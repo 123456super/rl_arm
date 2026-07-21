@@ -1,0 +1,29 @@
+# Formal simulation matrix for thesis experiments.
+# This file is consumed by scripts/prepare_experiments.py and does not start any run by itself.
+
+methods:
+  - ee_fixed
+  - link_fixed
+  - ldrc_fixed
+  - ldrc_adaptive
+
+training:
+  seeds: [101, 202, 303]
+  total_steps: 100000
+  config: configs/experiments/random_crossing.yaml
+  output_root: outputs/formal/train
+
+evaluation:
+  seeds: [1001, 1002, 1003]
+  episodes_per_seed: 100
+  scenarios:
+    - upper_arm_crossing
+    - elbow_crossing
+    - forearm_crossing
+    - wrist_crossing
+  output_root: outputs/formal/eval
+
+priority_methods_when_limited:
+  - ee_fixed
+  - link_fixed
+  - ldrc_fixed

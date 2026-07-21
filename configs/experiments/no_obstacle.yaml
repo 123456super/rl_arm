@@ -1,0 +1,12 @@
+includes:
+  - ../default.yaml
+
+env:
+  obstacle:
+    enabled: false
+
+train:
+  output_dir: outputs/experiments/no_obstacle
+
+eval:
+  output: outputs/experiments/no_obstacle/eval_metrics.csv

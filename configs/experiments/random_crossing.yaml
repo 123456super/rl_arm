@@ -1,0 +1,10 @@
+includes:
+  - ../default.yaml
+
+env:
+  obstacle:
+    enabled: true
+    scenario: random
+
+train:
+  output_dir: outputs/experiments/random_crossing

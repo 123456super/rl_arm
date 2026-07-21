@@ -1,0 +1,9 @@
+# Sensitivity grid for adaptive smoothing threshold.
+base_config: configs/experiments/random_crossing.yaml
+method: ldrc_adaptive
+parameter: smoothing.risk_high
+values: [0.55, 0.75, 0.95]
+seeds: [101, 202]
+total_steps: 50000
+eval_episodes: 50
+output_root: outputs/sweeps/risk_high

@@ -1,0 +1,11 @@
+# Sensitivity grid for event supplement costs. Keep k_collision > k_violation.
+base_config: configs/experiments/random_crossing.yaml
+method: ldrc_fixed
+parameter_pairs:
+  - {risk.cost.k_violation: 2.0, risk.cost.k_collision: 5.0}
+  - {risk.cost.k_violation: 3.0, risk.cost.k_collision: 8.0}
+  - {risk.cost.k_violation: 5.0, risk.cost.k_collision: 10.0}
+seeds: [101, 202]
+total_steps: 50000
+eval_episodes: 50
+output_root: outputs/sweeps/event_cost

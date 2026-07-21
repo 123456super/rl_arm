@@ -1,0 +1,9 @@
+# Sensitivity grid around the formal risk constraint threshold.
+base_config: configs/experiments/random_crossing.yaml
+method: ldrc_fixed
+parameter: risk.cost.c_safe
+values: [0.40, 0.55, 0.70]
+seeds: [101, 202]
+total_steps: 50000
+eval_episodes: 50
+output_root: outputs/sweeps/c_safe

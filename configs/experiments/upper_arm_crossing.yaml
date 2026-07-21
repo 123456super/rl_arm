@@ -1,0 +1,10 @@
+includes:
+  - ../default.yaml
+
+env:
+  obstacle:
+    enabled: true
+    scenario: upper_arm_crossing
+
+train:
+  output_dir: outputs/experiments/upper_arm_crossing

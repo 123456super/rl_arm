@@ -1,0 +1,10 @@
+includes:
+  - ../default.yaml
+
+env:
+  obstacle:
+    enabled: true
+    scenario: elbow_crossing
+
+train:
+  output_dir: outputs/experiments/elbow_crossing

@@ -1,0 +1,9 @@
+# Pre-experiment grid for selecting a fair fixed-risk penalty baseline.
+base_config: configs/experiments/random_crossing.yaml
+method: link_fixed
+parameter: sac.fixed_risk_penalty
+values: [1.0, 2.0, 4.0, 6.0, 8.0]
+seeds: [101, 202]
+total_steps: 50000
+eval_episodes: 50
+output_root: outputs/sweeps/fixed_risk_penalty
