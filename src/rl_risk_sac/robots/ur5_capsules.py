@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import pybullet as p
@@ -26,19 +27,27 @@ class CapsuleState:
 class UR5CapsuleModel:
     """Capsule approximation for the main links of the bundled UR5-like arm."""
 
-    def __init__(self) -> None:
-        self.specs = [
-            CapsuleSpec("shoulder", -1, 0, 0.075, np.array([0.0, 0.0, 0.0])),
-            CapsuleSpec("upper_arm", 1, 2, 0.06, np.array([0.0, 0.0, 0.0])),
-            CapsuleSpec("forearm", 2, 3, 0.052, np.array([0.0, 0.0, 0.0])),
-            CapsuleSpec("wrist_1", 3, 4, 0.045, np.array([0.0, 0.0, 0.0])),
-            CapsuleSpec("wrist_2", 4, 5, 0.043, np.array([0.0, 0.0, 0.0])),
-            CapsuleSpec("wrist_3", 5, 6, 0.04, np.array([0.0, 0.0, 0.0])),
-        ]
+    def __init__(self, specs: list[dict[str, Any]]) -> None:
+        self.specs = self._load_specs(specs)
 
     @property
     def count(self) -> int:
         return len(self.specs)
+
+    @staticmethod
+    def _load_specs(specs: list[dict[str, Any]]) -> list[CapsuleSpec]:
+        capsule_specs = []
+        for spec in specs:
+            capsule_specs.append(
+                CapsuleSpec(
+                    name=str(spec["name"]),
+                    parent_link=int(spec["parent_link"]),
+                    child_link=int(spec["child_link"]),
+                    radius=float(spec["radius"]),
+                    child_offset=np.asarray(spec.get("child_offset", [0.0, 0.0, 0.0]), dtype=np.float32),
+                )
+            )
+        return capsule_specs
 
     def states(self, robot_id: int, physics_client_id: int) -> list[CapsuleState]:
         states: list[CapsuleState] = []

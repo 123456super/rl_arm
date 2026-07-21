@@ -1,76 +1,31 @@
+# 默认配置入口。训练、评估和 smoke test 仍然只需要传这个文件。
+# includes 按顺序加载，后面的文件会覆盖前面的同名字段；本文件自身的字段优先级最高。
+includes:
+  - robot/ur5_like.yaml
+  - environment/sim.yaml
+  - algo/sac.yaml
+  - run/dev.yaml
+
+# 全局随机种子。训练、评估和环境采样都会使用它，正式对比时应固定同一组 seed。
 seed: 42
-device: cpu
 
-env:
-  gui: false
-  time_step: 0.0041666667
-  control_dt: 0.05
-  max_episode_steps: 240
-  action_scale: 0.7
-  fixed_beta: 0.35
-  success_tolerance: 0.055
-  workspace:
-    x: [0.25, 0.78]
-    y: [-0.45, 0.45]
-    z: [0.18, 0.78]
-  obstacle:
-    radius: 0.07
-    speed_range: [0.12, 0.38]
-  goal:
-    fixed: false
-    position: [0.55, 0.18, 0.36]
+# 计算设备。
+# cpu: 强制使用 CPU。
+# cuda:0/cuda:1: 强制使用指定 GPU。
+# cuda 或 cuda:auto: 自动综合空闲显存和显卡算力选择 GPU。
+device: cuda
 
-risk:
-  d_safe: 0.12
-  sigma_d: 0.12
-  v_max: 0.7
-  ttc_max: 3.0
-  tau: 1.0
-  eps: 1.0e-8
-  eps_v: 1.0e-4
-  weights:
-    distance: 0.5
-    velocity: 0.2
-    ttc: 0.3
-  cost:
-    k_risk: 1.0
-    k_violation: 3.0
-    k_collision: 8.0
-    c_safe: 0.55
-
-smoothing:
-  beta_min: 0.12
-  beta_max: 0.85
-  risk_high: 0.75
-  lambda_beta: 0.4
-
-reward:
-  w_position: 2.0
-  w_progress: 18.0
-  w_smooth: 0.04
-  success_bonus: 20.0
-  collision_penalty: 2.0
-
-sac:
-  gamma: 0.99
-  tau: 0.005
-  actor_lr: 0.0003
-  critic_lr: 0.0003
-  alpha_lr: 0.0003
-  lambda_lr: 0.01
-  cost_ema_rho: 0.05
-  batch_size: 256
-  replay_size: 300000
-  warmup_steps: 3000
-  update_after: 1000
-  update_every: 1
-  hidden_dims: [256, 256]
-  fixed_risk_penalty: 4.0
-  initial_alpha: 0.2
-  initial_lambda: 0.1
-
-train:
-  total_steps: 100000
-  log_interval: 10
-  save_interval: 10000
-  output_dir: outputs
+# GPU 自动选择参数。仅当 device 为 cuda、cuda:auto 或 auto 时生效。
+device_selection:
+  # true 时，如果 CUDA 不可用或没有满足显存阈值的卡，则回退 CPU；false 时直接报错。
+  fallback_to_cpu: true
+  # 候选 GPU id。null 表示扫描全部可见 GPU。
+  candidate_ids: null
+  # 最小空闲显存要求，单位 GB。低于该阈值的卡不会被选中。
+  min_free_memory_gb: 2.0
+  # 空闲显存占比的权重，越大越偏向选当前更空闲的卡。
+  memory_weight: 0.7
+  # 算力评分权重，越大越偏向选 SM 数和 compute capability 更高的卡。
+  compute_weight: 0.3
+  # 是否在启动时打印每张候选卡的评分和最终选择。
+  print_summary: true

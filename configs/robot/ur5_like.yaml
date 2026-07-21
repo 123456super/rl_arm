@@ -1,0 +1,27 @@
+# UR5-like 机器人模型配置。该文件只放与机器人结构、几何近似和 reset 初始状态相关的参数。
+robot:
+  # URDF 文件路径。相对路径以项目根目录为基准。
+  urdf: assets/urdf/ur5_like.urdf
+  # 机器人基座位置，单位 m。
+  base_position: [0.0, 0.0, 0.0]
+  # 参与控制的 PyBullet 关节 id。当前 UR5-like 模型为 6 自由度。
+  joint_ids: [0, 1, 2, 3, 4, 5]
+  # 末端执行器 link id，用于计算目标位置误差。
+  tool_link_id: 6
+
+  # 每个 episode reset 时的默认 6 关节角，单位 rad。
+  reset:
+    default_joint_positions: [0.0, -1.25, 1.35, -0.95, -1.1, 0.0]
+    # reset 时叠加到每个关节的均匀随机扰动范围，实际采样区间为 [-joint_noise_range, joint_noise_range]。
+    joint_noise_range: 0.22
+
+  # 连杆胶囊体近似参数，用于连杆级距离、TTC 和风险计算。
+  # parent_link/child_link 使用 PyBullet link id；parent_link=-1 表示机器人 base。
+  # radius 为胶囊体半径，child_offset 为 child_link 世界坐标上的末端偏移。
+  capsules:
+    - {name: shoulder, parent_link: -1, child_link: 0, radius: 0.075, child_offset: [0.0, 0.0, 0.0]}
+    - {name: upper_arm, parent_link: 1, child_link: 2, radius: 0.06, child_offset: [0.0, 0.0, 0.0]}
+    - {name: forearm, parent_link: 2, child_link: 3, radius: 0.052, child_offset: [0.0, 0.0, 0.0]}
+    - {name: wrist_1, parent_link: 3, child_link: 4, radius: 0.045, child_offset: [0.0, 0.0, 0.0]}
+    - {name: wrist_2, parent_link: 4, child_link: 5, radius: 0.043, child_offset: [0.0, 0.0, 0.0]}
+    - {name: wrist_3, parent_link: 5, child_link: 6, radius: 0.04, child_offset: [0.0, 0.0, 0.0]}

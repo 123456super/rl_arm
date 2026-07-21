@@ -1,0 +1,73 @@
+# 算法配置。该文件集中放风险建模、动作平滑、任务奖励和 SAC 超参数。
+risk:
+  # 安全距离阈值，d_min 小于该值计为安全距离违反。
+  d_safe: 0.12
+  # 距离风险指数衰减尺度，越小表示距离接近 d_safe 时风险上升越陡。
+  sigma_d: 0.12
+  # 接近速度归一化上限，单位 m/s。
+  v_max: 0.7
+  # TTC 截断上限，单位 s；超过该值统一视为低紧迫风险。
+  ttc_max: 3.0
+  # TTC 风险指数衰减尺度。
+  tau: 1.0
+  # 数值除零保护项。
+  eps: 1.0e-8
+  # 判断“几乎没有接近速度”的阈值，单位 m/s。
+  eps_v: 1.0e-4
+  # 连杆风险三类分量权重，建议保持三者和为 1。
+  weights:
+    distance: 0.5
+    velocity: 0.2
+    ttc: 0.3
+  # 风险代价函数 c_t = k_risk * Risk_global + k_violation * I[d_min<d_safe] + k_collision * I[collision]。
+  cost:
+    k_risk: 1.0
+    k_violation: 3.0
+    k_collision: 8.0
+    # episode 平均风险代价约束阈值；正式实验前应通过预实验标定。
+    c_safe: 0.55
+
+# 风险自适应动作平滑参数。
+smoothing:
+  # 低风险时的 beta 下限，值越小动作越平滑。
+  beta_min: 0.12
+  # 高风险时的 beta 上限，值越大策略响应越快。
+  beta_max: 0.85
+  # Risk_global 达到该值时 beta_raw 接近 beta_max。
+  risk_high: 0.75
+  # beta 自身的一阶平滑系数，越小 beta 变化越慢。
+  lambda_beta: 0.4
+
+# 任务奖励参数。约束方法中风险主要进入 cost，不建议靠大碰撞惩罚主导安全。
+reward:
+  # 末端位置误差平方惩罚权重。
+  w_position: 2.0
+  # 相邻步目标距离改善奖励权重。
+  w_progress: 18.0
+  # 实际执行关节速度变化惩罚权重。
+  w_smooth: 0.04
+  # 成功到达奖励。
+  success_bonus: 20.0
+  # 碰撞终止时的小额任务奖励惩罚；主要安全学习仍由 risk.cost 控制。
+  collision_penalty: 2.0
+
+# SAC 与约束 SAC 训练超参数。
+sac:
+  gamma: 0.99
+  tau: 0.005
+  actor_lr: 0.0003
+  critic_lr: 0.0003
+  alpha_lr: 0.0003
+  lambda_lr: 0.01
+  # episode 平均 cost 的指数滑动平均系数，用于更新拉格朗日乘子。
+  cost_ema_rho: 0.05
+  batch_size: 256
+  replay_size: 300000
+  warmup_steps: 3000
+  update_after: 1000
+  update_every: 1
+  hidden_dims: [256, 256]
+  # ee_fixed/link_fixed 的固定风险惩罚权重，正式基线应做小范围网格搜索后确定。
+  fixed_risk_penalty: 4.0
+  initial_alpha: 0.2
+  initial_lambda: 0.1

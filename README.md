@@ -4,6 +4,15 @@
 
 ## 环境
 
+推荐从项目根目录创建环境：
+
+```bash
+conda env create -f environment.yml
+conda activate rl
+```
+
+如果需要指定 CUDA 版 PyTorch，可先按下面方式创建 Python 环境，再手动安装匹配本机 CUDA 的 `torch`。
+
 ```bash
 conda env remove -n rl -y
 conda create -n rl --override-channels -c https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge -y python=3.13
@@ -33,13 +42,17 @@ GPU 验证：
 python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no cuda')"
 ```
 
+如需自动选择 GPU，把 `configs/default.yaml` 中的 `device` 改为 `cuda:auto`。程序会综合候选显卡的空闲显存和算力评分选择一张卡；如果 CUDA 不可用且 `device_selection.fallback_to_cpu: true`，会自动回退到 CPU。
+
 ## 快速检查
 
 ```bash
-python scripts/smoke_test.py
+conda run -n rl python scripts/smoke_test.py
 ```
 
 ## 训练
+
+详细训练流程、过程观察和下一步决策见 [docs/training_guide.md](docs/training_guide.md)。
 
 完整方法：
 
@@ -61,6 +74,27 @@ python scripts/train.py --method ldrc_adaptive --total-steps 100000
 ```bash
 python scripts/evaluate.py --checkpoint outputs/ldrc_adaptive/actor.pt --episodes 20
 ```
+
+如需导出典型 episode 曲线数据：
+
+```bash
+python scripts/evaluate.py --checkpoint outputs/ldrc_adaptive/actor.pt --episodes 3 --trace-output outputs/ldrc_adaptive/traces
+```
+
+## 场景配置
+
+配置入口是 `configs/default.yaml`，它通过 `includes` 组合多个子配置。脚本中的命令行参数只作为临时覆盖使用。
+
+```text
+configs/
+  default.yaml          # 默认入口，组合下面几个配置
+  robot/ur5_like.yaml   # URDF、关节 id、胶囊体、reset 初始状态
+  environment/sim.yaml  # PyBullet、目标、障碍物、场景和可视化
+  algo/sac.yaml         # 风险代价、平滑、奖励和 SAC 超参数
+  run/dev.yaml          # train、eval、smoke 的运行参数
+```
+
+`env.obstacle.enabled` 可关闭动态障碍物，用于基础目标到达能力检查。`env.obstacle.scenario` 默认为 `random`，也可设置为 `upper_arm_crossing`、`elbow_crossing`、`forearm_crossing` 或 `wrist_crossing`，用于后续构造靠近不同非末端连杆区域的受控测试场景。
 
 ## 方法名称
 

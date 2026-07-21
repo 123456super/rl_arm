@@ -9,7 +9,7 @@ import pybullet as p
 from gymnasium import spaces
 
 from rl_risk_sac.robots.ur5_capsules import CapsuleState, UR5CapsuleModel
-from rl_risk_sac.utils.risk import RiskConfig, compute_link_risk
+from rl_risk_sac.utils.risk import LinkRisk, RiskConfig, compute_link_risk
 
 
 METHODS = {"ee_fixed", "link_fixed", "ldrc_fixed", "ldrc_adaptive"}
@@ -42,6 +42,12 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.workspace = env_cfg["workspace"]
         self.obstacle_cfg = env_cfg["obstacle"]
         self.goal_cfg = env_cfg["goal"]
+        self.robot_cfg = config.get("robot", {})
+        self.observation_cfg = env_cfg.get("observation", {})
+        self.visual_cfg = env_cfg.get("visual", {})
+        self.execution_cfg = env_cfg.get("execution", {})
+        self.obstacle_enabled = bool(self.obstacle_cfg.get("enabled", True))
+        self.obstacle_scenario = str(self.obstacle_cfg.get("scenario", "random"))
 
         self.beta_min = float(smoothing_cfg["beta_min"])
         self.beta_max = float(smoothing_cfg["beta_max"])
@@ -66,21 +72,23 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.rng = np.random.default_rng(int(config.get("seed", 42)))
         self.physics_client_id = p.connect(p.GUI if render_mode == "human" or env_cfg.get("gui") else p.DIRECT)
         p.setTimeStep(self.time_step, physicsClientId=self.physics_client_id)
-        p.setGravity(0, 0, 0, physicsClientId=self.physics_client_id)
+        p.setGravity(*env_cfg["gravity"], physicsClientId=self.physics_client_id)
 
         self.repo_root = Path(__file__).resolve().parents[3]
-        self.robot_urdf = self.repo_root / "assets" / "urdf" / "ur5_like.urdf"
-        self.capsule_model = UR5CapsuleModel()
-        self.joint_ids = list(range(6))
-        self.tool_link_id = 6
+        robot_urdf = Path(self.robot_cfg["urdf"])
+        self.robot_urdf = robot_urdf if robot_urdf.is_absolute() else self.repo_root / robot_urdf
+        self.capsule_model = UR5CapsuleModel(self.robot_cfg.get("capsules"))
+        self.joint_ids = [int(joint_id) for joint_id in self.robot_cfg["joint_ids"]]
+        self.tool_link_id = int(self.robot_cfg["tool_link_id"])
+        self.joint_count = len(self.joint_ids)
 
         self.robot_id: int | None = None
         self.obstacle_id: int | None = None
         self.goal_marker_id: int | None = None
         self.prev_capsules: list[CapsuleState] | None = None
         self.prev_goal_error_norm = 0.0
-        self.prev_qdot_cmd = np.zeros(6, dtype=np.float32)
-        self.prev_joint_acc = np.zeros(6, dtype=np.float32)
+        self.prev_qdot_cmd = np.zeros(self.joint_count, dtype=np.float32)
+        self.prev_joint_acc = np.zeros(self.joint_count, dtype=np.float32)
         self.beta = self.fixed_beta
         self.step_count = 0
         self.goal = np.zeros(3, dtype=np.float32)
@@ -89,8 +97,10 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.last_risk = None
         self.last_info: dict[str, Any] = {}
 
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(6,), dtype=np.float32)
-        self.observation_space = spaces.Box(low=-10.0, high=10.0, shape=(67,), dtype=np.float32)
+        obs_dim = self.joint_count * 3 + self.capsule_model.count * 7 + 7
+        obs_bound = float(self.observation_cfg["space_bound"])
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.joint_count,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-obs_bound, high=obs_bound, shape=(obs_dim,), dtype=np.float32)
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
@@ -99,22 +109,22 @@ class UR5DynamicObstacleEnv(gym.Env):
 
         p.resetSimulation(physicsClientId=self.physics_client_id)
         p.setTimeStep(self.time_step, physicsClientId=self.physics_client_id)
-        p.setGravity(0, 0, 0, physicsClientId=self.physics_client_id)
+        p.setGravity(*self.config["env"]["gravity"], physicsClientId=self.physics_client_id)
         self._create_floor()
         self.robot_id = p.loadURDF(
             str(self.robot_urdf),
-            basePosition=[0, 0, 0],
+            basePosition=self.robot_cfg["base_position"],
             useFixedBase=True,
             physicsClientId=self.physics_client_id,
         )
         self._reset_robot()
         self.goal = self._sample_goal()
         self.obstacle_center, self.obstacle_velocity = self._sample_obstacle()
-        self.obstacle_id = self._create_obstacle(self.obstacle_center)
+        self.obstacle_id = self._create_obstacle(self.obstacle_center) if self.obstacle_enabled else None
         self.goal_marker_id = self._create_goal_marker(self.goal)
 
-        self.prev_qdot_cmd = np.zeros(6, dtype=np.float32)
-        self.prev_joint_acc = np.zeros(6, dtype=np.float32)
+        self.prev_qdot_cmd = np.zeros(self.joint_count, dtype=np.float32)
+        self.prev_joint_acc = np.zeros(self.joint_count, dtype=np.float32)
         self.beta = self.fixed_beta if self.method.endswith("fixed") else self.beta_min
         self.step_count = 0
         self.prev_capsules = self._capsules()
@@ -142,7 +152,7 @@ class UR5DynamicObstacleEnv(gym.Env):
                 self.joint_ids,
                 p.VELOCITY_CONTROL,
                 targetVelocities=qdot_cmd.tolist(),
-                forces=[90.0] * 6,
+                forces=[float(self.execution_cfg["joint_motor_force"])] * self.joint_count,
                 physicsClientId=self.physics_client_id,
             )
             p.stepSimulation(physicsClientId=self.physics_client_id)
@@ -203,7 +213,7 @@ class UR5DynamicObstacleEnv(gym.Env):
                 q_dot / max(self.action_scale, 1e-6),
                 goal_error,
                 goal_velocity_error,
-                np.clip(risk.distances, -1.0, 1.5),
+                np.clip(risk.distances, float(self.observation_cfg["distance_clip"][0]), float(self.observation_cfg["distance_clip"][1])),
                 risk.directions.reshape(-1),
                 np.clip(risk.approach_velocities / max(self.risk_config.v_max, 1e-6), 0.0, 1.0),
                 risk.ttc / max(self.risk_config.ttc_max, 1e-6),
@@ -219,6 +229,9 @@ class UR5DynamicObstacleEnv(gym.Env):
             "goal": self.goal.copy(),
             "ee_pos": ee_pos.copy(),
             "goal_error_norm": float(np.linalg.norm(goal_error)),
+            "obstacle_enabled": bool(self.obstacle_enabled),
+            "obstacle_center": self.obstacle_center.copy(),
+            "obstacle_velocity": self.obstacle_velocity.copy(),
             "risk_global": float(risk.risk_global),
             "d_min": float(risk.d_min),
             "closest_link": int(risk.closest_link),
@@ -228,6 +241,8 @@ class UR5DynamicObstacleEnv(gym.Env):
         return obs, info
 
     def _compute_risk(self):
+        if not self.obstacle_enabled:
+            return self._zero_risk()
         use_ee_only = self.method == "ee_fixed"
         return compute_link_risk(
             capsules=self._capsules(),
@@ -238,6 +253,21 @@ class UR5DynamicObstacleEnv(gym.Env):
             dt=self.control_dt,
             config=self.risk_config,
             use_end_effector_only=use_ee_only,
+        )
+
+    def _zero_risk(self) -> LinkRisk:
+        count = self.capsule_model.count
+        return LinkRisk(
+            closest_points=np.zeros((count, 3), dtype=np.float32),
+            distances=np.full(count, float(self.observation_cfg["no_obstacle_distance"]), dtype=np.float32),
+            directions=np.zeros((count, 3), dtype=np.float32),
+            link_velocities=np.zeros((count, 3), dtype=np.float32),
+            approach_velocities=np.zeros(count, dtype=np.float32),
+            ttc=np.full(count, self.risk_config.ttc_max, dtype=np.float32),
+            risks=np.zeros(count, dtype=np.float32),
+            risk_global=0.0,
+            d_min=float(self.observation_cfg["no_obstacle_distance"]),
+            closest_link=0,
         )
 
     def _reward(self, qdot_cmd: np.ndarray, success: bool, collision: bool) -> float:
@@ -293,6 +323,8 @@ class UR5DynamicObstacleEnv(gym.Env):
         return self.capsule_model.states(self.robot_id, self.physics_client_id)
 
     def _has_collision(self, d_min: float) -> bool:
+        if not self.obstacle_enabled or self.obstacle_id is None:
+            return False
         if d_min <= 0.0:
             return True
         contacts = p.getContactPoints(
@@ -303,8 +335,10 @@ class UR5DynamicObstacleEnv(gym.Env):
         return len(contacts) > 0
 
     def _reset_robot(self) -> None:
-        default = np.array([0.0, -1.25, 1.35, -0.95, -1.1, 0.0], dtype=np.float32)
-        noise = self.rng.uniform(-0.22, 0.22, size=6).astype(np.float32)
+        reset_cfg = self.robot_cfg["reset"]
+        default = np.asarray(reset_cfg["default_joint_positions"], dtype=np.float32)
+        noise_range = float(reset_cfg["joint_noise_range"])
+        noise = self.rng.uniform(-noise_range, noise_range, size=self.joint_count).astype(np.float32)
         q0 = default + noise
         for joint_id, joint_value in zip(self.joint_ids, q0):
             p.resetJointState(
@@ -328,21 +362,28 @@ class UR5DynamicObstacleEnv(gym.Env):
         )
 
     def _sample_obstacle(self) -> tuple[np.ndarray, np.ndarray]:
-        target_band_z = self.rng.uniform(0.18, 0.62)
+        if not self.obstacle_enabled:
+            return np.asarray(self.obstacle_cfg["disabled_position"], dtype=np.float32), np.zeros(3, dtype=np.float32)
+
+        if self.obstacle_scenario != "random":
+            return self._sample_named_obstacle(self.obstacle_scenario)
+
+        random_cfg = self.obstacle_cfg["random"]
+        target_band_z = self.rng.uniform(*random_cfg["z_range"])
         side = -1.0 if self.rng.random() < 0.5 else 1.0
         center = np.array(
             [
-                self.rng.uniform(0.22, 0.72),
-                side * self.rng.uniform(0.42, 0.62),
+                self.rng.uniform(*random_cfg["x_range"]),
+                side * self.rng.uniform(*random_cfg["start_y_abs_range"]),
                 target_band_z,
             ],
             dtype=np.float32,
         )
         target = np.array(
             [
-                self.rng.uniform(0.22, 0.72),
-                -side * self.rng.uniform(0.24, 0.48),
-                self.rng.uniform(0.18, 0.62),
+                self.rng.uniform(*random_cfg["x_range"]),
+                -side * self.rng.uniform(*random_cfg["target_y_abs_range"]),
+                self.rng.uniform(*random_cfg["z_range"]),
             ],
             dtype=np.float32,
         )
@@ -351,12 +392,34 @@ class UR5DynamicObstacleEnv(gym.Env):
         speed = self.rng.uniform(*self.obstacle_cfg["speed_range"])
         return center, (direction * speed).astype(np.float32)
 
+    def _sample_named_obstacle(self, scenario: str) -> tuple[np.ndarray, np.ndarray]:
+        scenarios = self.obstacle_cfg["scenarios"]
+        if scenario not in scenarios:
+            raise ValueError(f"Unknown obstacle scenario {scenario!r}; expected random or one of {sorted(scenarios)}")
+
+        scenario_cfg = scenarios[scenario]
+        side = -1.0 if self.rng.random() < 0.5 else 1.0
+        x_center = self.rng.uniform(*scenario_cfg["x_range"])
+        z_range = scenario_cfg["z_range"]
+        center = np.array(
+            [x_center, side * float(scenario_cfg["start_y_abs"]), self.rng.uniform(*z_range)],
+            dtype=np.float32,
+        )
+        target = np.array(
+            [x_center, -side * float(scenario_cfg["target_y_abs"]), self.rng.uniform(*z_range)],
+            dtype=np.float32,
+        )
+        direction = target - center
+        direction = direction / (np.linalg.norm(direction) + 1e-8)
+        speed = self.rng.uniform(*self.obstacle_cfg["speed_range"])
+        return center, (direction * speed).astype(np.float32)
+
     def _move_obstacle(self, dt: float) -> None:
+        if not self.obstacle_enabled or self.obstacle_id is None:
+            return
         self.obstacle_center = (self.obstacle_center + self.obstacle_velocity * dt).astype(np.float32)
-        x_low, x_high = self.workspace["x"]
-        y_low, y_high = -0.7, 0.7
-        z_low, z_high = 0.08, 0.85
-        for axis, (low, high) in enumerate([(x_low, x_high), (y_low, y_high), (z_low, z_high)]):
+        bounds = self.obstacle_cfg["bounds"]
+        for axis, (low, high) in enumerate([bounds["x"], bounds["y"], bounds["z"]]):
             if self.obstacle_center[axis] < low or self.obstacle_center[axis] > high:
                 self.obstacle_velocity[axis] *= -1.0
                 self.obstacle_center[axis] = np.clip(self.obstacle_center[axis], low, high)
@@ -371,10 +434,16 @@ class UR5DynamicObstacleEnv(gym.Env):
         collision = p.createCollisionShape(p.GEOM_PLANE, physicsClientId=self.physics_client_id)
         visual = p.createVisualShape(
             p.GEOM_PLANE,
-            rgbaColor=[0.82, 0.84, 0.86, 1.0],
+            rgbaColor=self.visual_cfg["floor_rgba"],
             physicsClientId=self.physics_client_id,
         )
-        p.createMultiBody(0, collision, visual, [0, 0, -0.005], physicsClientId=self.physics_client_id)
+        p.createMultiBody(
+            0,
+            collision,
+            visual,
+            self.visual_cfg["floor_position"],
+            physicsClientId=self.physics_client_id,
+        )
 
     def _create_obstacle(self, center: np.ndarray) -> int:
         radius = float(self.obstacle_cfg["radius"])
@@ -382,7 +451,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         visual = p.createVisualShape(
             p.GEOM_SPHERE,
             radius=radius,
-            rgbaColor=[0.95, 0.16, 0.12, 1.0],
+            rgbaColor=self.visual_cfg["obstacle_rgba"],
             physicsClientId=self.physics_client_id,
         )
         return p.createMultiBody(
@@ -396,8 +465,8 @@ class UR5DynamicObstacleEnv(gym.Env):
     def _create_goal_marker(self, goal: np.ndarray) -> int:
         visual = p.createVisualShape(
             p.GEOM_SPHERE,
-            radius=0.035,
-            rgbaColor=[0.12, 0.64, 0.28, 0.75],
+            radius=float(self.visual_cfg["goal_marker_radius"]),
+            rgbaColor=self.visual_cfg["goal_rgba"],
             physicsClientId=self.physics_client_id,
         )
         return p.createMultiBody(

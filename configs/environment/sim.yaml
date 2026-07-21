@@ -1,0 +1,97 @@
+# PyBullet 环境与任务配置。该文件只放仿真、任务、目标和障碍物场景参数。
+env:
+  # 是否打开 PyBullet GUI。服务器或批量实验应保持 false。
+  gui: false
+  # 仿真重力。本文固定基座速度控制任务默认设为零重力，避免重力动力学干扰避障策略原型。
+  gravity: [0.0, 0.0, 0.0]
+  # PyBullet 物理步长，0.0041666667 约等于 240 Hz。
+  time_step: 0.0041666667
+  # 策略控制周期，0.05 表示 20 Hz。环境会在一个控制周期内执行多个物理子步。
+  control_dt: 0.05
+  # 单个 episode 的最大控制步数。
+  max_episode_steps: 240
+  # 策略输出 [-1, 1] 映射到关节速度后的最大绝对速度，单位 rad/s。
+  action_scale: 0.7
+  # 固定平滑方法使用的一阶滤波系数；越小越平滑，越大响应越快。
+  fixed_beta: 0.35
+  # 末端位置到达判定阈值，单位 m；还需要 d_min > d_safe 才算成功。
+  success_tolerance: 0.055
+
+  # 目标和障碍物采样的工作空间范围，单位 m。
+  workspace:
+    x: [0.25, 0.78]
+    y: [-0.45, 0.45]
+    z: [0.18, 0.78]
+
+  # observation 中若干连续特征的归一化/裁剪参数。
+  observation:
+    # Gym observation_space 的统一上下界；真实特征仍在构造 observation 时单独归一化/裁剪。
+    space_bound: 10.0
+    # 连杆表面距离进入 observation 前的裁剪范围。
+    distance_clip: [-1.0, 1.5]
+    # 无障碍物场景下写入风险距离特征的安全占位距离。
+    no_obstacle_distance: 1.5
+
+  # 执行层参数。
+  execution:
+    # PyBullet 速度控制的关节最大驱动力，单位 N*m。过小可能跟不上速度命令，过大可能使仿真过硬。
+    joint_motor_force: 90.0
+
+  # 可视化参数，只影响 GUI/渲染显示，不参与训练逻辑。
+  visual:
+    floor_position: [0.0, 0.0, -0.005]
+    floor_rgba: [0.82, 0.84, 0.86, 1.0]
+    obstacle_rgba: [0.95, 0.16, 0.12, 1.0]
+    goal_marker_radius: 0.035
+    goal_rgba: [0.12, 0.64, 0.28, 0.75]
+
+  obstacle:
+    # 是否启用动态球形障碍物。false 用于无障碍基础到达能力检查。
+    enabled: true
+    # 障碍物场景。random 为随机穿越；也可设为 upper_arm_crossing、elbow_crossing、forearm_crossing、wrist_crossing。
+    scenario: random
+    # 球形障碍物半径，单位 m。
+    radius: 0.07
+    # 障碍物速度随机范围，单位 m/s。
+    speed_range: [0.12, 0.38]
+    # disabled 时的障碍物占位位置，应远离机械臂工作空间。
+    disabled_position: [10.0, 10.0, 10.0]
+    # 障碍物运动反弹边界，避免随机轨迹无限离开工作空间。
+    bounds:
+      x: [0.25, 0.78]
+      y: [-0.7, 0.7]
+      z: [0.08, 0.85]
+    # random 场景的起点/目标采样范围。
+    random:
+      x_range: [0.22, 0.72]
+      z_range: [0.18, 0.62]
+      start_y_abs_range: [0.42, 0.62]
+      target_y_abs_range: [0.24, 0.48]
+    # 受控场景用于后续公平测试，让障碍物重点靠近指定非末端连杆区域。
+    scenarios:
+      upper_arm_crossing:
+        x_range: [0.35, 0.62]
+        z_range: [0.48, 0.52]
+        start_y_abs: 0.58
+        target_y_abs: 0.38
+      elbow_crossing:
+        x_range: [0.35, 0.62]
+        z_range: [0.42, 0.46]
+        start_y_abs: 0.58
+        target_y_abs: 0.38
+      forearm_crossing:
+        x_range: [0.35, 0.62]
+        z_range: [0.34, 0.40]
+        start_y_abs: 0.58
+        target_y_abs: 0.38
+      wrist_crossing:
+        x_range: [0.35, 0.62]
+        z_range: [0.26, 0.32]
+        start_y_abs: 0.58
+        target_y_abs: 0.38
+
+  goal:
+    # true 时使用固定目标点；false 时在 workspace 内随机采样。
+    fixed: false
+    # fixed=true 时使用的目标点，单位 m。
+    position: [0.55, 0.18, 0.36]

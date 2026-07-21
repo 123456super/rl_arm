@@ -1,0 +1,31 @@
+# 开发运行配置。该文件只放训练、评估和 smoke test 的默认运行参数。
+
+# 训练输出与日志参数。
+train:
+  # 默认训练方法；命令行 --method 可覆盖。
+  method: ldrc_adaptive
+  total_steps: 100000
+  log_interval: 10
+  save_interval: 10000
+  output_dir: outputs
+
+# 评估脚本默认参数。命令行参数仍可覆盖 checkpoint、episodes、seed、output、trace_output。
+eval:
+  method: ldrc_adaptive
+  # 默认 checkpoint。保持 null 时必须通过命令行 --checkpoint 指定。
+  checkpoint: null
+  episodes: 20
+  seed: 123
+  output: null
+  # 不需要典型 episode 曲线时保持 null；需要时可设为 outputs/ldrc_adaptive/traces。
+  trace_output: null
+
+# smoke test 的轻量验证参数，只用于检查环境、回放池和一次网络更新能否跑通。
+smoke:
+  method: ldrc_adaptive
+  seed: 7
+  no_obstacle_seed: 11
+  max_episode_steps: 8
+  rollout_steps: 12
+  replay_capacity: 64
+  batch_size: 8

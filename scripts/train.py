@@ -14,13 +14,14 @@ from rl_risk_sac.algorithms import SACAgent
 from rl_risk_sac.algorithms.replay_buffer import ReplayBuffer
 from rl_risk_sac.envs import UR5DynamicObstacleEnv
 from rl_risk_sac.utils.config import load_config
+from rl_risk_sac.utils.device import resolve_device
 from rl_risk_sac.utils.seeding import set_seed
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/default.yaml")
-    parser.add_argument("--method", default="ldrc_adaptive", choices=["ee_fixed", "link_fixed", "ldrc_fixed", "ldrc_adaptive"])
+    parser.add_argument("--method", default=None, choices=["ee_fixed", "link_fixed", "ldrc_fixed", "ldrc_adaptive"])
     parser.add_argument("--total-steps", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--output-dir", default=None)
@@ -30,6 +31,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
+    method = args.method or config["train"]["method"]
     if args.seed is not None:
         config["seed"] = args.seed
     if args.total_steps is not None:
@@ -37,11 +39,12 @@ def main() -> None:
     if args.output_dir is not None:
         config["train"]["output_dir"] = args.output_dir
 
+    config["device"] = resolve_device(config)
     set_seed(int(config["seed"]))
-    env = UR5DynamicObstacleEnv(config, method=args.method)
+    env = UR5DynamicObstacleEnv(config, method=method)
     obs_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
-    agent = SACAgent(obs_dim, action_dim, config, method=args.method)
+    agent = SACAgent(obs_dim, action_dim, config, method=method)
     replay = ReplayBuffer(
         obs_dim=obs_dim,
         action_dim=action_dim,
@@ -49,7 +52,7 @@ def main() -> None:
         device=config.get("device", "cpu"),
     )
 
-    run_dir = Path(config["train"]["output_dir"]) / args.method
+    run_dir = Path(config["train"]["output_dir"]) / method
     run_dir.mkdir(parents=True, exist_ok=True)
     with open(run_dir / "config.json", "w", encoding="utf-8") as file:
         json.dump(config, file, ensure_ascii=False, indent=2)
@@ -92,7 +95,7 @@ def main() -> None:
     recent_rewards: deque[float] = deque(maxlen=20)
     update_info: dict[str, float] = {"alpha": float(agent.alpha.detach().cpu()), "lambda": agent.lagrange_multiplier}
 
-    progress = trange(1, total_steps + 1, desc=f"train:{args.method}")
+    progress = trange(1, total_steps + 1, desc=f"train:{method}")
     for step in progress:
         if step <= warmup_steps:
             action = env.action_space.sample()
