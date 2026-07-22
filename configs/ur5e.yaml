@@ -1,12 +1,12 @@
-# 默认配置入口。训练、评估和 smoke test 仍然只需要传这个文件。
-# includes 按顺序加载，后面的文件会覆盖前面的同名字段；本文件自身的字段优先级最高。
+# 使用真实导出的 UR5e URDF 的仿真入口配置。
+# 当前仍处于仿真链路完善阶段，建议先用该配置跑 smoke test 和短训练，不直接作为正式实验配置。
 includes:
-  - robot/ur5.yaml
+  - robot/ur5e.yaml
   - environment/sim.yaml
   - algo/sac.yaml
   - run/dev.yaml
 
-# 全局随机种子。训练、评估和环境采样都会使用它，正式对比时应固定同一组 seed。
+# 全局随机种子。训练、评估和环境采样都会使用它。
 seed: 42
 
 # 计算设备。

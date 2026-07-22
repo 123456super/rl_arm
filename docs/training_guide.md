@@ -29,13 +29,40 @@ configs/default.yaml
 它会组合以下配置：
 
 ```text
-configs/robot/ur5_like.yaml      # 机器人模型、关节、胶囊体、reset 初始状态
+configs/robot/ur5.yaml           # UR5 模型、关节、胶囊体、reset 初始状态
 configs/environment/sim.yaml     # 仿真环境、目标、障碍物、场景
 configs/algo/sac.yaml            # 风险、奖励、平滑、SAC 超参数
 configs/run/dev.yaml             # train/eval/smoke 运行参数
 ```
 
 一般只需要改子配置文件，不要把参数重新塞回 `default.yaml`。如果只是临时试验，可以新建一个入口 YAML，用 `includes` 引用 `default.yaml` 后覆盖少量字段。
+
+当前项目只保留从 ROS2 环境导出的真实 UR5/UR5e 离线模型：
+
+```text
+configs/ur5.yaml   # UR5，默认入口等价于该模型
+configs/ur5e.yaml  # UR5e
+```
+
+模型文件位于 `assets/robots/universal_robots/ur_models/`，包含 `ur5.urdf`、`ur5e.urdf` 和对应 meshes。URDF 已在 PyBullet 中验证可以直接加载；因为官方模型包含固定关节，配置里使用 `joint_names` 和 `tool_link_name` 自动解析 PyBullet id。
+
+UR5 模型的快速检查指令：
+
+```bash
+conda run -n rl python scripts/smoke_test.py --config configs/ur5.yaml
+```
+
+UR5e 模型的快速检查指令：
+
+```bash
+conda run -n rl python scripts/smoke_test.py --config configs/ur5e.yaml
+```
+
+UR5 模型的短训练指令：
+
+```bash
+conda run -n rl python scripts/train.py --config configs/experiments/ur5_short_train.yaml
+```
 
 如果要使用 GPU，推荐在入口配置里设置：
 
@@ -70,25 +97,39 @@ train:
 
 ## 3. 训练指令
 
-当前完整方法的训练指令是：
+训练脚本只通过 YAML 控制参数。方法、总步数、seed、输出目录、实时日志间隔等都写在配置文件里，不通过命令行覆盖。
 
-```bash
-conda run -n rl python scripts/train.py --config configs/default.yaml --method ldrc_adaptive --total-steps 100000
-```
-
-如果使用 `configs/run/dev.yaml` 里的默认 `train.method` 和 `train.total_steps`，可以简化为：
+默认训练指令是：
 
 ```bash
 conda run -n rl python scripts/train.py --config configs/default.yaml
 ```
 
-四个方法分别是：
+`configs/default.yaml` 默认使用 UR5。当前阶段建议先跑短训练配置，短训练通过后再新建长训练 YAML 扩大步数和种子数量。
+
+UR5 短训练：
 
 ```bash
-conda run -n rl python scripts/train.py --config configs/default.yaml --method ee_fixed --total-steps 100000
-conda run -n rl python scripts/train.py --config configs/default.yaml --method link_fixed --total-steps 100000
-conda run -n rl python scripts/train.py --config configs/default.yaml --method ldrc_fixed --total-steps 100000
-conda run -n rl python scripts/train.py --config configs/default.yaml --method ldrc_adaptive --total-steps 100000
+conda run -n rl python scripts/train.py --config configs/experiments/ur5_short_train.yaml
+```
+
+UR5e 短训练：
+
+```bash
+conda run -n rl python scripts/train.py --config configs/experiments/ur5e_short_train.yaml
+```
+
+如果要切换方法，不改命令，改 YAML：
+
+```yaml
+train:
+  method: ldrc_adaptive
+  total_steps: 10000
+  progress_interval: 100
+  log_interval: 10
+  save_interval: 5000
+  output_dir: outputs
+  run_name: null
 ```
 
 方法含义：
@@ -102,10 +143,22 @@ conda run -n rl python scripts/train.py --config configs/default.yaml --method l
 
 ## 4. 训练输出在哪里
 
-以 `ldrc_adaptive` 为例，默认输出目录是：
+每次训练都会新建一个独立目录，避免覆盖历史结果。目录格式为：
 
 ```text
-outputs/ldrc_adaptive/
+outputs/runs/YYYYMMDD_HHMMSS_模型_方法_seed种子_steps步数/
+```
+
+例如：
+
+```text
+outputs/runs/20260722_153012_ur5_ldrc_adaptive_seed42_steps10000/
+```
+
+最近一次训练目录会写入：
+
+```text
+outputs/latest_run.txt
 ```
 
 主要文件：
@@ -115,9 +168,10 @@ outputs/ldrc_adaptive/
 | `actor.pt` | 评估和部署时加载的策略网络 |
 | `agent_state.pt` | critic、alpha、lambda、cost_ema 等训练状态 |
 | `config.json` | 本次训练展开后的完整配置快照 |
+| `progress.csv` | 每隔 `train.progress_interval` 个 step 写入一次的实时进度 |
 | `train_metrics.csv` | 每个 episode 的训练指标 |
 
-训练中终端会显示 `tqdm` 进度条。每隔 `train.log_interval` 个 episode 会更新：
+训练中终端会显示 `tqdm` 进度条，并每隔 `train.progress_interval` 个 step 打印一行 `progress step=...` 普通日志。每隔 `train.log_interval` 个 episode 会更新：
 
 | 字段 | 含义 |
 | --- | --- |
@@ -131,7 +185,7 @@ outputs/ldrc_adaptive/
 
 ## 5. 训练过程中怎么看
 
-重点看 `outputs/<method>/train_metrics.csv`：
+重点看某次训练目录下的 `train_metrics.csv`：
 
 | 字段 | 怎么理解 |
 | --- | --- |
@@ -148,19 +202,21 @@ outputs/ldrc_adaptive/
 建议先每隔一段时间查看最近 20 到 50 个 episode：
 
 ```bash
-tail -n 50 outputs/ldrc_adaptive/train_metrics.csv
+RUN_DIR=$(cat outputs/latest_run.txt)
+tail -n 50 "$RUN_DIR/train_metrics.csv"
+```
+
+实时看 step 级进度：
+
+```bash
+RUN_DIR=$(cat outputs/latest_run.txt)
+tail -f "$RUN_DIR/progress.csv"
 ```
 
 也可以用 pandas 快速看均值：
 
 ```bash
-conda run -n rl python - <<'PY'
-import pandas as pd
-p = 'outputs/ldrc_adaptive/train_metrics.csv'
-df = pd.read_csv(p)
-tail = df.tail(50)
-print(tail[['episode_reward', 'success', 'collision', 'safety_violation_rate', 'min_distance', 'mean_risk', 'lambda']].mean(numeric_only=True))
-PY
+conda run -n rl python -c "import pandas as pd; p=open('outputs/latest_run.txt', encoding='utf-8').read().strip() + '/train_metrics.csv'; df=pd.read_csv(p); tail=df.tail(50); print(tail[['episode_reward','success','collision','safety_violation_rate','min_distance','mean_risk','lambda']].mean(numeric_only=True))"
 ```
 
 ## 6. 什么时候停止或调整
@@ -225,14 +281,14 @@ PY
 conda run -n rl python scripts/evaluate.py \
   --config configs/default.yaml \
   --method ldrc_adaptive \
-  --checkpoint outputs/ldrc_adaptive/actor.pt \
+  --checkpoint "$(cat outputs/latest_run.txt)/actor.pt" \
   --episodes 20
 ```
 
 评估结果会写入：
 
 ```text
-outputs/ldrc_adaptive/eval_metrics.csv
+当前工作目录下的 `eval_metrics.csv`，或通过 `--output` 指定的文件。
 ```
 
 终端会打印摘要：
@@ -256,15 +312,15 @@ outputs/ldrc_adaptive/eval_metrics.csv
 conda run -n rl python scripts/evaluate.py \
   --config configs/default.yaml \
   --method ldrc_adaptive \
-  --checkpoint outputs/ldrc_adaptive/actor.pt \
+  --checkpoint "$(cat outputs/latest_run.txt)/actor.pt" \
   --episodes 3 \
-  --trace-output outputs/ldrc_adaptive/traces
+  --trace-output "$(cat outputs/latest_run.txt)/traces"
 ```
 
 trace 文件在：
 
 ```text
-outputs/ldrc_adaptive/traces/episode_0000.csv
+某次训练目录下的 `traces/episode_0000.csv`
 ```
 
 重点看 `d_min`、`risk_global`、`beta`、`qdot_norm`、`acc_norm`、`jerk_norm`。

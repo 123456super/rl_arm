@@ -42,8 +42,8 @@ def validate_config(config: dict[str, Any]) -> None:
     required_paths = [
         ("robot", "urdf"),
         ("robot", "base_position"),
-        ("robot", "joint_ids"),
-        ("robot", "tool_link_id"),
+        ("robot", "joint_names"),
+        ("robot", "tool_link_name"),
         ("robot", "reset", "default_joint_positions"),
         ("robot", "reset", "joint_noise_range"),
         ("robot", "capsules"),
@@ -87,12 +87,16 @@ def validate_config(config: dict[str, Any]) -> None:
                 raise KeyError(f"Missing required config key: {dotted}")
             current = current[key]
 
-    joint_count = len(config["robot"]["joint_ids"])
+    robot_cfg = config["robot"]
+    joint_count = len(robot_cfg["joint_names"])
     if len(config["robot"]["reset"]["default_joint_positions"]) != joint_count:
-        raise ValueError("robot.reset.default_joint_positions must match robot.joint_ids length")
+        raise ValueError("robot.reset.default_joint_positions must match robot joint count")
 
     if len(config["robot"]["capsules"]) <= 0:
         raise ValueError("robot.capsules must contain at least one capsule")
+    for capsule in config["robot"]["capsules"]:
+        if "parent_link_name" not in capsule or "child_link_name" not in capsule:
+            raise KeyError("robot.capsules entries must define parent_link_name and child_link_name")
 
     weights = config.get("device_selection", {})
     memory_weight = float(weights.get("memory_weight", 0.7))

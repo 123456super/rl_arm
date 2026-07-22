@@ -2,12 +2,20 @@
 
 # 训练输出与日志参数。
 train:
-  # 默认训练方法；命令行 --method 可覆盖。
+  # 训练方法。可选：ee_fixed、link_fixed、ldrc_fixed、ldrc_adaptive。
   method: ldrc_adaptive
+  # 总环境交互步数。
   total_steps: 100000
+  # 实时进度输出间隔，单位为环境 step。每到该间隔会打印一行普通日志，并写入 progress.csv。
+  progress_interval: 100
+  # tqdm 摘要刷新间隔，单位为 episode。
   log_interval: 10
+  # checkpoint 保存间隔，单位为环境 step。
   save_interval: 10000
+  # 训练输出根目录。每次训练会自动创建 outputs/runs/日期_模型_方法_seed_steps/，避免覆盖历史结果。
   output_dir: outputs
+  # 自定义本次训练目录名。保持 null 时自动使用 日期_模型_方法_seed_steps。
+  run_name: null
 
 # 评估脚本默认参数。命令行参数仍可覆盖 checkpoint、episodes、seed、output、trace_output。
 eval:
@@ -17,7 +25,7 @@ eval:
   episodes: 20
   seed: 123
   output: null
-  # 不需要典型 episode 曲线时保持 null；需要时可设为 outputs/ldrc_adaptive/traces。
+  # 不需要典型 episode 曲线时保持 null；需要时可设为某次训练目录下的 traces。
   trace_output: null
 
 # smoke test 的轻量验证参数，只用于检查环境、回放池和一次网络更新能否跑通。

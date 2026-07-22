@@ -78,9 +78,9 @@ class UR5DynamicObstacleEnv(gym.Env):
         robot_urdf = Path(self.robot_cfg["urdf"])
         self.robot_urdf = robot_urdf if robot_urdf.is_absolute() else self.repo_root / robot_urdf
         self.capsule_model = UR5CapsuleModel(self.robot_cfg.get("capsules"))
-        self.joint_ids = [int(joint_id) for joint_id in self.robot_cfg["joint_ids"]]
-        self.tool_link_id = int(self.robot_cfg["tool_link_id"])
-        self.joint_count = len(self.joint_ids)
+        self.joint_ids: list[int] = []
+        self.tool_link_id = -1
+        self.joint_count = len(self.robot_cfg["joint_names"])
 
         self.robot_id: int | None = None
         self.obstacle_id: int | None = None
@@ -117,6 +117,7 @@ class UR5DynamicObstacleEnv(gym.Env):
             useFixedBase=True,
             physicsClientId=self.physics_client_id,
         )
+        self._resolve_robot_references()
         self._reset_robot()
         self.goal = self._sample_goal()
         self.obstacle_center, self.obstacle_velocity = self._sample_obstacle()
@@ -348,6 +349,29 @@ class UR5DynamicObstacleEnv(gym.Env):
                 targetVelocity=0.0,
                 physicsClientId=self.physics_client_id,
             )
+
+    def _resolve_robot_references(self) -> None:
+        joint_name_to_id, link_name_to_id = self._robot_name_maps()
+        self.joint_ids = [self._resolve_name(name, joint_name_to_id, "joint") for name in self.robot_cfg["joint_names"]]
+        self.tool_link_id = self._resolve_name(self.robot_cfg["tool_link_name"], link_name_to_id, "link")
+        self.joint_count = len(self.joint_ids)
+        self.capsule_model.resolve_link_names(link_name_to_id)
+
+    def _robot_name_maps(self) -> tuple[dict[str, int], dict[str, int]]:
+        joint_name_to_id: dict[str, int] = {}
+        link_name_to_id = {"base": -1}
+        for joint_id in range(p.getNumJoints(self.robot_id, physicsClientId=self.physics_client_id)):
+            info = p.getJointInfo(self.robot_id, joint_id, physicsClientId=self.physics_client_id)
+            joint_name_to_id[info[1].decode("utf-8")] = joint_id
+            link_name_to_id[info[12].decode("utf-8")] = joint_id
+        return joint_name_to_id, link_name_to_id
+
+    @staticmethod
+    def _resolve_name(name: str, name_to_id: dict[str, int], kind: str) -> int:
+        if name not in name_to_id:
+            available = ", ".join(sorted(name_to_id))
+            raise KeyError(f"Unknown {kind} name {name!r}; available {kind}s: {available}")
+        return name_to_id[name]
 
     def _sample_goal(self) -> np.ndarray:
         if self.goal_cfg.get("fixed", False):

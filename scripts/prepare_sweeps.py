@@ -66,7 +66,7 @@ def write_variant_config(base_config: str, variant: dict[str, Any], path: Path) 
         yaml.safe_dump(config, file, sort_keys=False, allow_unicode=True)
 
 
-def train_command(config: Path, method: str, seed: int, total_steps: int, output_dir: Path) -> str:
+def train_command(config: Path) -> str:
     return shell_join(
         [
             "conda",
@@ -77,14 +77,6 @@ def train_command(config: Path, method: str, seed: int, total_steps: int, output
             "scripts/train.py",
             "--config",
             config,
-            "--method",
-            method,
-            "--seed",
-            seed,
-            "--total-steps",
-            total_steps,
-            "--output-dir",
-            output_dir,
         ]
     )
 
@@ -127,6 +119,9 @@ def main() -> None:
     total_steps = int(sweep["total_steps"])
     eval_episodes = int(sweep["eval_episodes"])
     eval_seed = int(sweep.get("eval_seed", 1001))
+    progress_interval = int(sweep.get("progress_interval", 100))
+    log_interval = int(sweep.get("log_interval", 10))
+    save_interval = int(sweep.get("save_interval", 10000))
 
     lines = [
         "#!/usr/bin/env bash",
@@ -140,13 +135,27 @@ def main() -> None:
 
     for variant in variants_from_sweep(sweep):
         name = variant_name(sweep, variant)
-        config_path = config_root / f"{name}.yaml"
-        write_variant_config(base_config, variant, config_path)
         for seed in sweep["seeds"]:
             seed_int = int(seed)
+            run_name = f"{name}_{method}_seed{seed_int}_steps{total_steps}"
+            config_path = config_root / f"{run_name}.yaml"
             output_dir = train_root / name / f"seed_{seed_int}"
-            lines.append(train_command(config_path, method, seed_int, total_steps, output_dir))
-            checkpoint = output_dir / method / "actor.pt"
+            train_overrides = dict(variant)
+            train_overrides.update(
+                {
+                    "seed": seed_int,
+                    "train.method": method,
+                    "train.total_steps": total_steps,
+                    "train.progress_interval": progress_interval,
+                    "train.log_interval": log_interval,
+                    "train.save_interval": save_interval,
+                    "train.output_dir": str(output_dir),
+                    "train.run_name": run_name,
+                }
+            )
+            write_variant_config(base_config, train_overrides, config_path)
+            lines.append(train_command(config_path))
+            checkpoint = output_dir / run_name / "actor.pt"
             output = eval_root / name / f"seed_{seed_int}" / "eval_metrics.csv"
             eval_lines.append(eval_command(config_path, method, eval_seed, eval_episodes, checkpoint, output))
 

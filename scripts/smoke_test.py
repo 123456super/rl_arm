@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import copy
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -12,8 +14,15 @@ from rl_risk_sac.utils.device import resolve_device
 from rl_risk_sac.utils.seeding import set_seed
 
 
-def main() -> None:
-    config = load_config("configs/default.yaml")
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="configs/default.yaml")
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    args = parse_args(argv)
+    config = load_config(args.config)
     smoke_cfg = config["smoke"]
     config["seed"] = int(smoke_cfg["seed"])
     config["env"]["max_episode_steps"] = int(smoke_cfg["max_episode_steps"])

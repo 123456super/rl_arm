@@ -34,7 +34,25 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
         return yaml.safe_load(file) or {}
 
 
-def train_command(config: str, method: str, seed: int, total_steps: int, output_dir: Path) -> str:
+def set_dotted(config: dict[str, Any], dotted_key: str, value: Any) -> None:
+    current = config
+    parts = dotted_key.split(".")
+    for part in parts[:-1]:
+        current = current.setdefault(part, {})
+    current[parts[-1]] = value
+
+
+def write_train_config(base_config: str, path: Path, overrides: dict[str, Any]) -> None:
+    base_path = Path(base_config)
+    config: dict[str, Any] = {"includes": [str(base_path if base_path.is_absolute() else base_path.resolve())]}
+    for key, value in overrides.items():
+        set_dotted(config, key, value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as file:
+        yaml.safe_dump(config, file, sort_keys=False, allow_unicode=True)
+
+
+def train_command(config: Path) -> str:
     return shell_join(
         [
             "conda",
@@ -44,15 +62,7 @@ def train_command(config: str, method: str, seed: int, total_steps: int, output_
             "python",
             "scripts/train.py",
             "--config",
-            config,
-            "--method",
-            method,
-            "--seed",
-            str(seed),
-            "--total-steps",
-            str(total_steps),
-            "--output-dir",
-            str(output_dir),
+            str(config),
         ]
     )
 
@@ -89,6 +99,7 @@ def main() -> None:
     training = matrix["training"]
     evaluation = matrix["evaluation"]
     train_root = Path(training["output_root"])
+    config_root = train_root / "configs"
     eval_root = Path(evaluation["output_root"])
 
     lines = [
@@ -101,13 +112,36 @@ def main() -> None:
     ]
     for method in methods:
         for seed in training["seeds"]:
-            output_dir = train_root / method / f"seed_{int(seed)}"
-            lines.append(train_command(str(training["config"]), method, int(seed), int(training["total_steps"]), output_dir))
+            seed_int = int(seed)
+            total_steps = int(training["total_steps"])
+            progress_interval = int(training.get("progress_interval", 100))
+            log_interval = int(training.get("log_interval", 10))
+            save_interval = int(training.get("save_interval", 10000))
+            run_name = f"{method}_seed{seed_int}_steps{total_steps}"
+            output_dir = train_root / method / f"seed_{seed_int}"
+            config_path = config_root / f"{run_name}.yaml"
+            write_train_config(
+                str(training["config"]),
+                config_path,
+                {
+                    "seed": seed_int,
+                    "train.method": method,
+                    "train.total_steps": total_steps,
+                    "train.progress_interval": progress_interval,
+                    "train.log_interval": log_interval,
+                    "train.save_interval": save_interval,
+                    "train.output_dir": str(output_dir),
+                    "train.run_name": run_name,
+                },
+            )
+            lines.append(train_command(config_path))
 
     lines.extend(["", "# Evaluation commands"])
     for method in methods:
         for train_seed in training["seeds"]:
-            checkpoint = train_root / method / f"seed_{int(train_seed)}" / method / "actor.pt"
+            train_seed_int = int(train_seed)
+            run_name = f"{method}_seed{train_seed_int}_steps{int(training['total_steps'])}"
+            checkpoint = train_root / method / f"seed_{train_seed_int}" / run_name / "actor.pt"
             for scenario in evaluation["scenarios"]:
                 config = SCENARIO_CONFIGS[str(scenario)]
                 for eval_seed in evaluation["seeds"]:

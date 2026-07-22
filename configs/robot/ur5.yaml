@@ -1,0 +1,41 @@
+# UR5 机器人描述配置。
+# 该文件使用从 Universal Robots ROS2 Description 在 ROS2 环境中导出的离线 URDF。
+# URDF 和 meshes 必须保持当前相对目录结构：
+#   assets/robots/universal_robots/ur_models/ur5.urdf
+#   assets/robots/universal_robots/ur_models/meshes/ur5/...
+robot:
+  # ROS2/xacro 导出的 UR5 URDF。相对路径以项目根目录为基准。
+  urdf: assets/robots/universal_robots/ur_models/ur5.urdf
+  # 机器人基座位置，单位 m。
+  base_position: [0.0, 0.0, 0.0]
+
+  # 参与控制的 6 个真实 UR 关节名称。
+  # 官方 URDF 中包含 base、flange、tool0 等固定关节，所以必须按名称解析，不手写 PyBullet id。
+  joint_names:
+    - shoulder_pan_joint
+    - shoulder_lift_joint
+    - elbow_joint
+    - wrist_1_joint
+    - wrist_2_joint
+    - wrist_3_joint
+
+  # 末端执行器 link 名称，用于计算目标位置误差。
+  # tool0 是 UR 官方描述中的 TCP 坐标系；如果后续挂载夹爪，应改成真实工具 TCP。
+  tool_link_name: tool0
+
+  # 每个 episode reset 时的默认 6 关节角，单位 rad。
+  reset:
+    default_joint_positions: [0.0, -1.25, 1.35, -0.95, -1.1, 0.0]
+    # reset 时叠加到每个关节的均匀随机扰动范围，实际采样区间为 [-joint_noise_range, joint_noise_range]。
+    joint_noise_range: 0.22
+
+  # 连杆胶囊体近似参数，用于连杆级距离、TTC 和风险计算。
+  # parent_link_name/child_link_name 使用 URDF link 名称，代码会在 PyBullet 加载后自动解析成 link id。
+  # radius 是保守近似半径，并非厂家精确碰撞包络；正式实验前建议结合 PyBullet collision mesh 复核。
+  capsules:
+    - {name: shoulder, parent_link_name: base_link_inertia, child_link_name: shoulder_link, radius: 0.075, child_offset: [0.0, 0.0, 0.0]}
+    - {name: upper_arm, parent_link_name: shoulder_link, child_link_name: upper_arm_link, radius: 0.06, child_offset: [0.0, 0.0, 0.0]}
+    - {name: forearm, parent_link_name: upper_arm_link, child_link_name: forearm_link, radius: 0.052, child_offset: [0.0, 0.0, 0.0]}
+    - {name: wrist_1, parent_link_name: forearm_link, child_link_name: wrist_1_link, radius: 0.045, child_offset: [0.0, 0.0, 0.0]}
+    - {name: wrist_2, parent_link_name: wrist_1_link, child_link_name: wrist_2_link, radius: 0.043, child_offset: [0.0, 0.0, 0.0]}
+    - {name: wrist_3, parent_link_name: wrist_2_link, child_link_name: tool0, radius: 0.04, child_offset: [0.0, 0.0, 0.0]}
