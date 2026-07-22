@@ -1,0 +1,2 @@
+episode,reward,cost,length,success,collision,non_end_link_collision,final_position_error,completion_time,min_distance,mean_risk,max_risk,safety_violation_count,safety_violation_rate,mean_action_variation,rms_acceleration,rms_jerk
+0,-191.30105011271743,23.38299926929176,240,0,0,0,0.7214332818984985,12.0,0.23534594476222992,0.097429163622049,0.4034349322319031,0,0.0,0.06813727968838065,0.6083934903144836,5.190282821655273

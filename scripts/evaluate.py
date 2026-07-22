@@ -138,6 +138,7 @@ def main() -> None:
 
     env.close()
     output = Path(output_arg) if output_arg else Path(checkpoint).resolve().parent / "eval_metrics.csv"
+    output.parent.mkdir(parents=True, exist_ok=True)
     with open(output, "w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=list(rows[0].keys()))
         writer.writeheader()

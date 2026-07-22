@@ -1,0 +1,357 @@
+{
+  "robot": {
+    "urdf": "assets/robots/universal_robots/ur_models/ur5.urdf",
+    "base_position": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "joint_names": [
+      "shoulder_pan_joint",
+      "shoulder_lift_joint",
+      "elbow_joint",
+      "wrist_1_joint",
+      "wrist_2_joint",
+      "wrist_3_joint"
+    ],
+    "tool_link_name": "tool0",
+    "reset": {
+      "default_joint_positions": [
+        0.0,
+        -1.25,
+        1.35,
+        -0.95,
+        -1.1,
+        0.0
+      ],
+      "joint_noise_range": 0.22
+    },
+    "capsules": [
+      {
+        "name": "shoulder",
+        "parent_link_name": "base_link_inertia",
+        "child_link_name": "shoulder_link",
+        "radius": 0.075,
+        "child_offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "name": "upper_arm",
+        "parent_link_name": "shoulder_link",
+        "child_link_name": "upper_arm_link",
+        "radius": 0.06,
+        "child_offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "name": "forearm",
+        "parent_link_name": "upper_arm_link",
+        "child_link_name": "forearm_link",
+        "radius": 0.052,
+        "child_offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "name": "wrist_1",
+        "parent_link_name": "forearm_link",
+        "child_link_name": "wrist_1_link",
+        "radius": 0.045,
+        "child_offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "name": "wrist_2",
+        "parent_link_name": "wrist_1_link",
+        "child_link_name": "wrist_2_link",
+        "radius": 0.043,
+        "child_offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "name": "wrist_3",
+        "parent_link_name": "wrist_2_link",
+        "child_link_name": "tool0",
+        "radius": 0.04,
+        "child_offset": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ]
+  },
+  "env": {
+    "gui": false,
+    "gravity": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "time_step": 0.0041666667,
+    "control_dt": 0.05,
+    "max_episode_steps": 240,
+    "action_scale": 0.7,
+    "fixed_beta": 0.35,
+    "success_tolerance": 0.055,
+    "workspace": {
+      "x": [
+        0.25,
+        0.78
+      ],
+      "y": [
+        -0.45,
+        0.45
+      ],
+      "z": [
+        0.18,
+        0.78
+      ]
+    },
+    "observation": {
+      "space_bound": 10.0,
+      "distance_clip": [
+        -1.0,
+        1.5
+      ],
+      "no_obstacle_distance": 1.5
+    },
+    "execution": {
+      "joint_motor_force": 90.0
+    },
+    "visual": {
+      "floor_position": [
+        0.0,
+        0.0,
+        -0.005
+      ],
+      "floor_rgba": [
+        0.82,
+        0.84,
+        0.86,
+        1.0
+      ],
+      "obstacle_rgba": [
+        0.95,
+        0.16,
+        0.12,
+        1.0
+      ],
+      "goal_marker_radius": 0.035,
+      "goal_rgba": [
+        0.12,
+        0.64,
+        0.28,
+        0.75
+      ]
+    },
+    "obstacle": {
+      "enabled": true,
+      "scenario": "random",
+      "radius": 0.07,
+      "speed_range": [
+        0.12,
+        0.38
+      ],
+      "disabled_position": [
+        10.0,
+        10.0,
+        10.0
+      ],
+      "bounds": {
+        "x": [
+          0.25,
+          0.78
+        ],
+        "y": [
+          -0.7,
+          0.7
+        ],
+        "z": [
+          0.08,
+          0.85
+        ]
+      },
+      "random": {
+        "x_range": [
+          0.22,
+          0.72
+        ],
+        "z_range": [
+          0.18,
+          0.62
+        ],
+        "start_y_abs_range": [
+          0.42,
+          0.62
+        ],
+        "target_y_abs_range": [
+          0.24,
+          0.48
+        ]
+      },
+      "scenarios": {
+        "upper_arm_crossing": {
+          "x_range": [
+            0.35,
+            0.62
+          ],
+          "z_range": [
+            0.48,
+            0.52
+          ],
+          "start_y_abs": 0.58,
+          "target_y_abs": 0.38
+        },
+        "elbow_crossing": {
+          "x_range": [
+            0.35,
+            0.62
+          ],
+          "z_range": [
+            0.42,
+            0.46
+          ],
+          "start_y_abs": 0.58,
+          "target_y_abs": 0.38
+        },
+        "forearm_crossing": {
+          "x_range": [
+            0.35,
+            0.62
+          ],
+          "z_range": [
+            0.34,
+            0.4
+          ],
+          "start_y_abs": 0.58,
+          "target_y_abs": 0.38
+        },
+        "wrist_crossing": {
+          "x_range": [
+            0.35,
+            0.62
+          ],
+          "z_range": [
+            0.26,
+            0.32
+          ],
+          "start_y_abs": 0.58,
+          "target_y_abs": 0.38
+        }
+      }
+    },
+    "goal": {
+      "fixed": false,
+      "position": [
+        0.55,
+        0.18,
+        0.36
+      ]
+    }
+  },
+  "risk": {
+    "d_safe": 0.12,
+    "sigma_d": 0.12,
+    "v_max": 0.7,
+    "ttc_max": 3.0,
+    "tau": 1.0,
+    "eps": 1e-08,
+    "eps_v": 0.0001,
+    "weights": {
+      "distance": 0.5,
+      "velocity": 0.2,
+      "ttc": 0.3
+    },
+    "cost": {
+      "k_risk": 1.0,
+      "k_violation": 3.0,
+      "k_collision": 8.0,
+      "c_safe": 0.55
+    }
+  },
+  "smoothing": {
+    "beta_min": 0.12,
+    "beta_max": 0.85,
+    "risk_high": 0.75,
+    "lambda_beta": 0.4
+  },
+  "reward": {
+    "w_position": 2.0,
+    "w_progress": 18.0,
+    "w_smooth": 0.04,
+    "success_bonus": 20.0,
+    "collision_penalty": 2.0
+  },
+  "sac": {
+    "gamma": 0.99,
+    "tau": 0.005,
+    "actor_lr": 0.0003,
+    "critic_lr": 0.0003,
+    "alpha_lr": 0.0003,
+    "lambda_lr": 0.01,
+    "cost_ema_rho": 0.05,
+    "batch_size": 256,
+    "replay_size": 300000,
+    "warmup_steps": 3000,
+    "update_after": 1000,
+    "update_every": 1,
+    "hidden_dims": [
+      256,
+      256
+    ],
+    "fixed_risk_penalty": 4.0,
+    "initial_alpha": 0.2,
+    "initial_lambda": 0.1
+  },
+  "train": {
+    "method": "link_fixed",
+    "total_steps": 100000,
+    "progress_interval": 100,
+    "log_interval": 10,
+    "save_interval": 10000,
+    "output_dir": "outputs/formal/train/link_fixed/seed_101",
+    "run_name": "link_fixed_seed101_steps100000"
+  },
+  "eval": {
+    "method": "ldrc_adaptive",
+    "checkpoint": null,
+    "episodes": 20,
+    "seed": 123,
+    "output": null,
+    "trace_output": null
+  },
+  "smoke": {
+    "method": "ldrc_adaptive",
+    "seed": 7,
+    "no_obstacle_seed": 11,
+    "max_episode_steps": 8,
+    "rollout_steps": 12,
+    "replay_capacity": 64,
+    "batch_size": 8
+  },
+  "seed": 101,
+  "device": "cuda:1",
+  "device_selection": {
+    "fallback_to_cpu": true,
+    "candidate_ids": null,
+    "min_free_memory_gb": 2.0,
+    "memory_weight": 0.7,
+    "compute_weight": 0.3,
+    "print_summary": true
+  }
+}

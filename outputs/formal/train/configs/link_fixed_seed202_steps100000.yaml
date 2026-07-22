@@ -1,0 +1,11 @@
+includes:
+- /home/jixuefeng/rl/configs/experiments/random_crossing.yaml
+seed: 202
+train:
+  method: link_fixed
+  total_steps: 100000
+  progress_interval: 100
+  log_interval: 10
+  save_interval: 10000
+  output_dir: outputs/formal/train/link_fixed/seed_202
+  run_name: link_fixed_seed202_steps100000

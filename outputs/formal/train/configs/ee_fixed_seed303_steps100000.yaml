@@ -1,0 +1,11 @@
+includes:
+- /home/jixuefeng/rl/configs/experiments/random_crossing.yaml
+seed: 303
+train:
+  method: ee_fixed
+  total_steps: 100000
+  progress_interval: 100
+  log_interval: 10
+  save_interval: 10000
+  output_dir: outputs/formal/train/ee_fixed/seed_303
+  run_name: ee_fixed_seed303_steps100000

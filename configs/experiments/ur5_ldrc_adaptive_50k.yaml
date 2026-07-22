@@ -1,0 +1,13 @@
+# UR5 单方法中等训练配置。
+# 用途：在短训练通过后继续验证 ldrc_adaptive 是否能稳定提升成功率并降低碰撞率。
+includes:
+  - ../ur5.yaml
+
+train:
+  method: ldrc_adaptive
+  total_steps: 50000
+  progress_interval: 500
+  log_interval: 10
+  save_interval: 10000
+  output_dir: outputs
+  run_name: null

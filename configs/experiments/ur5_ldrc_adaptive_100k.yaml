@@ -1,0 +1,13 @@
+# UR5 单方法长训练配置。
+# 用途：单方法基本稳定后，用于观察 ldrc_adaptive 在 100k steps 下的收敛趋势。
+includes:
+  - ../ur5.yaml
+
+train:
+  method: ldrc_adaptive
+  total_steps: 100000
+  progress_interval: 1000
+  log_interval: 10
+  save_interval: 10000
+  output_dir: outputs
+  run_name: null

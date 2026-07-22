@@ -17,13 +17,14 @@ dist/
 *.egg
 
 # Training outputs and local artifacts
-outputs/
 runs/
 checkpoints/
 *.pt
 *.pth
 *.onnx
 *.whl
+!outputs/
+!outputs/**
 
 # OS/editor files
 .DS_Store
