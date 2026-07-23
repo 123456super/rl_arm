@@ -22,6 +22,10 @@ from rl_risk_sac.utils.seeding import set_seed
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/default.yaml")
+    parser.add_argument("--resume-actor", default=None)
+    parser.add_argument("--resume-state", default=None)
+    parser.add_argument("--start-step", type=int, default=0)
+    parser.add_argument("--run-name", default=None)
     return parser.parse_args()
 
 
@@ -41,7 +45,11 @@ def build_run_dir(config: dict[str, Any], method: str, run_name: str | None) -> 
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
+    if args.run_name is not None:
+        config["train"]["run_name"] = args.run_name
     method = config["train"]["method"]
+    if args.start_step < 0:
+        raise ValueError("--start-step must be non-negative")
 
     config["device"] = resolve_device(config)
     set_seed(int(config["seed"]))
@@ -49,6 +57,17 @@ def main() -> None:
     obs_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     agent = SACAgent(obs_dim, action_dim, config, method=method)
+    if args.resume_actor is not None:
+        resume_state = args.resume_state
+        if resume_state is None:
+            actor_path = Path(args.resume_actor)
+            resume_state = str(actor_path.with_name(actor_path.name.replace("actor", "agent_state", 1)))
+        agent.load(args.resume_actor, resume_state)
+        config["resume"] = {
+            "actor": args.resume_actor,
+            "state": resume_state,
+            "start_step": args.start_step,
+        }
     replay = ReplayBuffer(
         obs_dim=obs_dim,
         action_dim=action_dim,
@@ -106,6 +125,8 @@ def main() -> None:
     progress_writer.writeheader()
 
     total_steps = int(config["train"]["total_steps"])
+    if args.start_step > total_steps:
+        raise ValueError("--start-step must be less than or equal to train.total_steps")
     warmup_steps = int(config["sac"]["warmup_steps"])
     update_after = int(config["sac"]["update_after"])
     update_every = int(config["sac"]["update_every"])
@@ -127,10 +148,10 @@ def main() -> None:
 
     print(
         f"start training: method={method} total_steps={total_steps} device={config['device']} "
-        f"run_dir={run_dir} progress_interval={progress_interval}",
+        f"run_dir={run_dir} progress_interval={progress_interval} start_step={args.start_step}",
         flush=True,
     )
-    progress = trange(1, total_steps + 1, desc=f"train:{method}")
+    progress = trange(args.start_step + 1, total_steps + 1, desc=f"train:{method}")
     for step in progress:
         if step <= warmup_steps:
             action = env.action_space.sample()
@@ -233,7 +254,7 @@ def main() -> None:
             episode_violations = 0
 
         if step % save_interval == 0:
-            agent.save(run_dir)
+            agent.save(run_dir, suffix=f"_step_{step}")
 
     agent.save(run_dir)
     progress_file.close()

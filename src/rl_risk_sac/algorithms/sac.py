@@ -151,10 +151,10 @@ class SACAgent:
             self.lagrange_multiplier + self.lambda_lr * (self.cost_ema - self.cost_safe),
         )
 
-    def save(self, directory: str | Path) -> None:
+    def save(self, directory: str | Path, suffix: str = "") -> None:
         path = Path(directory)
         path.mkdir(parents=True, exist_ok=True)
-        torch.save(self.actor.state_dict(), path / "actor.pt")
+        torch.save(self.actor.state_dict(), path / f"actor{suffix}.pt")
         torch.save(
             {
                 "reward_q1": self.reward_q1.state_dict(),
@@ -166,8 +166,26 @@ class SACAgent:
                 "cost_ema": self.cost_ema,
                 "method": self.method,
             },
-            path / "agent_state.pt",
+            path / f"agent_state{suffix}.pt",
         )
+
+    def load(self, actor_path: str | Path, state_path: str | Path | None = None) -> None:
+        self.load_actor(actor_path)
+        if state_path is None:
+            return
+
+        state = torch.load(state_path, map_location=self.device)
+        self.reward_q1.load_state_dict(state["reward_q1"])
+        self.reward_q2.load_state_dict(state["reward_q2"])
+        self.cost_q1.load_state_dict(state["cost_q1"])
+        self.cost_q2.load_state_dict(state["cost_q2"])
+        hard_update(self.reward_q1, self.reward_target_q1)
+        hard_update(self.reward_q2, self.reward_target_q2)
+        hard_update(self.cost_q1, self.cost_target_q1)
+        hard_update(self.cost_q2, self.cost_target_q2)
+        self.log_alpha.data.copy_(state["log_alpha"].to(self.device))
+        self.lagrange_multiplier = float(state["lagrange_multiplier"])
+        self.cost_ema = float(state["cost_ema"])
 
     def load_actor(self, actor_path: str | Path) -> None:
         state = torch.load(actor_path, map_location=self.device)

@@ -345,7 +345,7 @@
     "batch_size": 8
   },
   "seed": 101,
-  "device": "cuda:3",
+  "device": "cuda:1",
   "device_selection": {
     "fallback_to_cpu": true,
     "candidate_ids": null,

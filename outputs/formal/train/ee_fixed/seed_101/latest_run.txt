@@ -1,1 +1,1 @@
-outputs/formal/train/ee_fixed/seed_101/ee_fixed_seed101_steps100000
+outputs/formal/train/ee_fixed/seed_101/ee_fixed_seed101_steps100000_ckptsel
