@@ -1,0 +1,6 @@
+# Formal recheck base: retain the random-crossing setup and only retune link_fixed.
+includes:
+  - random_crossing.yaml
+
+sac:
+  fixed_risk_penalty: 1.0

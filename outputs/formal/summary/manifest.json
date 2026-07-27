@@ -1,0 +1,6 @@
+{
+  "eval_root": "outputs/formal/eval",
+  "train_root": "outputs/formal/train",
+  "eval_files": 18000,
+  "train_rows": 8727
+}

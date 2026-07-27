@@ -1,0 +1,24 @@
+# Independent formal recheck for the selected link_fixed risk-penalty baseline.
+# Keep its artifacts separate from the completed formal matrix.
+methods:
+  - link_fixed
+
+training:
+  seeds: [101, 202, 303]
+  total_steps: 100000
+  config: configs/experiments/random_crossing_link_fixed_penalty1.yaml
+  output_root: outputs/rechecks/link_fixed_penalty1/train
+  progress_interval: 100
+  log_interval: 10
+  save_interval: 10000
+
+evaluation:
+  seeds: [1001, 1002, 1003]
+  episodes_per_seed: 100
+  scenarios:
+    - random_crossing
+    - upper_arm_crossing
+    - elbow_crossing
+    - forearm_crossing
+    - wrist_crossing
+  output_root: outputs/rechecks/link_fixed_penalty1/eval
