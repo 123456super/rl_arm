@@ -81,7 +81,13 @@ conda run -n rl python scripts/smoke_test.py \
 
 集成测试覆盖有效估计直通、无效/过期估计零速度停机、约束不可行停机和“过滤器是唯一命令出口”。运行时 `info` 额外包含 `predictive_risk_status`、`predictive_h_min_m`、`qdot_requested`、`qdot_cmd`、`safety_filter_intervention_norm`、`safety_filter_safe_stop`、`safety_filter_max_constraint_violation` 和 `safety_filter_solve_time_s`。
 
-该链路使用仿真障碍物真值作为默认状态估计，也提供估计注入接口用于失效测试。它不是 RGB-D 接入、真实控制器验收或安全保证；进入 P3 前不应把 smoke/单元测试结果写成过滤器降低碰撞率的实验结论。
+该链路使用 PyBullet 点雅可比构造连杆与 TCP 约束，避免控制周期内的有限差分状态保存/恢复。P2 的 20 episode、2,693 控制步测量中，过滤器均值为 2.68 ms、P95 为 4.94 ms，未超过 50 ms 仿真控制周期。该数字只覆盖当前 PyBullet 进程内的过滤器计算，不包含 RGB-D、通信或控制器延迟，也不构成真实控制器验收或安全保证。
+
+### 5.1 P3 因子化开发现状
+
+`configs/experiments/p3/` 中的 B1--B5 已用 train seed `4101`、10k step 和 eval seed `5101` 的 20 episode 完成链路检查。B4/B5 的过滤器指标已归档到 `train_metrics.csv`、评估 CSV 和 trace；其求解 P95 分别为 3.89 ms、4.88 ms，均未超 50 ms。
+
+这批单 seed、短预算结果没有产生可冻结的综合候选：B4 的碰撞率/安全距离违反率为 25%/9.40%，B5 的成功率为 0%。因此不要启动新的 train/eval seeds、OOD 或真机工作。下一轮应保持 B1--B5 因子和参数不变，将共同开发训练预算扩展至 100k，并完成独立 checkpoint validation；完整开发预算仍无合理任务--安全折中时，先诊断风险代价、奖励和不可行约束，而不是继续扩大实验矩阵。
 
 ## 6. 开发训练：安全的最小流程
 
