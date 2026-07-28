@@ -1,0 +1,67 @@
+{
+  "offline_status": "pass",
+  "scope": "PyBullet-only inference, normalized-action and joint-command-limit checks; no real robot is connected.",
+  "config": {
+    "method": "link_fixed_penalty1",
+    "fixed_risk_penalty": 1.0,
+    "action_scale_rad_s": 0.7,
+    "fixed_beta": 0.35,
+    "d_safe_m": 0.12,
+    "workspace_m": {
+      "x": [
+        0.25,
+        0.78
+      ],
+      "y": [
+        -0.45,
+        0.45
+      ],
+      "z": [
+        0.18,
+        0.78
+      ]
+    }
+  },
+  "candidates": [
+    {
+      "train_seed": "101",
+      "selected_step": "100000",
+      "checkpoint": "outputs/rechecks/link_fixed_penalty1/train/link_fixed/seed_101/link_fixed_seed101_steps100000/actor_step_100000.pt",
+      "status": "pass",
+      "steps": 20,
+      "max_normalized_action": 0.9988176822662354,
+      "max_abs_qdot_cmd_rad_s": 0.6426194310188293,
+      "minimum_observed_distance_m": 0.18127979338169098,
+      "finite_values": true
+    },
+    {
+      "train_seed": "202",
+      "selected_step": "50000",
+      "checkpoint": "outputs/rechecks/link_fixed_penalty1/train/link_fixed/seed_202/link_fixed_seed202_steps100000/actor_step_50000.pt",
+      "status": "pass",
+      "steps": 20,
+      "max_normalized_action": 0.9912788271903992,
+      "max_abs_qdot_cmd_rad_s": 0.6778342127799988,
+      "minimum_observed_distance_m": 0.43740785121917725,
+      "finite_values": true
+    },
+    {
+      "train_seed": "303",
+      "selected_step": "100000",
+      "checkpoint": "outputs/rechecks/link_fixed_penalty1/train/link_fixed/seed_303/link_fixed_seed303_steps100000/actor_step_100000.pt",
+      "status": "pass",
+      "steps": 20,
+      "max_normalized_action": 0.9739166498184204,
+      "max_abs_qdot_cmd_rad_s": 0.5803399682044983,
+      "minimum_observed_distance_m": 0.3999204933643341,
+      "finite_values": true
+    }
+  ],
+  "failures": [],
+  "required_on_site_signoff": [
+    "Robot-specific joint-speed, acceleration and workspace limits are configured in the robot controller, not inferred from the simulation action scale.",
+    "The physical emergency-stop and protective-stop path has been tested while the robot is in a safe state.",
+    "RGB-D detection loss, invalid depth, stale obstacle state and excessive risk all command a safe stop before commands reach the robot.",
+    "Camera-to-robot extrinsics and the conservative collision envelope have been verified on the physical cell."
+  ]
+}

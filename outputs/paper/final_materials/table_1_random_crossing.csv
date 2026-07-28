@@ -1,0 +1,4 @@
+method,success_rate,collision_rate,non_end_link_collision_rate,final_position_error_m,min_distance_m,safety_violation_rate,rms_jerk
+ee_fixed,17.00 +/- 2.00,13.44 +/- 5.19,13.11 +/- 5.17,0.369 +/- 0.017,0.177 +/- 0.012,2.38 +/- 1.44,25.0 +/- 2.0
+link_fixed_penalty1,64.22 +/- 12.54,6.89 +/- 2.22,6.89 +/- 2.22,0.125 +/- 0.029,0.193 +/- 0.020,1.27 +/- 0.92,32.3 +/- 2.7
+ldrc_fixed,56.33 +/- 18.02,5.56 +/- 2.91,5.56 +/- 2.91,0.172 +/- 0.054,0.167 +/- 0.008,3.12 +/- 1.27,32.7 +/- 0.2

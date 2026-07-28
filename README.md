@@ -1,6 +1,8 @@
-# Link-Level Dynamic Risk Constrained SAC
+# Link-Level Dynamic Risk SAC
 
-本项目根据 `docs/thesis_outline.md` 搭建一个可运行的 PyBullet 仿真原型，用于 UR5-like 机械臂在单动态球形障碍物场景下的连杆级风险约束 SAC 避障训练。
+本项目是 UR5 在单动态球形障碍物场景下的连杆级动态风险 SAC 仿真原型。最终论文主比较使用末端风险基线、连杆级固定风险惩罚 SAC（`w_R=1.0`）和连杆级约束 SAC；当前 held-out 结果支持前者作为部署候选，而非将约束 SAC 表述为整体最优。
+
+正式结论、论文图表和实机前检查分别见 [实验结论](docs/experiment_conclusions.md)、[论文材料](docs/paper_materials.md) 和 [部署预检](docs/deployment_preflight.md)。
 
 ## 环境
 
@@ -124,8 +126,8 @@ conda run -n rl python scripts/train.py --config configs/experiments/ur5_short_t
 ## 方法名称
 
 - `ee_fixed`: SAC-EndEffectorRisk-FixedPenalty-FixedSmooth
-- `link_fixed`: SAC-LinkDynamicRisk-FixedPenalty-FixedSmooth
+- `link_fixed`: SAC-LinkDynamicRisk-FixedPenalty-FixedSmooth；当 `sac.fixed_risk_penalty: 1.0` 时，论文中记为 `link_fixed_penalty1`
 - `ldrc_fixed`: LDRC-SAC-LinkDynamicRisk-FixedSmooth
-- `ldrc_adaptive`: LDRC-SAC-LinkDynamicRisk-AdaptiveSmooth
+- `ldrc_adaptive`: LDRC-SAC-LinkDynamicRisk-AdaptiveSmooth（历史失败消融，不是部署候选）
 
 当前代码定位为论文仿真实验原型。真实 UR5/RGB-D 部署需要接入实际机器人控制接口、相机标定和障碍物检测模块后再使用。

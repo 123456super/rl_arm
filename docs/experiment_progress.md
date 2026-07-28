@@ -42,10 +42,10 @@
 最终主表数据源：
 
 ```text
-outputs/rechecks/heldout_1004_1006/summary/all_eval_episodes_3methods.csv
-outputs/rechecks/heldout_1004_1006/summary/eval_summary_by_train_seed_3methods.csv
-outputs/rechecks/heldout_1004_1006/summary/eval_summary_across_train_seeds_3methods.csv
-outputs/rechecks/heldout_1004_1006/summary/eval_summary_macro_across_train_seeds_3methods.csv
+outputs/rechecks/heldout_1004_1006/final_3methods/all_eval_episodes.csv
+outputs/rechecks/heldout_1004_1006/final_3methods/eval_summary_by_train_seed.csv
+outputs/rechecks/heldout_1004_1006/final_3methods/eval_summary_across_train_seeds.csv
+outputs/rechecks/heldout_1004_1006/final_3methods/eval_summary_macro_across_train_seeds.csv
 ```
 
 旧文件 `outputs/formal/summary/` 及原 `link_fixed`（惩罚 4.0）结果只保留作历史和敏感性分析，不能再用于主方法排序或正文主表。
@@ -99,19 +99,20 @@ outputs/rechecks/heldout_1004_1006/summary/eval_summary_macro_across_train_seeds
 | adaptive actor seed 303 退化 | 不支持完整方法主张 | 将 adaptive 作为失败消融，不作真实部署候选 |
 | 单球形障碍物仿真 | 外部泛化有限 | 限定为本文仿真设定，不作真实安全保证 |
 
-## 8. 剩余工作
+## 8. 已固化事项与后续工作
 
-### 8.1 必做：论文结果固化
+### 8.1 已完成：论文结果固化
 
-1. 使用 held-out 三方法汇总表制作正文 Table 1（`random_crossing`）和 Table 2（四个定向压力场景）；统计单位明确为 train seed，主方法名称写为 `link_fixed_penalty1` 或“连杆级固定风险惩罚 SAC（w_R=1.0）”。
-2. 更新论文、汇报和结论文件中“`ldrc_fixed` 综合最优”以及“`link_fixed` 仅为保守 baseline”的表述；原四方法表格仅作为历史附录，不得混入新主表。
-3. 在论文方法与实验设置中说明：`w_R=1.0` 由 train seeds 101、202 的小规模筛选选出，最终主结论使用 eval-seed held-out 的 1004--1006；该流程避免复用筛选阶段的 eval seeds，但仍需新 train seeds 验证以排除完整的配置选择偏差。
+1. 已使用 held-out 三方法汇总表生成正文 Table 1（`random_crossing`）和 Table 2（四个定向压力场景），统计单位为 train seed，方法名称统一为 `link_fixed_penalty1` 或“连杆级固定风险惩罚 SAC（`w_R=1.0`）”。
+2. 论文大纲、项目 README 和结论文件已统一为“`link_fixed_penalty1` 是综合部署候选；`ldrc_fixed` 仅在部分场景保留较低碰撞率”的口径；原四方法表格仅作为历史附录。
+3. `docs/paper_materials.md` 已列出正文/附录图表、数据源与一键重建命令，并明确 `w_R=1.0` 筛选与 train seed 复用的局限。
 
-### 8.2 必做：真实低速部署前准备
+### 8.2 已完成：离线部署预检；实机签核待现场完成
 
-1. 将 `link_fixed_penalty1` 的三个已选 checkpoint 固化为部署候选，并确认推理输入、关节速度限幅、急停和碰撞/距离监控链路。
-2. 在不连接真实机械臂或使用严格限位的条件下，先完成离线回放与低速控制链路检查；随后使用轻质球体开展 10--20 次低速可执行性验证。
-3. 真实实验仅报告可执行性、轨迹和风险响应，不进行高风险碰撞性基线对比，也不宣称形式化安全保证。
+1. 三个 `link_fixed_penalty1` checkpoint 已固化为部署候选：train seeds 101、202、303 分别选择 step 100000、50000、100000。
+2. `scripts/deployment_preflight.py` 已完成无硬件预检：确认 checkpoint 可加载、推理输入和命令均为有限值、归一化动作未越界，并在 PyBullet 中确认关节速度命令不超过 `0.7 rad/s` 仿真限幅。
+3. 真实机器人控制接口、控制器限速/工作空间、急停与保护停、RGB-D 失效安全停止、相机外参和碰撞包络仍需在现场签核；完成后才可使用轻质球体开展 10--20 次低速可执行性验证。
+4. 真实实验仅报告可执行性、轨迹和风险响应，不进行高风险碰撞性基线对比，也不宣称形式化安全保证。
 
 ### 8.3 可选：后续研究，不阻塞论文主线
 
