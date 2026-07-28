@@ -61,7 +61,29 @@ configs/run/dev.yaml             # train/eval/smoke 参数
 
 注意：`link_fixed_penalty1` 是论文与结果目录中的配置名称；命令行/代码方法名仍为 `link_fixed`，通过 `sac.fixed_risk_penalty: 1.0` 区分。
 
-## 5. 开发训练：安全的最小流程
+## 5. P1/P2 安全链路开发验证
+
+阶段一默认配置的 `env.safety_filter.enabled` 为 `false`，以避免改变已冻结的历史结果。P2 开发入口 [configs/experiments/p2_safety_filter_dev.yaml](../configs/experiments/p2_safety_filter_dev.yaml) 显式启用过滤器，策略命令会经过预测风险、连杆/TCP 约束和安全过滤器后才发送到 PyBullet。
+
+从项目根目录运行：
+
+```bash
+conda run -n rl pytest -q tests
+
+conda run -n rl pytest -q \
+  tests/test_predictive_risk.py \
+  tests/test_safety_filter.py \
+  tests/test_safety_filter_integration.py
+
+conda run -n rl python scripts/smoke_test.py \
+  --config configs/experiments/p2_safety_filter_dev.yaml
+```
+
+集成测试覆盖有效估计直通、无效/过期估计零速度停机、约束不可行停机和“过滤器是唯一命令出口”。运行时 `info` 额外包含 `predictive_risk_status`、`predictive_h_min_m`、`qdot_requested`、`qdot_cmd`、`safety_filter_intervention_norm`、`safety_filter_safe_stop`、`safety_filter_max_constraint_violation` 和 `safety_filter_solve_time_s`。
+
+该链路使用仿真障碍物真值作为默认状态估计，也提供估计注入接口用于失效测试。它不是 RGB-D 接入、真实控制器验收或安全保证；进入 P3 前不应把 smoke/单元测试结果写成过滤器降低碰撞率的实验结论。
+
+## 6. 开发训练：安全的最小流程
 
 短训练只用于确认新配置、日志和 checkpoint 链路。UR5 示例：
 
@@ -93,7 +115,7 @@ conda run -n rl python scripts/train.py --config configs/experiments/no_obstacle
 | `progress.csv` | step 级进度 |
 | `train_metrics.csv` | episode 级训练指标 |
 
-## 6. 训练过程的诊断口径
+## 7. 训练过程的诊断口径
 
 不要只看 reward。至少同时观察任务、安全与数值稳定性：
 
@@ -115,7 +137,7 @@ tail -f "$RUN_DIR/progress.csv"
 
 `lambda` 长期接近零不一定是错误：先确认 episode 平均风险代价是否确实低于 `C_safe`。反之，`lambda` 持续升高时先检查 risk、violation 和 collision 是否同步偏高，再决定是调整参数还是继续训练。
 
-## 7. 评估与结果归档
+## 8. 评估与结果归档
 
 单次评估示例：
 
@@ -139,7 +161,7 @@ conda run -n rl python scripts/plot_traces.py \
 
 任何用于论文的复核都应满足：相同训练预算、相同场景集合、独立 checkpoint validation、未参与调参的 eval seeds，以及至少 3 个新的 train seeds。统计单位仍是 train seed，不把所有 episode 当成独立训练重复。
 
-## 8. 已完成主结果的复现与论文材料
+## 9. 已完成主结果的复现与论文材料
 
 论文材料使用 held-out 三方法汇总：
 
@@ -157,7 +179,7 @@ outputs/rechecks/heldout_1004_1006/final_3methods/
 
 `outputs/formal/summary/`、`outputs/formal/paper_notes/` 与原四方法结果是历史/诊断数据，不能混入正文主表或方法排序。
 
-## 9. 真实低速部署前的离线检查
+## 10. 真实低速部署前的离线检查
 
 候选 checkpoint、离线预检命令和现场签核项在 [deployment_preflight.md](deployment_preflight.md)。可重跑：
 
@@ -167,7 +189,7 @@ conda run -n rl python scripts/deployment_preflight.py
 
 该脚本只验证 PyBullet 中的输入维度、checkpoint 加载、动作范围和仿真关节速度命令限幅。真实控制器限速、工作空间围栏、急停/保护停、相机失效安全停止和相机—机器人标定必须现场单独验收。
 
-## 10. 阶段一后续研究优先级（历史参考）
+## 11. 阶段一后续研究优先级（历史参考）
 
 1. 如要验证结果稳健性，优先增加新的 train seeds 和独立 held-out eval seeds。
 2. 如要继续约束 SAC，聚焦 upper arm、elbow 的局部碰撞率优势，并同时报告成功率、最小距离、违反率和 jerk 的取舍。

@@ -1,0 +1,32 @@
+# P3 B3: link-level predicted-distance fixed-penalty SAC without a safety filter.
+includes:
+  - ../../default.yaml
+
+seed: 4101
+
+risk:
+  representation: predictive
+
+sac:
+  fixed_risk_penalty: 1.0
+
+env:
+  safety_filter:
+    enabled: false
+    control_delay_s: 0.0
+    geometry_margin_m: 0.0
+    tracking_error_bound_m: 0.0
+
+train:
+  method: link_fixed
+  total_steps: 10000
+  save_interval: 5000
+  output_dir: outputs/p3_dev/b3_link_predictive
+
+eval:
+  method: link_fixed
+  episodes: 20
+  seed: 5101
+
+smoke:
+  method: link_fixed

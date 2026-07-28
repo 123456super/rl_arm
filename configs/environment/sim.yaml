@@ -37,6 +37,22 @@ env:
     # PyBullet 速度控制的关节最大驱动力，单位 N*m。过小可能跟不上速度命令，过大可能使仿真过硬。
     joint_motor_force: 90.0
 
+  # P2 安全过滤器。默认关闭以冻结阶段一结果；新研究实验必须显式设为 true。
+  safety_filter:
+    enabled: false
+    # 预测风险的短时窗口、允许观测年龄和控制时延，单位 s。
+    prediction_horizon_s: 0.15
+    max_observation_age_s: 0.10
+    control_delay_s: 0.05
+    # 胶囊包络与控制跟踪误差，单位为 m。
+    geometry_margin_m: 0.0
+    tracking_error_bound_m: 0.01
+    # 控制约束。joint_acceleration_limit 为所有关节共享的保守限值。
+    joint_acceleration_limit_radps2: 4.0
+    safety_gain: 4.0
+    max_projection_iterations: 80
+    constraint_tolerance: 1.0e-8
+
   # 可视化参数，只影响 GUI/渲染显示，不参与训练逻辑。
   visual:
     floor_position: [0.0, 0.0, -0.005]

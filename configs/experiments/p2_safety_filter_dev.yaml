@@ -1,0 +1,11 @@
+# P2 开发入口：不覆盖阶段一结果目录，也不用于正式实验结论。
+includes:
+  - ../default.yaml
+
+env:
+  safety_filter:
+    enabled: true
+
+train:
+  output_dir: outputs/p2_dev
+  run_name: p2_safety_filter_dev

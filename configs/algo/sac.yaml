@@ -1,5 +1,7 @@
 # 算法配置。该文件集中放风险建模、动作平滑、任务奖励和 SAC 超参数。
 risk:
+  # 训练观测和风险代价的表示。current 保持阶段一行为；predictive/robust_predictive 供 P3 消融使用。
+  representation: current
   # 安全距离阈值，d_min 小于该值计为安全距离违反。
   d_safe: 0.12
   # 距离风险指数衰减尺度，越小表示距离接近 d_safe 时风险上升越陡。

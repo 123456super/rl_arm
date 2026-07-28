@@ -13,6 +13,12 @@ from rl_risk_sac.utils.device import resolve_device
 from rl_risk_sac.utils.seeding import set_seed
 
 
+def mean_finite(rows: list[dict[str, float | int]], field: str) -> float:
+    values = np.asarray([row[field] for row in rows], dtype=np.float64)
+    values = values[np.isfinite(values)]
+    return float(np.mean(values)) if len(values) else float("nan")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/default.yaml")
@@ -40,6 +46,7 @@ def main() -> None:
     config["seed"] = seed
     config["device"] = resolve_device(config)
     set_seed(seed)
+    safety_filter_enabled = bool(config["env"].get("safety_filter", {}).get("enabled", False))
 
     env = UR5DynamicObstacleEnv(config, method=method)
     agent = SACAgent(env.observation_space.shape[0], env.action_space.shape[0], config, method=method)
@@ -60,6 +67,13 @@ def main() -> None:
         accelerations = []
         jerks = []
         action_variations = []
+        filter_interventions = 0
+        filter_intervention_norms = []
+        filter_safe_stops = 0
+        filter_infeasible = 0
+        predictive_near_misses = 0
+        predictive_h_mins = []
+        filter_solve_times_s = []
         success = False
         collision = False
         final_position_error = 0.0
@@ -77,6 +91,20 @@ def main() -> None:
             accelerations.append(info["joint_acc"])
             jerks.append(info["joint_jerk"])
             action_variations.append(float(np.linalg.norm(info["qdot_cmd"] - prev_qdot_cmd)))
+            filter_status = str(info.get("safety_filter_status", "not_enabled"))
+            intervention_norm = float(info.get("safety_filter_intervention_norm", float("nan")))
+            predictive_h_min = float(info.get("predictive_h_min_m", float("nan")))
+            solve_time_s = float(info.get("safety_filter_solve_time_s", float("nan")))
+            filter_interventions += int(filter_status not in {"passthrough", "not_enabled"})
+            filter_safe_stops += int(bool(info.get("safety_filter_safe_stop", False)))
+            filter_infeasible += int(filter_status == "safe_stop_infeasible")
+            if np.isfinite(intervention_norm):
+                filter_intervention_norms.append(intervention_norm)
+            if np.isfinite(predictive_h_min):
+                predictive_h_mins.append(predictive_h_min)
+                predictive_near_misses += int(predictive_h_min < 0.0)
+            if np.isfinite(solve_time_s):
+                filter_solve_times_s.append(solve_time_s)
             success = bool(info["success"])
             collision = bool(info["collision"])
             final_position_error = float(info["goal_error_norm"])
@@ -99,6 +127,17 @@ def main() -> None:
                         "qdot_norm": float(np.linalg.norm(info["qdot_cmd"])),
                         "acc_norm": float(np.linalg.norm(info["joint_acc"])),
                         "jerk_norm": float(np.linalg.norm(info["joint_jerk"])),
+                        "qdot_requested_norm": float(np.linalg.norm(info.get("qdot_requested", info["qdot_cmd"]))),
+                        "safety_filter_status": filter_status,
+                        "safety_filter_intervention_norm": intervention_norm,
+                        "safety_filter_safe_stop": int(bool(info.get("safety_filter_safe_stop", False))),
+                        "safety_filter_active_constraints": info.get("safety_filter_active_constraints", 0),
+                        "safety_filter_max_constraint_violation": info.get(
+                            "safety_filter_max_constraint_violation", float("nan")
+                        ),
+                        "predictive_risk_status": info.get("predictive_risk_status", "not_enabled"),
+                        "predictive_h_min_m": predictive_h_min,
+                        "safety_filter_solve_time_s": solve_time_s,
                     }
                 )
             prev_qdot_cmd = info["qdot_cmd"].copy()
@@ -124,6 +163,25 @@ def main() -> None:
                 "max_risk": float(np.max(risks)) if risks else 0.0,
                 "safety_violation_count": violations,
                 "safety_violation_rate": violations / max(step + 1, 1),
+                "safety_filter_intervention_rate": (
+                    filter_interventions / max(step + 1, 1) if safety_filter_enabled else float("nan")
+                ),
+                "mean_safety_filter_intervention_norm": (
+                    float(np.mean(filter_intervention_norms)) if filter_intervention_norms else float("nan")
+                ),
+                "safety_filter_safe_stop_rate": (
+                    filter_safe_stops / max(step + 1, 1) if safety_filter_enabled else float("nan")
+                ),
+                "safety_filter_infeasible_rate": (
+                    filter_infeasible / max(step + 1, 1) if safety_filter_enabled else float("nan")
+                ),
+                "predictive_near_miss_rate": (
+                    predictive_near_misses / max(step + 1, 1) if safety_filter_enabled else float("nan")
+                ),
+                "min_predictive_h_m": min(predictive_h_mins) if predictive_h_mins else float("nan"),
+                "mean_safety_filter_solve_time_s": (
+                    float(np.mean(filter_solve_times_s)) if filter_solve_times_s else float("nan")
+                ),
                 "mean_action_variation": float(np.mean(action_variations)) if action_variations else 0.0,
                 "rms_acceleration": float(np.sqrt(np.mean(np.square(acc)))) if len(acc) else 0.0,
                 "rms_jerk": float(np.sqrt(np.mean(np.square(jerk)))) if len(jerk) else 0.0,
@@ -154,6 +212,12 @@ def main() -> None:
         "mean_reward": float(np.mean([r["reward"] for r in rows])),
         "mean_cost": float(np.mean([r["cost"] for r in rows])),
         "mean_safety_violation_count": float(np.mean([r["safety_violation_count"] for r in rows])),
+        "mean_safety_filter_intervention_rate": mean_finite(rows, "safety_filter_intervention_rate"),
+        "mean_safety_filter_safe_stop_rate": mean_finite(rows, "safety_filter_safe_stop_rate"),
+        "mean_safety_filter_infeasible_rate": mean_finite(rows, "safety_filter_infeasible_rate"),
+        "mean_predictive_near_miss_rate": mean_finite(rows, "predictive_near_miss_rate"),
+        "mean_min_predictive_h_m": mean_finite(rows, "min_predictive_h_m"),
+        "mean_safety_filter_solve_time_s": mean_finite(rows, "mean_safety_filter_solve_time_s"),
         "mean_action_variation": float(np.mean([r["mean_action_variation"] for r in rows])),
         "mean_rms_acceleration": float(np.mean([r["rms_acceleration"] for r in rows])),
         "mean_rms_jerk": float(np.mean([r["rms_jerk"] for r in rows])),

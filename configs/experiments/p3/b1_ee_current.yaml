@@ -1,0 +1,25 @@
+# P3 B1: end-effector current-distance fixed-penalty SAC development baseline.
+includes:
+  - ../../default.yaml
+
+seed: 4101
+
+risk:
+  representation: current
+
+sac:
+  fixed_risk_penalty: 1.0
+
+train:
+  method: ee_fixed
+  total_steps: 10000
+  save_interval: 5000
+  output_dir: outputs/p3_dev/b1_ee_current
+
+eval:
+  method: ee_fixed
+  episodes: 20
+  seed: 5101
+
+smoke:
+  method: ee_fixed

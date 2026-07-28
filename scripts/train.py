@@ -95,6 +95,13 @@ def main() -> None:
         "safety_violation_rate",
         "min_distance",
         "mean_risk",
+        "safety_filter_intervention_rate",
+        "mean_safety_filter_intervention_norm",
+        "safety_filter_safe_stop_rate",
+        "safety_filter_infeasible_rate",
+        "predictive_near_miss_rate",
+        "min_predictive_h_m",
+        "mean_safety_filter_solve_time_s",
         "lambda",
         "alpha",
     ]
@@ -116,6 +123,12 @@ def main() -> None:
         "d_min",
         "success",
         "collision",
+        "safety_filter_status",
+        "safety_filter_intervention_norm",
+        "safety_filter_safe_stop",
+        "safety_filter_max_constraint_violation",
+        "predictive_h_min_m",
+        "safety_filter_solve_time_s",
         "lambda",
         "alpha",
         "replay_size",
@@ -143,6 +156,14 @@ def main() -> None:
     episode_risks: list[float] = []
     episode_distances: list[float] = []
     episode_violations = 0
+    safety_filter_enabled = bool(config["env"].get("safety_filter", {}).get("enabled", False))
+    episode_filter_interventions = 0
+    episode_filter_intervention_norms: list[float] = []
+    episode_filter_safe_stops = 0
+    episode_filter_infeasible = 0
+    episode_predictive_near_misses = 0
+    episode_predictive_h_mins: list[float] = []
+    episode_filter_solve_times_s: list[float] = []
     recent_rewards: deque[float] = deque(maxlen=20)
     update_info: dict[str, float] = {"alpha": float(agent.alpha.detach().cpu()), "lambda": agent.lagrange_multiplier}
 
@@ -170,6 +191,21 @@ def main() -> None:
         episode_risks.append(float(info["risk_global"]))
         episode_distances.append(float(info["d_min"]))
         episode_violations += int(info["safety_violation"])
+        if safety_filter_enabled:
+            filter_status = str(info.get("safety_filter_status", "integration_error"))
+            intervention_norm = float(info.get("safety_filter_intervention_norm", float("nan")))
+            predictive_h_min = float(info.get("predictive_h_min_m", float("nan")))
+            solve_time_s = float(info.get("safety_filter_solve_time_s", float("nan")))
+            episode_filter_interventions += int(filter_status != "passthrough")
+            episode_filter_safe_stops += int(bool(info.get("safety_filter_safe_stop", False)))
+            episode_filter_infeasible += int(filter_status == "safe_stop_infeasible")
+            if np.isfinite(intervention_norm):
+                episode_filter_intervention_norms.append(intervention_norm)
+            if np.isfinite(predictive_h_min):
+                episode_predictive_h_mins.append(predictive_h_min)
+                episode_predictive_near_misses += int(predictive_h_min < 0.0)
+            if np.isfinite(solve_time_s):
+                episode_filter_solve_times_s.append(solve_time_s)
 
         if step >= update_after and len(replay) >= agent.batch_size and step % update_every == 0:
             batch = replay.sample(agent.batch_size)
@@ -189,6 +225,14 @@ def main() -> None:
                 "d_min": float(info["d_min"]),
                 "success": int(info["success"]),
                 "collision": int(info["collision"]),
+                "safety_filter_status": info.get("safety_filter_status", "not_enabled"),
+                "safety_filter_intervention_norm": info.get("safety_filter_intervention_norm", float("nan")),
+                "safety_filter_safe_stop": info.get("safety_filter_safe_stop", False),
+                "safety_filter_max_constraint_violation": info.get(
+                    "safety_filter_max_constraint_violation", float("nan")
+                ),
+                "predictive_h_min_m": info.get("predictive_h_min_m", float("nan")),
+                "safety_filter_solve_time_s": info.get("safety_filter_solve_time_s", float("nan")),
                 "lambda": agent.lagrange_multiplier,
                 "alpha": float(agent.alpha.detach().cpu()),
                 "replay_size": len(replay),
@@ -227,6 +271,29 @@ def main() -> None:
                     "safety_violation_rate": episode_violations / max(episode_length, 1),
                     "min_distance": min(episode_distances) if episode_distances else 0.0,
                     "mean_risk": float(np.mean(episode_risks)) if episode_risks else 0.0,
+                    "safety_filter_intervention_rate": (
+                        episode_filter_interventions / max(episode_length, 1) if safety_filter_enabled else float("nan")
+                    ),
+                    "mean_safety_filter_intervention_norm": (
+                        float(np.mean(episode_filter_intervention_norms))
+                        if episode_filter_intervention_norms
+                        else float("nan")
+                    ),
+                    "safety_filter_safe_stop_rate": (
+                        episode_filter_safe_stops / max(episode_length, 1) if safety_filter_enabled else float("nan")
+                    ),
+                    "safety_filter_infeasible_rate": (
+                        episode_filter_infeasible / max(episode_length, 1) if safety_filter_enabled else float("nan")
+                    ),
+                    "predictive_near_miss_rate": (
+                        episode_predictive_near_misses / max(episode_length, 1) if safety_filter_enabled else float("nan")
+                    ),
+                    "min_predictive_h_m": (
+                        min(episode_predictive_h_mins) if episode_predictive_h_mins else float("nan")
+                    ),
+                    "mean_safety_filter_solve_time_s": (
+                        float(np.mean(episode_filter_solve_times_s)) if episode_filter_solve_times_s else float("nan")
+                    ),
                     "lambda": agent.lagrange_multiplier,
                     "alpha": float(agent.alpha.detach().cpu()),
                 }
@@ -252,6 +319,13 @@ def main() -> None:
             episode_risks = []
             episode_distances = []
             episode_violations = 0
+            episode_filter_interventions = 0
+            episode_filter_intervention_norms = []
+            episode_filter_safe_stops = 0
+            episode_filter_infeasible = 0
+            episode_predictive_near_misses = 0
+            episode_predictive_h_mins = []
+            episode_filter_solve_times_s = []
 
         if step % save_interval == 0:
             agent.save(run_dir, suffix=f"_step_{step}")
