@@ -1,0 +1,12 @@
+# P3 B3, 100k-step development replication. Keeps B3 factors unchanged.
+includes:
+  - ../p3/b3_link_predictive.yaml
+
+train:
+  total_steps: 100000
+  output_dir: outputs/p3_dev_100k/b3_link_predictive
+
+checkpoint_selection:
+  seed: 5201
+  episodes: 20
+  metric: mean_reward

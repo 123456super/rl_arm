@@ -1,0 +1,12 @@
+# P3 B1, 100k-step development replication. Keeps B1 factors unchanged.
+includes:
+  - ../p3/b1_ee_current.yaml
+
+train:
+  total_steps: 100000
+  output_dir: outputs/p3_dev_100k/b1_ee_current
+
+checkpoint_selection:
+  seed: 5201
+  episodes: 20
+  metric: mean_reward
