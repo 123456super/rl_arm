@@ -1,8 +1,10 @@
-# 训练、复现与后续研究指南
+# 阶段一复现与新研究开发指南
 
 ## 1. 当前阶段与使用边界
 
-当前项目的仿真主比较已经完成：`ee_fixed`、`link_fixed_penalty1` 和 `ldrc_fixed` 已完成 3 个 train seeds、checkpoint selection、5 个场景和 3 个 held-out eval seeds 的统一评估。论文与汇报的唯一结论口径是 [experiment_conclusions.md](experiment_conclusions.md)；当前不应重跑主比较或使用旧四方法结果替代正文主表。
+阶段一仿真主比较已经完成：`ee_fixed`、`link_fixed_penalty1` 和 `ldrc_fixed` 已完成 3 个 train seeds、checkpoint selection、5 个场景和 3 个 held-out eval seeds 的统一评估。阶段一结论口径见 [experiment_conclusions.md](experiment_conclusions.md)；当前不应重跑主比较或将旧四方法结果写成新主题的正文主表。
+
+本分支的新主线是“不确定性连杆预测风险 + 安全过滤器 + 协同安全强化学习”。方法范围、实验矩阵和实施顺序以 [research_direction.md](research_direction.md) 为准；本指南中的既有命令仅服务于阶段一复现、环境检查和新模块的开发基线。
 
 本指南用于三类工作：
 
@@ -165,7 +167,7 @@ conda run -n rl python scripts/deployment_preflight.py
 
 该脚本只验证 PyBullet 中的输入维度、checkpoint 加载、动作范围和仿真关节速度命令限幅。真实控制器限速、工作空间围栏、急停/保护停、相机失效安全停止和相机—机器人标定必须现场单独验收。
 
-## 10. 后续研究优先级
+## 10. 阶段一后续研究优先级（历史参考）
 
 1. 如要验证结果稳健性，优先增加新的 train seeds 和独立 held-out eval seeds。
 2. 如要继续约束 SAC，聚焦 upper arm、elbow 的局部碰撞率优势，并同时报告成功率、最小距离、违反率和 jerk 的取舍。

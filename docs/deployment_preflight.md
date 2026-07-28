@@ -1,10 +1,12 @@
-# `link_fixed_penalty1` 低速部署前检查
+# 阶段一 `link_fixed_penalty1` 低速部署前检查
+
+> **新主题关系**：本文件只覆盖阶段一策略的离线预检，不是“预测风险 + 安全过滤器”新系统的部署批准。新系统必须新增预测风险误差裕度、过滤器可行性、过滤器延迟、不可行回退、感知失效和实机控制器接口的检查；设计边界见 [research_direction.md](research_direction.md)。
 
 ## 当前状态
 
 离线预检已通过，报告位于 `outputs/deployment_preflight/offline_report.json`。该检查只在 PyBullet 中运行，不连接真实机械臂；它证明 checkpoint 可加载、推理值有限，且仿真输出不超过配置的关节速度限幅。它不构成实机安全验收或形式化安全保证。
 
-## 固化的部署候选
+## 阶段一固化的离线部署候选
 
 | train seed | selected step | checkpoint |
 | --- | ---: | --- |
@@ -42,6 +44,6 @@ conda run -n rl python scripts/deployment_preflight.py
 - 完成相机—机械臂外参、TCP、胶囊体保守包络和距离监控的实物复核。
 - 先空载、无障碍物、低速度完成单步和短轨迹检查；随后才使用轻质球体进行 10--20 次低速可执行性验证。
 
-## 现场实验边界
+## 阶段一现场实验边界
 
 只记录可执行性、轨迹、`d_min`、`Risk_global`、关节速度及风险响应。不得安排高风险碰撞性基线对比，也不得将该实验表述为严格安全保证。
