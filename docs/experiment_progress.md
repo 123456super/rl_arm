@@ -10,7 +10,7 @@
 
 **阶段一已闭环；P1/P2 已完成开发验证；P3 的 B1--B5、OSQP、recovery 与多连杆逃逸已完成开发诊断，但设计尚未冻结。**
 
-### 最新进度（2026-07-29，Recovery 与多连杆逃逸诊断）
+### 最新进度（2026-07-29，Recovery、动态漂移与 maximin 逃逸诊断）
 
 在 B4 OSQP 诊断基础上，已增加显式 recovery mode：当预测安全裕度 `h_min <= 0` 时暂停策略任务推进，生成远离障碍物的逃逸关节速度，并在 `h_min >= 0.02 m` 后退出；回合级 CSV 单独记录 recovery 触发、成功、步数和持续时间。默认仿真配置仍关闭 recovery，诊断入口为 `configs/experiments/p3_diagnostics/b4_osqp_recovery.yaml`。
 
@@ -26,7 +26,11 @@
 | 5201 | 15/20 | 1/20 | 112 | -0.0499 m |
 | 5301 | 11/20 | 4/20 | 60 | -0.1595 m |
 
-结果显示多连杆方向在部分 seed 上降低了违规或缩短恢复时间，但跨 seed 仍不稳定，且 seed 5301 出现 4 次碰撞。因此 P3 仍未冻结，不进入 OOD、多场景扩展或真机测试。下一步应优先分析 seed 5301 的碰撞轨迹、连杆 Jacobian 冲突和障碍物运动方向，再决定是否引入方向选择/小型二次优化。
+为复现 seed 5301 的 4 次碰撞，已使用 B4 选中的 step 95000 checkpoint、20 episodes 和带 trace 的 OSQP 重跑。原过滤器即使显示 `solved` 也会发生碰撞：它只约束机器人命令对 `h` 的变化，漏掉障碍物自身速度引起的裕度漂移。现将约束修正为 `J_h qdot + h_drift + kappa(h - m) >= 0`，并在 trace 中记录逐连杆预测/鲁棒距离、`h_i`、`J_h qdot`、`h_drift`、约束残差、障碍物状态及初始不安全标记。
+
+在同一 seed/checkpoint 的逐步诊断中，将 recovery 触发/退出改为 `h_min <= 0.06 m` / `h_min >= 0.08 m`。碰撞数从原多连杆 recovery 的 4/20 依次变为提前 recovery 的 3/20、计入漂移但零速度回退的 3/20、放宽不可行预测约束的 2/20，以及 maximin recovery 的 1/20；最后一轮成功率为 14/20。初始 `h=-0.0677 m` 的 episode 16 被明确标记为 `initially_unsafe=1`，并在 maximin recovery 下脱离后成功完成；不能据此将初始安全集外恢复表述为安全保证。
+
+maximin recovery 在预测约束不可行时，保持关节和工作空间硬约束，最大化所有未达退出裕度连杆的最小 clearance 导数，并以 `recovery_relaxed` 明确记录预测约束放宽。它避免了 episode 0 的碰撞，但 episode 8 仍碰撞，且最危险连杆残差仍为负；episode 0 还出现 4.05 s recovery 后未完成任务。该分支单步最高求解时间约 277 ms，超过 50 ms 控制周期，因而只可作为离线故障诊断，不能进入实时链路、P4、OOD 或真机。下一步应先为 maximin QP 设置严格计算预算/超时回退，并在相同 checkpoint 的 5101、5201 上复核，再决定是否保留该方向。
 
 主比较的模型训练、checkpoint selection、eval-seed held-out 评估和三-seed汇总均已完成；它们被冻结为阶段一基线，当前不需要继续训练或重跑。新研究的实施基准见 [research_direction.md](research_direction.md)：B1--B5 已在一个开发 train seed 和一个开发 eval seed 上完成 10k step 链路检查，但没有稳定的任务--安全增益，不能进入 P4 或作为论文证据。
 
@@ -46,8 +50,8 @@
 | P2 端到端失效注入与指标 | 已完成（开发验证） | 可注入有效、无效或过期障碍物估计；运行时记录预测状态、`h_min`、原始/过滤后命令、干预量、停止状态、违反量与求解耗时 |
 | P2 解析点雅可比与仿真实时性 | 已完成（开发验证） | 以 PyBullet 点雅可比替代有限差分状态保存/恢复；20 episode、2,693 个控制步中滤波器均值 2.68 ms、P95 4.94 ms，无步超过 50 ms |
 | P3 B1--B5 开发轮次 | 已完成（未冻结） | 共用 train seed 4101、100k step、validation seed 5201、eval seed 5101；B4/B5 无稳定综合优势 |
-| P3 过滤器约束诊断 | 已完成（未冻结） | 已增加约束类别、真实活动约束、投影失败/确认不可行区分；循环投影、Dykstra、主动集回退、OSQP QP、recovery 与多连杆逃逸方向均已实现 |
-| OSQP 依赖与后端 | 已完成（开发验证） | `osqp=1.1.3`、`scipy=1.18.0` 已安装；最新 recovery 诊断平均约 2.6--2.7 ms，未出现 `primal infeasible` 或投影失败 |
+| P3 过滤器约束诊断 | 已完成（未冻结） | 已增加逐连杆诊断、障碍物漂移项、提前 recovery、初始不安全标记和 `recovery_relaxed`；循环投影、Dykstra、主动集回退、OSQP QP 与 maximin recovery 均仅为开发诊断 |
+| OSQP 依赖与后端 | 已完成（开发验证） | `osqp=1.1.3`、`scipy=1.18.0` 已安装；常规 OSQP 路径约 2.6--2.7 ms，但 maximin recovery 单步最高约 277 ms，尚不满足当前 50 ms 控制周期 |
 
 ## 3. 最终主对比口径
 

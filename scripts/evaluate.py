@@ -58,7 +58,7 @@ def main() -> None:
         trace_dir.mkdir(parents=True, exist_ok=True)
 
     for episode in range(episodes):
-        observation, _ = env.reset(seed=seed + episode)
+        observation, reset_info = env.reset(seed=seed + episode)
         total_reward = 0.0
         total_cost = 0.0
         risks = []
@@ -80,6 +80,8 @@ def main() -> None:
         recovery_steps = 0
         recovery_triggered = False
         recovery_success = False
+        initially_unsafe = bool(reset_info.get("recovery_initially_unsafe", False))
+        initial_predictive_h_m = float(reset_info.get("recovery_initial_h_min_m", float("nan")))
         success = False
         collision = False
         final_position_error = 0.0
@@ -145,6 +147,8 @@ def main() -> None:
                         "recovery_active": int(bool(info.get("recovery_active", False))),
                         "recovery_triggered": int(bool(info.get("recovery_triggered", False))),
                         "recovery_success": int(bool(info.get("recovery_success", False))),
+                        "recovery_initially_unsafe": int(bool(info.get("recovery_initially_unsafe", False))),
+                        "recovery_initial_h_min_m": float(info.get("recovery_initial_h_min_m", float("nan"))),
                         "recovery_command_norm": float(info.get("recovery_command_norm", 0.0)),
                         "safety_filter_status": filter_status,
                         "safety_filter_intervention_norm": intervention_norm,
@@ -169,6 +173,19 @@ def main() -> None:
                         ),
                         "predictive_risk_status": info.get("predictive_risk_status", "not_enabled"),
                         "predictive_h_min_m": predictive_h_min,
+                        "predictive_h_by_link_m": info.get("predictive_h_by_link_m", ""),
+                        "predictive_distance_by_link_m": info.get("predictive_distance_by_link_m", ""),
+                        "predictive_robust_distance_by_link_m": info.get("predictive_robust_distance_by_link_m", ""),
+                        "predictive_time_by_link_s": info.get("predictive_time_by_link_s", ""),
+                        "safety_jacobian_command_by_link_mps": info.get(
+                            "safety_jacobian_command_by_link_mps", ""
+                        ),
+                        "safety_drift_by_link_mps": info.get("safety_drift_by_link_mps", ""),
+                        "safety_constraint_residual_by_link_mps": info.get(
+                            "safety_constraint_residual_by_link_mps", ""
+                        ),
+                        "filter_obstacle_position_m": info.get("filter_obstacle_position_m", ""),
+                        "filter_obstacle_velocity_mps": info.get("filter_obstacle_velocity_mps", ""),
                         "safety_filter_solve_time_s": solve_time_s,
                     }
                 )
@@ -230,6 +247,8 @@ def main() -> None:
                 "recovery_success": int(recovery_success),
                 "recovery_steps": recovery_steps,
                 "recovery_duration_s": recovery_steps * float(config["env"]["control_dt"]),
+                "initially_unsafe": int(initially_unsafe),
+                "initial_predictive_h_m": initial_predictive_h_m,
             }
         )
         if trace_dir is not None and trace_rows:

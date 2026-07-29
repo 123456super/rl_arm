@@ -131,6 +131,8 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.recovery_triggered = False
         self.recovery_steps = 0
         self.recovery_success = False
+        self.recovery_initially_unsafe = False
+        self.recovery_initial_h_min_m = float("nan")
 
         obs_dim = self.joint_count * 3 + self.capsule_model.count * 7 + 7
         obs_bound = float(self.observation_cfg["space_bound"])
@@ -170,6 +172,13 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.recovery_triggered = False
         self.recovery_steps = 0
         self.recovery_success = False
+        self.recovery_initially_unsafe = False
+        self.recovery_initial_h_min_m = float("nan")
+        if self.safety_filter_enabled:
+            initial_predictive_risk = self._compute_predictive_risk()
+            if initial_predictive_risk.usable:
+                self.recovery_initial_h_min_m = float(np.min(initial_predictive_risk.safety_functions_m))
+                self.recovery_initially_unsafe = self.recovery_initial_h_min_m <= 0.0
         self.prev_capsules = self._capsules()
         self.prev_goal_error_norm = float(np.linalg.norm(self._goal_error()))
         obs, info = self._get_obs_and_info()
@@ -206,6 +215,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         filter_result = None
         predictive_risk = None
         filter_solve_time_s = None
+        filter_link_diagnostics: dict[str, Any] = {}
         if self.safety_filter_enabled:
             if predictive_risk_for_scaling is None:
                 filter_result, predictive_risk, filter_solve_time_s = self._filter_command(qdot_requested)
@@ -215,6 +225,8 @@ class UR5DynamicObstacleEnv(gym.Env):
                 )
         if filter_result is not None:
             qdot_cmd = filter_result.command_joint_velocity_radps.astype(np.float32)
+            if bool(self.safety_filter_cfg.get("diagnostic_logging", False)):
+                filter_link_diagnostics = self._filter_link_diagnostics(predictive_risk, qdot_cmd)
 
         for _ in range(self.sim_substeps):
             self._move_obstacle(self.time_step)
@@ -266,6 +278,8 @@ class UR5DynamicObstacleEnv(gym.Env):
                 "recovery_active": bool(self.recovery_active),
                 "recovery_triggered": bool(self.recovery_triggered),
                 "recovery_success": bool(self.recovery_success),
+                "recovery_initially_unsafe": bool(self.recovery_initially_unsafe),
+                "recovery_initial_h_min_m": float(self.recovery_initial_h_min_m),
                 "recovery_command_norm": (
                     float(np.linalg.norm(recovery_command)) if recovery_command is not None else 0.0
                 ),
@@ -273,6 +287,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         )
         if filter_result is not None:
             info.update(self._filter_info(filter_result, predictive_risk, filter_solve_time_s))
+            info.update(filter_link_diagnostics)
         self.prev_qdot_cmd = qdot_cmd
         self.prev_joint_acc = joint_acc
         self.prev_capsules = self._capsules()
@@ -346,6 +361,8 @@ class UR5DynamicObstacleEnv(gym.Env):
             "policy_risk_representation": self.risk_representation,
             "policy_risk_global": float(policy_risk.risk_global),
             "policy_risk_d_min": float(policy_risk.d_min),
+            "recovery_initially_unsafe": bool(self.recovery_initially_unsafe),
+            "recovery_initial_h_min_m": float(self.recovery_initial_h_min_m),
         }
         return obs, info
 
@@ -500,6 +517,7 @@ class UR5DynamicObstacleEnv(gym.Env):
 
             safety_jacobian, ee_position, ee_jacobian = self._analytic_constraint_jacobians(predictive_risk)
             workspace_constraints = self._workspace_velocity_constraints(ee_position, ee_jacobian)
+            safety_drift = self._safety_drift_mps(predictive_risk)
             result = filter_joint_velocity(
                 SafetyFilterInput(
                     requested_joint_velocity_radps=qdot_requested,
@@ -507,6 +525,19 @@ class UR5DynamicObstacleEnv(gym.Env):
                     previous_command_radps=self.prev_qdot_cmd,
                     predictive_risk=predictive_risk,
                     safety_jacobian_m_per_rad=safety_jacobian,
+                    safety_drift_mps=safety_drift,
+                    allow_infeasible_recovery=(
+                        self.recovery_active
+                        and bool(self.safety_filter_cfg.get("recovery_allow_constraint_relaxation", False))
+                    ),
+                    recovery_target_mask=(
+                        np.asarray(predictive_risk.safety_functions_m, dtype=np.float64)
+                        < float(self.safety_filter_cfg.get("recovery_exit_margin_m", 0.02))
+                    ),
+                    maximize_min_clearance_recovery=(
+                        self.recovery_active
+                        and bool(self.safety_filter_cfg.get("recovery_maximize_min_clearance", False))
+                    ),
                     workspace_constraints=workspace_constraints,
                 ),
                 self.safety_filter_config,
@@ -609,6 +640,34 @@ class UR5DynamicObstacleEnv(gym.Env):
         ee_position, _ = self._end_effector_state()
         return safety_jacobian, ee_position.astype(np.float64), self._link_origin_jacobian(self.tool_link_id)
 
+    def _safety_drift_mps(self, predictive_risk: PredictiveLinkRisk) -> np.ndarray:
+        """Return the obstacle-induced part of each safety-function derivative."""
+        obstacle = self._obstacle_state_estimate()
+        obstacle_position = np.asarray(obstacle.position, dtype=np.float64)
+        obstacle_velocity = np.asarray(obstacle.velocity, dtype=np.float64)
+        drift = np.zeros(self.capsule_model.count, dtype=np.float64)
+        for index, (capsule, prediction_time_s) in enumerate(
+            zip(self._capsules(), predictive_risk.closest_prediction_times_s, strict=True)
+        ):
+            segment = np.asarray(capsule.end, dtype=np.float64) - np.asarray(capsule.start, dtype=np.float64)
+            segment_norm_sq = float(np.dot(segment, segment))
+            if segment_norm_sq <= 1e-14:
+                continue
+            predicted_obstacle_position = obstacle_position + obstacle_velocity * float(prediction_time_s)
+            segment_fraction = float(
+                np.clip(
+                    np.dot(predicted_obstacle_position - capsule.start, segment) / segment_norm_sq,
+                    0.0,
+                    1.0,
+                )
+            )
+            closest_capsule_point = capsule.start + segment_fraction * segment
+            separation = predicted_obstacle_position - closest_capsule_point
+            separation_norm = float(np.linalg.norm(separation))
+            if separation_norm > 1e-10:
+                drift[index] = float(np.dot(separation / separation_norm, obstacle_velocity))
+        return drift
+
     def _workspace_velocity_constraints(
         self,
         ee_position: np.ndarray,
@@ -697,6 +756,39 @@ class UR5DynamicObstacleEnv(gym.Env):
             **predictive_info,
         }
 
+    def _filter_link_diagnostics(
+        self,
+        predictive_risk: PredictiveLinkRisk | None,
+        command_joint_velocity_radps: np.ndarray,
+    ) -> dict[str, Any]:
+        """Expose pre-command per-link values needed to diagnose filter misses."""
+        if predictive_risk is None or not predictive_risk.usable:
+            return {}
+        safety_jacobian, _, _ = self._analytic_constraint_jacobians(predictive_risk)
+        command = np.asarray(command_joint_velocity_radps, dtype=np.float64)
+        h = np.asarray(predictive_risk.safety_functions_m, dtype=np.float64)
+        jacobian_command = safety_jacobian @ command
+        drift = self._safety_drift_mps(predictive_risk)
+        safety_gain = float(self.safety_filter_cfg["safety_gain"])
+        preemptive_margin = float(self.safety_filter_cfg.get("preemptive_margin_m", 0.0))
+        residual = jacobian_command + drift + safety_gain * (h - preemptive_margin)
+        obstacle = self._obstacle_state_estimate()
+        return {
+            "predictive_h_by_link_m": self._format_diagnostic_vector(h),
+            "predictive_distance_by_link_m": self._format_diagnostic_vector(predictive_risk.predicted_distances_m),
+            "predictive_robust_distance_by_link_m": self._format_diagnostic_vector(predictive_risk.robust_distances_m),
+            "predictive_time_by_link_s": self._format_diagnostic_vector(predictive_risk.closest_prediction_times_s),
+            "safety_jacobian_command_by_link_mps": self._format_diagnostic_vector(jacobian_command),
+            "safety_drift_by_link_mps": self._format_diagnostic_vector(drift),
+            "safety_constraint_residual_by_link_mps": self._format_diagnostic_vector(residual),
+            "filter_obstacle_position_m": self._format_diagnostic_vector(obstacle.position),
+            "filter_obstacle_velocity_mps": self._format_diagnostic_vector(obstacle.velocity),
+        }
+
+    @staticmethod
+    def _format_diagnostic_vector(values: np.ndarray) -> str:
+        return "|".join(f"{float(value):.9g}" for value in np.asarray(values, dtype=np.float64))
+
     def _reward(self, qdot_cmd: np.ndarray, success: bool, collision: bool) -> float:
         goal_error_norm = float(np.linalg.norm(self._goal_error()))
         progress = self.prev_goal_error_norm - goal_error_norm
@@ -742,10 +834,16 @@ class UR5DynamicObstacleEnv(gym.Env):
         if predictive_risk.requires_safe_stop or not predictive_risk.usable:
             return
         h_min = float(np.min(predictive_risk.safety_functions_m))
+        enter_margin = float(self.safety_filter_cfg.get("recovery_enter_margin_m", 0.0))
         exit_margin = float(self.safety_filter_cfg.get("recovery_exit_margin_m", 0.02))
-        if not np.isfinite(exit_margin) or exit_margin < 0.0:
-            raise ValueError("recovery_exit_margin_m must be finite and non-negative")
-        if not self.recovery_active and h_min <= 0.0:
+        if (
+            not np.isfinite(enter_margin)
+            or not np.isfinite(exit_margin)
+            or enter_margin < 0.0
+            or exit_margin <= enter_margin
+        ):
+            raise ValueError("recovery requires finite 0 <= enter margin < exit margin")
+        if not self.recovery_active and h_min <= enter_margin:
             self.recovery_active = True
             self.recovery_triggered = True
             self.recovery_success = False

@@ -24,6 +24,7 @@ class SafetyFilterStatus(str, Enum):
     SAFE_STOP_INVALID_INPUT = "safe_stop_invalid_input"
     SAFE_STOP_INFEASIBLE = "safe_stop_infeasible"
     SAFE_STOP_PROJECTION_FAILED = "safe_stop_projection_failed"
+    RECOVERY_RELAXED = "recovery_relaxed"
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,10 @@ class SafetyFilterInput:
     previous_command_radps: np.ndarray
     predictive_risk: PredictiveLinkRisk
     safety_jacobian_m_per_rad: np.ndarray | None
+    safety_drift_mps: np.ndarray | None = None
+    allow_infeasible_recovery: bool = False
+    recovery_target_mask: np.ndarray | None = None
+    maximize_min_clearance_recovery: bool = False
     workspace_constraints: LinearVelocityConstraints | None = None
 
 
@@ -107,7 +112,9 @@ def filter_joint_velocity(
     """Return a bounded command or a deterministic zero-velocity safe stop.
 
     Valid predicted risks are enforced through the first-order condition
-    ``J_h qdot + safety_gain * (h - preemptive_margin) >= 0``. Position,
+    ``J_h qdot + h_drift + safety_gain * (h - preemptive_margin) >= 0``.
+    ``h_drift`` captures motion independent of the commanded joints, such as
+    the obstacle velocity. Position,
     velocity and acceleration limits are always applied before projecting the
     policy command. A failed input validation or failed feasibility check never
     falls back to the raw policy action.
@@ -137,6 +144,20 @@ def filter_joint_velocity(
     zero_row_mask = np.linalg.norm(rows, axis=1) <= 1e-14
     positive_zero_rows = zero_row_mask & (bounds > config.projection_failure_tolerance)
     if np.any(positive_zero_rows):
+        if filter_input.allow_infeasible_recovery:
+            return _relaxed_recovery_command(
+                requested,
+                lower,
+                upper,
+                rows,
+                bounds,
+                labels,
+                lower_labels,
+                upper_labels,
+                config,
+                "zero_sensitivity",
+                filter_input,
+            )
         index = int(np.flatnonzero(positive_zero_rows)[0])
         return _safe_stop(
             requested,
@@ -178,6 +199,20 @@ def filter_joint_velocity(
                 fallback_stage="osqp",
             )
         if qp_status.startswith("infeasible"):
+            if filter_input.allow_infeasible_recovery:
+                return _relaxed_recovery_command(
+                    requested,
+                    lower,
+                    upper,
+                    rows,
+                    bounds,
+                    labels,
+                    lower_labels,
+                    upper_labels,
+                    config,
+                    qp_status,
+                    filter_input,
+                )
             return _safe_stop(
                 requested,
                 SafetyFilterStatus.SAFE_STOP_INFEASIBLE,
@@ -264,6 +299,21 @@ def filter_joint_velocity(
         command, lower, upper, violations, labels, lower_labels, upper_labels, config
     )
     if max_violation > config.projection_failure_tolerance:
+        if filter_input.allow_infeasible_recovery:
+            return _relaxed_recovery_command(
+                requested,
+                lower,
+                upper,
+                rows,
+                bounds,
+                labels,
+                lower_labels,
+                upper_labels,
+                config,
+                qp_status,
+                iterations_used,
+                filter_input,
+            )
         return _safe_stop(
             requested,
             SafetyFilterStatus.SAFE_STOP_PROJECTION_FAILED,
@@ -316,6 +366,148 @@ def _constraint_diagnostics(
     )
     max_category = labels[int(np.argmax(violations))] if len(labels) else ""
     return int(np.count_nonzero(active_mask)), tuple(dict.fromkeys(active_categories_list)), max_category
+
+
+def _relaxed_recovery_command(
+    requested: np.ndarray,
+    lower: np.ndarray,
+    upper: np.ndarray,
+    rows: np.ndarray,
+    bounds: np.ndarray,
+    labels: tuple[str, ...],
+    lower_labels: tuple[str, ...],
+    upper_labels: tuple[str, ...],
+    config: SafetyFilterConfig,
+    solver_status: str,
+    projection_iterations: int = 0,
+    filter_input: SafetyFilterInput | None = None,
+) -> SafetyFilterResult:
+    """Execute an escape command while relaxing only unsatisfiable link barriers.
+
+    This branch is diagnostic recovery, not a safe command: it preserves joint
+    and workspace constraints but records the remaining predictive violation.
+    """
+    hard_mask = np.asarray([not label.startswith("predictive_link_") for label in labels], dtype=bool)
+    command = np.clip(requested, lower, upper)
+    fallback_stage = "recovery_joint_bounds"
+    if filter_input is not None and filter_input.maximize_min_clearance_recovery:
+        recovery_command, recovery_status = _maximin_recovery_projection(
+            requested,
+            lower,
+            upper,
+            rows,
+            bounds,
+            labels,
+            hard_mask,
+            filter_input,
+            config,
+        )
+        if recovery_command is not None:
+            command = recovery_command
+            fallback_stage = "recovery_maximin"
+            solver_status = f"{solver_status}; recovery={recovery_status}"
+    if np.any(hard_mask):
+        if fallback_stage != "recovery_maximin":
+            projected, hard_status = _osqp_projection(
+                command,
+                lower,
+                upper,
+                rows[hard_mask],
+                bounds[hard_mask],
+                config,
+            )
+            if projected is not None:
+                command = projected
+                fallback_stage = "recovery_hard_constraints"
+            else:
+                solver_status = f"{solver_status}; hard_constraints={hard_status}"
+    violations = bounds - rows @ command
+    max_violation = float(max(0.0, np.max(violations, initial=0.0)))
+    active_count, active_categories, max_category = _constraint_diagnostics(
+        command, lower, upper, violations, labels, lower_labels, upper_labels, config
+    )
+    return SafetyFilterResult(
+        command_joint_velocity_radps=command,
+        status=SafetyFilterStatus.RECOVERY_RELAXED,
+        reason="recovery command executed with predictive link constraints relaxed",
+        intervention_norm_radps=float(np.linalg.norm(command - requested)),
+        active_constraint_count=active_count,
+        max_constraint_violation=max_violation,
+        constraint_count=len(bounds),
+        active_constraint_categories=active_categories,
+        max_constraint_category=max_category,
+        projection_iterations=projection_iterations,
+        fallback_used=True,
+        qp_solver_used=True,
+        qp_solver_status=solver_status,
+        fallback_stage=fallback_stage,
+    )
+
+
+def _maximin_recovery_projection(
+    requested: np.ndarray,
+    lower: np.ndarray,
+    upper: np.ndarray,
+    rows: np.ndarray,
+    bounds: np.ndarray,
+    labels: tuple[str, ...],
+    hard_mask: np.ndarray,
+    filter_input: SafetyFilterInput,
+    config: SafetyFilterConfig,
+) -> tuple[np.ndarray | None, str]:
+    """Maximize the worst endangered-link clearance derivative under hard bounds."""
+    try:
+        import osqp
+        from scipy import sparse
+    except ImportError:
+        return None, "unavailable"
+
+    safety_rows = np.asarray([label.startswith("predictive_link_") for label in labels], dtype=bool)
+    target_mask = filter_input.recovery_target_mask
+    if target_mask is None:
+        target_mask = np.ones(int(np.count_nonzero(safety_rows)), dtype=bool)
+    else:
+        target_mask = _vector(target_mask, "recovery_target_mask", int(np.count_nonzero(safety_rows))).astype(bool)
+    selected_rows = np.flatnonzero(safety_rows)[target_mask]
+    if selected_rows.size == 0:
+        return None, "no_target_links"
+    drift = (
+        np.zeros(int(np.count_nonzero(safety_rows)), dtype=np.float64)
+        if filter_input.safety_drift_mps is None
+        else _vector(filter_input.safety_drift_mps, "safety_drift_mps", int(np.count_nonzero(safety_rows)))
+    )
+    selected_drift = drift[target_mask]
+    joint_count = requested.size
+    objective_weight = 1.0e-4
+    p_matrix = sparse.diags(np.concatenate((np.full(joint_count, objective_weight), [0.0])), format="csc")
+    q_vector = np.concatenate((-objective_weight * requested, [-1.0]))
+    clearance_rows = np.hstack((rows[selected_rows], -np.ones((selected_rows.size, 1))))
+    hard_rows = np.hstack((rows[hard_mask], np.zeros((int(np.count_nonzero(hard_mask)), 1))))
+    joint_rows = np.hstack((np.eye(joint_count), np.zeros((joint_count, 1))))
+    matrix = sparse.csc_matrix(np.vstack((clearance_rows, hard_rows, joint_rows)))
+    lower_bound = np.concatenate((-selected_drift, bounds[hard_mask], lower))
+    upper_bound = np.concatenate((np.full(selected_rows.size, np.inf), np.full(np.count_nonzero(hard_mask), np.inf), upper))
+    problem = osqp.OSQP()
+    problem.setup(
+        P=p_matrix,
+        q=q_vector,
+        A=matrix,
+        l=lower_bound,
+        u=upper_bound,
+        eps_abs=config.projection_failure_tolerance,
+        eps_rel=config.projection_failure_tolerance,
+        max_iter=max(400, config.fallback_projection_iterations),
+        polish=False,
+        verbose=False,
+    )
+    result = problem.solve()
+    status = str(result.info.status).lower()
+    if "solved" not in status or result.x is None:
+        return None, status
+    command = np.asarray(result.x[:joint_count], dtype=np.float64)
+    if command.shape != requested.shape or not np.isfinite(command).all():
+        return None, "invalid_solution"
+    return command, status
 
 
 def _osqp_projection(
@@ -536,9 +728,14 @@ def _build_constraints(
     if safety_values.ndim != 1 or not np.isfinite(safety_values).all():
         raise ValueError("valid predictive risk must provide finite one-dimensional safety functions")
     safety_jacobian = _matrix(filter_input.safety_jacobian_m_per_rad, "safety_jacobian_m_per_rad", safety_values.size, requested.size)
+    safety_drift = (
+        np.zeros(safety_values.size, dtype=np.float64)
+        if filter_input.safety_drift_mps is None
+        else _vector(filter_input.safety_drift_mps, "safety_drift_mps", safety_values.size)
+    )
     rows = [safety_jacobian]
     effective_safety_values = safety_values - config.preemptive_margin_m
-    bounds = [-config.safety_gain * effective_safety_values]
+    bounds = [-config.safety_gain * effective_safety_values - safety_drift]
     labels = [f"predictive_link_{index}" for index in range(safety_values.size)]
 
     if filter_input.workspace_constraints is not None:

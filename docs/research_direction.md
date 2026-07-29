@@ -97,9 +97,9 @@ h_i = d_robust,i - d_safe
 
 `configs/experiments/p3/` 已提供 B1--B5 的独立入口。它们以共同 train seed `4101`、10k step 和 eval seed `5101` 的 20 episode 检查完成了链路验证，但没有形成可冻结的设计：B4 的碰撞率为 25%、安全距离违反率为 9.40%，B5 成功率为 0%。因此不能据此声称预测风险、过滤器或不确定性裕度带来整体增益。
 
-点雅可比实现已将 PyBullet 内过滤器计算保持在当前 50 ms 仿真周期内；当前 100k 开发轮次已完成独立 checkpoint validation。过滤器现支持循环投影、Dykstra、主动集回退和可选 OSQP QP；最新 recovery 诊断的 OSQP 平均求解约 2.6--2.7 ms，未出现 `primal infeasible` 或投影失败，但该测量不包含感知、通信和控制器延迟。
+点雅可比实现已使常规 PyBullet 内过滤器计算满足当前 50 ms 仿真周期；当前 100k 开发轮次已完成独立 checkpoint validation。过滤器现支持循环投影、Dykstra、主动集回退和可选 OSQP QP。常规 recovery 诊断的 OSQP 平均求解约 2.6--2.7 ms；新 maximin recovery 的单步最高求解约 277 ms，尚不具备实时性。上述测量均不包含感知、通信和控制器延迟。
 
-已增加显式 recovery mode：预测裕度非正时暂停策略推进并优先输出逃逸速度，达到 `0.02 m` 退出裕度后恢复任务。单连杆方向的 `0.35 rad/s` 诊断将 20 回合违规步数从 120 降至 88，但成功率和碰撞数未改善。进一步实现了按负裕度 deficit 加权的多连杆逃逸方向，并通过 `38 passed` 回归测试。三 seed、每 seed 20 回合结果为：5101/5201/5301 的成功率分别为 55%/75%/55%，碰撞率为 5%/5%/20%，最小预测裕度分别为 -0.0788/-0.0499/-0.1595 m。该结果尚不稳定，不能声称 recovery 或多连杆方向提供安全保证。
+已增加显式 recovery mode；最新诊断以 `h_min <= 0.06 m` 触发、`h_min >= 0.08 m` 退出，并将障碍物自身运动加入屏障约束 `J_h qdot + h_drift + kappa(h-m) >= 0`。seed 5301 的同一 B4 checkpoint 20-episode trace 显示：原多连杆 recovery 为 4 次碰撞，提前 recovery 为 3 次，放宽不可行预测约束为 2 次，maximin recovery 为 1 次；最后一轮成功 14/20。maximin 分支仅在预测约束不可行时执行，保持关节和工作空间硬约束、最大化危险连杆的最小 clearance 导数，并标记为 `recovery_relaxed`，不代表满足预测安全约束。episode 8 仍碰撞，且 episode 0 需 4.05 s recovery 后仍未完成任务。因此 recovery、约束放宽和 maximin 都未冻结，不得作为安全或实时性证据。
 
 冻结设计后，使用至少 3 个、推荐 5 个未参与开发的 train seeds 和新 held-out eval seeds。训练重复单位是 train seed，不能把 episode 当作独立训练重复。OOD 至少包括障碍物速度/半径/方位、目标位置、位置和速度噪声、观测和控制时延、相机外参扰动。
 
@@ -117,8 +117,8 @@ h_i = d_robust,i - d_safe
 | --- | --- | --- |
 | P0 | 固化阶段一 | 历史结果可复跑，不再修改其结论 |
 | P1 | 预测风险与误差裕度 | **已完成开发验证**：单元测试覆盖几何、预测窗口、误差裕度、无效/未来/过期观测和边界值 |
-| P2 | 仿真安全过滤器 | **开发验证完成，诊断已完成一轮**：约束投影、Dykstra/主动集回退、OSQP QP、端到端命令出口、无效/过期状态注入、recovery 和 smoke test 通过；仍未构成端到端或实机安全保证 |
-| P3 | 协同训练与消融 | **100k 开发轮次完成，未冻结**：B1--B5 与 recovery 已完成开发诊断；多连杆逃逸方向通过 `38 passed`，但三 seed 结果不稳定，需先分析碰撞轨迹，不能进入 P4/OOD 或真机 |
+| P2 | 仿真安全过滤器 | **开发验证完成，诊断已完成多轮**：约束投影、Dykstra/主动集回退、OSQP QP、端到端命令出口、无效/过期状态注入和逐连杆 trace 已具备；常规过滤器通过 smoke test，仍未构成端到端或实机安全保证 |
+| P3 | 协同训练与消融 | **100k 开发轮次完成，未冻结**：B1--B5 与 recovery 已完成开发诊断；5301 的 maximin recovery 降低碰撞但超出实时预算、且仍有碰撞/任务退化，须先限时并跨 seed 复核，不能进入 P4/OOD 或真机 |
 | P4 | 独立复核与 OOD | 新 train/eval seeds 和预定义统计完成 |
 | P5 | 低速真机 | 现场签核和安全受控试验记录齐全 |
 

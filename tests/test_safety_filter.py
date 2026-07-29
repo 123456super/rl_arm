@@ -60,6 +60,7 @@ def filter_input(
     risk,
     requested: float,
     jacobian: float | None = 1.0,
+    drift: float | None = None,
     workspace: LinearVelocityConstraints | None = None,
 ) -> SafetyFilterInput:
     return SafetyFilterInput(
@@ -68,6 +69,7 @@ def filter_input(
         previous_command_radps=np.asarray([0.0]),
         predictive_risk=risk,
         safety_jacobian_m_per_rad=None if jacobian is None else np.asarray([[jacobian]]),
+        safety_drift_mps=None if drift is None else np.asarray([drift]),
         workspace_constraints=workspace,
     )
 
@@ -112,6 +114,16 @@ def test_preemptive_margin_enforces_an_earlier_predictive_constraint() -> None:
     np.testing.assert_allclose(result.command_joint_velocity_radps, [0.06], atol=1e-12)
 
 
+def test_filter_compensates_for_closing_obstacle_drift() -> None:
+    result = filter_joint_velocity(
+        filter_input(risk_with_safety_function(0.1), requested=0.0, drift=-0.3),
+        config(),
+    )
+
+    assert result.status is SafetyFilterStatus.FILTERED
+    np.testing.assert_allclose(result.command_joint_velocity_radps, [0.1], atol=1e-12)
+
+
 def test_filter_enforces_workspace_and_command_continuity_constraints() -> None:
     constrained_config = SafetyFilterConfig(
         joint_velocity_limits_radps=np.asarray([1.0]),
@@ -152,6 +164,34 @@ def test_infeasible_safety_constraint_falls_back_to_safe_stop() -> None:
     assert result.status is SafetyFilterStatus.SAFE_STOP_INFEASIBLE
     assert result.requires_safe_stop
     np.testing.assert_array_equal(result.command_joint_velocity_radps, [0.0])
+
+
+def test_infeasible_recovery_relaxes_only_the_predictive_constraint() -> None:
+    result = filter_joint_velocity(
+        replace(filter_input(risk_with_safety_function(-0.1), requested=0.4, jacobian=0.0), allow_infeasible_recovery=True),
+        config(),
+    )
+
+    assert result.status is SafetyFilterStatus.RECOVERY_RELAXED
+    np.testing.assert_allclose(result.command_joint_velocity_radps, [0.4], atol=1e-12)
+    assert result.max_constraint_category == "predictive_link_0"
+
+
+def test_maximin_recovery_uses_joint_limited_escape_command() -> None:
+    limited_config = replace(config(), joint_velocity_limits_radps=np.asarray([0.2]))
+    result = filter_joint_velocity(
+        replace(
+            filter_input(risk_with_safety_function(-0.1), requested=0.0, jacobian=1.0, drift=-0.3),
+            allow_infeasible_recovery=True,
+            recovery_target_mask=np.asarray([True]),
+            maximize_min_clearance_recovery=True,
+        ),
+        limited_config,
+    )
+
+    assert result.status is SafetyFilterStatus.RECOVERY_RELAXED
+    assert result.fallback_stage == "recovery_maximin"
+    np.testing.assert_allclose(result.command_joint_velocity_radps, [0.2], atol=1e-6)
 
 
 def test_projection_residual_is_reported_separately_from_confirmed_infeasibility() -> None:

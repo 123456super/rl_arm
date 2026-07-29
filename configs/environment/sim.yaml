@@ -57,8 +57,15 @@ env:
     risk_speed_scaling_start_m: 0.08
     risk_speed_scaling_stop_m: 0.0
     recovery_mode_enabled: false
+    # Enter recovery before h reaches zero; exit at a larger margin to avoid chattering.
+    recovery_enter_margin_m: 0.0
     recovery_exit_margin_m: 0.02
     recovery_speed_radps: 0.25
+    # Diagnostic only: retain an escape command when predictive constraints are infeasible.
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+    # Per-link diagnostics are opt-in because they require an additional Jacobian evaluation.
+    diagnostic_logging: false
     max_projection_iterations: 80
     constraint_tolerance: 1.0e-8
     # Residual above this threshold is classified as projection failure;

@@ -1,0 +1,11 @@
+# B4 diagnostic: trigger recovery before the predicted margin becomes negative.
+includes:
+  - b4_osqp_recovery_speed35.yaml
+
+env:
+  safety_filter:
+    recovery_enter_margin_m: 0.06
+    recovery_exit_margin_m: 0.08
+    recovery_allow_constraint_relaxation: true
+    recovery_maximize_min_clearance: true
+    diagnostic_logging: true

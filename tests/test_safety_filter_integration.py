@@ -15,9 +15,32 @@ def _recovery_test_env(jacobian: np.ndarray):
     env = object.__new__(UR5DynamicObstacleEnv)
     env.joint_count = jacobian.shape[1]
     env.action_scale = 1.0
-    env.safety_filter_cfg = {"recovery_speed_radps": 0.5, "recovery_exit_margin_m": 0.02}
+    env.safety_filter_cfg = {
+        "recovery_speed_radps": 0.5,
+        "recovery_enter_margin_m": 0.06,
+        "recovery_exit_margin_m": 0.08,
+    }
     env._analytic_constraint_jacobians = lambda _: (jacobian, None, None)  # type: ignore[method-assign]
     return env
+
+
+def test_recovery_uses_enter_and_exit_hysteresis() -> None:
+    env = _recovery_test_env(np.asarray([[1.0, 0.0]]))
+    env.recovery_active = False
+    env.recovery_triggered = False
+    env.recovery_success = False
+    env.recovery_steps = 0
+
+    env._update_recovery_state(replace(_predictive_risk_for_test(1), safety_functions_m=np.asarray([0.05])))
+    assert env.recovery_active is True
+    assert env.recovery_triggered is True
+
+    env._update_recovery_state(replace(_predictive_risk_for_test(1), safety_functions_m=np.asarray([0.07])))
+    assert env.recovery_active is True
+
+    env._update_recovery_state(replace(_predictive_risk_for_test(1), safety_functions_m=np.asarray([0.08])))
+    assert env.recovery_active is False
+    assert env.recovery_success is True
 
 
 def test_recovery_command_weights_all_below_margin_links() -> None:
