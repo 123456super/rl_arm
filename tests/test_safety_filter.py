@@ -15,6 +15,7 @@ from rl_risk_sac.utils.safety_filter import (
     SafetyFilterConfig,
     SafetyFilterInput,
     SafetyFilterStatus,
+    _dykstra_projection,
     filter_joint_velocity,
 )
 from rl_risk_sac.robots.ur5_capsules import CapsuleState
@@ -139,6 +140,60 @@ def test_infeasible_safety_constraint_falls_back_to_safe_stop() -> None:
     assert result.status is SafetyFilterStatus.SAFE_STOP_INFEASIBLE
     assert result.requires_safe_stop
     np.testing.assert_array_equal(result.command_joint_velocity_radps, [0.0])
+
+
+def test_projection_residual_is_reported_separately_from_confirmed_infeasibility() -> None:
+    constrained_config = SafetyFilterConfig(
+        joint_velocity_limits_radps=np.asarray([1.0]),
+        joint_acceleration_limits_radps2=np.asarray([2.0]),
+        joint_position_lower_rad=np.asarray([-1.0]),
+        joint_position_upper_rad=np.asarray([1.0]),
+        control_dt_s=0.1,
+    )
+    workspace = LinearVelocityConstraints(matrix=np.asarray([[1.0]]), lower_bound=np.asarray([0.5]))
+    result = filter_joint_velocity(
+        filter_input(risk_with_safety_function(1.0), requested=0.0, workspace=workspace),
+        constrained_config,
+    )
+
+    assert result.status is SafetyFilterStatus.SAFE_STOP_PROJECTION_FAILED
+    assert result.requires_safe_stop
+    assert result.max_constraint_category == "workspace_0"
+    assert result.constraint_count == 2
+
+
+def test_result_reports_limiting_joint_box_constraints() -> None:
+    result = filter_joint_velocity(filter_input(risk_with_safety_function(1.0), requested=1.0), config())
+
+    assert any(category.startswith("joint_0_") for category in result.active_constraint_categories)
+
+
+def test_dykstra_projection_finds_a_feasible_box_constrained_command() -> None:
+    result = _dykstra_projection(
+        requested=np.asarray([0.0]),
+        lower=np.asarray([-1.0]),
+        upper=np.asarray([1.0]),
+        rows=np.asarray([[1.0], [-1.0]]),
+        bounds=np.asarray([0.5, -0.8]),
+        config=config(),
+    )
+
+    assert result is not None
+    np.testing.assert_allclose(result, [0.5], atol=1e-6)
+
+
+def test_solver_status_is_preserved_when_fallback_fails() -> None:
+    constrained_config = SafetyFilterConfig(
+        joint_velocity_limits_radps=np.asarray([1.0]),
+        joint_acceleration_limits_radps2=np.asarray([20.0]),
+        joint_position_lower_rad=np.asarray([-1.0]),
+        joint_position_upper_rad=np.asarray([1.0]),
+        control_dt_s=0.1,
+        use_qp_solver=True,
+    )
+    result = filter_joint_velocity(filter_input(risk_with_safety_function(1.0), requested=0.0), constrained_config)
+
+    assert result.qp_solver_status in {"solved", "unavailable"}
 
 
 def test_missing_safety_jacobian_never_allows_raw_policy_command() -> None:

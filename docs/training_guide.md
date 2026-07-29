@@ -85,9 +85,11 @@ conda run -n rl python scripts/smoke_test.py \
 
 ### 5.1 P3 因子化开发现状
 
-`configs/experiments/p3/` 中的 B1--B5 已用 train seed `4101`、10k step 和 eval seed `5101` 的 20 episode 完成链路检查。B4/B5 的过滤器指标已归档到 `train_metrics.csv`、评估 CSV 和 trace；其求解 P95 分别为 3.89 ms、4.88 ms，均未超 50 ms。
+`configs/experiments/p3_100k/` 中的 B1--B5 已用 train seed `4101`、100k step、validation seed `5201` 和 eval seed `5101` 完成训练、checkpoint selection 与开发评估。`configs/experiments/p3_diagnostics/` 还提供 `b4_osqp.yaml`、`b5_osqp.yaml`，用于不重新训练的 QP 求解器诊断。
 
-这批单 seed、短预算结果没有产生可冻结的综合候选：B4 的碰撞率/安全距离违反率为 25%/9.40%，B5 的成功率为 0%。因此不要启动新的 train/eval seeds、OOD 或真机工作。下一轮应保持 B1--B5 因子和参数不变，将共同开发训练预算扩展至 100k，并完成独立 checkpoint validation；完整开发预算仍无合理任务--安全折中时，先诊断风险代价、奖励和不可行约束，而不是继续扩大实验矩阵。
+100k 单 seed 结果仍没有产生可冻结的综合候选。B4/B5 的过滤器已经记录约束类别、真实活动约束、投影失败/确认不可行、Dykstra/主动集回退和 OSQP 状态；此前 OSQP 状态在最终失败路径中为空，已修复。重跑状态化 OSQP trace 前，不要启动新的 train/eval seeds、OOD 或真机工作。
+
+OSQP 诊断依赖已安装：`osqp=1.1.3`、`scipy=1.18.0`。当前求解时间约 6--9 ms，仅覆盖 PyBullet 进程内计算，不构成端到端安全或真机实时性结论。
 
 ## 6. 开发训练：安全的最小流程
 

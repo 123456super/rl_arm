@@ -1,0 +1,9 @@
+# B4 diagnostic rerun: only increase cyclic projection iterations.
+includes:
+  - ../p3_100k/b4_predictive_nonrobust_filter.yaml
+
+env:
+  safety_filter:
+    max_projection_iterations: 320
+    active_set_fallback_enabled: true
+    fallback_projection_iterations: 640

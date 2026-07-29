@@ -16,6 +16,7 @@ env:
     control_delay_s: 0.05
     geometry_margin_m: 0.0
     tracking_error_bound_m: 0.01
+    projection_failure_tolerance: 1.0e-6
 
 train:
   method: link_fixed

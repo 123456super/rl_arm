@@ -48,7 +48,11 @@ def test_enabled_filter_produces_runtime_metrics() -> None:
             SafetyFilterStatus.PASSTHROUGH.value,
             SafetyFilterStatus.FILTERED.value,
         }
-        assert info["safety_filter_active_constraints"] == 12
+        assert info["safety_filter_constraint_count"] == 12
+        assert 0 <= info["safety_filter_active_constraints"] <= 12
+        assert isinstance(info["safety_filter_active_constraint_categories"], str)
+        assert isinstance(info["safety_filter_max_constraint_category"], str)
+        assert info["safety_filter_projection_iterations"] >= 0
         assert info["safety_filter_safe_stop"] is False
         assert np.isfinite(info["safety_filter_max_constraint_violation"])
         assert info["predictive_risk_status"] == PredictionStatus.VALID.value

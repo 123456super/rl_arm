@@ -99,6 +99,7 @@ def main() -> None:
         "mean_safety_filter_intervention_norm",
         "safety_filter_safe_stop_rate",
         "safety_filter_infeasible_rate",
+        "safety_filter_projection_failure_rate",
         "predictive_near_miss_rate",
         "min_predictive_h_m",
         "mean_safety_filter_solve_time_s",
@@ -161,6 +162,7 @@ def main() -> None:
     episode_filter_intervention_norms: list[float] = []
     episode_filter_safe_stops = 0
     episode_filter_infeasible = 0
+    episode_filter_projection_failures = 0
     episode_predictive_near_misses = 0
     episode_predictive_h_mins: list[float] = []
     episode_filter_solve_times_s: list[float] = []
@@ -199,6 +201,7 @@ def main() -> None:
             episode_filter_interventions += int(filter_status != "passthrough")
             episode_filter_safe_stops += int(bool(info.get("safety_filter_safe_stop", False)))
             episode_filter_infeasible += int(filter_status == "safe_stop_infeasible")
+            episode_filter_projection_failures += int(filter_status == "safe_stop_projection_failed")
             if np.isfinite(intervention_norm):
                 episode_filter_intervention_norms.append(intervention_norm)
             if np.isfinite(predictive_h_min):
@@ -285,6 +288,11 @@ def main() -> None:
                     "safety_filter_infeasible_rate": (
                         episode_filter_infeasible / max(episode_length, 1) if safety_filter_enabled else float("nan")
                     ),
+                    "safety_filter_projection_failure_rate": (
+                        episode_filter_projection_failures / max(episode_length, 1)
+                        if safety_filter_enabled
+                        else float("nan")
+                    ),
                     "predictive_near_miss_rate": (
                         episode_predictive_near_misses / max(episode_length, 1) if safety_filter_enabled else float("nan")
                     ),
@@ -323,6 +331,7 @@ def main() -> None:
             episode_filter_intervention_norms = []
             episode_filter_safe_stops = 0
             episode_filter_infeasible = 0
+            episode_filter_projection_failures = 0
             episode_predictive_near_misses = 0
             episode_predictive_h_mins = []
             episode_filter_solve_times_s = []

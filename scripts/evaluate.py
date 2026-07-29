@@ -71,6 +71,9 @@ def main() -> None:
         filter_intervention_norms = []
         filter_safe_stops = 0
         filter_infeasible = 0
+        filter_projection_failures = 0
+        filter_fallbacks = 0
+        filter_qp_used = 0
         predictive_near_misses = 0
         predictive_h_mins = []
         filter_solve_times_s = []
@@ -98,6 +101,9 @@ def main() -> None:
             filter_interventions += int(filter_status not in {"passthrough", "not_enabled"})
             filter_safe_stops += int(bool(info.get("safety_filter_safe_stop", False)))
             filter_infeasible += int(filter_status == "safe_stop_infeasible")
+            filter_projection_failures += int(filter_status == "safe_stop_projection_failed")
+            filter_fallbacks += int(bool(info.get("safety_filter_fallback_used", False)))
+            filter_qp_used += int(bool(info.get("safety_filter_qp_solver_used", False)))
             if np.isfinite(intervention_norm):
                 filter_intervention_norms.append(intervention_norm)
             if np.isfinite(predictive_h_min):
@@ -132,6 +138,20 @@ def main() -> None:
                         "safety_filter_intervention_norm": intervention_norm,
                         "safety_filter_safe_stop": int(bool(info.get("safety_filter_safe_stop", False))),
                         "safety_filter_active_constraints": info.get("safety_filter_active_constraints", 0),
+                        "safety_filter_constraint_count": info.get("safety_filter_constraint_count", 0),
+                        "safety_filter_active_constraint_categories": info.get(
+                            "safety_filter_active_constraint_categories", ""
+                        ),
+                        "safety_filter_max_constraint_category": info.get(
+                            "safety_filter_max_constraint_category", ""
+                        ),
+                        "safety_filter_projection_iterations": info.get(
+                            "safety_filter_projection_iterations", 0
+                        ),
+                        "safety_filter_fallback_used": int(info.get("safety_filter_fallback_used", False)),
+                        "safety_filter_qp_solver_used": int(info.get("safety_filter_qp_solver_used", False)),
+                        "safety_filter_qp_solver_status": info.get("safety_filter_qp_solver_status", ""),
+                        "safety_filter_fallback_stage": info.get("safety_filter_fallback_stage", ""),
                         "safety_filter_max_constraint_violation": info.get(
                             "safety_filter_max_constraint_violation", float("nan")
                         ),
@@ -175,6 +195,15 @@ def main() -> None:
                 "safety_filter_infeasible_rate": (
                     filter_infeasible / max(step + 1, 1) if safety_filter_enabled else float("nan")
                 ),
+                "safety_filter_projection_failure_rate": (
+                    filter_projection_failures / max(step + 1, 1) if safety_filter_enabled else float("nan")
+                ),
+                "safety_filter_fallback_rate": (
+                    filter_fallbacks / max(step + 1, 1) if safety_filter_enabled else float("nan")
+                ),
+                "safety_filter_qp_used_rate": (
+                    filter_qp_used / max(step + 1, 1) if safety_filter_enabled else float("nan")
+                ),
                 "predictive_near_miss_rate": (
                     predictive_near_misses / max(step + 1, 1) if safety_filter_enabled else float("nan")
                 ),
@@ -215,6 +244,9 @@ def main() -> None:
         "mean_safety_filter_intervention_rate": mean_finite(rows, "safety_filter_intervention_rate"),
         "mean_safety_filter_safe_stop_rate": mean_finite(rows, "safety_filter_safe_stop_rate"),
         "mean_safety_filter_infeasible_rate": mean_finite(rows, "safety_filter_infeasible_rate"),
+        "mean_safety_filter_projection_failure_rate": mean_finite(rows, "safety_filter_projection_failure_rate"),
+        "mean_safety_filter_fallback_rate": mean_finite(rows, "safety_filter_fallback_rate"),
+        "mean_safety_filter_qp_used_rate": mean_finite(rows, "safety_filter_qp_used_rate"),
         "mean_predictive_near_miss_rate": mean_finite(rows, "predictive_near_miss_rate"),
         "mean_min_predictive_h_m": mean_finite(rows, "min_predictive_h_m"),
         "mean_safety_filter_solve_time_s": mean_finite(rows, "mean_safety_filter_solve_time_s"),

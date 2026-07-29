@@ -1,0 +1,8 @@
+# B5 diagnostic rerun using the optional OSQP QP backend.
+includes:
+  - ../p3_100k/b5_robust_predictive_filter.yaml
+
+env:
+  safety_filter:
+    use_qp_solver: true
+    fallback_projection_iterations: 640

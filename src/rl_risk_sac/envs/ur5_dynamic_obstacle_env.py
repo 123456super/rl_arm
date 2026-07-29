@@ -419,6 +419,18 @@ class UR5DynamicObstacleEnv(gym.Env):
             safety_gain=float(self.safety_filter_cfg["safety_gain"]),
             max_projection_iterations=int(self.safety_filter_cfg["max_projection_iterations"]),
             constraint_tolerance=float(self.safety_filter_cfg["constraint_tolerance"]),
+            projection_failure_tolerance=float(
+                self.safety_filter_cfg.get(
+                    "projection_failure_tolerance",
+                    max(float(self.safety_filter_cfg["constraint_tolerance"]) * 100.0, 1.0e-6),
+                )
+            ),
+            active_set_fallback_enabled=bool(self.safety_filter_cfg.get("active_set_fallback_enabled", True)),
+            active_set_max_candidate_constraints=int(
+                self.safety_filter_cfg.get("active_set_max_candidate_constraints", 12)
+            ),
+            fallback_projection_iterations=int(self.safety_filter_cfg.get("fallback_projection_iterations", 320)),
+            use_qp_solver=bool(self.safety_filter_cfg.get("use_qp_solver", False)),
         )
 
     def _filter_command(
@@ -573,7 +585,12 @@ class UR5DynamicObstacleEnv(gym.Env):
                     -self.safety_filter_config.safety_gain * (high - float(ee_position[axis])),
                 )
             )
-        return LinearVelocityConstraints(matrix=np.asarray(rows), lower_bound=np.asarray(bounds))
+        labels = tuple(
+            label
+            for axis_name in ("x", "y", "z")
+            for label in (f"workspace_{axis_name}_lower", f"workspace_{axis_name}_upper")
+        )
+        return LinearVelocityConstraints(matrix=np.asarray(rows), lower_bound=np.asarray(bounds), labels=labels)
 
     def _link_origin_jacobian(self, link_id: int) -> np.ndarray:
         if link_id < 0:
@@ -624,6 +641,14 @@ class UR5DynamicObstacleEnv(gym.Env):
             "safety_filter_reason": result.reason,
             "safety_filter_intervention_norm": float(result.intervention_norm_radps),
             "safety_filter_active_constraints": int(result.active_constraint_count),
+            "safety_filter_constraint_count": int(result.constraint_count),
+            "safety_filter_active_constraint_categories": "|".join(result.active_constraint_categories),
+            "safety_filter_max_constraint_category": result.max_constraint_category,
+            "safety_filter_projection_iterations": int(result.projection_iterations),
+            "safety_filter_fallback_used": bool(result.fallback_used),
+            "safety_filter_qp_solver_used": bool(result.qp_solver_used),
+            "safety_filter_qp_solver_status": result.qp_solver_status,
+            "safety_filter_fallback_stage": result.fallback_stage,
             "safety_filter_max_constraint_violation": float(result.max_constraint_violation),
             "safety_filter_safe_stop": bool(result.requires_safe_stop),
             "safety_filter_solve_time_s": float(solve_time_s) if solve_time_s is not None else float("nan"),

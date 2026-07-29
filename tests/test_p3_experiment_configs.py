@@ -66,3 +66,24 @@ def test_p3_100k_configs_preserve_factors_and_use_an_independent_validation_seed
         assert config["checkpoint_selection"] == {"seed": 5201, "episodes": 20, "metric": "mean_reward"}
         assert config["checkpoint_selection"]["seed"] != config["seed"]
         assert config["checkpoint_selection"]["seed"] != config["eval"]["seed"]
+
+
+def test_p3_projection_diagnostics_only_change_projection_iterations() -> None:
+    for name, base_name in {
+        "b4_projection320": "b4_predictive_nonrobust_filter",
+        "b5_projection320": "b5_robust_predictive_filter",
+    }.items():
+        base = load_config(Path("configs/experiments/p3_100k") / f"{base_name}.yaml")
+        diagnostic = load_config(Path("configs/experiments/p3_diagnostics") / f"{name}.yaml")
+        assert diagnostic["env"]["safety_filter"]["max_projection_iterations"] == 320
+        assert diagnostic["env"]["safety_filter"]["fallback_projection_iterations"] == 640
+        assert diagnostic["env"]["safety_filter"]["projection_failure_tolerance"] == base["env"]["safety_filter"]["projection_failure_tolerance"]
+        assert diagnostic["risk"] == base["risk"]
+        assert diagnostic["sac"] == base["sac"]
+
+
+def test_osqp_diagnostic_configs_enable_only_the_qp_backend() -> None:
+    for name in ("b4_osqp", "b5_osqp"):
+        config = load_config(Path("configs/experiments/p3_diagnostics") / f"{name}.yaml")
+        assert config["env"]["safety_filter"]["use_qp_solver"] is True
+        assert config["env"]["safety_filter"]["fallback_projection_iterations"] == 640

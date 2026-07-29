@@ -52,6 +52,14 @@ env:
     safety_gain: 4.0
     max_projection_iterations: 80
     constraint_tolerance: 1.0e-8
+    # Residual above this threshold is classified as projection failure;
+    # smaller numerical residuals are retained in diagnostics but do not stop.
+    projection_failure_tolerance: 1.0e-6
+    # Box-aware active-set fallback used only after cyclic projection fails.
+    active_set_fallback_enabled: true
+    active_set_max_candidate_constraints: 12
+    fallback_projection_iterations: 320
+    use_qp_solver: false
 
   # 可视化参数，只影响 GUI/渲染显示，不参与训练逻辑。
   visual:
