@@ -100,6 +100,18 @@ def test_filter_projects_policy_command_onto_predictive_safety_constraint() -> N
     assert result.intervention_norm_radps == pytest.approx(1.0)
 
 
+def test_preemptive_margin_enforces_an_earlier_predictive_constraint() -> None:
+    preemptive_config = replace(config(), preemptive_margin_m=0.05)
+
+    result = filter_joint_velocity(
+        filter_input(risk_with_safety_function(0.02), requested=-0.8),
+        preemptive_config,
+    )
+
+    assert result.status is SafetyFilterStatus.FILTERED
+    np.testing.assert_allclose(result.command_joint_velocity_radps, [0.06], atol=1e-12)
+
+
 def test_filter_enforces_workspace_and_command_continuity_constraints() -> None:
     constrained_config = SafetyFilterConfig(
         joint_velocity_limits_radps=np.asarray([1.0]),

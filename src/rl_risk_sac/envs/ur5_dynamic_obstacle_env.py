@@ -127,6 +127,10 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.predictive_risk_config: PredictiveRiskConfig | None = None
         self.safety_filter_config: SafetyFilterConfig | None = None
         self.obstacle_state_estimate_override: ObstacleStateEstimate | None = None
+        self.recovery_active = False
+        self.recovery_triggered = False
+        self.recovery_steps = 0
+        self.recovery_success = False
 
         obs_dim = self.joint_count * 3 + self.capsule_model.count * 7 + 7
         obs_bound = float(self.observation_cfg["space_bound"])
@@ -162,6 +166,10 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.step_count = 0
         self.sim_time_s = 0.0
         self.obstacle_state_estimate_override = None
+        self.recovery_active = False
+        self.recovery_triggered = False
+        self.recovery_steps = 0
+        self.recovery_success = False
         self.prev_capsules = self._capsules()
         self.prev_goal_error_norm = float(np.linalg.norm(self._goal_error()))
         obs, info = self._get_obs_and_info()
@@ -172,19 +180,39 @@ class UR5DynamicObstacleEnv(gym.Env):
         action = np.clip(action, -1.0, 1.0)
 
         pre_risk = self._compute_policy_risk(self._compute_risk())
+        predictive_risk_for_scaling = None
+        risk_speed_scale = 1.0
+        if self.safety_filter_enabled and bool(self.safety_filter_cfg.get("risk_speed_scaling_enabled", False)):
+            predictive_risk_for_scaling = self._compute_predictive_risk()
+            risk_speed_scale = self._risk_speed_scale(predictive_risk_for_scaling)
+        if self.safety_filter_enabled and bool(self.safety_filter_cfg.get("recovery_mode_enabled", False)):
+            if predictive_risk_for_scaling is None:
+                predictive_risk_for_scaling = self._compute_predictive_risk()
+            self._update_recovery_state(predictive_risk_for_scaling)
         qdot_policy = self.action_scale * action
         if self.method.endswith("adaptive"):
             beta = self._adaptive_beta(pre_risk.risk_global)
         else:
             beta = self.fixed_beta
         qdot_cmd = beta * qdot_policy + (1.0 - beta) * self.prev_qdot_cmd
+        if predictive_risk_for_scaling is not None:
+            qdot_cmd *= risk_speed_scale
+        recovery_command = None
+        if self.recovery_active and predictive_risk_for_scaling is not None:
+            recovery_command = self._recovery_command(predictive_risk_for_scaling)
+            qdot_cmd = recovery_command
         qdot_cmd = np.clip(qdot_cmd, -self.action_scale, self.action_scale).astype(np.float32)
         qdot_requested = qdot_cmd.copy()
         filter_result = None
         predictive_risk = None
         filter_solve_time_s = None
         if self.safety_filter_enabled:
-            filter_result, predictive_risk, filter_solve_time_s = self._filter_command(qdot_requested)
+            if predictive_risk_for_scaling is None:
+                filter_result, predictive_risk, filter_solve_time_s = self._filter_command(qdot_requested)
+            else:
+                filter_result, predictive_risk, filter_solve_time_s = self._filter_command(
+                    qdot_requested, predictive_risk_for_scaling
+                )
         if filter_result is not None:
             qdot_cmd = filter_result.command_joint_velocity_radps.astype(np.float32)
 
@@ -229,6 +257,18 @@ class UR5DynamicObstacleEnv(gym.Env):
                 "joint_jerk": jerk.copy(),
                 "beta": float(beta),
                 "qdot_requested": qdot_requested.copy(),
+                "risk_speed_scale": float(risk_speed_scale),
+                "risk_speed_h_min_m": (
+                    float(np.min(predictive_risk_for_scaling.safety_functions_m))
+                    if predictive_risk_for_scaling is not None and predictive_risk_for_scaling.usable
+                    else float("nan")
+                ),
+                "recovery_active": bool(self.recovery_active),
+                "recovery_triggered": bool(self.recovery_triggered),
+                "recovery_success": bool(self.recovery_success),
+                "recovery_command_norm": (
+                    float(np.linalg.norm(recovery_command)) if recovery_command is not None else 0.0
+                ),
             }
         )
         if filter_result is not None:
@@ -417,6 +457,7 @@ class UR5DynamicObstacleEnv(gym.Env):
             joint_position_upper_rad=joint_upper,
             control_dt_s=self.control_dt,
             safety_gain=float(self.safety_filter_cfg["safety_gain"]),
+            preemptive_margin_m=float(self.safety_filter_cfg.get("preemptive_margin_m", 0.0)),
             max_projection_iterations=int(self.safety_filter_cfg["max_projection_iterations"]),
             constraint_tolerance=float(self.safety_filter_cfg["constraint_tolerance"]),
             projection_failure_tolerance=float(
@@ -436,13 +477,14 @@ class UR5DynamicObstacleEnv(gym.Env):
     def _filter_command(
         self,
         qdot_requested: np.ndarray,
+        predictive_risk_override: PredictiveLinkRisk | None = None,
     ) -> tuple[SafetyFilterResult, PredictiveLinkRisk | None, float]:
         if self.predictive_risk_config is None or self.safety_filter_config is None:
             raise RuntimeError("Safety filter was enabled but not configured")
 
         started_at = perf_counter()
         try:
-            predictive_risk = self._compute_predictive_risk()
+            predictive_risk = predictive_risk_override or self._compute_predictive_risk()
             if predictive_risk.requires_safe_stop:
                 result = filter_joint_velocity(
                     SafetyFilterInput(
@@ -683,6 +725,68 @@ class UR5DynamicObstacleEnv(gym.Env):
         ratio = np.clip(risk_global / max(self.risk_high, 1e-6), 0.0, 1.0)
         beta_raw = self.beta_min + (self.beta_max - self.beta_min) * ratio
         return float(self.lambda_beta * beta_raw + (1.0 - self.lambda_beta) * self.beta)
+
+    def _risk_speed_scale(self, predictive_risk: PredictiveLinkRisk) -> float:
+        """Continuously reduce policy speed as the predictive margin closes."""
+        if predictive_risk.requires_safe_stop or not predictive_risk.usable:
+            return 0.0
+        h_min = float(np.min(predictive_risk.safety_functions_m))
+        start = float(self.safety_filter_cfg.get("risk_speed_scaling_start_m", 0.08))
+        stop = float(self.safety_filter_cfg.get("risk_speed_scaling_stop_m", 0.0))
+        if not np.isfinite(h_min) or not np.isfinite(start) or not np.isfinite(stop) or start <= stop or stop < 0.0:
+            raise ValueError("risk speed scaling requires finite start > stop >= 0")
+        return float(np.clip((h_min - stop) / (start - stop), 0.0, 1.0))
+
+    def _update_recovery_state(self, predictive_risk: PredictiveLinkRisk) -> None:
+        """Enter recovery at non-positive margin and exit after clearance."""
+        if predictive_risk.requires_safe_stop or not predictive_risk.usable:
+            return
+        h_min = float(np.min(predictive_risk.safety_functions_m))
+        exit_margin = float(self.safety_filter_cfg.get("recovery_exit_margin_m", 0.02))
+        if not np.isfinite(exit_margin) or exit_margin < 0.0:
+            raise ValueError("recovery_exit_margin_m must be finite and non-negative")
+        if not self.recovery_active and h_min <= 0.0:
+            self.recovery_active = True
+            self.recovery_triggered = True
+            self.recovery_success = False
+        elif self.recovery_active:
+            self.recovery_steps += 1
+            if h_min >= exit_margin:
+                self.recovery_active = False
+                self.recovery_success = True
+
+    def _recovery_command(self, predictive_risk: PredictiveLinkRisk) -> np.ndarray:
+        """Generate a bounded velocity that separates every endangered link.
+
+        Negative margins receive weights proportional to their clearance
+        deficits, so the command is driven by all endangered links rather
+        than only the currently worst one.  While recovering, links below the
+        exit margin remain in the objective to avoid an immediate re-trigger.
+        """
+        safety_jacobian, _, _ = self._analytic_constraint_jacobians(predictive_risk)
+        margins = np.asarray(predictive_risk.safety_functions_m, dtype=np.float64)
+        if safety_jacobian.shape != (margins.size, self.joint_count):
+            raise ValueError("safety Jacobian shape does not match predictive margins")
+        if not np.isfinite(margins).all() or not np.isfinite(safety_jacobian).all():
+            return np.zeros(self.joint_count, dtype=np.float32)
+
+        exit_margin = float(self.safety_filter_cfg.get("recovery_exit_margin_m", 0.02))
+        # Include every negative-margin link; during recovery also retain links
+        # that have not yet reached the exit clearance.
+        deficits = np.maximum(-margins, 0.0)
+        if not np.any(deficits > 0.0):
+            deficits = np.maximum(exit_margin - margins, 0.0)
+        if not np.any(deficits > 0.0):
+            return np.zeros(self.joint_count, dtype=np.float32)
+        weights = deficits / float(np.sum(deficits))
+        direction = np.sum(weights[:, None] * safety_jacobian, axis=0)
+        norm = float(np.linalg.norm(direction))
+        if norm <= 1e-10:
+            return np.zeros(self.joint_count, dtype=np.float32)
+        speed = float(self.safety_filter_cfg.get("recovery_speed_radps", 0.25))
+        if not np.isfinite(speed) or speed < 0.0:
+            raise ValueError("recovery_speed_radps must be finite and non-negative")
+        return np.clip(speed * direction / norm, -self.action_scale, self.action_scale).astype(np.float32)
 
     def _joint_state(self) -> tuple[np.ndarray, np.ndarray]:
         states = p.getJointStates(self.robot_id, self.joint_ids, physicsClientId=self.physics_client_id)

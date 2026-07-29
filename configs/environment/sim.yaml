@@ -50,6 +50,15 @@ env:
     # 控制约束。joint_acceleration_limit 为所有关节共享的保守限值。
     joint_acceleration_limit_radps2: 4.0
     safety_gain: 4.0
+    # Applies the predictive barrier before physical h reaches zero.
+    preemptive_margin_m: 0.0
+    # Optional continuous policy-speed reduction as predictive h approaches zero.
+    risk_speed_scaling_enabled: false
+    risk_speed_scaling_start_m: 0.08
+    risk_speed_scaling_stop_m: 0.0
+    recovery_mode_enabled: false
+    recovery_exit_margin_m: 0.02
+    recovery_speed_radps: 0.25
     max_projection_iterations: 80
     constraint_tolerance: 1.0e-8
     # Residual above this threshold is classified as projection failure;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 
 import numpy as np
 
@@ -8,6 +9,46 @@ from rl_risk_sac.envs import UR5DynamicObstacleEnv
 from rl_risk_sac.utils.config import load_config
 from rl_risk_sac.utils.predictive_risk import ObstacleStateEstimate, PredictionStatus
 from rl_risk_sac.utils.safety_filter import SafetyFilterResult, SafetyFilterStatus
+
+
+def _recovery_test_env(jacobian: np.ndarray):
+    env = object.__new__(UR5DynamicObstacleEnv)
+    env.joint_count = jacobian.shape[1]
+    env.action_scale = 1.0
+    env.safety_filter_cfg = {"recovery_speed_radps": 0.5, "recovery_exit_margin_m": 0.02}
+    env._analytic_constraint_jacobians = lambda _: (jacobian, None, None)  # type: ignore[method-assign]
+    return env
+
+
+def test_recovery_command_weights_all_below_margin_links() -> None:
+    env = _recovery_test_env(np.asarray([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]]))
+    risk = replace(
+        _predictive_risk_for_test(3),
+        safety_functions_m=np.asarray([-0.10, -0.05, 0.01]),
+    )
+
+    command = env._recovery_command(risk)
+
+    # Deficit weights are 2/3 and 1/3; the third link is already safe.
+    np.testing.assert_allclose(command, [1.0 / np.sqrt(5.0), 0.5 / np.sqrt(5.0)], atol=1e-6)
+
+
+def _predictive_risk_for_test(count: int):
+    from rl_risk_sac.utils.predictive_risk import PredictiveLinkRisk
+
+    return PredictiveLinkRisk(
+        status=PredictionStatus.VALID,
+        status_reason="",
+        observation_age_s=0.0,
+        closest_prediction_times_s=np.zeros(count),
+        predicted_distances_m=np.ones(count),
+        robust_distances_m=np.ones(count),
+        safety_functions_m=np.ones(count),
+        geometry_margins_m=np.zeros(count),
+        perception_margin_m=0.0,
+        delay_margin_m=0.0,
+        tracking_margin_m=0.0,
+    )
 
 
 def test_enabled_filter_is_the_only_command_path() -> None:
@@ -59,6 +100,7 @@ def test_enabled_filter_produces_runtime_metrics() -> None:
         assert np.isfinite(info["predictive_h_min_m"])
         assert info["safety_filter_solve_time_s"] >= 0.0
         assert np.isfinite(info["qdot_cmd"]).all()
+        assert info["risk_speed_scale"] == 1.0
     finally:
         env.close()
 

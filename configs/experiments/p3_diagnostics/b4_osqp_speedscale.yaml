@@ -1,0 +1,9 @@
+# B4 diagnostic rerun: continuously reduce policy speed as predictive h closes.
+includes:
+  - b4_osqp.yaml
+
+env:
+  safety_filter:
+    risk_speed_scaling_enabled: true
+    risk_speed_scaling_start_m: 0.08
+    risk_speed_scaling_stop_m: 0.0

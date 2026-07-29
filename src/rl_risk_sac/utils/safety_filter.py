@@ -36,6 +36,7 @@ class SafetyFilterConfig:
     joint_position_upper_rad: np.ndarray
     control_dt_s: float
     safety_gain: float = 4.0
+    preemptive_margin_m: float = 0.0
     max_projection_iterations: int = 80
     constraint_tolerance: float = 1e-8
     projection_failure_tolerance: float = 1e-6
@@ -106,10 +107,10 @@ def filter_joint_velocity(
     """Return a bounded command or a deterministic zero-velocity safe stop.
 
     Valid predicted risks are enforced through the first-order condition
-    ``J_h qdot + safety_gain * h >= 0``.  Position, velocity and acceleration
-    limits are always applied before projecting the policy command.  A failed
-    input validation or failed feasibility check never falls back to the raw
-    policy action.
+    ``J_h qdot + safety_gain * (h - preemptive_margin) >= 0``. Position,
+    velocity and acceleration limits are always applied before projecting the
+    policy command. A failed input validation or failed feasibility check never
+    falls back to the raw policy action.
     """
 
     risk = filter_input.predictive_risk
@@ -498,6 +499,8 @@ def _build_constraints(
         raise ValueError("control_dt_s must be finite and positive")
     if not np.isfinite(config.safety_gain) or config.safety_gain < 0.0:
         raise ValueError("safety_gain must be finite and non-negative")
+    if not np.isfinite(config.preemptive_margin_m) or config.preemptive_margin_m < 0.0:
+        raise ValueError("preemptive_margin_m must be finite and non-negative")
     if (
         config.max_projection_iterations <= 0
         or config.constraint_tolerance <= 0.0
@@ -534,7 +537,8 @@ def _build_constraints(
         raise ValueError("valid predictive risk must provide finite one-dimensional safety functions")
     safety_jacobian = _matrix(filter_input.safety_jacobian_m_per_rad, "safety_jacobian_m_per_rad", safety_values.size, requested.size)
     rows = [safety_jacobian]
-    bounds = [-config.safety_gain * safety_values]
+    effective_safety_values = safety_values - config.preemptive_margin_m
+    bounds = [-config.safety_gain * effective_safety_values]
     labels = [f"predictive_link_{index}" for index in range(safety_values.size)]
 
     if filter_input.workspace_constraints is not None:

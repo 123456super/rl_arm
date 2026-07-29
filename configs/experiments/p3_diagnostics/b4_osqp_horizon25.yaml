@@ -1,0 +1,7 @@
+# B4 diagnostic rerun: extend the predictive-risk horizon to 250 ms.
+includes:
+  - b4_osqp.yaml
+
+env:
+  safety_filter:
+    prediction_horizon_s: 0.25

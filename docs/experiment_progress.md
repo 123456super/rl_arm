@@ -8,7 +8,25 @@
 
 ### 当前进度标记
 
-**阶段一已闭环；P1/P2 已完成开发验证；P3 的 B1--B5 已完成 100k 单开发 seed 训练、独立 checkpoint validation 和开发评估，但设计尚未冻结。安全过滤器求解器诊断仍在进行。**
+**阶段一已闭环；P1/P2 已完成开发验证；P3 的 B1--B5、OSQP、recovery 与多连杆逃逸已完成开发诊断，但设计尚未冻结。**
+
+### 最新进度（2026-07-29，Recovery 与多连杆逃逸诊断）
+
+在 B4 OSQP 诊断基础上，已增加显式 recovery mode：当预测安全裕度 `h_min <= 0` 时暂停策略任务推进，生成远离障碍物的逃逸关节速度，并在 `h_min >= 0.02 m` 后退出；回合级 CSV 单独记录 recovery 触发、成功、步数和持续时间。默认仿真配置仍关闭 recovery，诊断入口为 `configs/experiments/p3_diagnostics/b4_osqp_recovery.yaml`。
+
+随后将单一最危险连杆的逃逸方向改为多连杆加权方向：所有负裕度连杆按 clearance deficit 加权合并安全 Jacobian；恢复阶段同时保留尚未达到退出裕度的连杆，避免恢复后立即重触发。实现位于 `src/rl_risk_sac/envs/ur5_dynamic_obstacle_env.py`，并新增集成测试。
+
+`recovery_speed_radps=0.35` 的 20 回合诊断相较 `0.25` 基线将安全违规步数从 120 降至 88，触发回合平均恢复时间从 1.73 s 降至 1.53 s；任务成功率仍为 11/20，碰撞仍为 1/20，故速度提升只能作为诊断基线，不能视为安全保证。
+
+多连杆加权方向已用 3 个评估 seed、每 seed 20 回合复核：
+
+| eval seed | success | collision | safety violation steps | min predictive `h` |
+| ---: | ---: | ---: | ---: | ---: |
+| 5101 | 11/20 | 1/20 | 90 | -0.0788 m |
+| 5201 | 15/20 | 1/20 | 112 | -0.0499 m |
+| 5301 | 11/20 | 4/20 | 60 | -0.1595 m |
+
+结果显示多连杆方向在部分 seed 上降低了违规或缩短恢复时间，但跨 seed 仍不稳定，且 seed 5301 出现 4 次碰撞。因此 P3 仍未冻结，不进入 OOD、多场景扩展或真机测试。下一步应优先分析 seed 5301 的碰撞轨迹、连杆 Jacobian 冲突和障碍物运动方向，再决定是否引入方向选择/小型二次优化。
 
 主比较的模型训练、checkpoint selection、eval-seed held-out 评估和三-seed汇总均已完成；它们被冻结为阶段一基线，当前不需要继续训练或重跑。新研究的实施基准见 [research_direction.md](research_direction.md)：B1--B5 已在一个开发 train seed 和一个开发 eval seed 上完成 10k step 链路检查，但没有稳定的任务--安全增益，不能进入 P4 或作为论文证据。
 
@@ -28,8 +46,8 @@
 | P2 端到端失效注入与指标 | 已完成（开发验证） | 可注入有效、无效或过期障碍物估计；运行时记录预测状态、`h_min`、原始/过滤后命令、干预量、停止状态、违反量与求解耗时 |
 | P2 解析点雅可比与仿真实时性 | 已完成（开发验证） | 以 PyBullet 点雅可比替代有限差分状态保存/恢复；20 episode、2,693 个控制步中滤波器均值 2.68 ms、P95 4.94 ms，无步超过 50 ms |
 | P3 B1--B5 开发轮次 | 已完成（未冻结） | 共用 train seed 4101、100k step、validation seed 5201、eval seed 5101；B4/B5 无稳定综合优势 |
-| P3 过滤器约束诊断 | 已完成（待复核） | 已增加约束类别、真实活动约束、投影失败/确认不可行区分；循环投影、Dykstra、主动集回退和可选 OSQP QP 均已实现 |
-| OSQP 依赖与后端 | 已完成（开发验证） | `osqp=1.1.3`、`scipy=1.18.0` 已安装；OSQP 平均约 6--9 ms，但失败步状态透传修复后需重跑 |
+| P3 过滤器约束诊断 | 已完成（未冻结） | 已增加约束类别、真实活动约束、投影失败/确认不可行区分；循环投影、Dykstra、主动集回退、OSQP QP、recovery 与多连杆逃逸方向均已实现 |
+| OSQP 依赖与后端 | 已完成（开发验证） | `osqp=1.1.3`、`scipy=1.18.0` 已安装；最新 recovery 诊断平均约 2.6--2.7 ms，未出现 `primal infeasible` 或投影失败 |
 
 ## 3. 最终主对比口径
 
@@ -127,7 +145,7 @@ outputs/rechecks/heldout_1004_1006/final_3methods/eval_summary_macro_across_trai
 2. [安全过滤器](../src/rl_risk_sac/utils/safety_filter.py) 已以半空间投影实现 `J_h qdot + kappa h >= 0`，并同时处理关节位置、速度、加速度/命令连续性与外部工作空间约束。风险不可用、输入无效或约束不可行时，过滤器确定性输出零速度。
 3. [UR5 仿真环境](../src/rl_risk_sac/envs/ur5_dynamic_obstacle_env.py) 在 `env.safety_filter.enabled=true` 时将过滤器作为策略命令的唯一出口。通过 PyBullet 点雅可比和固定最优投影参数构造连杆安全函数与 TCP 工作空间雅可比；默认配置保持关闭，不改变阶段一结果。
 4. 已提供感知估计注入接口，可在仿真中复现无效和过期状态。端到端指标包括预测状态、`h_min`、原始与过滤后动作、干预范数、停止状态、活动约束数、最大违反量和求解时间。
-5. 当前回归结果为 `35 passed`（状态透传修复后定向过滤器测试 `14 passed`），且 P2、B4、B5 的 PyBullet smoke test 已通过。过滤器已支持循环投影、Dykstra、主动集回退和可选 OSQP QP；OSQP 后端在已有 20 episode 诊断中使用约 94--97% 控制步，平均求解约 6--9 ms。该数字只覆盖当前 PyBullet 进程内的求解，不覆盖感知、通信、控制器和真实硬件延迟；此前 `qp_status` 在最终投影失败路径中未透传，已修复，必须重跑后才能分析失败原因。
+5. 当前回归结果为 `38 passed`，且 P2、B4、B5 的 PyBullet smoke test 已通过。过滤器已支持循环投影、Dykstra、主动集回退、可选 OSQP QP、显式 recovery 和多连杆加权逃逸方向。最新 recovery 诊断的求解耗时约 2.6--2.7 ms；该数字只覆盖当前 PyBullet 进程内的求解，不覆盖感知、通信、控制器和真实硬件延迟。
 
 ### 8.4 当前状态：P3 因子化开发轮次已完成，设计未冻结
 

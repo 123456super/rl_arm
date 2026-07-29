@@ -1,0 +1,7 @@
+# B4 diagnostic rerun: increase the predictive safety feedback gain.
+includes:
+  - b4_osqp.yaml
+
+env:
+  safety_filter:
+    safety_gain: 8.0

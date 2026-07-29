@@ -1,0 +1,7 @@
+# B4 diagnostic rerun: double only the joint acceleration allowance.
+includes:
+  - b4_osqp.yaml
+
+env:
+  safety_filter:
+    joint_acceleration_limit_radps2: 8.0

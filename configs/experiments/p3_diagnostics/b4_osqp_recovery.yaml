@@ -1,0 +1,9 @@
+# B4 diagnostic rerun: recover with an outward command after h becomes non-positive.
+includes:
+  - b4_osqp_speedscale.yaml
+
+env:
+  safety_filter:
+    recovery_mode_enabled: true
+    recovery_exit_margin_m: 0.02
+    recovery_speed_radps: 0.25

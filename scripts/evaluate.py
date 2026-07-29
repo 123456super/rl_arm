@@ -77,6 +77,9 @@ def main() -> None:
         predictive_near_misses = 0
         predictive_h_mins = []
         filter_solve_times_s = []
+        recovery_steps = 0
+        recovery_triggered = False
+        recovery_success = False
         success = False
         collision = False
         final_position_error = 0.0
@@ -98,6 +101,9 @@ def main() -> None:
             intervention_norm = float(info.get("safety_filter_intervention_norm", float("nan")))
             predictive_h_min = float(info.get("predictive_h_min_m", float("nan")))
             solve_time_s = float(info.get("safety_filter_solve_time_s", float("nan")))
+            recovery_steps += int(bool(info.get("recovery_active", False)))
+            recovery_triggered = recovery_triggered or bool(info.get("recovery_triggered", False))
+            recovery_success = recovery_success or bool(info.get("recovery_success", False))
             filter_interventions += int(filter_status not in {"passthrough", "not_enabled"})
             filter_safe_stops += int(bool(info.get("safety_filter_safe_stop", False)))
             filter_infeasible += int(filter_status == "safe_stop_infeasible")
@@ -134,6 +140,12 @@ def main() -> None:
                         "acc_norm": float(np.linalg.norm(info["joint_acc"])),
                         "jerk_norm": float(np.linalg.norm(info["joint_jerk"])),
                         "qdot_requested_norm": float(np.linalg.norm(info.get("qdot_requested", info["qdot_cmd"]))),
+                        "risk_speed_scale": float(info.get("risk_speed_scale", 1.0)),
+                        "risk_speed_h_min_m": float(info.get("risk_speed_h_min_m", float("nan"))),
+                        "recovery_active": int(bool(info.get("recovery_active", False))),
+                        "recovery_triggered": int(bool(info.get("recovery_triggered", False))),
+                        "recovery_success": int(bool(info.get("recovery_success", False))),
+                        "recovery_command_norm": float(info.get("recovery_command_norm", 0.0)),
                         "safety_filter_status": filter_status,
                         "safety_filter_intervention_norm": intervention_norm,
                         "safety_filter_safe_stop": int(bool(info.get("safety_filter_safe_stop", False))),
@@ -214,6 +226,10 @@ def main() -> None:
                 "mean_action_variation": float(np.mean(action_variations)) if action_variations else 0.0,
                 "rms_acceleration": float(np.sqrt(np.mean(np.square(acc)))) if len(acc) else 0.0,
                 "rms_jerk": float(np.sqrt(np.mean(np.square(jerk)))) if len(jerk) else 0.0,
+                "recovery_triggered": int(recovery_triggered),
+                "recovery_success": int(recovery_success),
+                "recovery_steps": recovery_steps,
+                "recovery_duration_s": recovery_steps * float(config["env"]["control_dt"]),
             }
         )
         if trace_dir is not None and trace_rows:

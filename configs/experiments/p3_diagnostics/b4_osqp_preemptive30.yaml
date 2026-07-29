@@ -1,0 +1,7 @@
+# B4 diagnostic rerun: enforce the predictive barrier 30 mm before h reaches zero.
+includes:
+  - b4_osqp.yaml
+
+env:
+  safety_filter:
+    preemptive_margin_m: 0.03
