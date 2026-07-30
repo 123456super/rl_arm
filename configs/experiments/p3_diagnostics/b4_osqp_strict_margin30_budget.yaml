@@ -1,0 +1,16 @@
+# Strict safety-stop diagnostic: no relaxed predictive recovery command.
+# Infeasible or over-budget filter cycles return zero velocity.
+includes:
+  - ../p3_100k/b4_predictive_nonrobust_filter.yaml
+
+env:
+  safety_filter:
+    use_qp_solver: true
+    fallback_projection_iterations: 640
+    geometry_margin_m: 0.03
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+    qp_time_limit_s: 0.02
+    max_filter_compute_time_s: 0.05
+    diagnostic_logging: true

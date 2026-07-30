@@ -5,6 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
+import rl_risk_sac.utils.safety_filter as safety_filter_module
 from rl_risk_sac.utils.predictive_risk import (
     ObstacleStateEstimate,
     PredictiveRiskConfig,
@@ -166,6 +167,52 @@ def test_infeasible_safety_constraint_falls_back_to_safe_stop() -> None:
     np.testing.assert_array_equal(result.command_joint_velocity_radps, [0.0])
 
 
+def test_primal_infeasible_osqp_status_forces_safe_stop(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        safety_filter_module,
+        "_osqp_projection",
+        lambda *_args, **_kwargs: (None, "primal infeasible inaccurate"),
+    )
+
+    result = filter_joint_velocity(
+        filter_input(risk_with_safety_function(1.0), requested=0.4),
+        replace(config(), use_qp_solver=True),
+    )
+
+    assert result.status is SafetyFilterStatus.SAFE_STOP_INFEASIBLE
+    assert result.qp_solver_status == "primal infeasible inaccurate"
+    np.testing.assert_array_equal(result.command_joint_velocity_radps, [0.0])
+
+
+def test_primal_infeasible_osqp_uses_bounded_recovery_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    def osqp_projection(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return None, "primal infeasible"
+        return np.asarray([0.2]), "solved"
+
+    monkeypatch.setattr(safety_filter_module, "_osqp_projection", osqp_projection)
+    workspace = LinearVelocityConstraints(matrix=np.asarray([[1.0]]), lower_bound=np.asarray([0.1]))
+    result = filter_joint_velocity(
+        replace(
+            filter_input(risk_with_safety_function(-0.1), requested=0.4, workspace=workspace),
+            allow_infeasible_recovery=True,
+            maximize_min_clearance_recovery=False,
+        ),
+        replace(config(), use_qp_solver=True),
+    )
+
+    assert calls == 2
+    assert result.status is SafetyFilterStatus.RECOVERY_RELAXED
+    assert result.fallback_stage == "recovery_hard_constraints"
+    assert result.projection_iterations == 0
+    assert int(result.projection_iterations) == 0
+    np.testing.assert_allclose(result.command_joint_velocity_radps, [0.2])
+
+
 def test_infeasible_recovery_relaxes_only_the_predictive_constraint() -> None:
     result = filter_joint_velocity(
         replace(filter_input(risk_with_safety_function(-0.1), requested=0.4, jacobian=0.0), allow_infeasible_recovery=True),
@@ -178,7 +225,11 @@ def test_infeasible_recovery_relaxes_only_the_predictive_constraint() -> None:
 
 
 def test_maximin_recovery_uses_joint_limited_escape_command() -> None:
-    limited_config = replace(config(), joint_velocity_limits_radps=np.asarray([0.2]))
+    limited_config = replace(
+        config(),
+        joint_velocity_limits_radps=np.asarray([0.2]),
+        qp_time_limit_s=0.02,
+    )
     result = filter_joint_velocity(
         replace(
             filter_input(risk_with_safety_function(-0.1), requested=0.0, jacobian=1.0, drift=-0.3),

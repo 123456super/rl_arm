@@ -1,0 +1,11 @@
+# Strict bounded-recovery diagnostic after positive-margin physical collisions.
+includes:
+  - b4_osqp_recovery_early_timed.yaml
+
+env:
+  safety_filter:
+    # Do not admit an unbounded relaxed/maximin recovery command to the online path.
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+    # Covers the 10.7--22.8 mm positive-margin collision misses; diagnostic only.
+    geometry_margin_m: 0.03

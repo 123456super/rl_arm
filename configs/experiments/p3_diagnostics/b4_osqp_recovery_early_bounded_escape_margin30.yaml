@@ -1,0 +1,9 @@
+# Bounded escape diagnostic: relax only infeasible predictive barriers.
+includes:
+  - b4_osqp_recovery_early_bounded_margin30.yaml
+
+env:
+  safety_filter:
+    recovery_allow_constraint_relaxation: true
+    # Keep the analytic recovery command; do not enter the unbounded maximin QP.
+    recovery_maximize_min_clearance: false

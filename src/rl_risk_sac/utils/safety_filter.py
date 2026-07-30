@@ -24,6 +24,7 @@ class SafetyFilterStatus(str, Enum):
     SAFE_STOP_INVALID_INPUT = "safe_stop_invalid_input"
     SAFE_STOP_INFEASIBLE = "safe_stop_infeasible"
     SAFE_STOP_PROJECTION_FAILED = "safe_stop_projection_failed"
+    SAFE_STOP_COMPUTE_BUDGET = "safe_stop_compute_budget"
     RECOVERY_RELAXED = "recovery_relaxed"
 
 
@@ -45,6 +46,7 @@ class SafetyFilterConfig:
     active_set_max_candidate_constraints: int = 12
     fallback_projection_iterations: int = 320
     use_qp_solver: bool = False
+    qp_time_limit_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -102,6 +104,7 @@ class SafetyFilterResult:
             SafetyFilterStatus.SAFE_STOP_INVALID_INPUT,
             SafetyFilterStatus.SAFE_STOP_INFEASIBLE,
             SafetyFilterStatus.SAFE_STOP_PROJECTION_FAILED,
+            SafetyFilterStatus.SAFE_STOP_COMPUTE_BUDGET,
         }
 
 
@@ -156,7 +159,7 @@ def filter_joint_velocity(
                 upper_labels,
                 config,
                 "zero_sensitivity",
-                filter_input,
+                filter_input=filter_input,
             )
         index = int(np.flatnonzero(positive_zero_rows)[0])
         return _safe_stop(
@@ -198,7 +201,7 @@ def filter_joint_velocity(
                 qp_solver_status=qp_status,
                 fallback_stage="osqp",
             )
-        if qp_status.startswith("infeasible"):
+        if "infeasible" in qp_status:
             if filter_input.allow_infeasible_recovery:
                 return _relaxed_recovery_command(
                     requested,
@@ -211,7 +214,7 @@ def filter_joint_velocity(
                     upper_labels,
                     config,
                     qp_status,
-                    filter_input,
+                    filter_input=filter_input,
                 )
             return _safe_stop(
                 requested,
@@ -219,6 +222,8 @@ def filter_joint_velocity(
                 f"OSQP reported {qp_status}",
                 constraint_count=len(bounds),
                 max_constraint_category="qp_solver",
+                qp_solver_status=qp_status,
+                fallback_stage="osqp",
             )
 
     command = np.clip(requested, lower, upper)
@@ -421,6 +426,18 @@ def _relaxed_recovery_command(
                 fallback_stage = "recovery_hard_constraints"
             else:
                 solver_status = f"{solver_status}; hard_constraints={hard_status}"
+        if fallback_stage == "recovery_joint_bounds":
+            hard_projected = _dykstra_projection(
+                command,
+                lower,
+                upper,
+                rows[hard_mask],
+                bounds[hard_mask],
+                config,
+            )
+            if hard_projected is not None:
+                command = hard_projected
+                fallback_stage = "recovery_hard_constraints_dykstra"
     violations = bounds - rows @ command
     max_violation = float(max(0.0, np.max(violations, initial=0.0)))
     active_count, active_categories, max_category = _constraint_diagnostics(
@@ -488,6 +505,9 @@ def _maximin_recovery_projection(
     lower_bound = np.concatenate((-selected_drift, bounds[hard_mask], lower))
     upper_bound = np.concatenate((np.full(selected_rows.size, np.inf), np.full(np.count_nonzero(hard_mask), np.inf), upper))
     problem = osqp.OSQP()
+    setup_kwargs = {}
+    if config.qp_time_limit_s is not None:
+        setup_kwargs["time_limit"] = config.qp_time_limit_s
     problem.setup(
         P=p_matrix,
         q=q_vector,
@@ -499,6 +519,7 @@ def _maximin_recovery_projection(
         max_iter=max(400, config.fallback_projection_iterations),
         polish=False,
         verbose=False,
+        **setup_kwargs,
     )
     result = problem.solve()
     status = str(result.info.status).lower()
@@ -529,6 +550,9 @@ def _osqp_projection(
     lower_bound = np.concatenate((bounds, lower))
     upper_bound = np.concatenate((np.full(len(bounds), np.inf), upper))
     problem = osqp.OSQP()
+    setup_kwargs = {}
+    if config.qp_time_limit_s is not None:
+        setup_kwargs["time_limit"] = config.qp_time_limit_s
     problem.setup(
         P=sparse.eye(requested.size, format="csc"),
         q=-requested,
@@ -540,6 +564,7 @@ def _osqp_projection(
         max_iter=max(400, config.fallback_projection_iterations),
         polish=False,
         verbose=False,
+        **setup_kwargs,
     )
     result = problem.solve()
     status = str(result.info.status).lower()
@@ -701,6 +726,10 @@ def _build_constraints(
         or config.fallback_projection_iterations <= 0
     ):
         raise ValueError("projection settings must be positive")
+    if config.qp_time_limit_s is not None and (
+        not np.isfinite(config.qp_time_limit_s) or config.qp_time_limit_s <= 0.0
+    ):
+        raise ValueError("qp_time_limit_s must be finite and positive when set")
 
     dt = config.control_dt_s
     lower_candidates = np.vstack(

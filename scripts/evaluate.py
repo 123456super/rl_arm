@@ -19,6 +19,12 @@ def mean_finite(rows: list[dict[str, float | int]], field: str) -> float:
     return float(np.mean(values)) if len(values) else float("nan")
 
 
+def max_finite(rows: list[dict[str, float | int]], field: str) -> float:
+    values = np.asarray([row[field] for row in rows], dtype=np.float64)
+    values = values[np.isfinite(values)]
+    return float(np.max(values)) if len(values) else float("nan")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/default.yaml")
@@ -74,9 +80,14 @@ def main() -> None:
         filter_projection_failures = 0
         filter_fallbacks = 0
         filter_qp_used = 0
+        filter_qp_timeouts = 0
+        filter_compute_budget_stops = 0
         predictive_near_misses = 0
         predictive_h_mins = []
         filter_solve_times_s = []
+        filter_predictive_risk_times_s = []
+        filter_jacobian_workspace_times_s = []
+        filter_projection_times_s = []
         recovery_steps = 0
         recovery_triggered = False
         recovery_success = False
@@ -103,6 +114,9 @@ def main() -> None:
             intervention_norm = float(info.get("safety_filter_intervention_norm", float("nan")))
             predictive_h_min = float(info.get("predictive_h_min_m", float("nan")))
             solve_time_s = float(info.get("safety_filter_solve_time_s", float("nan")))
+            predictive_risk_time_s = float(info.get("safety_filter_predictive_risk_time_s", float("nan")))
+            jacobian_workspace_time_s = float(info.get("safety_filter_jacobian_workspace_time_s", float("nan")))
+            projection_time_s = float(info.get("safety_filter_projection_time_s", float("nan")))
             recovery_steps += int(bool(info.get("recovery_active", False)))
             recovery_triggered = recovery_triggered or bool(info.get("recovery_triggered", False))
             recovery_success = recovery_success or bool(info.get("recovery_success", False))
@@ -112,6 +126,8 @@ def main() -> None:
             filter_projection_failures += int(filter_status == "safe_stop_projection_failed")
             filter_fallbacks += int(bool(info.get("safety_filter_fallback_used", False)))
             filter_qp_used += int(bool(info.get("safety_filter_qp_solver_used", False)))
+            filter_qp_timeouts += int("time limit" in str(info.get("safety_filter_qp_solver_status", "")).lower())
+            filter_compute_budget_stops += int(filter_status == "safe_stop_compute_budget")
             if np.isfinite(intervention_norm):
                 filter_intervention_norms.append(intervention_norm)
             if np.isfinite(predictive_h_min):
@@ -119,6 +135,12 @@ def main() -> None:
                 predictive_near_misses += int(predictive_h_min < 0.0)
             if np.isfinite(solve_time_s):
                 filter_solve_times_s.append(solve_time_s)
+            if np.isfinite(predictive_risk_time_s):
+                filter_predictive_risk_times_s.append(predictive_risk_time_s)
+            if np.isfinite(jacobian_workspace_time_s):
+                filter_jacobian_workspace_times_s.append(jacobian_workspace_time_s)
+            if np.isfinite(projection_time_s):
+                filter_projection_times_s.append(projection_time_s)
             success = bool(info["success"])
             collision = bool(info["collision"])
             final_position_error = float(info["goal_error_norm"])
@@ -187,6 +209,9 @@ def main() -> None:
                         "filter_obstacle_position_m": info.get("filter_obstacle_position_m", ""),
                         "filter_obstacle_velocity_mps": info.get("filter_obstacle_velocity_mps", ""),
                         "safety_filter_solve_time_s": solve_time_s,
+                        "safety_filter_predictive_risk_time_s": predictive_risk_time_s,
+                        "safety_filter_jacobian_workspace_time_s": jacobian_workspace_time_s,
+                        "safety_filter_projection_time_s": projection_time_s,
                     }
                 )
             prev_qdot_cmd = info["qdot_cmd"].copy()
@@ -233,12 +258,28 @@ def main() -> None:
                 "safety_filter_qp_used_rate": (
                     filter_qp_used / max(step + 1, 1) if safety_filter_enabled else float("nan")
                 ),
+                "safety_filter_qp_timeout_rate": (
+                    filter_qp_timeouts / max(step + 1, 1) if safety_filter_enabled else float("nan")
+                ),
+                "safety_filter_compute_budget_stop_rate": (
+                    filter_compute_budget_stops / max(step + 1, 1) if safety_filter_enabled else float("nan")
+                ),
                 "predictive_near_miss_rate": (
                     predictive_near_misses / max(step + 1, 1) if safety_filter_enabled else float("nan")
                 ),
                 "min_predictive_h_m": min(predictive_h_mins) if predictive_h_mins else float("nan"),
                 "mean_safety_filter_solve_time_s": (
                     float(np.mean(filter_solve_times_s)) if filter_solve_times_s else float("nan")
+                ),
+                "max_safety_filter_solve_time_s": max(filter_solve_times_s, default=float("nan")),
+                "mean_safety_filter_predictive_risk_time_s": (
+                    float(np.mean(filter_predictive_risk_times_s)) if filter_predictive_risk_times_s else float("nan")
+                ),
+                "mean_safety_filter_jacobian_workspace_time_s": (
+                    float(np.mean(filter_jacobian_workspace_times_s)) if filter_jacobian_workspace_times_s else float("nan")
+                ),
+                "mean_safety_filter_projection_time_s": (
+                    float(np.mean(filter_projection_times_s)) if filter_projection_times_s else float("nan")
                 ),
                 "mean_action_variation": float(np.mean(action_variations)) if action_variations else 0.0,
                 "rms_acceleration": float(np.sqrt(np.mean(np.square(acc)))) if len(acc) else 0.0,
@@ -282,9 +323,15 @@ def main() -> None:
         "mean_safety_filter_projection_failure_rate": mean_finite(rows, "safety_filter_projection_failure_rate"),
         "mean_safety_filter_fallback_rate": mean_finite(rows, "safety_filter_fallback_rate"),
         "mean_safety_filter_qp_used_rate": mean_finite(rows, "safety_filter_qp_used_rate"),
+        "mean_safety_filter_qp_timeout_rate": mean_finite(rows, "safety_filter_qp_timeout_rate"),
+        "mean_safety_filter_compute_budget_stop_rate": mean_finite(rows, "safety_filter_compute_budget_stop_rate"),
         "mean_predictive_near_miss_rate": mean_finite(rows, "predictive_near_miss_rate"),
         "mean_min_predictive_h_m": mean_finite(rows, "min_predictive_h_m"),
         "mean_safety_filter_solve_time_s": mean_finite(rows, "mean_safety_filter_solve_time_s"),
+        "max_safety_filter_solve_time_s": max_finite(rows, "max_safety_filter_solve_time_s"),
+        "mean_safety_filter_predictive_risk_time_s": mean_finite(rows, "mean_safety_filter_predictive_risk_time_s"),
+        "mean_safety_filter_jacobian_workspace_time_s": mean_finite(rows, "mean_safety_filter_jacobian_workspace_time_s"),
+        "mean_safety_filter_projection_time_s": mean_finite(rows, "mean_safety_filter_projection_time_s"),
         "mean_action_variation": float(np.mean([r["mean_action_variation"] for r in rows])),
         "mean_rms_acceleration": float(np.mean([r["rms_acceleration"] for r in rows])),
         "mean_rms_jerk": float(np.mean([r["rms_jerk"] for r in rows])),

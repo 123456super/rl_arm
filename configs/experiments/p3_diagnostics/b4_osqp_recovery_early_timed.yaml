@@ -1,0 +1,8 @@
+# B4 diagnostic: cap every OSQP solve before cross-seed maximin recovery rechecks.
+includes:
+  - b4_osqp_recovery_early.yaml
+
+env:
+  safety_filter:
+    # Reserves 30 ms of the 50 ms control period for integration and fallback.
+    qp_time_limit_s: 0.02

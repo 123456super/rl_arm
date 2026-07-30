@@ -101,6 +101,19 @@ h_i = d_robust,i - d_safe
 
 已增加显式 recovery mode；最新诊断以 `h_min <= 0.06 m` 触发、`h_min >= 0.08 m` 退出，并将障碍物自身运动加入屏障约束 `J_h qdot + h_drift + kappa(h-m) >= 0`。seed 5301 的同一 B4 checkpoint 20-episode trace 显示：原多连杆 recovery 为 4 次碰撞，提前 recovery 为 3 次，放宽不可行预测约束为 2 次，maximin recovery 为 1 次；最后一轮成功 14/20。maximin 分支仅在预测约束不可行时执行，保持关节和工作空间硬约束、最大化危险连杆的最小 clearance 导数，并标记为 `recovery_relaxed`，不代表满足预测安全约束。episode 8 仍碰撞，且 episode 0 需 4.05 s recovery 后仍未完成任务。因此 recovery、约束放宽和 maximin 都未冻结，不得作为安全或实时性证据。
 
+### 6.2 bounded escape 复核结论（2026-07-30）
+
+`primal infeasible` 状态识别和 recovery 参数错位问题已修复，并通过 focused/integration `23 passed` 与 smoke test。使用同一 step 95000 checkpoint、eval seeds 5101/5201、每 seed 20 episodes 的 bounded escape 复核结果为：
+
+| eval seed | success | collision | safety violation steps | recovery triggered/success | mean solve | max solve |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 5101 | 10/20 | 1/20 | 27 | 15/14 | 4.32 ms | 176.24 ms |
+| 5201 | 13/20 | 1/20 | 0 | 16/15 | 5.23 ms | 198.50 ms |
+
+加入 50 ms simulator-side watchdog 后，seed 5101 有 1 次预算停止、seed 5201 有 7 次预算停止，最大记录耗时仍为 154.59 ms 和 221.09 ms；seed 5201 的安全违反增加到 21 步，碰撞没有下降。该 watchdog 是 post-return 检查，不能替代可中断求解器或独立硬件 watchdog。
+
+由此淘汰 bounded escape、`recovery_relaxed` 和 maximin recovery，不将其作为实时安全机制或论文主结果。当前唯一保留的开发入口为 `configs/experiments/p3_diagnostics/b4_osqp_strict_margin30_budget.yaml`：关闭 recovery 和预测约束放宽，保留 OSQP 20 ms 限时、30 mm 几何裕度和 50 ms 诊断预算。该入口的双 seed 结果完成前，不启动新的训练、P4/OOD 或真机工作。
+
 冻结设计后，使用至少 3 个、推荐 5 个未参与开发的 train seeds 和新 held-out eval seeds。训练重复单位是 train seed，不能把 episode 当作独立训练重复。OOD 至少包括障碍物速度/半径/方位、目标位置、位置和速度噪声、观测和控制时延、相机外参扰动。
 
 除成功率、碰撞率、最小距离、最终误差和 jerk 外，还要报告过滤器干预率/范数、停止率、近失事件率、风险检出率、漏检率、误停率、风险提前量、求解时间、超时率和不可行率。
@@ -118,7 +131,7 @@ h_i = d_robust,i - d_safe
 | P0 | 固化阶段一 | 历史结果可复跑，不再修改其结论 |
 | P1 | 预测风险与误差裕度 | **已完成开发验证**：单元测试覆盖几何、预测窗口、误差裕度、无效/未来/过期观测和边界值 |
 | P2 | 仿真安全过滤器 | **开发验证完成，诊断已完成多轮**：约束投影、Dykstra/主动集回退、OSQP QP、端到端命令出口、无效/过期状态注入和逐连杆 trace 已具备；常规过滤器通过 smoke test，仍未构成端到端或实机安全保证 |
-| P3 | 协同训练与消融 | **100k 开发轮次完成，未冻结**：B1--B5 与 recovery 已完成开发诊断；5301 的 maximin recovery 降低碰撞但超出实时预算、且仍有碰撞/任务退化，须先限时并跨 seed 复核，不能进入 P4/OOD 或真机 |
+| P3 | 协同训练与消融 | **100k 开发轮次完成，未冻结**：B1--B5 与 recovery 已完成开发诊断；bounded escape/maximin 未通过实时性与跨 seed 稳定性门槛，strict safe-stop 双 seed 复核待完成，不能进入 P4/OOD 或真机 |
 | P4 | 独立复核与 OOD | 新 train/eval seeds 和预定义统计完成 |
 | P5 | 低速真机 | 现场签核和安全受控试验记录齐全 |
 

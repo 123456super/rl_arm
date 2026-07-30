@@ -1,0 +1,8 @@
+# Bounded escape diagnostic with a simulator-side 50 ms compute watchdog.
+# This is for budget validation only; it is not an online safety guarantee.
+includes:
+  - b4_osqp_recovery_early_bounded_escape_margin30.yaml
+
+env:
+  safety_filter:
+    max_filter_compute_time_s: 0.05

@@ -1,4 +1,4 @@
-# 阶段一进展与新研究分支计划（2026-07-29）
+# 阶段一进展与新研究分支计划（2026-07-30）
 
 ## 1. 当前状态
 
@@ -30,7 +30,24 @@
 
 在同一 seed/checkpoint 的逐步诊断中，将 recovery 触发/退出改为 `h_min <= 0.06 m` / `h_min >= 0.08 m`。碰撞数从原多连杆 recovery 的 4/20 依次变为提前 recovery 的 3/20、计入漂移但零速度回退的 3/20、放宽不可行预测约束的 2/20，以及 maximin recovery 的 1/20；最后一轮成功率为 14/20。初始 `h=-0.0677 m` 的 episode 16 被明确标记为 `initially_unsafe=1`，并在 maximin recovery 下脱离后成功完成；不能据此将初始安全集外恢复表述为安全保证。
 
-maximin recovery 在预测约束不可行时，保持关节和工作空间硬约束，最大化所有未达退出裕度连杆的最小 clearance 导数，并以 `recovery_relaxed` 明确记录预测约束放宽。它避免了 episode 0 的碰撞，但 episode 8 仍碰撞，且最危险连杆残差仍为负；episode 0 还出现 4.05 s recovery 后未完成任务。该分支单步最高求解时间约 277 ms，超过 50 ms 控制周期，因而只可作为离线故障诊断，不能进入实时链路、P4、OOD 或真机。下一步应先为 maximin QP 设置严格计算预算/超时回退，并在相同 checkpoint 的 5101、5201 上复核，再决定是否保留该方向。
+maximin recovery 在预测约束不可行时，保持关节和工作空间硬约束，最大化所有未达退出裕度连杆的最小 clearance 导数，并以 `recovery_relaxed` 明确记录预测约束放宽。它避免了 episode 0 的碰撞，但 episode 8 仍碰撞，且最危险连杆残差仍为负；episode 0 还出现 4.05 s recovery 后未完成任务。该分支单步最高求解时间约 277 ms，超过 50 ms 控制周期，因而只可作为离线故障诊断，不能进入实时链路、P4、OOD 或真机。该历史诊断随后已完成限时/预算复核，并在 2026-07-30 的 bounded escape 结论中淘汰。
+
+### 最新进度（2026-07-30，bounded escape 复核与方案收敛）
+
+此前 `primal infeasible` 识别修复后，bounded escape 的两个入口均已完成同一 checkpoint、同一两个 eval seed 的 20 episode 复核。恢复分支的参数错位也已修复：`SafetyFilterInput` 不再被误传为 `projection_iterations`；安全过滤器 focused/integration 测试为 `23 passed`，目标配置 smoke test 通过。
+
+不带预算 watchdog 的 bounded escape 结果如下：
+
+| eval seed | success | collision | safety violation steps | recovery triggered/success | mean solve | max solve |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 5101 | 10/20 | 1/20 | 27 | 15/14 | 4.32 ms | 176.24 ms |
+| 5201 | 13/20 | 1/20 | 0 | 16/15 | 5.23 ms | 198.50 ms |
+
+对应指标文件为 `outputs/p3_diagnostics/b4_bounded_escape_margin30_fixarg_seed5101_metrics.csv` 和 `outputs/p3_diagnostics/b4_bounded_escape_margin30_fixarg_seed5201_metrics.csv`；预算复核文件为同名 `budget_seed5101/5201_metrics.csv`。
+
+加入 `max_filter_compute_time_s=0.05` 的预算诊断没有改善任务或安全结果：seed 5101 仍为 10/20、1/20、27 个违反步，发生 1 次预算停止；seed 5201 仍为 13/20、1/20，但出现 21 个违反步和 7 次预算停止。最大记录耗时仍为 154.59 ms 和 221.09 ms。该 watchdog 在过滤计算返回后才执行，不能真正中断超时的 OSQP/主动集计算。
+
+因此，bounded escape、`recovery_relaxed` 和 maximin recovery 均不进入实时链路，也不进入 P4/OOD 或真机验证。当前保留方案是严格安全停止：关闭 recovery mode、关闭预测约束放宽、保留 OSQP 20 ms 求解预算和 50 ms 诊断 watchdog，配置入口为 `configs/experiments/p3_diagnostics/b4_osqp_strict_margin30_budget.yaml`。该入口的两个 seed 结果尚未完成，完成前不冻结 P3 设计。
 
 主比较的模型训练、checkpoint selection、eval-seed held-out 评估和三-seed汇总均已完成；它们被冻结为阶段一基线，当前不需要继续训练或重跑。新研究的实施基准见 [research_direction.md](research_direction.md)：B1--B5 已在一个开发 train seed 和一个开发 eval seed 上完成 10k step 链路检查，但没有稳定的任务--安全增益，不能进入 P4 或作为论文证据。
 
@@ -50,7 +67,7 @@ maximin recovery 在预测约束不可行时，保持关节和工作空间硬约
 | P2 端到端失效注入与指标 | 已完成（开发验证） | 可注入有效、无效或过期障碍物估计；运行时记录预测状态、`h_min`、原始/过滤后命令、干预量、停止状态、违反量与求解耗时 |
 | P2 解析点雅可比与仿真实时性 | 已完成（开发验证） | 以 PyBullet 点雅可比替代有限差分状态保存/恢复；20 episode、2,693 个控制步中滤波器均值 2.68 ms、P95 4.94 ms，无步超过 50 ms |
 | P3 B1--B5 开发轮次 | 已完成（未冻结） | 共用 train seed 4101、100k step、validation seed 5201、eval seed 5101；B4/B5 无稳定综合优势 |
-| P3 过滤器约束诊断 | 已完成（未冻结） | 已增加逐连杆诊断、障碍物漂移项、提前 recovery、初始不安全标记和 `recovery_relaxed`；循环投影、Dykstra、主动集回退、OSQP QP 与 maximin recovery 均仅为开发诊断 |
+| P3 过滤器约束诊断 | 已完成（未冻结） | 已完成 OSQP 状态修复、逐连杆诊断、障碍物漂移项和 recovery 双 seed 复核；bounded escape/maximin 未通过实时性与稳定性门槛，strict safe-stop 配置待双 seed 复核 |
 | OSQP 依赖与后端 | 已完成（开发验证） | `osqp=1.1.3`、`scipy=1.18.0` 已安装；常规 OSQP 路径约 2.6--2.7 ms，但 maximin recovery 单步最高约 277 ms，尚不满足当前 50 ms 控制周期 |
 
 ## 3. 最终主对比口径
@@ -149,7 +166,7 @@ outputs/rechecks/heldout_1004_1006/final_3methods/eval_summary_macro_across_trai
 2. [安全过滤器](../src/rl_risk_sac/utils/safety_filter.py) 已以半空间投影实现 `J_h qdot + kappa h >= 0`，并同时处理关节位置、速度、加速度/命令连续性与外部工作空间约束。风险不可用、输入无效或约束不可行时，过滤器确定性输出零速度。
 3. [UR5 仿真环境](../src/rl_risk_sac/envs/ur5_dynamic_obstacle_env.py) 在 `env.safety_filter.enabled=true` 时将过滤器作为策略命令的唯一出口。通过 PyBullet 点雅可比和固定最优投影参数构造连杆安全函数与 TCP 工作空间雅可比；默认配置保持关闭，不改变阶段一结果。
 4. 已提供感知估计注入接口，可在仿真中复现无效和过期状态。端到端指标包括预测状态、`h_min`、原始与过滤后动作、干预范数、停止状态、活动约束数、最大违反量和求解时间。
-5. 当前回归结果为 `38 passed`，且 P2、B4、B5 的 PyBullet smoke test 已通过。过滤器已支持循环投影、Dykstra、主动集回退、可选 OSQP QP、显式 recovery 和多连杆加权逃逸方向。最新 recovery 诊断的求解耗时约 2.6--2.7 ms；该数字只覆盖当前 PyBullet 进程内的求解，不覆盖感知、通信、控制器和真实硬件延迟。
+5. 当前回归结果为 `38 passed`，且 P2、B4、B5 的 PyBullet smoke test 已通过。过滤器已支持循环投影、Dykstra、主动集回退、可选 OSQP QP、显式 recovery 和多连杆加权逃逸方向；新增的 OSQP infeasible/recovery 回归 focused suite 为 `23 passed`。bounded escape 双 seed 复核仍有 154--221 ms 的单步长尾，故当前只保留 strict safe-stop 入口做最终预算复核。所有耗时数字只覆盖当前 PyBullet 进程内的求解，不覆盖感知、通信、控制器和真实硬件延迟。
 
 ### 8.4 当前状态：P3 因子化开发轮次已完成，设计未冻结
 
@@ -164,6 +181,6 @@ outputs/rechecks/heldout_1004_1006/final_3methods/eval_summary_macro_across_trai
 | B5 鲁棒预测风险 + 鲁棒过滤器 | 0% | 20% | 4.55% | 介入率 47.96%，不可行停止率 8.23%，任务过于保守或训练不足 |
 
 2. B4/B5 的过滤器在 PyBullet 内分别达到 P95 3.89 ms 和 4.88 ms，均无控制步超过 50 ms；实时性不再是当前开发瓶颈，但这不是端到端或实机实时性结论。
-3. 100k 开发评估仍不支持冻结 B1--B5 参数、不支持进入 P4/OOD，也不支持把 B4/B5 写成降低碰撞率的证据。B4/B5 的 OSQP 诊断曾报告约 0.81%/2.41% `projection_failed`、0% `confirmed_infeasible`，但失败步的 OSQP 状态在最终回退路径中未被记录；该问题已修复，下一步必须用同一 checkpoint、同一 seed 重跑带 trace 的 OSQP 诊断。
-4. 重跑后若 OSQP 报告 `primal infeasible`，记录为真实约束不可行并分析鲁棒裕度与执行边界的冲突；若为 `maximum iterations reached` 或 `inaccurate_solution`，先调整求解精度/缩放，不扩大实验矩阵。只有求解状态稳定、任务--安全折中合理且多 seed 复核通过，才进入 P4/OOD。
-4. 设计冻结后，才可用新的 train seeds 和 held-out eval seeds 完成独立复核与 OOD 扰动；当前 P1/P2 测试和单 seed P3 结果不得替代此证据。真机工作仍停留在现场签核前。
+3. 100k 开发评估仍不支持冻结 B1--B5 参数、不支持进入 P4/OOD，也不支持把 B4/B5 写成降低碰撞率的证据。OSQP 状态记录和 `primal infeasible` 识别问题已修复，并已用同一 checkpoint、eval seeds 5101/5201 完成带 trace 的 bounded escape 复核。
+4. 复核表明 bounded escape 的碰撞仍为各 1/20，seed 间安全违反不稳定，且预算诊断仍出现 154--221 ms 长尾；因此淘汰 relaxed/maximin recovery。下一步只复核 `b4_osqp_strict_margin30_budget.yaml` 的严格 safe-stop 行为；只有停止率、不可行率和耗时均可解释，才讨论是否冻结 P3，否则停留在开发诊断。
+5. 设计冻结后，才可用新的 train seeds 和 held-out eval seeds 完成独立复核与 OOD 扰动；当前 P1/P2 测试和单 seed P3 结果不得替代此证据。真机工作仍停留在现场签核前。

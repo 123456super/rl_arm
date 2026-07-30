@@ -126,6 +126,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.sim_time_s = 0.0
         self.predictive_risk_config: PredictiveRiskConfig | None = None
         self.safety_filter_config: SafetyFilterConfig | None = None
+        self.last_filter_phase_times_s: dict[str, float] = {}
         self.obstacle_state_estimate_override: ObstacleStateEstimate | None = None
         self.recovery_active = False
         self.recovery_triggered = False
@@ -190,13 +191,19 @@ class UR5DynamicObstacleEnv(gym.Env):
 
         pre_risk = self._compute_policy_risk(self._compute_risk())
         predictive_risk_for_scaling = None
+        precomputed_risk_time_s = 0.0
         risk_speed_scale = 1.0
+        filter_cycle_started_at = perf_counter() if self.safety_filter_enabled else None
         if self.safety_filter_enabled and bool(self.safety_filter_cfg.get("risk_speed_scaling_enabled", False)):
+            phase_started_at = perf_counter()
             predictive_risk_for_scaling = self._compute_predictive_risk()
+            precomputed_risk_time_s += perf_counter() - phase_started_at
             risk_speed_scale = self._risk_speed_scale(predictive_risk_for_scaling)
         if self.safety_filter_enabled and bool(self.safety_filter_cfg.get("recovery_mode_enabled", False)):
             if predictive_risk_for_scaling is None:
+                phase_started_at = perf_counter()
                 predictive_risk_for_scaling = self._compute_predictive_risk()
+                precomputed_risk_time_s += perf_counter() - phase_started_at
             self._update_recovery_state(predictive_risk_for_scaling)
         qdot_policy = self.action_scale * action
         if self.method.endswith("adaptive"):
@@ -218,10 +225,16 @@ class UR5DynamicObstacleEnv(gym.Env):
         filter_link_diagnostics: dict[str, Any] = {}
         if self.safety_filter_enabled:
             if predictive_risk_for_scaling is None:
-                filter_result, predictive_risk, filter_solve_time_s = self._filter_command(qdot_requested)
+                filter_result, predictive_risk, filter_solve_time_s = self._filter_command(
+                    qdot_requested,
+                    cycle_started_at=filter_cycle_started_at,
+                )
             else:
                 filter_result, predictive_risk, filter_solve_time_s = self._filter_command(
-                    qdot_requested, predictive_risk_for_scaling
+                    qdot_requested,
+                    predictive_risk_for_scaling,
+                    cycle_started_at=filter_cycle_started_at,
+                    precomputed_risk_time_s=precomputed_risk_time_s,
                 )
         if filter_result is not None:
             qdot_cmd = filter_result.command_joint_velocity_radps.astype(np.float32)
@@ -286,7 +299,14 @@ class UR5DynamicObstacleEnv(gym.Env):
             }
         )
         if filter_result is not None:
-            info.update(self._filter_info(filter_result, predictive_risk, filter_solve_time_s))
+            info.update(
+                self._filter_info(
+                    filter_result,
+                    predictive_risk,
+                    filter_solve_time_s,
+                    self.last_filter_phase_times_s,
+                )
+            )
             info.update(filter_link_diagnostics)
         self.prev_qdot_cmd = qdot_cmd
         self.prev_joint_acc = joint_acc
@@ -489,20 +509,38 @@ class UR5DynamicObstacleEnv(gym.Env):
             ),
             fallback_projection_iterations=int(self.safety_filter_cfg.get("fallback_projection_iterations", 320)),
             use_qp_solver=bool(self.safety_filter_cfg.get("use_qp_solver", False)),
+            qp_time_limit_s=(
+                None
+                if self.safety_filter_cfg.get("qp_time_limit_s") is None
+                else float(self.safety_filter_cfg["qp_time_limit_s"])
+            ),
         )
 
     def _filter_command(
         self,
         qdot_requested: np.ndarray,
         predictive_risk_override: PredictiveLinkRisk | None = None,
+        cycle_started_at: float | None = None,
+        precomputed_risk_time_s: float = 0.0,
     ) -> tuple[SafetyFilterResult, PredictiveLinkRisk | None, float]:
         if self.predictive_risk_config is None or self.safety_filter_config is None:
             raise RuntimeError("Safety filter was enabled but not configured")
 
-        started_at = perf_counter()
+        started_at = perf_counter() if cycle_started_at is None else cycle_started_at
+        phase_times_s = {
+            "predictive_risk": float(precomputed_risk_time_s),
+            "jacobian_workspace": 0.0,
+            "projection": 0.0,
+        }
         try:
-            predictive_risk = predictive_risk_override or self._compute_predictive_risk()
+            if predictive_risk_override is None:
+                phase_started_at = perf_counter()
+                predictive_risk = self._compute_predictive_risk()
+                phase_times_s["predictive_risk"] += perf_counter() - phase_started_at
+            else:
+                predictive_risk = predictive_risk_override
             if predictive_risk.requires_safe_stop:
+                phase_started_at = perf_counter()
                 result = filter_joint_velocity(
                     SafetyFilterInput(
                         requested_joint_velocity_radps=qdot_requested,
@@ -513,11 +551,15 @@ class UR5DynamicObstacleEnv(gym.Env):
                     ),
                     self.safety_filter_config,
                 )
-                return result, predictive_risk, perf_counter() - started_at
+                phase_times_s["projection"] = perf_counter() - phase_started_at
+                return self._finalize_filter_command(result, predictive_risk, qdot_requested, started_at, phase_times_s)
 
+            phase_started_at = perf_counter()
             safety_jacobian, ee_position, ee_jacobian = self._analytic_constraint_jacobians(predictive_risk)
             workspace_constraints = self._workspace_velocity_constraints(ee_position, ee_jacobian)
             safety_drift = self._safety_drift_mps(predictive_risk)
+            phase_times_s["jacobian_workspace"] = perf_counter() - phase_started_at
+            phase_started_at = perf_counter()
             result = filter_joint_velocity(
                 SafetyFilterInput(
                     requested_joint_velocity_radps=qdot_requested,
@@ -542,7 +584,8 @@ class UR5DynamicObstacleEnv(gym.Env):
                 ),
                 self.safety_filter_config,
             )
-            return result, predictive_risk, perf_counter() - started_at
+            phase_times_s["projection"] = perf_counter() - phase_started_at
+            return self._finalize_filter_command(result, predictive_risk, qdot_requested, started_at, phase_times_s)
         except (ValueError, RuntimeError, p.error) as error:
             result = SafetyFilterResult(
                 command_joint_velocity_radps=np.zeros(self.joint_count, dtype=np.float64),
@@ -552,7 +595,49 @@ class UR5DynamicObstacleEnv(gym.Env):
                 active_constraint_count=0,
                 max_constraint_violation=0.0,
             )
-            return result, None, perf_counter() - started_at
+            return self._finalize_filter_command(result, None, qdot_requested, started_at, phase_times_s)
+
+    def _finalize_filter_command(
+        self,
+        result: SafetyFilterResult,
+        predictive_risk: PredictiveLinkRisk | None,
+        qdot_requested: np.ndarray,
+        started_at: float,
+        phase_times_s: dict[str, float],
+    ) -> tuple[SafetyFilterResult, PredictiveLinkRisk | None, float]:
+        elapsed_s = perf_counter() - started_at
+        self.last_filter_phase_times_s = phase_times_s
+        compute_budget_s = self.safety_filter_cfg.get("max_filter_compute_time_s")
+        if compute_budget_s is None:
+            return result, predictive_risk, elapsed_s
+        compute_budget_s = float(compute_budget_s)
+        if not np.isfinite(compute_budget_s) or compute_budget_s <= 0.0:
+            raise ValueError("max_filter_compute_time_s must be finite and positive when set")
+        if elapsed_s <= compute_budget_s:
+            return result, predictive_risk, elapsed_s
+        return (
+            SafetyFilterResult(
+                command_joint_velocity_radps=np.zeros(self.joint_count, dtype=np.float64),
+                status=SafetyFilterStatus.SAFE_STOP_COMPUTE_BUDGET,
+                reason=(
+                    f"safety-filter computation took {elapsed_s:.6f}s, "
+                    f"exceeding the {compute_budget_s:.6f}s diagnostic budget"
+                ),
+                intervention_norm_radps=float(np.linalg.norm(qdot_requested)),
+                active_constraint_count=result.active_constraint_count,
+                max_constraint_violation=result.max_constraint_violation,
+                constraint_count=result.constraint_count,
+                active_constraint_categories=result.active_constraint_categories,
+                max_constraint_category=result.max_constraint_category,
+                projection_iterations=result.projection_iterations,
+                fallback_used=result.fallback_used,
+                qp_solver_used=result.qp_solver_used,
+                qp_solver_status=result.qp_solver_status,
+                fallback_stage=result.fallback_stage,
+            ),
+            predictive_risk,
+            elapsed_s,
+        )
 
     def _compute_predictive_risk(self) -> PredictiveLinkRisk:
         if self.predictive_risk_config is None:
@@ -723,6 +808,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         result: SafetyFilterResult,
         predictive_risk: PredictiveLinkRisk | None,
         solve_time_s: float | None,
+        phase_times_s: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         predictive_info = {
             "predictive_risk_status": "integration_error",
@@ -753,6 +839,9 @@ class UR5DynamicObstacleEnv(gym.Env):
             "safety_filter_max_constraint_violation": float(result.max_constraint_violation),
             "safety_filter_safe_stop": bool(result.requires_safe_stop),
             "safety_filter_solve_time_s": float(solve_time_s) if solve_time_s is not None else float("nan"),
+            "safety_filter_predictive_risk_time_s": float((phase_times_s or {}).get("predictive_risk", 0.0)),
+            "safety_filter_jacobian_workspace_time_s": float((phase_times_s or {}).get("jacobian_workspace", 0.0)),
+            "safety_filter_projection_time_s": float((phase_times_s or {}).get("projection", 0.0)),
             **predictive_info,
         }
 

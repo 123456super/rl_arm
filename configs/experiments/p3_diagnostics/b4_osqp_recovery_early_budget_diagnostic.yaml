@@ -1,0 +1,8 @@
+# Isolated timing diagnostic. Do not compare its task metrics with timed recovery results.
+includes:
+  - b4_osqp_recovery_early_timed.yaml
+
+env:
+  safety_filter:
+    # Simulator-only post-return stop; a physical controller still needs an independent watchdog.
+    max_filter_compute_time_s: 0.05

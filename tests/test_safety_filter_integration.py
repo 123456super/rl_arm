@@ -88,7 +88,7 @@ def test_enabled_filter_is_the_only_command_path() -> None:
             active_constraint_count=0,
             max_constraint_violation=0.0,
         )
-        env._filter_command = lambda _: (safe_stop, None, 0.0)  # type: ignore[method-assign]
+        env._filter_command = lambda *_args, **_kwargs: (safe_stop, None, 0.0)  # type: ignore[method-assign]
 
         _, _, _, _, _, info = env.step(np.ones(env.action_space.shape, dtype=np.float32))
 
@@ -122,8 +122,27 @@ def test_enabled_filter_produces_runtime_metrics() -> None:
         assert info["predictive_risk_status"] == PredictionStatus.VALID.value
         assert np.isfinite(info["predictive_h_min_m"])
         assert info["safety_filter_solve_time_s"] >= 0.0
+        assert info["safety_filter_predictive_risk_time_s"] >= 0.0
+        assert info["safety_filter_jacobian_workspace_time_s"] >= 0.0
+        assert info["safety_filter_projection_time_s"] >= 0.0
         assert np.isfinite(info["qdot_cmd"]).all()
         assert info["risk_speed_scale"] == 1.0
+    finally:
+        env.close()
+
+
+def test_filter_compute_budget_forces_zero_velocity_after_an_overrun() -> None:
+    config = copy.deepcopy(load_config("configs/default.yaml"))
+    config["env"]["safety_filter"]["enabled"] = True
+    config["env"]["safety_filter"]["max_filter_compute_time_s"] = 1.0e-12
+    env = UR5DynamicObstacleEnv(config, method="link_fixed")
+    try:
+        env.reset(seed=18)
+        _, _, _, _, _, info = env.step(np.ones(env.action_space.shape, dtype=np.float32))
+
+        np.testing.assert_array_equal(info["qdot_cmd"], np.zeros(env.action_space.shape))
+        assert info["safety_filter_status"] == SafetyFilterStatus.SAFE_STOP_COMPUTE_BUDGET.value
+        assert info["safety_filter_safe_stop"] is True
     finally:
         env.close()
 
