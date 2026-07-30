@@ -118,6 +118,23 @@ h_i = d_robust,i - d_safe
 
 除成功率、碰撞率、最小距离、最终误差和 jerk 外，还要报告过滤器干预率/范数、停止率、近失事件率、风险检出率、漏检率、误停率、风险提前量、求解时间、超时率和不可行率。
 
+### 6.3 几何修正后的 strict safe-stop 诊断（2026-07-30）
+
+UR5 胶囊映射已修正，重点修复 `upper_arm` 的近零长度错误映射，并补齐前臂与腕部段。两个几何修正后的 20k B4 开发训练均已完成：train seed `4102` 选择 step `20000`，train seed `4103` 选择 step `15000`，validation seed 均为 `6201`。
+
+使用 `configs/experiments/p3_diagnostics/b4_osqp_strict_margin30_budget.yaml`、eval seed `6101`、每个 checkpoint 20 episodes 的当前结果：
+
+| train seed | checkpoint | success | collision | capsule overlap | PyBullet contact | violation steps | mean solve | max solve |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4102 | 20000 | 7/20 | 1/20 | 0/20 | 1/20 | 123 | 4.42 ms | 206.69 ms |
+| 4103 | 15000 | 6/20 | 1/20 | 0/20 | 1/20 | 4 | 4.43 ms | 146.43 ms |
+
+两次碰撞均为 PyBullet 对 `upper_arm_link` 的实际接触，胶囊重叠字段为 false；因此碰撞审计已区分物理接触与胶囊模型重叠，但上臂几何包络仍需进一步审计。两组 strict 结果都存在超过 50 ms 的求解长尾，且任务成功率仅为 30--35%，不能冻结 P3，也不能作为实时安全保证。当前只有 eval seed `6101`，尚未形成新的 held-out eval seed 复核。
+
+对提前降速 trace 的 safe-stop 漂移审计显示，11 个不可行停止 episode 中 4 个为 `h` 下降超过 `0.05 m/s` 的动态漂移型，3 次碰撞全部位于动态漂移型；其余 7 个为静态或缓慢漂移型。该结果说明障碍物持续运动时零速度 safe-stop 不能保证保持安全集；后续方案必须区分静态不可行与动态漂移不可行，并明确任何逃逸动作不再属于严格安全保证。
+
+当前不继续训练，不启动 P4/OOD 或真机。下一步仅保留三项：完善 collision mesh 的 local transform 审计；对动态漂移不可行构造离线、带硬关节约束的逃逸诊断；完成独立 held-out eval seeds 后再决定 P3 是否冻结。
+
 ## 7. 真机验证边界
 
 真机只在限速、围栏、急停、保护停、超时停止、相机标定和感知失效停止签核后测试，不主动制造碰撞。以无障碍到达、低风险穿越、上臂/肘部/前臂接近、感知短时丢失和受控时延为主，记录检测状态、时间戳、障碍物估计、风险/裕度、策略与过滤后动作、停止事件、`d_min` 和控制时延。
@@ -131,7 +148,7 @@ h_i = d_robust,i - d_safe
 | P0 | 固化阶段一 | 历史结果可复跑，不再修改其结论 |
 | P1 | 预测风险与误差裕度 | **已完成开发验证**：单元测试覆盖几何、预测窗口、误差裕度、无效/未来/过期观测和边界值 |
 | P2 | 仿真安全过滤器 | **开发验证完成，诊断已完成多轮**：约束投影、Dykstra/主动集回退、OSQP QP、端到端命令出口、无效/过期状态注入和逐连杆 trace 已具备；常规过滤器通过 smoke test，仍未构成端到端或实机安全保证 |
-| P3 | 协同训练与消融 | **100k 开发轮次完成，未冻结**：B1--B5 与 recovery 已完成开发诊断；bounded escape/maximin 未通过实时性与跨 seed 稳定性门槛，strict safe-stop 双 seed 复核待完成，不能进入 P4/OOD 或真机 |
+| P3 | 协同训练与消融 | **100k 开发轮次完成，未冻结**：B1--B5 与 recovery 已完成开发诊断；bounded escape/maximin 未通过实时性与跨 seed 稳定性门槛；几何修正后的 strict safe-stop 在 eval seed 6101 上仍有各 1/20 碰撞和 146--207 ms 长尾，不能进入 P4/OOD 或真机 |
 | P4 | 独立复核与 OOD | 新 train/eval seeds 和预定义统计完成 |
 | P5 | 低速真机 | 现场签核和安全受控试验记录齐全 |
 

@@ -112,6 +112,10 @@ def test_enabled_filter_produces_runtime_metrics() -> None:
             SafetyFilterStatus.PASSTHROUGH.value,
             SafetyFilterStatus.FILTERED.value,
         }
+        assert info["collision_capsule_overlap"] is False
+        assert info["collision_pybullet_contact"] is False
+        assert info["collision_contact_link_indices"] == ""
+        assert info["collision_contact_link_names"] == ""
         assert info["safety_filter_constraint_count"] == 12
         assert 0 <= info["safety_filter_active_constraints"] <= 12
         assert isinstance(info["safety_filter_active_constraint_categories"], str)

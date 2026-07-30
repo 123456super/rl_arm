@@ -42,6 +42,7 @@ class SafetyFilterConfig:
     max_projection_iterations: int = 80
     constraint_tolerance: float = 1e-8
     projection_failure_tolerance: float = 1e-6
+    allow_iterative_fallback: bool = True
     active_set_fallback_enabled: bool = True
     active_set_max_candidate_constraints: int = 12
     fallback_projection_iterations: int = 320
@@ -244,7 +245,7 @@ def filter_joint_velocity(
 
     violations = bounds - rows @ command
     max_violation = float(max(0.0, np.max(violations, initial=0.0)))
-    if max_violation > config.projection_failure_tolerance:
+    if max_violation > config.projection_failure_tolerance and config.allow_iterative_fallback:
         fallback_stage = ""
         fallback_command = _dykstra_projection(
             requested,

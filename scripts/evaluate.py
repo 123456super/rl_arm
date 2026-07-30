@@ -95,6 +95,8 @@ def main() -> None:
         initial_predictive_h_m = float(reset_info.get("recovery_initial_h_min_m", float("nan")))
         success = False
         collision = False
+        collision_capsule_overlap = False
+        collision_pybullet_contact = False
         final_position_error = 0.0
         closest_link = -1
         prev_qdot_cmd = np.zeros(env.action_space.shape[0], dtype=np.float32)
@@ -143,6 +145,8 @@ def main() -> None:
                 filter_projection_times_s.append(projection_time_s)
             success = bool(info["success"])
             collision = bool(info["collision"])
+            collision_capsule_overlap = bool(info.get("collision_capsule_overlap", False))
+            collision_pybullet_contact = bool(info.get("collision_pybullet_contact", False))
             final_position_error = float(info["goal_error_norm"])
             closest_link = int(info["closest_link"])
             if trace_dir is not None:
@@ -159,6 +163,13 @@ def main() -> None:
                         "closest_link": closest_link,
                         "safety_violation": int(info["safety_violation"]),
                         "collision": int(info["collision"]),
+                        "collision_capsule_overlap": int(bool(info.get("collision_capsule_overlap", False))),
+                        "collision_pybullet_contact": int(bool(info.get("collision_pybullet_contact", False))),
+                        "collision_contact_link_indices": info.get("collision_contact_link_indices", ""),
+                        "collision_contact_link_names": info.get("collision_contact_link_names", ""),
+                        "collision_min_contact_distance": float(
+                            info.get("collision_min_contact_distance", float("nan"))
+                        ),
                         "success": int(info["success"]),
                         "qdot_norm": float(np.linalg.norm(info["qdot_cmd"])),
                         "acc_norm": float(np.linalg.norm(info["joint_acc"])),
@@ -229,6 +240,13 @@ def main() -> None:
                 "length": step + 1,
                 "success": int(success),
                 "collision": int(collision),
+                "collision_capsule_overlap": int(collision_capsule_overlap),
+                "collision_pybullet_contact": int(collision_pybullet_contact),
+                "collision_contact_link_indices": info.get("collision_contact_link_indices", ""),
+                "collision_contact_link_names": info.get("collision_contact_link_names", ""),
+                "collision_min_contact_distance": float(
+                    info.get("collision_min_contact_distance", float("nan"))
+                ),
                 "non_end_link_collision": int(non_end_link_collision),
                 "final_position_error": final_position_error,
                 "completion_time": (step + 1) * float(config["env"]["control_dt"]),
@@ -311,6 +329,8 @@ def main() -> None:
         "episodes": len(rows),
         "success_rate": float(np.mean([r["success"] for r in rows])),
         "collision_rate": float(np.mean([r["collision"] for r in rows])),
+        "collision_capsule_overlap_rate": float(np.mean([r["collision_capsule_overlap"] for r in rows])),
+        "collision_pybullet_contact_rate": float(np.mean([r["collision_pybullet_contact"] for r in rows])),
         "non_end_link_collision_rate": float(np.mean([r["non_end_link_collision"] for r in rows])),
         "mean_final_position_error": float(np.mean([r["final_position_error"] for r in rows])),
         "mean_min_distance": float(np.mean([r["min_distance"] for r in rows])),

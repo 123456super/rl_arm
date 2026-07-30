@@ -259,7 +259,14 @@ class UR5DynamicObstacleEnv(gym.Env):
         obs, info = self._get_obs_and_info()
         current_risk = self.last_risk
         policy_risk = self.last_policy_risk
-        collision = self._has_collision(current_risk.d_min)
+        (
+            collision_capsule_overlap,
+            collision_pybullet_contact,
+            collision_contact_link_indices,
+            collision_contact_link_names,
+            collision_min_contact_distance,
+        ) = self._collision_sources(current_risk.d_min)
+        collision = collision_capsule_overlap or collision_pybullet_contact
         success = info["goal_error_norm"] < self.success_tolerance and current_risk.d_min > self.risk_config.d_safe
         terminated = bool(collision or success)
         truncated = self.step_count >= self.max_episode_steps
@@ -276,6 +283,11 @@ class UR5DynamicObstacleEnv(gym.Env):
                 "reward": float(reward),
                 "cost": float(cost),
                 "collision": bool(collision),
+                "collision_capsule_overlap": bool(collision_capsule_overlap),
+                "collision_pybullet_contact": bool(collision_pybullet_contact),
+                "collision_contact_link_indices": collision_contact_link_indices,
+                "collision_contact_link_names": collision_contact_link_names,
+                "collision_min_contact_distance": collision_min_contact_distance,
                 "success": bool(success),
                 "qdot_cmd": qdot_cmd.copy(),
                 "joint_acc": joint_acc.copy(),
@@ -503,6 +515,7 @@ class UR5DynamicObstacleEnv(gym.Env):
                     max(float(self.safety_filter_cfg["constraint_tolerance"]) * 100.0, 1.0e-6),
                 )
             ),
+            allow_iterative_fallback=bool(self.safety_filter_cfg.get("allow_iterative_fallback", True)),
             active_set_fallback_enabled=bool(self.safety_filter_cfg.get("active_set_fallback_enabled", True)),
             active_set_max_candidate_constraints=int(
                 self.safety_filter_cfg.get("active_set_max_candidate_constraints", 12)
@@ -998,17 +1011,34 @@ class UR5DynamicObstacleEnv(gym.Env):
     def _capsules(self) -> list[CapsuleState]:
         return self.capsule_model.states(self.robot_id, self.physics_client_id)
 
-    def _has_collision(self, d_min: float) -> bool:
+    def _collision_sources(self, d_min: float) -> tuple[bool, bool, str, str, float]:
         if not self.obstacle_enabled or self.obstacle_id is None:
-            return False
-        if d_min <= 0.0:
-            return True
+            return False, False, "", "", float("nan")
+        capsule_overlap = d_min <= 0.0
         contacts = p.getContactPoints(
             bodyA=self.robot_id,
             bodyB=self.obstacle_id,
             physicsClientId=self.physics_client_id,
         )
-        return len(contacts) > 0
+        link_indices = sorted({int(contact[3]) for contact in contacts})
+        link_names = []
+        for link_index in link_indices:
+            if link_index < 0:
+                link_names.append("base")
+            else:
+                link_names.append(
+                    p.getJointInfo(self.robot_id, link_index, physicsClientId=self.physics_client_id)[12].decode(
+                        "utf-8"
+                    )
+                )
+        contact_distances = [float(contact[8]) for contact in contacts]
+        return (
+            capsule_overlap,
+            bool(contacts),
+            "|".join(str(index) for index in link_indices),
+            "|".join(link_names),
+            min(contact_distances, default=float("nan")),
+        )
 
     def _reset_robot(self) -> None:
         reset_cfg = self.robot_cfg["reset"]

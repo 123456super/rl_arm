@@ -167,6 +167,19 @@ def test_infeasible_safety_constraint_falls_back_to_safe_stop() -> None:
     np.testing.assert_array_equal(result.command_joint_velocity_radps, [0.0])
 
 
+def test_strict_projection_does_not_enter_iterative_fallback() -> None:
+    strict_config = replace(config(), allow_iterative_fallback=False, max_projection_iterations=1)
+    result = filter_joint_velocity(
+        filter_input(risk_with_safety_function(-0.1), requested=-0.8),
+        strict_config,
+    )
+
+    assert result.status is SafetyFilterStatus.FILTERED
+    assert result.fallback_stage == ""
+    assert result.fallback_used is False
+    assert result.projection_iterations == 1
+
+
 def test_primal_infeasible_osqp_status_forces_safe_stop(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         safety_filter_module,

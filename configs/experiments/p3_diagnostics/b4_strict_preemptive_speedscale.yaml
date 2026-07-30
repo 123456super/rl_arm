@@ -1,0 +1,10 @@
+# Strict-filter diagnostic with earlier barrier enforcement and continuous slowdown.
+includes:
+  - b4_osqp_strict_margin30_budget.yaml
+
+env:
+  safety_filter:
+    preemptive_margin_m: 0.03
+    risk_speed_scaling_enabled: true
+    risk_speed_scaling_start_m: 0.08
+    risk_speed_scaling_stop_m: 0.0

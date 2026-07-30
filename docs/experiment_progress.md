@@ -8,7 +8,7 @@
 
 ### 当前进度标记
 
-**阶段一已闭环；P1/P2 已完成开发验证；P3 的 B1--B5、OSQP、recovery 与多连杆逃逸已完成开发诊断，但设计尚未冻结。**
+**阶段一已闭环；P1/P2 已完成开发验证；P3 的 B1--B5、OSQP、recovery 与多连杆逃逸已完成开发诊断，但设计尚未冻结。几何修正后的 strict safe-stop 已完成一轮 2x20 episode 诊断，仍未达到冻结门槛。**
 
 ### 最新进度（2026-07-29，Recovery、动态漂移与 maximin 逃逸诊断）
 
@@ -49,6 +49,23 @@ maximin recovery 在预测约束不可行时，保持关节和工作空间硬约
 
 因此，bounded escape、`recovery_relaxed` 和 maximin recovery 均不进入实时链路，也不进入 P4/OOD 或真机验证。当前保留方案是严格安全停止：关闭 recovery mode、关闭预测约束放宽、保留 OSQP 20 ms 求解预算和 50 ms 诊断 watchdog，配置入口为 `configs/experiments/p3_diagnostics/b4_osqp_strict_margin30_budget.yaml`。该入口的两个 seed 结果尚未完成，完成前不冻结 P3 设计。
 
+### 最新进度（2026-07-30，几何修正后的 strict safe-stop 诊断）
+
+UR5 胶囊映射已修正：`upper_arm` 从 `shoulder_link -> upper_arm_link` 改为 `shoulder_link -> forearm_link`，并补齐后续前臂/腕部段。几何修正后的 B4 开发训练已完成两个 20k train seed，checkpoint selection 使用 validation seed `6201`：seed `4102` 选择 `actor_step_20000.pt`，seed `4103` 选择 `actor_step_15000.pt`。
+
+在严格 OSQP 配置 `b4_osqp_strict_margin30_budget.yaml`、eval seed `6101`、每个 seed 20 episodes 下，结果为：
+
+| train seed | selected checkpoint | success | collision | capsule overlap | PyBullet contact | violation steps | mean solve | max solve |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4102 | 20000 | 7/20 | 1/20 | 0/20 | 1/20 | 123 | 4.42 ms | 206.69 ms |
+| 4103 | 15000 | 6/20 | 1/20 | 0/20 | 1/20 | 4 | 4.43 ms | 146.43 ms |
+
+两次碰撞均为 PyBullet 实际接触，接触连杆为 `upper_arm_link`，胶囊重叠检测为 false；这说明碰撞审计已能区分“胶囊模型漏检”和物理引擎接触。两组结果都出现超过 50 ms 的单步长尾，且成功率仅为 30--35%，因此不能冻结 P3，也不能把严格 safe-stop 描述为已满足实时安全保证。当前结果只覆盖 eval seed `6101`，不能替代新的 held-out eval seeds `5101/5201` 的完整复核。
+
+对提前降速诊断 trace 的漂移审计显示：11 个进入 `safe_stop_infeasible` 的 episode 中，4 个属于 `h` 下降超过 `0.05 m/s` 的动态漂移型，3 次碰撞全部集中在该类别；静态或缓慢漂移型共 7 个。结论是障碍物持续运动会使零速度 safe-stop 离开安全集，后续必须把“静态不可行”和“动态漂移不可行”分开处理。该审计是故障机理诊断，不是安全保证。
+
+当前主要问题：上臂实际接触仍未被胶囊重叠可靠覆盖；预测安全裕度在动态漂移下会下降；严格 OSQP 平均耗时较低但存在 146--207 ms 长尾；过滤器高干预/不可行时任务成功率明显下降。下一步只做离线碰撞几何变换审计、动态漂移故障分析和独立 held-out 复核，不启动新的训练、P4/OOD 或真机。
+
 主比较的模型训练、checkpoint selection、eval-seed held-out 评估和三-seed汇总均已完成；它们被冻结为阶段一基线，当前不需要继续训练或重跑。新研究的实施基准见 [research_direction.md](research_direction.md)：B1--B5 已在一个开发 train seed 和一个开发 eval seed 上完成 10k step 链路检查，但没有稳定的任务--安全增益，不能进入 P4 或作为论文证据。
 
 ## 2. 已完成工作
@@ -67,7 +84,7 @@ maximin recovery 在预测约束不可行时，保持关节和工作空间硬约
 | P2 端到端失效注入与指标 | 已完成（开发验证） | 可注入有效、无效或过期障碍物估计；运行时记录预测状态、`h_min`、原始/过滤后命令、干预量、停止状态、违反量与求解耗时 |
 | P2 解析点雅可比与仿真实时性 | 已完成（开发验证） | 以 PyBullet 点雅可比替代有限差分状态保存/恢复；20 episode、2,693 个控制步中滤波器均值 2.68 ms、P95 4.94 ms，无步超过 50 ms |
 | P3 B1--B5 开发轮次 | 已完成（未冻结） | 共用 train seed 4101、100k step、validation seed 5201、eval seed 5101；B4/B5 无稳定综合优势 |
-| P3 过滤器约束诊断 | 已完成（未冻结） | 已完成 OSQP 状态修复、逐连杆诊断、障碍物漂移项和 recovery 双 seed 复核；bounded escape/maximin 未通过实时性与稳定性门槛，strict safe-stop 配置待双 seed 复核 |
+| P3 过滤器约束诊断 | 已完成（未冻结） | 已完成 OSQP 状态修复、逐连杆诊断、障碍物漂移项、recovery 与几何修正后的 strict safe-stop 诊断；strict 2x20 结果仍有碰撞、长尾和任务退化，不能冻结 |
 | OSQP 依赖与后端 | 已完成（开发验证） | `osqp=1.1.3`、`scipy=1.18.0` 已安装；常规 OSQP 路径约 2.6--2.7 ms，但 maximin recovery 单步最高约 277 ms，尚不满足当前 50 ms 控制周期 |
 
 ## 3. 最终主对比口径
@@ -182,5 +199,5 @@ outputs/rechecks/heldout_1004_1006/final_3methods/eval_summary_macro_across_trai
 
 2. B4/B5 的过滤器在 PyBullet 内分别达到 P95 3.89 ms 和 4.88 ms，均无控制步超过 50 ms；实时性不再是当前开发瓶颈，但这不是端到端或实机实时性结论。
 3. 100k 开发评估仍不支持冻结 B1--B5 参数、不支持进入 P4/OOD，也不支持把 B4/B5 写成降低碰撞率的证据。OSQP 状态记录和 `primal infeasible` 识别问题已修复，并已用同一 checkpoint、eval seeds 5101/5201 完成带 trace 的 bounded escape 复核。
-4. 复核表明 bounded escape 的碰撞仍为各 1/20，seed 间安全违反不稳定，且预算诊断仍出现 154--221 ms 长尾；因此淘汰 relaxed/maximin recovery。下一步只复核 `b4_osqp_strict_margin30_budget.yaml` 的严格 safe-stop 行为；只有停止率、不可行率和耗时均可解释，才讨论是否冻结 P3，否则停留在开发诊断。
+4. 复核表明 bounded escape 的碰撞仍为各 1/20，seed 间安全违反不稳定，且预算诊断仍出现 154--221 ms 长尾；因此淘汰 relaxed/maximin recovery。几何修正后的 strict safe-stop 在 eval seed 6101 上仍为 1/20 碰撞、146--207 ms 长尾，且成功率为 6--7/20；因此继续停留在开发诊断。
 5. 设计冻结后，才可用新的 train seeds 和 held-out eval seeds 完成独立复核与 OOD 扰动；当前 P1/P2 测试和单 seed P3 结果不得替代此证据。真机工作仍停留在现场签核前。

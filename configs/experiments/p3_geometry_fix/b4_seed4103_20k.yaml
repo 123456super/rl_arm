@@ -1,0 +1,21 @@
+# Geometry-corrected B4 development run.
+includes:
+  - ../p3/b4_predictive_nonrobust_filter.yaml
+
+seed: 4103
+
+train:
+  total_steps: 20000
+  save_interval: 5000
+  output_dir: outputs/p3_geometry_fix/b4_seed4103_20k
+
+checkpoint_selection:
+  seed: 6201
+  episodes: 20
+  metric: mean_reward
+
+eval:
+  method: link_fixed
+  episodes: 20
+  seed: 6101
+

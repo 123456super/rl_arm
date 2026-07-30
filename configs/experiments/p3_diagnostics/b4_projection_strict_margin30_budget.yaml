@@ -1,0 +1,10 @@
+# Strict safe-stop diagnostic using bounded cyclic projection instead of OSQP.
+includes:
+  - b4_osqp_strict_margin30_budget.yaml
+
+env:
+  safety_filter:
+    use_qp_solver: false
+    max_projection_iterations: 8
+    allow_iterative_fallback: false
+    active_set_fallback_enabled: false
