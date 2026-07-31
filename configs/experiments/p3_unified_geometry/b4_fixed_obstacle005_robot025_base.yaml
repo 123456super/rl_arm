@@ -1,0 +1,12 @@
+# P3 low-speed isolation condition.
+# Obstacle and robot speeds are fixed independently:
+# obstacle speed is m/s; robot joint command speed is rad/s.
+includes:
+  - b4_fixed_speed010_base.yaml
+
+env:
+  # Low robot joint-speed limit used by policy, filter, and command clipping.
+  action_scale: 0.25
+  obstacle:
+    # Low non-zero obstacle speed; keep dynamic drift observable.
+    speed_range: [0.05, 0.05]

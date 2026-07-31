@@ -1,0 +1,8 @@
+# Held-out evaluation stream for the low-speed isolation condition.
+includes:
+  - b4_fixed_obstacle005_robot025_base.yaml
+
+eval:
+  method: link_fixed
+  episodes: 20
+  seed: 5201

@@ -1,0 +1,20 @@
+# Independent training replicate for the low-speed isolation condition.
+includes:
+  - b4_fixed_obstacle005_robot100_base.yaml
+
+seed: 4109
+
+train:
+  total_steps: 100000
+  save_interval: 5000
+  output_dir: outputs/p3_unified_geometry/b4_fixed_obstacle005_robot100_seed4109_100k
+
+checkpoint_selection:
+  seed: 5201
+  episodes: 20
+  metric: mean_reward
+
+eval:
+  method: link_fixed
+  episodes: 20
+  seed: 5101

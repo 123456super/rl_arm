@@ -30,8 +30,8 @@
 
 - P0 阶段一主比较已冻结；本文不修改其结论。
 - P1/P2 仅表示风险、过滤器和诊断链路完成开发验证，不代表端到端安全保证。
-- P3 尚未冻结。当前证据只支持固定预算、硬约束优先的仿真失效分析。
-- 在 P3 通过固定时间预算、碰撞分类、任务性能和不可行率门槛前，不启动新训练、P4/OOD、实时链路或真机验证。
+- P3 尚未冻结。本轮先在统一配置下解决几何一致性、动态可行性、碰撞口径和任务退化问题；实时性/耗时暂不作为本轮阻塞条件。
+- 在 P3 通过统一几何、碰撞分类、动态可行性、任务性能和不可行率门槛前，不进入 P4/OOD 或真机验证。实时性仍是最终部署门槛，但本轮只记录，不用它阻止离线训练和诊断。
 - `recovery_relaxed`、bounded/maximin escape 只能作为离线诊断，不能作为安全保证或论文主结果。
 
 ## 3. 结果总览
@@ -66,6 +66,22 @@ frame-corrected 几何、strict OSQP、20 ms 求解限时、50 ms 诊断预算�
 ### 3.3 历史 mesh-fit 结果
 
 历史 300 回合 mesh-fit 复核为 success `19/300`、collision `105/300`；其中 82 次 capsule-only、24 次触发 PyBullet contact、仅 1 次同时触发。该结果说明胶囊模型会误报，也可能漏掉物理接触；几何采样覆盖不能替代完整动态碰撞判据。该历史数据不与最新 deterministic 数值混合。
+
+### 3.3 固定速度边界诊断（2026-07-31）
+
+在相同 frame-corrected 几何、strict QP、安全 margin 0.03 m、两个历史 B4 checkpoint、两个 eval seed 的条件下，完成了 5 个固定障碍物速度，每个速度 80 episodes（共 400 episodes）。速度边界汇总文件为 outputs/p3_diagnostics/speed_boundary/speed_boundary_summary.csv。
+
+注意：该 CSV 的 speed_mps 展示字段存在除以 1000 的标签错误。配置后缀 speed_005/010/020/030/038 对应的实际速度分别是 0.05/0.10/0.20/0.30/0.38 m/s，以下表格按配置实际值修正。
+
+| 实际速度 (m/s) | episodes | success | collision | capsule overlap | PyBullet contact | avoidable | infeasible steps | mean solve | max solve |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.05 | 80 | 4/80 (5.0%) | 12/80 (15.0%) | 12 | 0 | 12 | 17.8% | 4.88 ms | 325 ms |
+| 0.10 | 80 | 5/80 (6.25%) | 27/80 (33.75%) | 27 | 0 | 7 | 24.1% | 4.97 ms | 338 ms |
+| 0.20 | 80 | 3/80 (3.75%) | 30/80 (37.5%) | 30 | 0 | 3 | 23.4% | 5.23 ms | 329 ms |
+| 0.30 | 80 | 6/80 (7.5%) | 43/80 (53.75%) | 43 | 3 | 3 | 38.4% | 4.94 ms | 337 ms |
+| 0.38 | 80 | 5/80 (6.25%) | 52/80 (65.0%) | 52 | 2 | 7 | 48.7% | 4.91 ms | 294 ms |
+
+结论：速度从 0.10 m/s 起已能暴露 dynamic drift；继续提高速度时 collision 和 infeasible rate 总体上升。0.10 m/s 是为了减少变量而选的统一控制点，不是宣称的最优安全速度。capsule overlap 和 PyBullet contact 必须继续分开；success 在所有速度下仍只有 3.75%--7.5%，首要问题是统一训练/评估包络、联合不可行和 safe-stop 后的动态漂移。
 
 ## 4. 根因分析
 
@@ -186,13 +202,46 @@ V2 filter timing（仅统计当前仿真进程内过滤器，不含感知、通�
 
 ## 4.12 基于 V2 的现状与决策
 
-**已完成：** V2 2x2 几何/运动隔离、safe-stop 漂移审计、统一 collision 标签、OSQP 约束归因、V2 timing 统计，以及相关安全过滤器回归（29 passed）。
+已完成 V2 2x2 几何/运动隔离、safe-stop 漂移审计、统一 collision 标签、OSQP 约束归因、速度边界诊断，以及安全过滤器回归（全量测试 55 passed）。
 
-**当前现状：** P3 已完成诊断，但设计未冻结。几何失配和动态漂移已被证据支持；infeasible 主要是 predictive barrier 与 acceleration 的联合问题；任务 success 仍只有 8.8%--13.8%，不足以支持策略性能结论；过滤器 max 仍超 50 ms。
+当前已确认：几何失配和动态漂移是主要问题；infeasible 主要涉及 predictive barrier 与 joint acceleration 的联合冲突；任务 success 仍很低，不足以支持策略性能结论。实时性存在长尾，但本轮按当前决策只记录，不把它作为离线训练/诊断的阻塞条件。
 
-**当前问题：** 训练/评估几何和安全 margin 尚未形成统一冻结配置；strict safe-stop 对动态障碍物没有持续安全保证；联合可行性没有得到可达逃逸求解；实时路径没有硬截止；样本仍是开发 checkpoint 的 80 episode 量级，不能支持跨 seed 泛化。
+本轮问题优先级：
+1. 训练/评估 frame-corrected 几何、安全 margin 和动作约束统一；
+2. 固定障碍物 0.05 m/s、机械臂关节 1.0 rad/s 下的动态漂移、safe-stop 失效和联合不可行；
+3. capsule overlap 与 PyBullet contact 独立统计；
+4. 统一配置下的任务性能、训练收敛和跨 train seed 稳定性；
+5. 上述问题收敛后，再处理求解耗时、硬截止和实时链路。
 
-**当前决策：** 不重训、不进入 P4/OOD、不做真机验证。下一轮只允许在统一几何和碰撞口径下做离线可达性、障碍物运动边界、硬截止求解器和最小回归；只有通过固定预算、碰撞分类、不可行率和任务性能门槛后，才重新评估是否冻结 P3。
+## 4.13 统一配置与本轮执行口径（2026-07-31）
+
+新增配置目录：configs/experiments/p3_unified_geometry/。
+
+基础入口为 b4_fixed_speed010_base.yaml；新训练 seeds 为 4104 和 4105，各 100000 steps；评估 seeds 为 5101 和 5201。训练和评估共享最终 frame-corrected local capsule endpoints、geometry_margin_m=0.03、strict QP、recovery/relaxation/maximin 关闭、动作/工作空间/关节加速度约束和 speed_range=[0.10,0.10]。
+
+历史 configs/experiments/p3_geometry_fix/b4_seed4102_20k.yaml、b4_seed4103_20k.yaml 不修改，旧 checkpoint provenance 继续可复现。统一配置中的 qp_time_limit_s 和 max_filter_compute_time_s 为 null，表示本轮是离线 feasibility/behavior 轮次，不是实时性验证。
+
+本轮执行顺序：先验证几何和安全 envelope 一致，再验证动态漂移和联合不可行，再验证碰撞分类与任务收敛，最后才处理耗时、硬截止和实时控制链路。
+
+### 4.14 低速双速度隔离配置（2026-07-31，当前控制点）
+
+为把速度因素从失败原因中尽量摘除，本轮将障碍物和机械臂速度分别固定，不再使用速度范围或默认动作上限：
+
+| 变量 | 配置 | 单位 | 含义 |
+| --- | --- | --- | --- |
+| 障碍物速度 | speed_range=[0.05,0.05] | m/s | 固定的球形障碍物线速度 |
+| 机械臂速度 | action_scale=1.0 | rad/s | 策略、过滤器和执行层共享的关节速度上限 |
+
+选择 0.05 m/s 障碍物速度，是因为速度边界诊断中它是已测试的最低非零速度；选择 1.0 rad/s 机械臂关节上限，是为了避免 0.25 rad/s 的人为限速成为失败原因，同时略高于历史 0.7 rad/s 上限，保留足够的避障动作能力。两者是不同物理量，不能比较数值大小，也不能用一个变量代替另一个变量。
+
+新增当前主控制点配置：
+configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_base.yaml
+configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_seed4108_100k.yaml
+configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_seed4109_100k.yaml
+configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_eval_seed5101.yaml
+configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_eval_seed5201.yaml
+
+该配置继续使用最终 frame-corrected capsules、geometry_margin_m=0.03、strict QP、recovery/relaxation/maximin 关闭，qp_time_limit_s 和 max_filter_compute_time_s 为 null。fixed_obstacle005_robot025 配置保留为较慢机械臂速度对照，不与当前主控制点结果混合。
 
 ## 5. 统一指标和标签
 
@@ -206,40 +255,30 @@ V2 filter timing（仅统计当前仿真进程内过滤器，不含感知、通�
 
 ## 6. 下一步验证顺序
 
-### A. 隔离 geometry mismatch
+### A. 统一配置训练与评估（当前）
 
-固定 checkpoint、eval seed 和环境随机序列，仅切换训练几何/`geometry_margin` 与最终 corrected 几何/`geometry_margin`，比较 success、两类 collision、infeasible rate、violation steps 和干预量。
+使用 b4_fixed_obstacle005_robot100 配置下的两个新 train seeds 4108/4109 和 eval seeds 5101/5201。训练、checkpoint selection 和评估都使用同一组 frame-corrected capsules、margin 0.03 m、action/workspace/joint constraints、strict QP 和固定 speed_range=[0.05,0.05] 和 action_scale=1.0。
 
-### B. 隔离 dynamic drift
+### B. 统一配置下的动态可行性
 
-固定策略和几何，分别运行 obstacle velocity = 0 与原始 moving obstacle，比较 safe-stop 后 `h`、碰撞分类和恢复触发。
+记录 safe_stop_infeasible 后的 h 漂移、dynamic/static 分类、碰撞分类，以及 predictive barrier 与 joint acceleration 的约束归因。
 
 ### C. 分离碰撞判据
 
-每次评估同时记录 capsule overlap、PyBullet contact、link name 和最小接触距离。
+同时记录总 collision、capsule_overlap、pybullet_contact、link name 和最小接触距离，不把 capsule-only 事件写成物理碰撞。
 
-### D. 分类 infeasible 原因
+### D. 任务性能和训练收敛
 
-按 predictive barrier、joint bound、acceleration、workspace、projection failure、OSQP infeasible 和 compute budget 分类。
+按 train seed 报告 success、collision、infeasible rate、violation steps、最终误差和干预量。episode 只作为回合样本，不冒充独立 train seed。统一配置达到可解释收敛前，不进入 P4/OOD 或真机。
 
-### E. 审计真实时间预算
+### E. 实时性与硬截止（后置）
 
-记录完整过滤周期的 mean、P95/P99、max 及各 phase 时间。若需要硬截止，使用可中断求解器或独立外部 watchdog，不能依赖 post-return 检查。
-
-### F. 统一配置后再决定是否重训
-
-训练和评估完全统一几何、安全 margin、动作约束和碰撞口径后，再决定是否投入新的训练预算。
-
+本轮只保留 mean/P95/P99/max 记录，不以 max_solve <= 50 ms 阻止离线训练和根因诊断。统一配置的非实时问题解决后，再单独处理可中断求解器、硬截止和外部 watchdog。
 ## 7. 当前决策
 
-当前 P3 结论：**诊断完成，设计未冻结**。
+当前 P3 结论：诊断已完成，设计仍未冻结；本轮进入统一变量的离线训练/评估阶段。
 
-近期失败的主因不是“策略还差一点”，而是训练分布、几何模型、可行性处理、动态障碍物假设和实时预算没有形成一致闭环。在这些结构性问题解决前：
-
-- 不把 deterministic escape 写成安全通过；
-- 不把 capsule-only collision 写成物理碰撞；
-- 不把 safe-stop 写成动态安全保证；
-- 不继续扩大训练、P4/OOD 或真机实验。
+本轮明确不修改历史 4102/4103 配置，不扩大速度、几何或 recovery 变量，不把 0.05 m/s 或 1.0 rad/s 宣称为最优安全边界，不把 capsule-only collision 写成 physical contact，不把 safe-stop 写成动态安全保证，也不因暂不处理耗时而进入 P4/OOD 或真机。
 
 ## 8. 证据索引
 

@@ -1,0 +1,8 @@
+# Held-out evaluation stream for the canonical fixed-speed condition.
+includes:
+  - b4_fixed_speed010_base.yaml
+
+eval:
+  method: link_fixed
+  episodes: 20
+  seed: 5101

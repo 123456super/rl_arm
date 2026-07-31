@@ -104,9 +104,140 @@ def test_strict_heldout_config_keeps_safe_stop_and_heldout_defaults() -> None:
     assert safety_filter["max_filter_compute_time_s"] == 0.05
 
 
+def test_corrected_geometry_speed_boundary_configs_only_change_obstacle_speed() -> None:
+    baseline = load_config("configs/experiments/p3_diagnostics/b4_root_cause_corrected_geometry_moving.yaml")
+    for suffix, speed_mps in (("005", 0.05), ("010", 0.10), ("020", 0.20), ("030", 0.30), ("038", 0.38)):
+        config = load_config(
+            f"configs/experiments/p3_diagnostics/b4_root_cause_corrected_geometry_speed_{suffix}.yaml"
+        )
+        assert config["env"]["obstacle"]["speed_range"] == [speed_mps, speed_mps]
+        assert config["robot"]["capsules"] == baseline["robot"]["capsules"]
+        assert config["env"]["safety_filter"] == baseline["env"]["safety_filter"]
+
+
 def test_mesh_capsule_diagnostic_uses_local_endpoint_pairs() -> None:
     config = load_config("configs/experiments/p3_diagnostics/b4_osqp_strict_mesh_capsules.yaml")
     for capsule in config["robot"]["capsules"]:
         assert capsule["parent_link_name"] == capsule["child_link_name"]
         assert len(capsule["start_local_position"]) == 3
         assert len(capsule["end_local_position"]) == 3
+
+def test_unified_geometry_fixed_speed_configs_freeze_non_timing_factors() -> None:
+    base = load_config("configs/experiments/p3_unified_geometry/b4_fixed_speed010_base.yaml")
+    corrected_geometry = load_config(
+        "configs/experiments/p3_diagnostics/b4_osqp_strict_frame_corrected_heldout.yaml"
+    )
+    config_paths = (
+        "configs/experiments/p3_unified_geometry/b4_fixed_speed010_seed4104_100k.yaml",
+        "configs/experiments/p3_unified_geometry/b4_fixed_speed010_seed4105_100k.yaml",
+        "configs/experiments/p3_unified_geometry/b4_fixed_speed010_eval_seed5101.yaml",
+        "configs/experiments/p3_unified_geometry/b4_fixed_speed010_eval_seed5201.yaml",
+    )
+    expected_workspace = {"x": [0.25, 0.78], "y": [-0.45, 0.45], "z": [0.18, 0.78]}
+    expected_filter = {
+        "enabled": True,
+        "control_delay_s": 0.0,
+        "geometry_margin_m": 0.03,
+        "tracking_error_bound_m": 0.0,
+        "joint_acceleration_limit_radps2": 4.0,
+        "use_qp_solver": True,
+        "recovery_mode_enabled": False,
+        "recovery_allow_constraint_relaxation": False,
+        "recovery_maximize_min_clearance": False,
+        "qp_time_limit_s": None,
+        "max_filter_compute_time_s": None,
+    }
+
+    for path in config_paths:
+        config = load_config(path)
+        safety_filter = config["env"]["safety_filter"]
+        assert config["robot"]["capsules"] == corrected_geometry["robot"]["capsules"]
+        assert config["robot"]["capsules"] == base["robot"]["capsules"]
+        assert config["env"]["obstacle"]["speed_range"] == [0.10, 0.10]
+        assert config["env"]["action_scale"] == 0.7
+        assert config["env"]["workspace"] == expected_workspace
+        for key, expected_value in expected_filter.items():
+            assert safety_filter[key] == expected_value
+
+    train_configs = [load_config(path) for path in config_paths[:2]]
+    assert [config["seed"] for config in train_configs] == [4104, 4105]
+    assert len({config["train"]["output_dir"] for config in train_configs}) == 2
+    for config in train_configs:
+        assert config["train"]["total_steps"] == 100000
+        assert config["checkpoint_selection"] == {"seed": 5201, "episodes": 20, "metric": "mean_reward"}
+
+    assert [load_config(path)["eval"]["seed"] for path in config_paths[2:]] == [5101, 5201]
+    evaluate_source = Path("scripts/evaluate.py").read_text(encoding="utf-8")
+    assert '"collision_capsule_overlap": int(collision_capsule_overlap)' in evaluate_source
+    assert '"collision_pybullet_contact": int(collision_pybullet_contact)' in evaluate_source
+def test_low_speed_isolation_configs_separate_obstacle_and_robot_speeds() -> None:
+    base = load_config(
+        "configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot025_base.yaml"
+    )
+    corrected_geometry = load_config(
+        "configs/experiments/p3_diagnostics/b4_osqp_strict_frame_corrected_heldout.yaml"
+    )
+    config_paths = (
+        "configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot025_seed4106_100k.yaml",
+        "configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot025_seed4107_100k.yaml",
+        "configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot025_eval_seed5101.yaml",
+        "configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot025_eval_seed5201.yaml",
+    )
+    for path in config_paths:
+        config = load_config(path)
+        assert config["robot"]["capsules"] == base["robot"]["capsules"]
+        assert config["robot"]["capsules"] == corrected_geometry["robot"]["capsules"]
+        assert config["env"]["obstacle"]["speed_range"] == [0.05, 0.05]
+        assert config["env"]["action_scale"] == 0.25
+        assert config["env"]["safety_filter"]["joint_acceleration_limit_radps2"] == 4.0
+        assert config["env"]["safety_filter"]["use_qp_solver"] is True
+        assert config["env"]["safety_filter"]["recovery_mode_enabled"] is False
+        assert config["env"]["safety_filter"]["recovery_allow_constraint_relaxation"] is False
+        assert config["env"]["safety_filter"]["recovery_maximize_min_clearance"] is False
+        assert config["env"]["safety_filter"]["geometry_margin_m"] == 0.03
+        assert config["env"]["safety_filter"]["qp_time_limit_s"] is None
+        assert config["env"]["safety_filter"]["max_filter_compute_time_s"] is None
+
+    train_configs = [load_config(path) for path in config_paths[:2]]
+    assert [config["seed"] for config in train_configs] == [4106, 4107]
+    assert len({config["train"]["output_dir"] for config in train_configs}) == 2
+    for config in train_configs:
+        assert config["train"]["total_steps"] == 100000
+        assert config["checkpoint_selection"] == {"seed": 5201, "episodes": 20, "metric": "mean_reward"}
+
+    assert [load_config(path)["eval"]["seed"] for path in config_paths[2:]] == [5101, 5201]
+def test_current_low_speed_control_point_uses_robot_speed_one_radps() -> None:
+    base = load_config(
+        "configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_base.yaml"
+    )
+    prior = load_config(
+        "configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot025_base.yaml"
+    )
+    assert base["env"]["obstacle"]["speed_range"] == [0.05, 0.05]
+    assert base["env"]["action_scale"] == 1.0
+    assert prior["env"]["action_scale"] == 0.25
+    assert base["env"]["safety_filter"]["joint_acceleration_limit_radps2"] == 4.0
+    assert base["env"]["safety_filter"]["geometry_margin_m"] == 0.03
+    assert base["env"]["safety_filter"]["use_qp_solver"] is True
+    assert base["env"]["safety_filter"]["recovery_mode_enabled"] is False
+    assert base["env"]["safety_filter"]["recovery_allow_constraint_relaxation"] is False
+    assert base["env"]["safety_filter"]["recovery_maximize_min_clearance"] is False
+    assert base["env"]["safety_filter"]["qp_time_limit_s"] is None
+    assert base["env"]["safety_filter"]["max_filter_compute_time_s"] is None
+
+    for path, seed in (
+        (
+            "configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_seed4108_100k.yaml",
+            4108,
+        ),
+        (
+            "configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_seed4109_100k.yaml",
+            4109,
+        ),
+    ):
+        config = load_config(path)
+        assert config["seed"] == seed
+        assert config["train"]["total_steps"] == 100000
+        assert config["train"]["output_dir"].startswith(
+            "outputs/p3_unified_geometry/b4_fixed_obstacle005_robot100_"
+        )

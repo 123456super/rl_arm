@@ -1,0 +1,12 @@
+# Offline-only strict diagnostic at a fixed 0.38 m/s obstacle speed.
+# It keeps the final geometry and every robot-side constraint unchanged.
+includes:
+  - b4_root_cause_corrected_geometry_moving.yaml
+
+env:
+  obstacle:
+    speed_range: [0.38, 0.38]
+
+eval:
+  method: link_fixed
+  episodes: 20
