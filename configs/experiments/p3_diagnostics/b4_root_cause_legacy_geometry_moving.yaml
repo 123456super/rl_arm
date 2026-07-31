@@ -1,0 +1,17 @@
+# Root-cause 2x2: checkpoint-time capsule geometry and moving obstacle.
+# Keep strict constraints and bounded solver budgets; no relaxed recovery.
+includes:
+  - b4_osqp_strict_margin30_budget.yaml
+
+env:
+  safety_filter:
+    geometry_margin_m: 0.0
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+  obstacle:
+    speed_range: [0.12, 0.38]
+
+eval:
+  method: link_fixed
+  episodes: 20

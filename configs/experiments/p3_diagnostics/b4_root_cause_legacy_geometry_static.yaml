@@ -1,0 +1,17 @@
+# Root-cause 2x2: checkpoint-time capsule geometry and a static obstacle.
+# This differs from the moving condition only in obstacle velocity.
+includes:
+  - b4_osqp_strict_margin30_budget.yaml
+
+env:
+  safety_filter:
+    geometry_margin_m: 0.0
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+  obstacle:
+    speed_range: [0.0, 0.0]
+
+eval:
+  method: link_fixed
+  episodes: 20

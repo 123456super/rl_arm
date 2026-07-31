@@ -95,6 +95,34 @@ def _predictive_risk_for_test(count: int):
     )
 
 
+def test_safe_stop_drift_classifier_matches_audit_threshold() -> None:
+    env = object.__new__(UR5DynamicObstacleEnv)
+    env.control_dt = 0.05
+    env.safety_filter_cfg = {"safe_stop_dynamic_drift_threshold_mps": 0.05}
+    env.safe_stop_infeasible_first_step = None
+    env.safe_stop_infeasible_last_step = None
+    env.safe_stop_infeasible_first_h_m = float("nan")
+    env.safe_stop_infeasible_last_h_m = float("nan")
+    safe_stop = SafetyFilterResult(
+        command_joint_velocity_radps=np.zeros(1),
+        status=SafetyFilterStatus.SAFE_STOP_INFEASIBLE,
+        reason="test",
+        intervention_norm_radps=0.0,
+        active_constraint_count=0,
+        max_constraint_violation=0.0,
+    )
+
+    env.step_count = 4
+    env._record_infeasible_safe_stop(safe_stop, replace(_predictive_risk_for_test(1), safety_functions_m=np.asarray([0.02])))
+    env.step_count = 6
+    env._record_infeasible_safe_stop(safe_stop, replace(_predictive_risk_for_test(1), safety_functions_m=np.asarray([0.00])))
+
+    drift_mps, drift_class = env._safe_stop_drift()
+
+    np.testing.assert_allclose(drift_mps, -0.2)
+    assert drift_class == "dynamic_drift"
+
+
 def test_enabled_filter_is_the_only_command_path() -> None:
     config = copy.deepcopy(load_config("configs/default.yaml"))
     config["env"]["safety_filter"]["enabled"] = True

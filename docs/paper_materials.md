@@ -13,7 +13,7 @@
 | Figure 1 | 五场景宏平均的任务与安全指标 | `outputs/paper/final_materials/figure_1_heldout_macro_comparison.png` |
 | Figure 2 | 五个场景的成功率与碰撞率 | `outputs/paper/final_materials/figure_2_heldout_by_scenario.png` |
 
-表 1 和表 2 的每个单元格均先合并同一 train seed 下 3 个 eval seeds 的 300 episodes，再对 3 个 train seeds 报告 `mean +/- sample std`（`n=3`）。每种“场景-方法”共 900 held-out episodes。checkpoint 使用 `validation_seed=2001` 选择；正式评估使用 eval seeds 1004、1005、1006。
+表 1 和表 2 的每个单元格均先合并同一 train seed 下 3 个 eval seeds 的 300 episodes，再对 3 个 train seeds 报告 `mean +/- sample std`（`n=3`）。每种“场景-方法”共 900 held-out episodes。checkpoint 使用 `validation_seed=2001` 选择；正式评估使用 eval seeds 1004、1005、1006。表中的 `collision rate` 是阶段一环境的综合 collision 事件指标，不等同于 P3 诊断中的 `capsule_overlap` 或 `pybullet_contact`。
 
 ## 附录材料
 

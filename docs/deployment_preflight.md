@@ -14,7 +14,7 @@
 | 202 | 50000 | `outputs/rechecks/link_fixed_penalty1/train/link_fixed/seed_202/link_fixed_seed202_steps100000/actor_step_50000.pt` |
 | 303 | 100000 | `outputs/rechecks/link_fixed_penalty1/train/link_fixed/seed_303/link_fixed_seed303_steps100000/actor_step_100000.pt` |
 
-三个 checkpoint 均由 `validation_seed=2001`、每 checkpoint 20 episodes 的独立验证选择。实机只部署这一固定平滑候选；不部署 `ldrc_fixed` 或 `ldrc_adaptive` 做碰撞性对比。
+三个 checkpoint 均由 `validation_seed=2001`、每 checkpoint 20 episodes 的独立验证选择。若未来完成真实控制器、急停、感知失效和现场安全签核，只允许优先评估这一固定平滑候选；当前 P3 未冻结，暂不执行实机部署，也不部署 `ldrc_fixed` 或 `ldrc_adaptive` 做碰撞性对比。
 
 ## 已验证的离线条件
 

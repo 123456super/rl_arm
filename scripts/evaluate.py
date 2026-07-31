@@ -172,6 +172,10 @@ def main() -> None:
                         "unavoidable_collision": int(bool(info.get("unavoidable_collision", False))),
                         "avoidable_collision": int(bool(info.get("avoidable_collision", False))),
                         "collision_avoidability_reason": info.get("collision_avoidability_reason", ""),
+                        "safe_stop_infeasible_first_step": info.get("safe_stop_infeasible_first_step", -1),
+                        "safe_stop_infeasible_last_step": info.get("safe_stop_infeasible_last_step", -1),
+                        "safe_stop_h_drift_mps": float(info.get("safe_stop_h_drift_mps", float("nan"))),
+                        "safe_stop_drift_class": info.get("safe_stop_drift_class", "not_applicable"),
                         "collision_contact_link_indices": info.get("collision_contact_link_indices", ""),
                         "collision_contact_link_names": info.get("collision_contact_link_names", ""),
                         "collision_min_contact_distance": float(
@@ -191,6 +195,7 @@ def main() -> None:
                         "recovery_initial_h_min_m": float(info.get("recovery_initial_h_min_m", float("nan"))),
                         "recovery_command_norm": float(info.get("recovery_command_norm", 0.0)),
                         "safety_filter_status": filter_status,
+                        "safety_filter_reason": info.get("safety_filter_reason", ""),
                         "safety_filter_intervention_norm": intervention_norm,
                         "safety_filter_safe_stop": int(bool(info.get("safety_filter_safe_stop", False))),
                         "safety_filter_active_constraints": info.get("safety_filter_active_constraints", 0),
@@ -200,6 +205,12 @@ def main() -> None:
                         ),
                         "safety_filter_max_constraint_category": info.get(
                             "safety_filter_max_constraint_category", ""
+                        ),
+                        "safety_filter_infeasible_constraint_categories": info.get(
+                            "safety_filter_infeasible_constraint_categories", ""
+                        ),
+                        "safety_filter_infeasibility_diagnostic_status": info.get(
+                            "safety_filter_infeasibility_diagnostic_status", ""
                         ),
                         "safety_filter_projection_iterations": info.get(
                             "safety_filter_projection_iterations", 0

@@ -78,6 +78,10 @@ env:
     use_qp_solver: false
     # null preserves historical behavior. OSQP diagnostics must set a strict budget.
     qp_time_limit_s: null
+    # Offline only: test one constraint category at a time after OSQP reports infeasible.
+    infeasibility_diagnostics_enabled: false
+    # Must match scripts/audit_safe_stop.py when assigning unavoidable collisions.
+    safe_stop_dynamic_drift_threshold_mps: 0.05
     # null preserves historical behavior. A simulator-side stop is applied only after this budget is exceeded.
     max_filter_compute_time_s: null
 

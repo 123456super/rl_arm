@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 2026-07-27--07-31 / P0 | 已冻结 | 复现阶段一主表、检查文档和输出归档 |
 | 2026-07-29--07-31 / P1-P2 | 开发验证完成 | 运行测试、smoke test、trace 和几何/漂移审计 |
-| 2026-07-31 / P3 | 未冻结 | 仅验证固定预算硬约束 escape；不可行时记录 safe-stop |
+| 2026-07-31 / P3 | 未冻结 | 仅分析固定预算硬约束 escape；不可行时记录 safe-stop，并区分 dynamic drift/static or slow |
 | 后续 / P4-P5 | 未开始 | 不运行新训练、OOD 或真机流程 |
 
 当前推荐的无长训练校验命令（在项目根目录执行）：
@@ -76,7 +76,7 @@ configs/run/dev.yaml             # train/eval/smoke 参数
 | 代码中的 `train.method` / `--method` | 含义 | 当前定位 |
 | --- | --- | --- |
 | `ee_fixed` | 末端风险 + 固定风险惩罚 + 固定平滑 | 主比较基线 |
-| `link_fixed` 且 `sac.fixed_risk_penalty: 1.0` | 连杆级风险 + 固定风险惩罚 + 固定平滑 | 论文中称 `link_fixed_penalty1`；主方法与部署候选 |
+| `link_fixed` 且 `sac.fixed_risk_penalty: 1.0` | 连杆级风险 + 固定风险惩罚 + 固定平滑 | 论文中称 `link_fixed_penalty1`；阶段一仿真候选，不是新 P3 部署候选 |
 | `ldrc_fixed` | 连杆级风险 + 约束 SAC + 固定平滑 | 主比较对象；仅在部分场景碰撞率更低 |
 | `ldrc_adaptive` | 连杆级风险 + 约束 SAC + 自适应平滑 | 历史失败消融，不作为部署候选 |
 
@@ -110,11 +110,11 @@ conda run -n rl python scripts/smoke_test.py \
 
 100k 单 seed 结果仍没有产生可冻结的综合候选。B4/B5 的过滤器已经记录约束类别、真实活动约束、投影失败/确认不可行、Dykstra/主动集回退和 OSQP 状态；此前 OSQP 状态在最终失败路径为空的问题已修复。B4 的提前 recovery 诊断入口为 `b4_osqp_recovery_early.yaml`：它记录逐连杆预测距离、裕度、障碍物漂移、屏障残差和初始不安全状态。`recovery_relaxed` bounded/maximin 复核显示两个 eval seed 的碰撞仍各为 1/20，且出现 154--221 ms 单步长尾，因此仅保留为离线诊断，不进入实时链路、P4/OOD 或真机。当前保留入口为 `b4_osqp_strict_margin30_budget.yaml`：关闭约束放宽和 recovery，使用 OSQP 20 ms 限时及 50 ms 诊断预算。
 
-几何修正后的 B4 20k 开发训练已完成。strict safe-stop 在 eval seed `6101` 下：seed `4102`（step 20000）成功 `7/20`、碰撞 `1/20`、违规步 `123`、平均求解 `4.42 ms`、最大 `206.69 ms`；seed `4103`（step 15000）成功 `6/20`、碰撞 `1/20`、违规步 `4`、平均求解 `4.43 ms`、最大 `146.43 ms`。两次碰撞均为 `upper_arm_link` 的 PyBullet 接触，胶囊重叠为 false。该结果只覆盖一个 eval seed，仍有 50 ms 以上长尾，不能冻结 P3。
+几何修正后的 B4 20k 开发训练曾在 eval seed `6101` 完成 strict safe-stop 历史诊断：seed `4102`（step 20000）成功 `7/20`、碰撞 `1/20`，seed `4103`（step 15000）成功 `6/20`、碰撞 `1/20`；两次碰撞均为 `upper_arm_link` 的 PyBullet 接触，胶囊重叠为 false，且最大耗时为 `146--207 ms`。该结果只覆盖一个 eval seed，现作为历史基线；后续 frame-corrected deterministic escape 的最新结果见 `docs/p3_failure_root_cause_analysis.md`。
 
-safe-stop 漂移审计显示，11 个不可行停止 episode 中 4 个属于动态漂移型（`h` 下降超过 `0.05 m/s`），3 次碰撞全部集中在动态漂移型。持续移动障碍物下零速度并不等价于安全保持；下一步先审计 collision mesh 的 local transform，并将动态漂移不可行作为离线逃逸诊断问题处理。在完整 held-out 复核完成前，不启动新的 train/eval seeds、OOD 或真机工作。
+早期 safe-stop 漂移审计显示，11 个不可行停止 episode 中 4 个属于动态漂移型，3 次碰撞集中在该类别。该结果已被后续完整 deterministic escape 审计（58 个不可行停止、dynamic drift 34 个、其中碰撞 29 个）取代；持续移动障碍物下零速度并不等价于安全保持。在完整根因验证前，不启动新的 train/eval seeds、OOD 或真机工作。
 
-OSQP 诊断依赖已安装：`osqp=1.1.3`、`scipy=1.18.0`。常规求解约 6--9 ms，但 maximin recovery 最坏单步约 277 ms；两者都只覆盖 PyBullet 进程内计算，不构成端到端安全或真机实时性结论。
+OSQP 诊断依赖已安装：`osqp=1.1.3`、`scipy=1.18.0`。平均过滤耗时通常为毫秒级，但 deterministic escape 复核的最大单步耗时达到 `368--410 ms`，历史 strict/TTC/maximin 诊断也出现 `146--582 ms` 长尾；这些数字只覆盖 PyBullet 进程内计算，不构成端到端安全或真机实时性结论。
 
 ### 5.2 当前禁止事项与结果记录要求（2026-07-31）
 
@@ -166,6 +166,8 @@ conda run -n rl python scripts/train.py --config configs/experiments/no_obstacle
 | `episode_cost`、`mean_risk` | 风险信号是否连续且可区分 | 风险特征、距离/TTC 标定、事件代价 |
 | `lambda`（仅 `ldrc_*`） | 是否随长期 episode 代价调整 | `C_safe`、cost 量级和 lambda 学习率 |
 | `rms_jerk`、`action_variation` | 执行层平滑性 | `fixed_beta` 或 adaptive 参数；不能只以 jerk 判断安全性 |
+
+P3 评估中的 `collision` 必须拆分为 `capsule_overlap` 和 `pybullet_contact`；两者不能直接合并解释为物理碰撞率。`safe_stop_infeasible` 与 `safe_stop_compute_budget` 也必须分开统计。
 
 常用查看方式：
 

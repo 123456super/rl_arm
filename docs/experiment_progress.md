@@ -9,7 +9,7 @@
 | P0：阶段一基线 | 2026-07-27 至 2026-07-31 | 已冻结 | held-out 三方法主表；link_fixed_penalty1 为仿真候选 | 只允许复现和勘误，不再改写主结论 |
 | P1：预测风险与不确定性 | 2026-07-29 前完成首轮开发验证 | 开发验证完成 | 几何、预测窗口、误差裕度和观测有效性测试 | 需要在冻结配置上补齐独立复核 |
 | P2：仿真安全过滤器 | 2026-07-29 至 2026-07-31 | 开发验证完成，未构成安全保证 | QP/投影/OSQP、命令唯一出口、safe-stop 和 trace 诊断 | 先解决几何漏检、动态漂移和计算长尾 |
-| P3：协同训练与安全失效分析 | 2026-07-29 至 2026-07-31 | 未冻结，当前阻塞 | B1--B5、mesh/frame 审计、strict/relaxed TTC 诊断 | 硬约束确定性 escape 在固定预算内通过仿真回归 |
+| P3：协同训练与安全失效分析 | 2026-07-29 至 2026-07-31 | 诊断完成，设计未冻结 | B1--B5、mesh/frame 审计、V2 2x2、漂移审计、OSQP 约束归因 | 统一几何/碰撞口径、联合可行性和硬时间截止后再冻结 |
 | P4：独立复核与 OOD | 原计划后置 | 未开始 | 无 | P3 冻结后才可开始 |
 | P5：低速真机 | 原计划后置 | 未开始 | 无 | P4 通过且现场安全签核完成 |
 
@@ -17,15 +17,16 @@
 
 - 阶段一结果与 P3 诊断严格分开；P3 的任何 success/collision 数值不得回写阶段一主表。
 - 当前不启动新训练、不扩大 P3 held-out、不进入 P4/OOD、不做实时链路验证和真机测试。
-- 继续仿真时，只做固定时间预算、硬关节/工作空间约束优先的确定性 escape controller；不可行时安全停止并记录 unavoidable_collision。
-- relaxed recovery、bounded/maximin escape 和当前 mesh-fit 胶囊只保留为离线失效/几何敏感性诊断，不得写成安全成功。
+- V2 2x2、漂移审计和 OSQP 约束归因已完成；当前只做统一几何/碰撞口径下的离线可达性、动态边界和硬截止路径审计。
+- deterministic escape、relaxed recovery、bounded/maximin escape 和 mesh-fit 胶囊均只保留为离线失效/几何敏感性诊断，不得写成安全成功。
 
 ### 当前阻塞问题（2026-07-31）
 
-1. 几何一致性：frame-corrected 顶点和三角形内部采样覆盖已通过，但 mesh/capsule 仍出现保守误报与物理接触漏检，采样覆盖不能替代完整碰撞判据。
-2. 动态漂移：strict safe-stop 停止机器人后，障碍物仍可能压缩安全裕度；必须区分 static_or_slow 与 dynamic drift，并单独报告 avoidable_collision/unavoidable_collision。
-3. 实时预算：平均 OSQP 求解虽为毫秒级，但存在 146--582 ms 长尾；返回后 watchdog 不能中断已超时求解，不满足 50 ms 控制周期要求。
-4. 证据规模：当前结果主要是开发 checkpoint 和 20/50 episode 诊断，尚不足以支持跨 seed 泛化、P4/OOD 或真机结论。
+1. 几何一致性：frame-corrected 顶点和三角形内部采样覆盖已通过，但 corrected/moving 的 capsule-only collision 显著增加，mesh/capsule 仍不能视为完整动态碰撞判据。
+2. 动态漂移：V2 corrected/moving 的 dynamic drift 碰撞为 34/39（87.2%）；strict safe-stop 停止机器人后，障碍物仍会压缩安全裕度。
+3. 联合不可行：1,823 个 infeasible steps 中 predictive barrier 出现 1,815 次、joint acceleration 出现 1,103 次，主因是两者联合可达性冲突，不是单纯 workspace/velocity 限制。
+4. 实时预算：V2 mean 4.36--5.25 ms、P99 6.55--7.47 ms，但 max 197--351 ms；返回后 watchdog 不能中断超时求解，不满足 50 ms 控制周期。
+5. 任务与证据规模：V2 success 仅 7--11/80（8.8%--13.8%），结果仍来自开发 checkpoint 和 80 episode 诊断，不足以支持跨 seed 泛化、P4/OOD 或真机结论。
 
 ## 0. 最新结果归档（截至 2026-07-31，基于 outputs）
 
@@ -35,18 +36,18 @@
 
 ### 已完成的最新诊断
 
-UR5 胶囊映射已修正并补齐后续前臂/腕部段；在 eval seed `6101`、每个 train seed 20 episodes 的严格 OSQP safe-stop 复核中：
+UR5 胶囊映射已修正并补齐后续前臂/腕部段；以下是 eval seed `6101`、每个 train seed 20 episodes 的**历史**严格 OSQP safe-stop 复核：
 
 | train seed | selected checkpoint | success | collision | safety violation steps | mean solve | max solve |
 | ---: | --- | ---: | ---: | ---: | ---: | ---: |
 | 4102 | `actor_step_20000.pt` | 7/20 | 1/20 | 123 | 4.42 ms | 206.69 ms |
 | 4103 | `actor_step_15000.pt` | 6/20 | 1/20 | 4 | 4.43 ms | 146.43 ms |
 
-两次碰撞均为 PyBullet 实际接触，胶囊重叠均为 false；说明审计已能识别胶囊几何漏检，但也说明当前几何包络不能单独作为碰撞安全判据。两组严格配置的平均求解时间较低，却仍出现 146--207 ms 的单步长尾，超过 50 ms 控制周期。
+两次碰撞均为 PyBullet 实际接触，胶囊重叠均为 false；这说明该历史几何包络存在漏检。两组严格配置的平均求解时间较低，却仍出现 146--207 ms 的单步长尾，超过 50 ms 控制周期。后续 frame-corrected deterministic escape 的最新结果以本页后文和 `docs/p3_failure_root_cause_analysis.md` 为准。
 
 补充方案没有解决该问题：同一开发分支的 bounded projection（train seed 4103）为 5/20 success、2/20 collisions、137 个违反步；提前降速为 3/20 success、1/20 collision、132 个违反步，并出现 248.41 ms 最大求解时间。因此，bounded projection 和 preemptive speed scale 均只保留为故障诊断，不作为候选方案。
 
-对 11 个进入 `safe_stop_infeasible` 的 trace 审计表明，7 个静态或缓慢漂移案例没有碰撞，而 4 个动态漂移案例发生了 3 次碰撞。零速度安全停止无法阻止障碍物自身持续接近；这是当前的主要失效机理，而非策略命令投影可单独解决的问题。
+早期 11 个 `safe_stop_infeasible` trace 的审计表明，7 个静态或缓慢漂移案例没有碰撞，4 个动态漂移案例发生 3 次碰撞。该结果已被后续完整审计取代：58 个不可行停止中 34 个为 dynamic drift，碰撞 29 个。零速度安全停止无法阻止障碍物自身持续接近；这是当前的主要失效机理，而非策略命令投影可单独解决的问题。
 
 ### 当前问题与下一步
 
@@ -67,11 +68,11 @@ outputs/p3_geometry_fix/safe_stop_drift_audit.json
 
 ### 2026-07-31 几何覆盖审计结果
 
-对现有 UR5 collision mesh 做 256 个关节姿态采样后，当前严格配置的胶囊并未覆盖 mesh 顶点：`upper_arm_link` 所需最大半径约 `0.2056 m`，而配置为 `0.0600 m`；`forearm_link` 所需约 `0.1503 m`，而配置为 `0.0520 m`。这解释了先前 PyBullet 接触而胶囊重叠为 false 的现象，当前几何风险结果不能用于安全结论。
+对现有 UR5 collision mesh 做 256 个关节姿态采样后，**早期严格配置**的胶囊并未覆盖 mesh 顶点：`upper_arm_link` 所需最大半径约 `0.2056 m`，而配置为 `0.0600 m`；`forearm_link` 所需约 `0.1503 m`，而配置为 `0.0520 m`。这解释了先前 PyBullet 接触而胶囊重叠为 false 的现象。该结论已由后续 frame-corrected 几何审计补充，不能把早期配置称为当前配置。
 
 已新增离线诊断配置 `configs/experiments/p3_diagnostics/b4_osqp_strict_mesh_capsules_heldout.yaml`。它使用 collision-mesh 顶点拟合的保守胶囊（附加约 3 mm 顶点余量），同样的 256 姿态审计中六个 link 均通过顶点覆盖检查。该检查仅证明采样顶点覆盖，不证明三角形表面、动态运动或实时安全；配置只用于下一轮离线 held-out 诊断，不得与历史 B4 数值混合。
 
-因此下一步的唯一推荐顺序是：先用该配置完成更大姿态样本的几何复核，再用未参与开发的 eval seeds 做严格 safe-stop 诊断，最后对 trace 做静态/动态漂移分类。未完成这三步前不训练、不进入 P4/OOD、不做真机测试。
+当时的推荐顺序是先完成 mesh-fit 几何复核、再做 held-out safe-stop 和漂移分类；这些步骤已由后续 frame-corrected 几何审计和 deterministic escape 诊断推进。当前结论以本页后文的最新 4×20 复核和完整漂移审计为准，仍不训练、不进入 P4/OOD、不做真机测试。
 
 ### 2026-07-31 mesh-fit 胶囊 300 回合复核
 
@@ -92,7 +93,7 @@ safe-stop 漂移审计覆盖的 186 个不可行停止 episode 中，115 个被�
 
 六组结果均出现明显任务退化：success 为 1--6/50（2%--12%），碰撞为 13--23/50（26%--46%）；其中一组最大过滤耗时 302.04 ms，全部超过当前 50 ms 控制周期上限。该结果不是可冻结的安全改进，mesh-fit 胶囊配置应淘汰为主方案，仅保留作几何敏感性/误报诊断。
 
-**P3 决策：不冻结。** 当前不再扩大 mesh-fit 评估、不启动新的训练、不进入 P4/OOD 或真机。后续若继续研究，只做独立的 link-frame/三角面碰撞审计，以及带障碍物运动边界的离线失效分析；必须先解决 23 个物理接触漏检和动态漂移碰撞问题，才重新设计过滤器。
+**P3 决策：不冻结。** mesh-fit 结果只保留为几何敏感性/误报诊断，不再作为主方案。后续应继续做独立的 link-frame/三角面碰撞审计，以及带障碍物运动边界的离线失效分析；历史 mesh-fit 的物理接触漏检数值不能直接套用到后续 frame-corrected 配置。
 
 ### 2026-07-31 坐标系修正与三角面审计
 
@@ -124,7 +125,19 @@ safe-stop 漂移审计覆盖的 186 个不可行停止 episode 中，115 个被�
 
 随后修复了固定 link 的 Jacobian：`_link_point_jacobian` 现在把 `tool0` 等固定链上的点转换到最近可动祖先 link，再计算 PyBullet Jacobian；退化为点胶囊的末端也补充了点 Jacobian。全量测试现为 `51 passed`。修复后的同一 TTC + relaxed recovery 复核为 success 5%、collision 35%、最大耗时 582 ms；关闭约束放宽的严格对照为 success 5%、collision 55%，其中 `unavoidable_collision=55%`、`avoidable_collision=0`，平均安全停止率 43%。这证实：严格停止对动态漂移无能为力，而放宽预测约束会产生可避免碰撞；两者都不能冻结为方案。
 
-当前唯一推荐方向是实现固定时间预算的硬约束优先 escape controller（不可行时安全停止并标记 unavoidable），再重新跑仿真回归；在此之前不训练、不进入 OOD/P4、不做真机。
+当前唯一推荐方向是实现固定时间预算的硬约束优先 escape controller（不可行时安全停止并分类审计），再重新跑仿真回归；该建议属于当时的阶段记录，后续 deterministic escape 复核未通过，因此当前只做根因隔离，不训练、不进入 OOD/P4、不做真机。
+
+### 当前口径修正（2026-07-31）
+
+上一节的 strict safe-stop、bounded escape 和“当前唯一推荐方向”段落属于当时的阶段性记录，已由后续 frame-corrected deterministic escape 复核取代。最新 4×20 结果为 success `4/80`、collision `34/80`、最大过滤耗时 `410.4 ms`；完整漂移审计为 58 个不可行停止，其中 dynamic drift 34 个、碰撞 29 个。当前只做根因隔离和失效分析，不把 deterministic escape 视为已通过方案；不可行停止按 `dynamic_drift`/`static_or_slow` 分类，不能预先全部标记为 `unavoidable_collision`。
+
+### 2026-07-31 V2 根因隔离与审计结果（当前最新）
+
+- V2 2x2：legacy/moving `success=11/80, collision=6/80`；corrected/moving `8/80, 39/80`；legacy/static `8/80, 0/80`；corrected/static `7/80, 0/80`。同一 corrected geometry 在 static 条件无碰撞，说明动态障碍物运动是关键交互因素。
+- 漂移审计：legacy/moving 为 7 个 dynamic drift（碰撞 4）和 8 个 static/slow（碰撞 0）；corrected/moving 为 39 个 dynamic drift（碰撞 34，87.2%）和 20 个 static/slow（碰撞 5，25.0%）。
+- 约束归因：1,823 个 infeasible steps 中 1,818 个可由单类别松弛解释；`predictive_barrier` 1,815 次、`joint_acceleration` 1,103 次，主因是联合可达性冲突。
+- 时间与性能：四个条件 max filter time 为 197--351 ms，超过 50 ms；success 仅 7--11/80，不能冻结策略或实时方案。
+- 现状与决策：评估、约束归因和审计均已完成；P3 为“诊断完成、设计未冻结”。当前不重训、不进入 P4/OOD、不做真机；下一步只做统一几何/碰撞口径、动态可达性和可中断/硬截止路径验证。
 
 ## 1. 当前状态
 
@@ -173,7 +186,9 @@ maximin recovery 在预测约束不可行时，保持关节和工作空间硬约
 
 加入 `max_filter_compute_time_s=0.05` 的预算诊断没有改善任务或安全结果：seed 5101 仍为 10/20、1/20、27 个违反步，发生 1 次预算停止；seed 5201 仍为 13/20、1/20，但出现 21 个违反步和 7 次预算停止。最大记录耗时仍为 154.59 ms 和 221.09 ms。该 watchdog 在过滤计算返回后才执行，不能真正中断超时的 OSQP/主动集计算。
 
-因此，bounded escape、`recovery_relaxed` 和 maximin recovery 均不进入实时链路，也不进入 P4/OOD 或真机验证。当前保留方案是严格安全停止：关闭 recovery mode、关闭预测约束放宽、保留 OSQP 20 ms 求解预算和 50 ms 诊断 watchdog，配置入口为 `configs/experiments/p3_diagnostics/b4_osqp_strict_margin30_budget.yaml`。该入口的两个 seed 结果尚未完成，完成前不冻结 P3 设计。
+因此，bounded escape、`recovery_relaxed` 和 maximin recovery 均不进入实时链路，也不进入 P4/OOD 或真机验证。该阶段曾暂时保留 strict safe-stop 入口；随后已完成 frame-corrected deterministic escape 的 4×20 复核（success `4/80`、collision `34/80`、最大过滤耗时 `410.4 ms`）。因此这里的 strict 入口应理解为历史诊断配置，不是已通过的部署方案，P3 仍不冻结。
+
+> **口径更新（2026-07-31）**：本节及前面的 bounded/strict 段落是阶段性历史记录。后续 frame-corrected deterministic escape 的 4×20 复核和完整漂移审计已经完成，当前状态以本页“当前口径修正”和 `docs/p3_failure_root_cause_analysis.md` 为准。
 
 ### 最新进度（2026-07-30，几何修正后的 strict safe-stop 诊断）
 
@@ -208,7 +223,7 @@ UR5 胶囊映射已修正：`upper_arm` 从 `shoulder_link -> upper_arm_link` �
 | P1 不确定性连杆预测风险 | 已完成（开发验证） | 已实现时间戳状态估计接口、短时最小预测距离、几何/感知/时延/跟踪裕度和 `h`；无效、未来或过期观测不会产生低风险结果 |
 | P2 仿真安全过滤器 | 已完成（开发验证） | 策略命令可经连杆预测约束、关节位置/速度/加速度和 TCP 工作空间约束投影；不可用风险、无效输入或不可行约束均输出零速度 |
 | P2 端到端失效注入与指标 | 已完成（开发验证） | 可注入有效、无效或过期障碍物估计；运行时记录预测状态、`h_min`、原始/过滤后命令、干预量、停止状态、违反量与求解耗时 |
-| P2 解析点雅可比与仿真实时性 | 已完成（开发验证） | 以 PyBullet 点雅可比替代有限差分状态保存/恢复；20 episode、2,693 个控制步中滤波器均值 2.68 ms、P95 4.94 ms，无步超过 50 ms |
+| P2 解析点雅可比与仿真实时性 | 已完成（开发基准） | 以 PyBullet 点雅可比替代有限差分状态保存/恢复；20 episode、2,693 个控制步中滤波器均值 2.68 ms、P95 4.94 ms，无步超过 50 ms。该基准不代表后续 OSQP/deterministic escape 的硬实时预算 |
 | P3 B1--B5 开发轮次 | 已完成（未冻结） | 共用 train seed 4101、100k step、validation seed 5201、eval seed 5101；B4/B5 无稳定综合优势 |
 | P3 过滤器约束诊断 | 已完成（未冻结） | 已完成 OSQP 状态修复、逐连杆诊断、障碍物漂移项、recovery 与几何修正后的 strict safe-stop 诊断；strict 2x20 结果仍有碰撞、长尾和任务退化，不能冻结 |
 | OSQP 依赖与后端 | 已完成（开发验证） | `osqp=1.1.3`、`scipy=1.18.0` 已安装；常规 OSQP 路径约 2.6--2.7 ms，但 maximin recovery 单步最高约 277 ms，尚不满足当前 50 ms 控制周期 |
@@ -309,7 +324,7 @@ outputs/rechecks/heldout_1004_1006/final_3methods/eval_summary_macro_across_trai
 2. [安全过滤器](../src/rl_risk_sac/utils/safety_filter.py) 已以半空间投影实现 `J_h qdot + kappa h >= 0`，并同时处理关节位置、速度、加速度/命令连续性与外部工作空间约束。风险不可用、输入无效或约束不可行时，过滤器确定性输出零速度。
 3. [UR5 仿真环境](../src/rl_risk_sac/envs/ur5_dynamic_obstacle_env.py) 在 `env.safety_filter.enabled=true` 时将过滤器作为策略命令的唯一出口。通过 PyBullet 点雅可比和固定最优投影参数构造连杆安全函数与 TCP 工作空间雅可比；默认配置保持关闭，不改变阶段一结果。
 4. 已提供感知估计注入接口，可在仿真中复现无效和过期状态。端到端指标包括预测状态、`h_min`、原始与过滤后动作、干预范数、停止状态、活动约束数、最大违反量和求解时间。
-5. 当前回归结果为 `38 passed`，且 P2、B4、B5 的 PyBullet smoke test 已通过。过滤器已支持循环投影、Dykstra、主动集回退、可选 OSQP QP、显式 recovery 和多连杆加权逃逸方向；新增的 OSQP infeasible/recovery 回归 focused suite 为 `23 passed`。bounded escape 双 seed 复核仍有 154--221 ms 的单步长尾，故当前只保留 strict safe-stop 入口做最终预算复核。所有耗时数字只覆盖当前 PyBullet 进程内的求解，不覆盖感知、通信、控制器和真实硬件延迟。
+5. 当前回归结果为 `51 passed`，且 P2、B4、B5 的 PyBullet smoke test 已通过。过滤器已支持循环投影、Dykstra、主动集回退、可选 OSQP QP、显式 recovery 和多连杆加权逃逸方向；新增的 OSQP infeasible/recovery 回归 focused suite 为 `23 passed`。bounded escape、strict safe-stop 和 deterministic escape 均出现任务退化、碰撞或长尾，不能作为实时方案。所有耗时数字只覆盖当前 PyBullet 进程内的求解，不覆盖感知、通信、控制器和真实硬件延迟。
 
 ### 8.4 当前状态：P3 因子化开发轮次已完成，设计未冻结
 

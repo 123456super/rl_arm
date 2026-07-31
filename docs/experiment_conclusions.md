@@ -8,10 +8,20 @@
 
 - 阶段一正式结论：已冻结。本页的 held-out 主表、方法排序和限定条件保持不变；link_fixed_penalty1 仍只是仿真部署候选，不是真机安全认证。
 - P3 研究分支：未冻结。2026-07-31 前完成的几何 frame 修正、mesh/三角形覆盖审计、strict safe-stop、TTC recovery 和固定 link Jacobian 修复均属于开发诊断，不能与阶段一数据合并。
-- 当前阻塞：物理接触与胶囊模型仍有漏检/误报，动态漂移下 safe-stop 不能保持安全集，OSQP 存在超过 50 ms 的长尾，现有诊断样本不足以支持泛化。
-- 后续口径：在固定时间预算、硬约束优先 deterministic escape controller 通过仿真回归前，不新增训练、不进入 P4/OOD、不做真机；其结果应追加到 experiment_progress.md，而不是改写本页正式主表。
+- 当前阻塞：V2 已确认 corrected/moving 下 capsule-only 误报、少量 physical contact 漏检、dynamic drift safe-stop 失效、predictive barrier 与 acceleration 联合不可行、OSQP 超过 50 ms 长尾，以及任务 success 仅 8.8%--13.8%。
+- 后续口径：P3 诊断完成但设计未冻结。在统一几何/碰撞口径、固定时间预算和硬约束可达性通过仿真回归前，不新增训练、不进入 P4/OOD、不做真机；V2 结果只作为研究分支状态和根因证据，不改写本页正式主表。
+
+### P3 状态更新（2026-07-31，非阶段一正式结论）
+
+P3 的评估、约束归因和漂移审计已完成，但设计未冻结。V2 2x2 结果为：legacy/moving `11/80` success、`6/80` collision；corrected/moving `8/80`、`39/80`；legacy/static `8/80`、`0/80`；corrected/static `7/80`、`0/80`。corrected/moving 的 39 次 collision 中 38 次是 capsule-only、1 次为 PyBullet contact。
+
+漂移审计中 corrected/moving 有 39 个 dynamic drift infeasible episodes，碰撞 34 次（87.2%），static/slow 有 20 个、碰撞 5 次（25.0%）。1,823 个 infeasible steps 的 OSQP 探针显示 `predictive_barrier` 1,815 次、`joint_acceleration` 1,103 次，说明主阻塞是联合可达性而非单一 workspace/velocity 限制。过滤器 max time 为 197--351 ms，仍不满足 50 ms 控制周期；V2 success 仅 8.8%--13.8%。这些数字仅用于 P3 根因分析，不得回写阶段一主表。
+
+当前仍不重训、不进入 P4/OOD、不做真机；后续只有在统一训练/评估几何、碰撞口径、联合可行性和硬时间截止后，才重新评估是否冻结 P3。
 
 ## 1. 可信数据源与统计口径
+
+本页阶段一主表中的 `collision rate` 沿用当时环境的综合 collision 事件定义，不能与 P3 新诊断中的 `capsule_overlap` 或 `pybullet_contact` 直接比较，也不能把阶段一 collision rate 解释为纯物理接触率。
 
 最终主比较覆盖 3 个训练随机种子、5 个场景、3 种方法、3 个独立评估随机种子，每个评估 seed 运行 100 episodes：
 

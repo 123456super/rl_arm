@@ -197,6 +197,17 @@ def test_primal_infeasible_osqp_status_forces_safe_stop(monkeypatch: pytest.Monk
     np.testing.assert_array_equal(result.command_joint_velocity_radps, [0.0])
 
 
+def test_osqp_infeasibility_diagnostics_identify_predictive_barrier() -> None:
+    result = filter_joint_velocity(
+        filter_input(risk_with_safety_function(-1.0), requested=0.4),
+        replace(config(), use_qp_solver=True, infeasibility_diagnostics_enabled=True),
+    )
+
+    assert result.status is SafetyFilterStatus.SAFE_STOP_INFEASIBLE
+    assert set(result.infeasible_constraint_categories) == {"predictive_barrier", "joint_velocity"}
+    assert result.infeasibility_diagnostic_status == "single_category_relaxation"
+
+
 def test_primal_infeasible_osqp_uses_bounded_recovery_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = 0
 

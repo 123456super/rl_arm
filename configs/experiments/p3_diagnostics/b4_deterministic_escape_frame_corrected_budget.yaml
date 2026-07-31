@@ -1,0 +1,27 @@
+# Deterministic escape diagnostic with corrected link frames and fixed budgets.
+# Hard joint/workspace/predictive constraints remain mandatory; infeasible cases
+# safe-stop and are classified as unavoidable_collision by the evaluator.
+# Offline simulation diagnosis only; not a real-time or deployment guarantee.
+includes:
+  - b4_osqp_strict_frame_corrected_heldout.yaml
+
+env:
+  safety_filter:
+    # Enter the bounded analytic escape before the predictive barrier closes.
+    recovery_mode_enabled: true
+    recovery_enter_margin_m: 0.04
+    recovery_exit_margin_m: 0.08
+    recovery_ttc_threshold_s: 0.15
+    recovery_speed_radps: 0.7
+    # Never relax predictive barriers or solve the unbounded maximin recovery QP.
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+    # Keep deterministic solver budgets: 20 ms OSQP, 50 ms end-to-end diagnostic.
+    qp_time_limit_s: 0.02
+    max_filter_compute_time_s: 0.05
+    diagnostic_logging: true
+
+eval:
+  method: link_fixed
+  episodes: 20
+  seed: 5101

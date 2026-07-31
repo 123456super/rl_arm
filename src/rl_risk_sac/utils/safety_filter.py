@@ -8,7 +8,7 @@ correction through cyclic projection onto the resulting half-spaces.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from itertools import combinations
 
@@ -48,6 +48,7 @@ class SafetyFilterConfig:
     fallback_projection_iterations: int = 320
     use_qp_solver: bool = False
     qp_time_limit_s: float | None = None
+    infeasibility_diagnostics_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,8 @@ class SafetyFilterResult:
     qp_solver_used: bool = False
     qp_solver_status: str = ""
     fallback_stage: str = ""
+    infeasible_constraint_categories: tuple[str, ...] = ()
+    infeasibility_diagnostic_status: str = ""
 
     @property
     def requires_safe_stop(self) -> bool:
@@ -203,6 +206,20 @@ def filter_joint_velocity(
                 fallback_stage="osqp",
             )
         if "infeasible" in qp_status:
+            infeasible_categories: tuple[str, ...] = ()
+            diagnostic_status = "disabled"
+            if config.infeasibility_diagnostics_enabled:
+                infeasible_categories, diagnostic_status = _diagnose_infeasible_constraint_categories(
+                    requested,
+                    lower,
+                    upper,
+                    rows,
+                    bounds,
+                    labels,
+                    lower_labels,
+                    upper_labels,
+                    config,
+                )
             if filter_input.allow_infeasible_recovery:
                 return _relaxed_recovery_command(
                     requested,
@@ -225,6 +242,8 @@ def filter_joint_velocity(
                 max_constraint_category="qp_solver",
                 qp_solver_status=qp_status,
                 fallback_stage="osqp",
+                infeasible_constraint_categories=infeasible_categories,
+                infeasibility_diagnostic_status=diagnostic_status,
             )
 
     command = np.clip(requested, lower, upper)
@@ -584,6 +603,66 @@ def _osqp_projection(
     return command, status
 
 
+def _diagnose_infeasible_constraint_categories(
+    requested: np.ndarray,
+    lower: np.ndarray,
+    upper: np.ndarray,
+    rows: np.ndarray,
+    bounds: np.ndarray,
+    labels: tuple[str, ...],
+    lower_labels: tuple[str, ...],
+    upper_labels: tuple[str, ...],
+    config: SafetyFilterConfig,
+) -> tuple[tuple[str, ...], str]:
+    """Find categories whose individual relaxation restores QP feasibility.
+
+    This is deliberately an offline diagnostic: each candidate performs one
+    additional OSQP solve with no solver time limit. It must remain disabled
+    for any timing-sensitive control path.
+    """
+    row_categories = np.asarray([_constraint_category(label) for label in labels], dtype=object)
+    lower_categories = np.asarray([_constraint_category(label) for label in lower_labels], dtype=object)
+    upper_categories = np.asarray([_constraint_category(label) for label in upper_labels], dtype=object)
+    categories = tuple(dict.fromkeys((*row_categories, *lower_categories, *upper_categories)))
+    diagnostic_config = replace(config, qp_time_limit_s=None)
+    restoring_categories: list[str] = []
+
+    for category in categories:
+        row_mask = row_categories != category
+        lower_probe = lower.copy()
+        upper_probe = upper.copy()
+        lower_probe[lower_categories == category] = -np.inf
+        upper_probe[upper_categories == category] = np.inf
+        command, _ = _osqp_projection(
+            requested,
+            lower_probe,
+            upper_probe,
+            rows[row_mask],
+            bounds[row_mask],
+            diagnostic_config,
+        )
+        if command is not None:
+            restoring_categories.append(str(category))
+
+    return (
+        tuple(restoring_categories),
+        "single_category_relaxation" if restoring_categories else "combined_or_unresolved",
+    )
+
+
+def _constraint_category(label: str) -> str:
+    if label.startswith("predictive_link_"):
+        return "predictive_barrier"
+    if label.startswith("workspace_"):
+        return "workspace"
+    if label.startswith("joint_"):
+        for source in ("velocity", "acceleration", "position"):
+            if f"_{source}_" in label:
+                return f"joint_{source}"
+        return "joint_bound"
+    return "other"
+
+
 def _dykstra_projection(
     requested: np.ndarray,
     lower: np.ndarray,
@@ -830,6 +909,8 @@ def _safe_stop(
     projection_iterations: int = 0,
     qp_solver_status: str = "",
     fallback_stage: str = "",
+    infeasible_constraint_categories: tuple[str, ...] = (),
+    infeasibility_diagnostic_status: str = "",
 ) -> SafetyFilterResult:
     requested_array = np.asarray(requested, dtype=np.float64)
     command = np.zeros_like(requested_array) if requested_array.ndim == 1 else np.zeros(0, dtype=np.float64)
@@ -847,4 +928,6 @@ def _safe_stop(
         projection_iterations=projection_iterations,
         qp_solver_status=qp_solver_status,
         fallback_stage=fallback_stage,
+        infeasible_constraint_categories=infeasible_constraint_categories,
+        infeasibility_diagnostic_status=infeasibility_diagnostic_status,
     )

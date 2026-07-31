@@ -1,0 +1,15 @@
+# Offline-only attribution run for corrected geometry and moving obstacles.
+# It performs one extra OSQP feasibility probe per constraint category.
+includes:
+  - b4_root_cause_corrected_geometry_moving.yaml
+
+env:
+  safety_filter:
+    infeasibility_diagnostics_enabled: true
+    # The extra probes are not compatible with a real-time budget claim.
+    max_filter_compute_time_s: null
+
+eval:
+  method: link_fixed
+  episodes: 20
+  seed: 5101

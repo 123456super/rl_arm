@@ -138,6 +138,10 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.recovery_min_ttc_s = float("inf")
         self.unavoidable_collision = False
         self.avoidable_collision = False
+        self.safe_stop_infeasible_first_step: int | None = None
+        self.safe_stop_infeasible_last_step: int | None = None
+        self.safe_stop_infeasible_first_h_m = float("nan")
+        self.safe_stop_infeasible_last_h_m = float("nan")
 
         obs_dim = self.joint_count * 3 + self.capsule_model.count * 7 + 7
         obs_bound = float(self.observation_cfg["space_bound"])
@@ -183,6 +187,10 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.recovery_min_ttc_s = float("inf")
         self.unavoidable_collision = False
         self.avoidable_collision = False
+        self.safe_stop_infeasible_first_step = None
+        self.safe_stop_infeasible_last_step = None
+        self.safe_stop_infeasible_first_h_m = float("nan")
+        self.safe_stop_infeasible_last_h_m = float("nan")
         if self.safety_filter_enabled:
             initial_predictive_risk = self._compute_predictive_risk()
             if initial_predictive_risk.usable:
@@ -331,21 +339,32 @@ class UR5DynamicObstacleEnv(gym.Env):
                 )
             )
             info.update(filter_link_diagnostics)
-            dynamic_drift = False
-            if predictive_risk is not None and predictive_risk.usable:
-                dynamic_drift = bool(np.min(self._safety_drift_mps(predictive_risk)) < -1.0e-6)
-            unavoidable_collision = bool(collision and filter_result.requires_safe_stop and dynamic_drift)
+            self._record_infeasible_safe_stop(filter_result, predictive_risk)
+            safe_stop_drift_mps, safe_stop_drift_class = self._safe_stop_drift()
+            unavoidable_collision = bool(collision and safe_stop_drift_class == "dynamic_drift")
             self.unavoidable_collision = self.unavoidable_collision or unavoidable_collision
             self.avoidable_collision = self.avoidable_collision or bool(collision and not unavoidable_collision)
             info.update(
                 {
                     "unavoidable_collision": unavoidable_collision,
                     "avoidable_collision": bool(collision and not unavoidable_collision),
-                "collision_avoidability_reason": (
-                        "dynamic_drift_after_safe_stop" if unavoidable_collision else "command_or_static_failure"
+                    "collision_avoidability_reason": (
+                        "dynamic_drift_after_safe_stop" if unavoidable_collision else "avoidable_or_static_failure"
                     )
                     if collision
                     else "",
+                    "safe_stop_infeasible_first_step": (
+                        self.safe_stop_infeasible_first_step
+                        if self.safe_stop_infeasible_first_step is not None
+                        else -1
+                    ),
+                    "safe_stop_infeasible_last_step": (
+                        self.safe_stop_infeasible_last_step
+                        if self.safe_stop_infeasible_last_step is not None
+                        else -1
+                    ),
+                    "safe_stop_h_drift_mps": safe_stop_drift_mps,
+                    "safe_stop_drift_class": safe_stop_drift_class,
                 }
             )
         self.prev_qdot_cmd = qdot_cmd
@@ -359,6 +378,38 @@ class UR5DynamicObstacleEnv(gym.Env):
     def close(self) -> None:
         if p.isConnected(self.physics_client_id):
             p.disconnect(self.physics_client_id)
+
+    def _record_infeasible_safe_stop(
+        self,
+        result: SafetyFilterResult,
+        predictive_risk: PredictiveLinkRisk | None,
+    ) -> None:
+        if result.status is not SafetyFilterStatus.SAFE_STOP_INFEASIBLE:
+            return
+        if predictive_risk is None or not predictive_risk.usable:
+            return
+        h_min = float(np.min(predictive_risk.safety_functions_m))
+        step = self.step_count - 1
+        if self.safe_stop_infeasible_first_step is None:
+            self.safe_stop_infeasible_first_step = step
+            self.safe_stop_infeasible_first_h_m = h_min
+        self.safe_stop_infeasible_last_step = step
+        self.safe_stop_infeasible_last_h_m = h_min
+
+    def _safe_stop_drift(self) -> tuple[float, str]:
+        first_step = self.safe_stop_infeasible_first_step
+        last_step = self.safe_stop_infeasible_last_step
+        if first_step is None or last_step is None:
+            return float("nan"), "not_applicable"
+        if last_step <= first_step:
+            return 0.0, "static_or_slow"
+        duration_s = (last_step - first_step) * self.control_dt
+        drift_mps = (self.safe_stop_infeasible_last_h_m - self.safe_stop_infeasible_first_h_m) / duration_s
+        threshold_mps = float(self.safety_filter_cfg.get("safe_stop_dynamic_drift_threshold_mps", 0.05))
+        if not np.isfinite(threshold_mps) or threshold_mps < 0.0:
+            raise ValueError("safe_stop_dynamic_drift_threshold_mps must be finite and non-negative")
+        drift_class = "dynamic_drift" if drift_mps < -threshold_mps else "static_or_slow"
+        return float(drift_mps), drift_class
 
     def get_metrics(self) -> dict[str, Any]:
         return dict(self.last_info)
@@ -555,6 +606,9 @@ class UR5DynamicObstacleEnv(gym.Env):
                 if self.safety_filter_cfg.get("qp_time_limit_s") is None
                 else float(self.safety_filter_cfg["qp_time_limit_s"])
             ),
+            infeasibility_diagnostics_enabled=bool(
+                self.safety_filter_cfg.get("infeasibility_diagnostics_enabled", False)
+            ),
         )
 
     def _filter_command(
@@ -675,6 +729,8 @@ class UR5DynamicObstacleEnv(gym.Env):
                 qp_solver_used=result.qp_solver_used,
                 qp_solver_status=result.qp_solver_status,
                 fallback_stage=result.fallback_stage,
+                infeasible_constraint_categories=result.infeasible_constraint_categories,
+                infeasibility_diagnostic_status=result.infeasibility_diagnostic_status,
             ),
             predictive_risk,
             elapsed_s,
@@ -938,6 +994,8 @@ class UR5DynamicObstacleEnv(gym.Env):
             "safety_filter_qp_solver_used": bool(result.qp_solver_used),
             "safety_filter_qp_solver_status": result.qp_solver_status,
             "safety_filter_fallback_stage": result.fallback_stage,
+            "safety_filter_infeasible_constraint_categories": "|".join(result.infeasible_constraint_categories),
+            "safety_filter_infeasibility_diagnostic_status": result.infeasibility_diagnostic_status,
             "safety_filter_max_constraint_violation": float(result.max_constraint_violation),
             "safety_filter_safe_stop": bool(result.requires_safe_stop),
             "safety_filter_solve_time_s": float(solve_time_s) if solve_time_s is not None else float("nan"),
