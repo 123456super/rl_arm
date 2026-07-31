@@ -1,4 +1,25 @@
-# 阶段一复现与新研究开发指南
+# 阶段一复现与新研究开发指南（状态更新至 2026-07-31）
+
+> 当前执行边界（2026-07-31）：阶段一只复现，不改主结论；P3 只做仿真诊断，不训练扩展、不进入 P4/OOD、不做真机。除非后续文档明确写出新的日期和通过门槛，否则不要把任一 P3 配置当作部署候选。
+
+## 0.1 日期化进度与当前可执行事项
+
+| 日期/阶段 | 状态 | 当前可执行事项 |
+| --- | --- | --- |
+| 2026-07-27--07-31 / P0 | 已冻结 | 复现阶段一主表、检查文档和输出归档 |
+| 2026-07-29--07-31 / P1-P2 | 开发验证完成 | 运行测试、smoke test、trace 和几何/漂移审计 |
+| 2026-07-31 / P3 | 未冻结 | 仅验证固定预算硬约束 escape；不可行时记录 safe-stop |
+| 后续 / P4-P5 | 未开始 | 不运行新训练、OOD 或真机流程 |
+
+当前推荐的无长训练校验命令（在项目根目录执行）：
+
+```bash
+/home/jixuefeng/miniforge3/envs/rl/bin/python -m pytest -q tests
+/home/jixuefeng/miniforge3/envs/rl/bin/python scripts/smoke_test.py \
+  --config configs/experiments/p3_diagnostics/b4_osqp_strict_frame_corrected_heldout.yaml
+```
+
+不要执行 python scripts；scripts 是目录，不是 Python 模块。任何耗时评估应使用已记录日期、train seed、eval seed 和独立输出目录，完成后再把结果追加到 experiment_progress.md。
 
 ## 1. 当前阶段与使用边界
 
@@ -94,6 +115,13 @@ conda run -n rl python scripts/smoke_test.py \
 safe-stop 漂移审计显示，11 个不可行停止 episode 中 4 个属于动态漂移型（`h` 下降超过 `0.05 m/s`），3 次碰撞全部集中在动态漂移型。持续移动障碍物下零速度并不等价于安全保持；下一步先审计 collision mesh 的 local transform，并将动态漂移不可行作为离线逃逸诊断问题处理。在完整 held-out 复核完成前，不启动新的 train/eval seeds、OOD 或真机工作。
 
 OSQP 诊断依赖已安装：`osqp=1.1.3`、`scipy=1.18.0`。常规求解约 6--9 ms，但 maximin recovery 最坏单步约 277 ms；两者都只覆盖 PyBullet 进程内计算，不构成端到端安全或真机实时性结论。
+
+### 5.2 当前禁止事项与结果记录要求（2026-07-31）
+
+- 在 P3 未冻结前，不启动新 train seed、不扩大 held-out、不进入 P4/OOD，也不执行真机试验。
+- relaxed recovery、bounded/maximin escape 和 mesh-fit 胶囊结果只能放在诊断输出中；不得混入阶段一主表或宣称安全成功。
+- 每次评估必须记录日期、阶段、配置路径、代码版本、train seed、checkpoint、eval seed、episode 数、碰撞分类、不可行/停止率、平均/最大求解时间和输出路径。
+- 只有固定预算、硬约束优先的 deterministic escape 通过仿真回归后，才允许重新讨论 P3 冻结。
 
 ## 6. 开发训练：安全的最小流程
 

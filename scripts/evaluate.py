@@ -97,6 +97,8 @@ def main() -> None:
         collision = False
         collision_capsule_overlap = False
         collision_pybullet_contact = False
+        unavoidable_collision = False
+        avoidable_collision = False
         final_position_error = 0.0
         closest_link = -1
         prev_qdot_cmd = np.zeros(env.action_space.shape[0], dtype=np.float32)
@@ -147,6 +149,8 @@ def main() -> None:
             collision = bool(info["collision"])
             collision_capsule_overlap = bool(info.get("collision_capsule_overlap", False))
             collision_pybullet_contact = bool(info.get("collision_pybullet_contact", False))
+            unavoidable_collision = unavoidable_collision or bool(info.get("unavoidable_collision", False))
+            avoidable_collision = avoidable_collision or bool(info.get("avoidable_collision", False))
             final_position_error = float(info["goal_error_norm"])
             closest_link = int(info["closest_link"])
             if trace_dir is not None:
@@ -165,6 +169,9 @@ def main() -> None:
                         "collision": int(info["collision"]),
                         "collision_capsule_overlap": int(bool(info.get("collision_capsule_overlap", False))),
                         "collision_pybullet_contact": int(bool(info.get("collision_pybullet_contact", False))),
+                        "unavoidable_collision": int(bool(info.get("unavoidable_collision", False))),
+                        "avoidable_collision": int(bool(info.get("avoidable_collision", False))),
+                        "collision_avoidability_reason": info.get("collision_avoidability_reason", ""),
                         "collision_contact_link_indices": info.get("collision_contact_link_indices", ""),
                         "collision_contact_link_names": info.get("collision_contact_link_names", ""),
                         "collision_min_contact_distance": float(
@@ -242,6 +249,8 @@ def main() -> None:
                 "collision": int(collision),
                 "collision_capsule_overlap": int(collision_capsule_overlap),
                 "collision_pybullet_contact": int(collision_pybullet_contact),
+                "unavoidable_collision": int(unavoidable_collision),
+                "avoidable_collision": int(avoidable_collision),
                 "collision_contact_link_indices": info.get("collision_contact_link_indices", ""),
                 "collision_contact_link_names": info.get("collision_contact_link_names", ""),
                 "collision_min_contact_distance": float(
@@ -331,6 +340,8 @@ def main() -> None:
         "collision_rate": float(np.mean([r["collision"] for r in rows])),
         "collision_capsule_overlap_rate": float(np.mean([r["collision_capsule_overlap"] for r in rows])),
         "collision_pybullet_contact_rate": float(np.mean([r["collision_pybullet_contact"] for r in rows])),
+        "unavoidable_collision_rate": float(np.mean([r["unavoidable_collision"] for r in rows])),
+        "avoidable_collision_rate": float(np.mean([r["avoidable_collision"] for r in rows])),
         "non_end_link_collision_rate": float(np.mean([r["non_end_link_collision"] for r in rows])),
         "mean_final_position_error": float(np.mean([r["final_position_error"] for r in rows])),
         "mean_min_distance": float(np.mean([r["min_distance"] for r in rows])),

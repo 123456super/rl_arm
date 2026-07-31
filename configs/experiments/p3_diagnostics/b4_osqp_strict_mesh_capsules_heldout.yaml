@@ -1,0 +1,20 @@
+# Geometry-audited strict safe-stop evaluation.
+# The capsule parameters are fit to UR5 collision-mesh vertices. This entry
+# is for offline geometry validation and held-out diagnosis only; it must not
+# be mixed with the historical B4 results or used as a safety guarantee.
+includes:
+  - b4_osqp_strict_margin30_heldout.yaml
+
+robot:
+  capsules:
+    - {name: shoulder, parent_link_name: shoulder_link, child_link_name: shoulder_link, start_local_position: [0.000350998, -0.012557210, 0.095378828], end_local_position: [0.002518316, -0.008481777, -0.041826077], radius: 0.085988}
+    - {name: upper_arm, parent_link_name: upper_arm_link, child_link_name: upper_arm_link, start_local_position: [-0.038707009, 0.000393747, -0.272398842], end_local_position: [-0.038434202, -0.000446319, 0.272250380], radius: 0.103253}
+    - {name: forearm, parent_link_name: forearm_link, child_link_name: forearm_link, start_local_position: [-0.011380995, 0.000943677, 0.302860786], end_local_position: [0.033275165, -0.000159142, -0.189085289], radius: 0.079995}
+    - {name: wrist_1, parent_link_name: wrist_1_link, child_link_name: wrist_1_link, start_local_position: [0.000437277, -0.033102766, -0.010646458], end_local_position: [-0.000488359, 0.075533069, -0.002242941], radius: 0.055692}
+    - {name: wrist_2, parent_link_name: wrist_2_link, child_link_name: wrist_2_link, start_local_position: [0.001389759, 0.033631473, -0.013914476], end_local_position: [-0.000883790, -0.076196493, -0.001581969], radius: 0.055331}
+    - {name: wrist_3, parent_link_name: wrist_3_link, child_link_name: wrist_3_link, start_local_position: [-0.000646004, 0.037341475, -0.004316612], end_local_position: [0.000267715, -0.043955026, -0.012230660], radius: 0.048377}
+
+eval:
+  method: link_fixed
+  episodes: 20
+  seed: 6301

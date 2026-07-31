@@ -1,0 +1,62 @@
+{
+  "config": "configs/experiments/p3_diagnostics/b4_osqp_strict_frame_corrected_heldout.yaml",
+  "seed": 6301,
+  "samples_per_triangle": 8,
+  "links": {
+    "shoulder_link": {
+      "capsule": "shoulder",
+      "triangle_count": 674,
+      "sample_count": 7414,
+      "configured_radius_m": 0.08598767561066961,
+      "max_required_radius_m": 0.08298767575224043,
+      "max_radius_excess_m": -0.002999999858429178,
+      "coverage_ok_at_samples": true
+    },
+    "upper_arm_link": {
+      "capsule": "upper_arm",
+      "triangle_count": 1176,
+      "sample_count": 12936,
+      "configured_radius_m": 0.10325230532579074,
+      "max_required_radius_m": 0.10025230738338353,
+      "max_radius_excess_m": -0.002999997942407212,
+      "coverage_ok_at_samples": true
+    },
+    "forearm_link": {
+      "capsule": "forearm",
+      "triangle_count": 1050,
+      "sample_count": 11550,
+      "configured_radius_m": 0.07999408774853851,
+      "max_required_radius_m": 0.07699408845119574,
+      "max_radius_excess_m": -0.0029999992973427786,
+      "coverage_ok_at_samples": true
+    },
+    "wrist_1_link": {
+      "capsule": "wrist_1",
+      "triangle_count": 702,
+      "sample_count": 7722,
+      "configured_radius_m": 0.05569111334476015,
+      "max_required_radius_m": 0.05269111343628124,
+      "max_radius_excess_m": -0.0029999999084789133,
+      "coverage_ok_at_samples": true
+    },
+    "wrist_2_link": {
+      "capsule": "wrist_2",
+      "triangle_count": 702,
+      "sample_count": 7722,
+      "configured_radius_m": 0.05533030881024477,
+      "max_required_radius_m": 0.05233030838594379,
+      "max_radius_excess_m": -0.003000000424300979,
+      "coverage_ok_at_samples": true
+    },
+    "wrist_3_link": {
+      "capsule": "wrist_3",
+      "triangle_count": 446,
+      "sample_count": 4906,
+      "configured_radius_m": 0.04837612224317481,
+      "max_required_radius_m": 0.045376122172094455,
+      "max_radius_excess_m": -0.0030000000710803526,
+      "coverage_ok_at_samples": true
+    }
+  },
+  "all_sampled_points_covered": true
+}

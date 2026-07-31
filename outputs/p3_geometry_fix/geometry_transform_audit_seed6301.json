@@ -1,0 +1,382 @@
+{
+  "config": "configs/experiments/p3_diagnostics/b4_osqp_strict_mesh_capsules_heldout.yaml",
+  "seed": 6301,
+  "robot_urdf": "/home/jixuefeng/rl/assets/robots/universal_robots/ur_models/ur5.urdf",
+  "reset_info": {
+    "goal": [
+      0.45775237679481506,
+      0.13378125429153442,
+      0.46171388030052185
+    ],
+    "ee_pos": [
+      0.5957388877868652,
+      0.11907452344894409,
+      0.26811379194259644
+    ],
+    "goal_error_norm": 0.2381964772939682,
+    "obstacle_enabled": true,
+    "obstacle_center": [
+      0.4233742952346802,
+      0.4443882405757904,
+      0.25679588317871094
+    ],
+    "obstacle_velocity": [
+      0.08409800380468369,
+      -0.31902363896369934,
+      0.08155287802219391
+    ],
+    "risk_global": 0.6344562768936157,
+    "d_min": 0.15983781218528748,
+    "closest_link": 2,
+    "safety_violation": false,
+    "risk_body": [
+      0.11280722916126251,
+      0.155049666762352,
+      0.6344562768936157,
+      0.3813522756099701,
+      0.41454580426216125,
+      0.4713991582393646
+    ],
+    "policy_risk_representation": "predictive",
+    "policy_risk_global": 0.697904109954834,
+    "policy_risk_d_min": 0.14029604196548462,
+    "recovery_initially_unsafe": true,
+    "recovery_initial_h_min_m": -0.009703962939124872
+  },
+  "capsules": [
+    {
+      "name": "shoulder",
+      "parent_link_name": "shoulder_link",
+      "child_link_name": "shoulder_link",
+      "parent_link_id": 2,
+      "child_link_id": 2,
+      "radius_m": 0.085988,
+      "start_world": [
+        2.7319732907926664e-05,
+        0.012562086805701256,
+        0.1845378279685974
+      ],
+      "end_world": [
+        -0.0022617464419454336,
+        0.008553769439458847,
+        0.047332920134067535
+      ]
+    },
+    {
+      "name": "upper_arm",
+      "parent_link_name": "upper_arm_link",
+      "child_link_name": "upper_arm_link",
+      "parent_link_id": 3,
+      "child_link_id": 3,
+      "radius_m": 0.103253,
+      "start_world": [
+        0.011120264418423176,
+        -0.2728574573993683,
+        0.12269482016563416
+      ],
+      "end_world": [
+        0.028106864541769028,
+        0.27152708172798157,
+        0.12203294038772583
+      ]
+    },
+    {
+      "name": "forearm",
+      "parent_link_name": "forearm_link",
+      "child_link_name": "forearm_link",
+      "parent_link_id": 4,
+      "child_link_id": 4,
+      "radius_m": 0.079995,
+      "start_world": [
+        0.23638693988323212,
+        0.2958762049674988,
+        0.4542199969291687
+      ],
+      "end_world": [
+        0.1773746907711029,
+        -0.1945151388645172,
+        0.46056094765663147
+      ]
+    },
+    {
+      "name": "wrist_1",
+      "parent_link_name": "wrist_1_link",
+      "child_link_name": "wrist_1_link",
+      "parent_link_id": 5,
+      "child_link_id": 5,
+      "radius_m": 0.055692,
+      "start_world": [
+        0.6236979961395264,
+        0.07975713908672333,
+        0.36230382323265076
+      ],
+      "end_world": [
+        0.5637030005455017,
+        0.08997203409671783,
+        0.45268896222114563
+      ]
+    },
+    {
+      "name": "wrist_2",
+      "parent_link_name": "wrist_2_link",
+      "child_link_name": "wrist_2_link",
+      "parent_link_id": 6,
+      "child_link_id": 6,
+      "radius_m": 0.055331,
+      "start_world": [
+        0.6248748302459717,
+        0.10043439269065857,
+        0.30509769916534424
+      ],
+      "end_world": [
+        0.7168511152267456,
+        0.06267376244068146,
+        0.3534085154533386
+      ]
+    },
+    {
+      "name": "wrist_3",
+      "parent_link_name": "wrist_3_link",
+      "child_link_name": "wrist_3_link",
+      "parent_link_id": 7,
+      "child_link_id": 7,
+      "radius_m": 0.048377,
+      "start_world": [
+        0.5771065950393677,
+        0.11492752283811569,
+        0.3005032539367676
+      ],
+      "end_world": [
+        0.6310873031616211,
+        0.11816021054983139,
+        0.2392805516719818
+      ]
+    }
+  ],
+  "collision_shapes": [
+    {
+      "link_id": 1,
+      "link_name": "base_link_inertia",
+      "geometry_type": 5,
+      "dimensions": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "filename": "b'/home/jixuefeng/rl/assets/robots/universal_robots/ur_models/meshes/ur5/collision/base.stl'",
+      "local_frame_position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "local_frame_orientation": [
+        0.0,
+        0.0,
+        1.0,
+        6.123233995736766e-17
+      ],
+      "world_aabb_min": [
+        -0.07657943803071979,
+        -0.11300011116266254,
+        -0.0030000497998446188
+      ],
+      "world_aabb_max": [
+        0.07663327592611316,
+        0.07655142384767535,
+        0.026997946849256757
+      ]
+    },
+    {
+      "link_id": 2,
+      "link_name": "shoulder_link",
+      "geometry_type": 5,
+      "dimensions": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "filename": "b'/home/jixuefeng/rl/assets/robots/universal_robots/ur_models/meshes/ur5/collision/shoulder.stl'",
+      "local_frame_position": [
+        0.0,
+        0.00193,
+        0.02561
+      ],
+      "local_frame_orientation": [
+        0.0,
+        0.0,
+        1.0,
+        6.123233995736766e-17
+      ],
+      "world_aabb_min": [
+        -0.06426530931977353,
+        -0.064600086364319,
+        0.020958842536449418
+      ],
+      "world_aabb_max": [
+        0.06468529129855605,
+        0.07534724854182166,
+        0.16061868216657638
+      ]
+    },
+    {
+      "link_id": 3,
+      "link_name": "upper_arm_link",
+      "geometry_type": 5,
+      "dimensions": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "filename": "b'/home/jixuefeng/rl/assets/robots/universal_robots/ur_models/meshes/ur5/collision/upperarm.stl'",
+      "local_frame_position": [
+        -0.022490000000000093,
+        0.0,
+        0.2125
+      ],
+      "local_frame_orientation": [
+        -0.7071067811865475,
+        0.7071067811865476,
+        -1.570092458683775e-16,
+        0.0
+      ],
+      "world_aabb_min": [
+        -0.08397701982687508,
+        0.05853170029655057,
+        0.0033669648718164247
+      ],
+      "world_aabb_max": [
+        0.3078761178726749,
+        0.2099447258806395,
+        0.5413157955085524
+      ]
+    },
+    {
+      "link_id": 4,
+      "link_name": "forearm_link",
+      "geometry_type": 5,
+      "dimensions": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "filename": "b'/home/jixuefeng/rl/assets/robots/universal_robots/ur_models/meshes/ur5/collision/forearm.stl'",
+      "local_frame_position": [
+        0.009999999999999891,
+        0.0,
+        0.24225
+      ],
+      "local_frame_orientation": [
+        -0.7071067811865475,
+        0.7071067811865476,
+        -1.570092458683775e-16,
+        0.0
+      ],
+      "world_aabb_min": [
+        0.14423683505364765,
+        -0.06336198319365038,
+        0.3222643979151019
+      ],
+      "world_aabb_max": [
+        0.6562833957032299,
+        0.06959184125515447,
+        0.5253910067677755
+      ]
+    },
+    {
+      "link_id": 5,
+      "link_name": "wrist_1_link",
+      "geometry_type": 5,
+      "dimensions": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "filename": "b'/home/jixuefeng/rl/assets/robots/universal_robots/ur_models/meshes/ur5/collision/wrist1.stl'",
+      "local_frame_position": [
+        0.0,
+        0.01634,
+        -0.0912
+      ],
+      "local_frame_orientation": [
+        0.7071067811865475,
+        0.0,
+        0.0,
+        0.7071067811865476
+      ],
+      "world_aabb_min": [
+        0.5358949991751463,
+        0.04057858014981089,
+        0.32462099069549144
+      ],
+      "world_aabb_max": [
+        0.669827400585715,
+        0.13549080072208103,
+        0.46308565369642263
+      ]
+    },
+    {
+      "link_id": 6,
+      "link_name": "wrist_2_link",
+      "geometry_type": 5,
+      "dimensions": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "filename": "b'/home/jixuefeng/rl/assets/robots/universal_robots/ur_models/meshes/ur5/collision/wrist2.stl'",
+      "local_frame_position": [
+        0.0,
+        -0.01634,
+        -0.0932
+      ],
+      "local_frame_orientation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "world_aabb_min": [
+        0.5798946286729434,
+        0.028032440816553837,
+        0.24278178129667366
+      ],
+      "world_aabb_max": [
+        0.7413062709993117,
+        0.14746938912055704,
+        0.3918296280491325
+      ]
+    },
+    {
+      "link_id": 7,
+      "link_name": "wrist_3_link",
+      "geometry_type": 5,
+      "dimensions": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "filename": "b'/home/jixuefeng/rl/assets/robots/universal_robots/ur_models/meshes/ur5/collision/wrist3.stl'",
+      "local_frame_position": [
+        0.0,
+        0.0,
+        -0.080641
+      ],
+      "local_frame_orientation": [
+        0.7071067811865475,
+        0.0,
+        0.0,
+        0.7071067811865476
+      ],
+      "world_aabb_min": [
+        0.559531422457374,
+        0.06445772681727781,
+        0.21832889132792466
+      ],
+      "world_aabb_max": [
+        0.6616514059475598,
+        0.16171549611930636,
+        0.3317218768130339
+      ]
+    }
+  ]
+}

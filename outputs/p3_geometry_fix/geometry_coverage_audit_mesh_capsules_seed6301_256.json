@@ -1,0 +1,143 @@
+{
+  "config": "configs/experiments/p3_diagnostics/b4_osqp_strict_mesh_capsules.yaml",
+  "seed": 6301,
+  "samples": 256,
+  "note": "Vertex-only coverage audit; passing does not prove full triangle-surface containment.",
+  "links": {
+    "shoulder_link": {
+      "capsule": "shoulder",
+      "configured_radius_m": 0.085988,
+      "max_required_radius_m": 0.082990541037049,
+      "max_radius_excess_m": -0.0029974589629509912,
+      "worst_sample": 213,
+      "vertex_count": 341,
+      "coverage_ok_at_vertices": true
+    },
+    "upper_arm_link": {
+      "capsule": "upper_arm",
+      "configured_radius_m": 0.103253,
+      "max_required_radius_m": 0.10025246597520218,
+      "max_radius_excess_m": -0.0030005340247978157,
+      "worst_sample": 35,
+      "vertex_count": 598,
+      "coverage_ok_at_vertices": true
+    },
+    "forearm_link": {
+      "capsule": "forearm",
+      "configured_radius_m": 0.079995,
+      "max_required_radius_m": 0.07699457423505097,
+      "max_radius_excess_m": -0.003000425764949022,
+      "worst_sample": 103,
+      "vertex_count": 537,
+      "coverage_ok_at_vertices": true
+    },
+    "wrist_1_link": {
+      "capsule": "wrist_1",
+      "configured_radius_m": 0.055692,
+      "max_required_radius_m": 0.052691171558164114,
+      "max_radius_excess_m": -0.0030008284418358844,
+      "worst_sample": 11,
+      "vertex_count": 355,
+      "coverage_ok_at_vertices": true
+    },
+    "wrist_2_link": {
+      "capsule": "wrist_2",
+      "configured_radius_m": 0.055331,
+      "max_required_radius_m": 0.0523303648874757,
+      "max_radius_excess_m": -0.003000635112524297,
+      "worst_sample": 41,
+      "vertex_count": 355,
+      "coverage_ok_at_vertices": true
+    },
+    "wrist_3_link": {
+      "capsule": "wrist_3",
+      "configured_radius_m": 0.048377,
+      "max_required_radius_m": 0.04537582979376839,
+      "max_radius_excess_m": -0.0030011702062316126,
+      "worst_sample": 234,
+      "vertex_count": 233,
+      "coverage_ok_at_vertices": true
+    }
+  },
+  "mesh_fit_capsules": {
+    "shoulder_link": {
+      "start_link_frame": [
+        0.00035099775497308863,
+        -0.012557209697358544,
+        0.0953788282704378
+      ],
+      "end_link_frame": [
+        0.0025183157712317444,
+        -0.008481776808963462,
+        -0.04182607695359205
+      ],
+      "radius_m": 0.0829876756106696
+    },
+    "upper_arm_link": {
+      "start_link_frame": [
+        -0.03870700885257854,
+        0.00039374708982157304,
+        -0.27239884151917293
+      ],
+      "end_link_frame": [
+        -0.03843420170733536,
+        -0.00044631925413363236,
+        0.27225037957844966
+      ],
+      "radius_m": 0.10025230532579085
+    },
+    "forearm_link": {
+      "start_link_frame": [
+        -0.011380995472575497,
+        0.0009436765708290753,
+        0.30286078581854575
+      ],
+      "end_link_frame": [
+        0.03327516586321247,
+        -0.00015914218439643538,
+        -0.18908528926896928
+      ],
+      "radius_m": 0.07699408774853841
+    },
+    "wrist_1_link": {
+      "start_link_frame": [
+        0.00043727698883109763,
+        -0.03310276586533761,
+        -0.010646458665946454
+      ],
+      "end_link_frame": [
+        -0.000488359088828363,
+        0.0755330691373362,
+        -0.002242940542226263
+      ],
+      "radius_m": 0.052691113344760225
+    },
+    "wrist_2_link": {
+      "start_link_frame": [
+        0.0013897591173356225,
+        0.033631473474467474,
+        -0.013914475099089607
+      ],
+      "end_link_frame": [
+        -0.0008837896959542568,
+        -0.07619649311548127,
+        -0.0015819689650173373
+      ],
+      "radius_m": 0.05233030881024481
+    },
+    "wrist_3_link": {
+      "start_link_frame": [
+        -0.0006460044145153697,
+        0.03734147476600254,
+        -0.0043166121428858
+      ],
+      "end_link_frame": [
+        0.00026771506568554096,
+        -0.04395502633600611,
+        -0.012230659999409787
+      ],
+      "radius_m": 0.04537612224317479
+    }
+  },
+  "all_vertices_covered": true
+}

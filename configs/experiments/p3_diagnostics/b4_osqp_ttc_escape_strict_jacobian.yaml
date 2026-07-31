@@ -1,0 +1,15 @@
+# Strict simulation candidate after fixed-link Jacobian correction.
+includes:
+  - b4_osqp_ttc_escape_frame_corrected.yaml
+
+env:
+  safety_filter:
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+    qp_time_limit_s: 0.008
+    max_filter_compute_time_s: 0.02
+
+eval:
+  method: link_fixed
+  episodes: 20
+  seed: 6301

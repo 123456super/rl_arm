@@ -43,6 +43,27 @@ def test_recovery_uses_enter_and_exit_hysteresis() -> None:
     assert env.recovery_success is True
 
 
+def test_recovery_enters_on_early_ttc() -> None:
+    env = _recovery_test_env(np.asarray([[1.0, 0.0]]))
+    env.safety_filter_cfg["recovery_enter_margin_m"] = 0.0
+    env.safety_filter_cfg["recovery_ttc_threshold_s"] = 0.15
+    env.prev_qdot_cmd = np.asarray([0.0, 0.0])
+    env.obstacle_state_estimate_override = None
+    env.recovery_active = False
+    env.recovery_triggered = False
+    env.recovery_success = False
+    env.recovery_steps = 0
+    env._safety_drift_mps = lambda _risk: np.asarray([-1.0])  # type: ignore[method-assign]
+
+    env._update_recovery_state(
+        replace(_predictive_risk_for_test(1), safety_functions_m=np.asarray([0.10])),
+        np.asarray([0.0, 0.0]),
+    )
+
+    assert env.recovery_active is True
+    assert env.recovery_trigger_reason == "ttc"
+
+
 def test_recovery_command_weights_all_below_margin_links() -> None:
     env = _recovery_test_env(np.asarray([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]]))
     risk = replace(

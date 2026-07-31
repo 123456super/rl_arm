@@ -1,0 +1,15 @@
+# More conservative simulation screening variant.
+includes:
+  - b4_osqp_ttc_escape_frame_corrected.yaml
+
+env:
+  safety_filter:
+    recovery_enter_margin_m: 0.10
+    recovery_exit_margin_m: 0.14
+    recovery_ttc_threshold_s: 0.30
+    recovery_speed_radps: 0.7
+
+eval:
+  method: link_fixed
+  episodes: 20
+  seed: 6301

@@ -1,4 +1,130 @@
-# 阶段一进展与新研究分支计划（2026-07-30）
+# 阶段一进展与新研究分支计划（项目状态更新至 2026-07-31）
+
+> 文档版本与口径（2026-07-31）：本页按“日期—阶段—证据—结论边界”记录进度。阶段一正式主比较保持冻结；P1/P2 仅表示开发验证完成；P3 仍处于仿真诊断和失效分析阶段，未形成可部署或可发表的安全结论。
+
+## 项目阶段进度总览（截至 2026-07-31）
+
+| 阶段 | 时间/日期 | 当前状态 | 可引用内容 | 进入下一阶段的门槛 |
+| --- | --- | --- | --- | --- |
+| P0：阶段一基线 | 2026-07-27 至 2026-07-31 | 已冻结 | held-out 三方法主表；link_fixed_penalty1 为仿真候选 | 只允许复现和勘误，不再改写主结论 |
+| P1：预测风险与不确定性 | 2026-07-29 前完成首轮开发验证 | 开发验证完成 | 几何、预测窗口、误差裕度和观测有效性测试 | 需要在冻结配置上补齐独立复核 |
+| P2：仿真安全过滤器 | 2026-07-29 至 2026-07-31 | 开发验证完成，未构成安全保证 | QP/投影/OSQP、命令唯一出口、safe-stop 和 trace 诊断 | 先解决几何漏检、动态漂移和计算长尾 |
+| P3：协同训练与安全失效分析 | 2026-07-29 至 2026-07-31 | 未冻结，当前阻塞 | B1--B5、mesh/frame 审计、strict/relaxed TTC 诊断 | 硬约束确定性 escape 在固定预算内通过仿真回归 |
+| P4：独立复核与 OOD | 原计划后置 | 未开始 | 无 | P3 冻结后才可开始 |
+| P5：低速真机 | 原计划后置 | 未开始 | 无 | P4 通过且现场安全签核完成 |
+
+### 当前决策（2026-07-31）
+
+- 阶段一结果与 P3 诊断严格分开；P3 的任何 success/collision 数值不得回写阶段一主表。
+- 当前不启动新训练、不扩大 P3 held-out、不进入 P4/OOD、不做实时链路验证和真机测试。
+- 继续仿真时，只做固定时间预算、硬关节/工作空间约束优先的确定性 escape controller；不可行时安全停止并记录 unavoidable_collision。
+- relaxed recovery、bounded/maximin escape 和当前 mesh-fit 胶囊只保留为离线失效/几何敏感性诊断，不得写成安全成功。
+
+### 当前阻塞问题（2026-07-31）
+
+1. 几何一致性：frame-corrected 顶点和三角形内部采样覆盖已通过，但 mesh/capsule 仍出现保守误报与物理接触漏检，采样覆盖不能替代完整碰撞判据。
+2. 动态漂移：strict safe-stop 停止机器人后，障碍物仍可能压缩安全裕度；必须区分 static_or_slow 与 dynamic drift，并单独报告 avoidable_collision/unavoidable_collision。
+3. 实时预算：平均 OSQP 求解虽为毫秒级，但存在 146--582 ms 长尾；返回后 watchdog 不能中断已超时求解，不满足 50 ms 控制周期要求。
+4. 证据规模：当前结果主要是开发 checkpoint 和 20/50 episode 诊断，尚不足以支持跨 seed 泛化、P4/OOD 或真机结论。
+
+## 0. 最新结果归档（截至 2026-07-31，基于 outputs）
+
+### 当前结论
+
+阶段一的 held-out 主比较已冻结，`link_fixed_penalty1` 仍是阶段一仿真部署候选。P3 的几何修正、严格安全停止和补充诊断均已完成一轮开发验证，但**P3 设计未冻结，不进入 P4/OOD、实时链路或真机**。本次结果只更新研究分支状态，不改变阶段一主表和既有论文结论。
+
+### 已完成的最新诊断
+
+UR5 胶囊映射已修正并补齐后续前臂/腕部段；在 eval seed `6101`、每个 train seed 20 episodes 的严格 OSQP safe-stop 复核中：
+
+| train seed | selected checkpoint | success | collision | safety violation steps | mean solve | max solve |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 4102 | `actor_step_20000.pt` | 7/20 | 1/20 | 123 | 4.42 ms | 206.69 ms |
+| 4103 | `actor_step_15000.pt` | 6/20 | 1/20 | 4 | 4.43 ms | 146.43 ms |
+
+两次碰撞均为 PyBullet 实际接触，胶囊重叠均为 false；说明审计已能识别胶囊几何漏检，但也说明当前几何包络不能单独作为碰撞安全判据。两组严格配置的平均求解时间较低，却仍出现 146--207 ms 的单步长尾，超过 50 ms 控制周期。
+
+补充方案没有解决该问题：同一开发分支的 bounded projection（train seed 4103）为 5/20 success、2/20 collisions、137 个违反步；提前降速为 3/20 success、1/20 collision、132 个违反步，并出现 248.41 ms 最大求解时间。因此，bounded projection 和 preemptive speed scale 均只保留为故障诊断，不作为候选方案。
+
+对 11 个进入 `safe_stop_infeasible` 的 trace 审计表明，7 个静态或缓慢漂移案例没有碰撞，而 4 个动态漂移案例发生了 3 次碰撞。零速度安全停止无法阻止障碍物自身持续接近；这是当前的主要失效机理，而非策略命令投影可单独解决的问题。
+
+### 当前问题与下一步
+
+1. 上臂、前臂及腕部真实接触与胶囊距离模型仍存在不一致，需先完成离线碰撞几何变换审计和包络校准。
+2. 动态障碍物漂移可在策略停止后继续压缩预测安全裕度；必须将静态不可行和动态漂移不可行分开建模、记录和评估，不能宣称 safe-stop 提供动态安全保证。
+3. OSQP/主动集路径存在远超 50 ms 的长尾；现有 watchdog 在计算返回后才检查，不能构成实时截止保障。
+4. 当前 2x20 仅为开发复核。只有在几何、动态漂移和计算预算问题得到可验证处理后，才能使用新的 train seeds 与独立 held-out eval seeds 再次评估；在此之前不启动 P4/OOD 或真机。
+
+### 可追溯数据
+
+```text
+outputs/p3_geometry_fix/b4_seed4102_20k/strict_eval_seed6101_metrics.csv
+outputs/p3_geometry_fix/b4_seed4103_20k/strict_eval_seed6101_metrics.csv
+outputs/p3_geometry_fix/b4_seed4103_20k/projection_bounded_eval_seed6101_metrics.csv
+outputs/p3_geometry_fix/b4_seed4103_20k/preemptive_speedscale_eval_seed6101_metrics.csv
+outputs/p3_geometry_fix/safe_stop_drift_audit.json
+```
+
+### 2026-07-31 几何覆盖审计结果
+
+对现有 UR5 collision mesh 做 256 个关节姿态采样后，当前严格配置的胶囊并未覆盖 mesh 顶点：`upper_arm_link` 所需最大半径约 `0.2056 m`，而配置为 `0.0600 m`；`forearm_link` 所需约 `0.1503 m`，而配置为 `0.0520 m`。这解释了先前 PyBullet 接触而胶囊重叠为 false 的现象，当前几何风险结果不能用于安全结论。
+
+已新增离线诊断配置 `configs/experiments/p3_diagnostics/b4_osqp_strict_mesh_capsules_heldout.yaml`。它使用 collision-mesh 顶点拟合的保守胶囊（附加约 3 mm 顶点余量），同样的 256 姿态审计中六个 link 均通过顶点覆盖检查。该检查仅证明采样顶点覆盖，不证明三角形表面、动态运动或实时安全；配置只用于下一轮离线 held-out 诊断，不得与历史 B4 数值混合。
+
+因此下一步的唯一推荐顺序是：先用该配置完成更大姿态样本的几何复核，再用未参与开发的 eval seeds 做严格 safe-stop 诊断，最后对 trace 做静态/动态漂移分类。未完成这三步前不训练、不进入 P4/OOD、不做真机测试。
+
+### 2026-07-31 mesh-fit 胶囊 300 回合复核
+
+使用 mesh-fit 胶囊配置、train seeds `4102/4103` 的已选 checkpoint、eval seeds `6301/6401/6501`，每组 50 episodes，共 300 episodes，结果如下：
+
+| 指标 | 汇总结果 |
+| --- | ---: |
+| success | 19/300（6.3%） |
+| collision | 105/300（35.0%） |
+| safety violation steps | 4,283 |
+| infeasible-stop episodes | 186/300（62.0%） |
+| mean filter solve time | 4.99 ms |
+| max filter solve time | 302.04 ms |
+
+碰撞审计进一步显示：105 个碰撞 episode 中，82 个触发 capsule overlap，24 个触发 PyBullet contact，只有 1 个同时触发；因此当前 mesh-fit 胶囊既造成大量保守误报（81 个 capsule-only），仍有 23 个物理接触未被胶囊重叠捕获。顶点采样覆盖不等于三角面覆盖、动态接触覆盖或正确的 link-frame 变换，不能据此宣称几何安全。
+
+safe-stop 漂移审计覆盖的 186 个不可行停止 episode 中，115 个被分类为 dynamic drift、71 个为 static_or_slow。动态漂移案例碰撞 89/115（77.4%），静态/缓慢漂移案例碰撞 16/71（22.5%）。换言之，约 85% 的审计碰撞来自动态漂移类别；零速度 safe-stop 在障碍物持续运动时不能保持安全集。
+
+六组结果均出现明显任务退化：success 为 1--6/50（2%--12%），碰撞为 13--23/50（26%--46%）；其中一组最大过滤耗时 302.04 ms，全部超过当前 50 ms 控制周期上限。该结果不是可冻结的安全改进，mesh-fit 胶囊配置应淘汰为主方案，仅保留作几何敏感性/误报诊断。
+
+**P3 决策：不冻结。** 当前不再扩大 mesh-fit 评估、不启动新的训练、不进入 P4/OOD 或真机。后续若继续研究，只做独立的 link-frame/三角面碰撞审计，以及带障碍物运动边界的离线失效分析；必须先解决 23 个物理接触漏检和动态漂移碰撞问题，才重新设计过滤器。
+
+### 2026-07-31 坐标系修正与三角面审计
+
+复核发现，原 mesh-fit 生成流程将 collision shape 的惯性坐标系直接当作 link 坐标系，导致端点/半径与运行时 `getLinkState()[4]/[5]` 不一致。已新增 `scripts/audit_collision_frames.py`，显式执行 inertial-frame -> world -> link-frame 变换，并生成 `b4_osqp_strict_frame_corrected_heldout.yaml`。
+
+修正后的 2048 姿态顶点覆盖和 64 姿态、每三角形 8 个内部采样点（约 3.3M 点）均通过，六个 link 的最大半径余量约为 3 mm。该结果只证明采样点在 capsule 内，不证明完整三角面、障碍物运动或控制实时性；因此下一步先用修正后的配置做小规模单回合 sanity check，再决定是否重做 held-out。
+
+### 2026-07-31 坐标修正后的 sanity eval
+
+使用 `b4_osqp_strict_frame_corrected_heldout.yaml`、train seed `4102` 的 step `20000` checkpoint 和 eval seed `6301` 完成 1 回合 sanity eval。几何审计本身通过：256 个姿态、每个三角形 8 个内部采样点，六个 link 的 `all_sampled_points_covered=true`，最大半径余量约 3 mm。
+
+但策略执行未通过 sanity 门槛：回合在第 16 步结束，`success=0`，`collision=1`，`collision_capsule_overlap=1`，`collision_pybullet_contact=0`，最终误差 `0.2382 m`，最小 capsule 距离 `-0.00158 m`。过滤器干预率和 safe-stop 率均为 100%，不可行率为 93.75%，动作变化为 0；预测安全裕度从初始 `0.0490 m` 降至最小 `-0.1740 m`。平均过滤耗时 `23.98 ms`，最大耗时 `325.11 ms`，仍远超 50 ms 控制周期。
+
+这说明坐标系修正消除了几何审计中的 frame mismatch，但没有解决控制链路的核心失效：预测约束很快不可行，机器人停止后障碍物仍继续运动并压缩裕度；同时 mesh-fit capsule overlap 会先于 PyBullet physical contact 触发，属于保守模型碰撞而非实际接触。该回合不能作为安全成功，也不能据此扩大 held-out 评估。
+
+**当前决策保持不变：P3 不冻结。** 已完成的几何审计可作为模型一致性证据；sanity eval 暴露出的动态漂移、过高不可行率和 325 ms 长尾仍未解决。下一步只应做离线动态可达性/漂移边界分析和过滤器超时路径审计，不重新训练、不进入 P4/OOD、不做真机。
+
+### 2026-07-31 TTC 提前逃逸仿真候选
+
+针对动态漂移导致的零速度 safe-stop 失效，新增配置 `configs/experiments/p3_diagnostics/b4_osqp_ttc_escape_frame_corrected.yaml`。恢复模式现在基于候选命令下的安全裕度导数计算最小 TTC，在 `recovery_ttc_threshold_s` 内提前进入有界逃逸；逃逸仍通过 joint/workspace 约束滤波。评估 trace 新增 `unavoidable_collision`、`avoidable_collision` 和触发原因字段。
+
+使用修正坐标系胶囊、train seed `4102` 的 `actor_step_20000.pt`、eval seed `6301` 做 1 回合 sanity：完整运行 240 步，`collision=0`、`capsule_overlap=0`、`pybullet_contact=0`、`safety_violation_steps=0`，平均滤波耗时 `7.30 ms`，动作变化恢复为非零；任务仍未到达目标（`success=0`，最终位置误差 `0.309 m`），且最大单步耗时 `379.18 ms`，超过 50 ms 控制周期。因此该结果只能标记为“仿真候选闭环通过”，不能作为实时安全或任务性能结论。
+
+验证：安全滤波与环境集成测试 `25 passed`。全量测试 `49 passed, 1 failed`；唯一失败为既有 `tests/test_analytic_safety_jacobian.py`：第 6 个胶囊在 `p2_safety_filter_dev` 配置下解析 Jacobian 为零，而有限差分约 `0.45`，与 TTC 改动无关，需单独修复/确认几何模型后再冻结。
+
+随后按同一配置完成 `20 episodes × 3 eval seeds`（6301/6401/6501）。成功率分别为 5%/20%/20%，胶囊碰撞率为 20%/15%/20%，平均安全违反步数为 20.0/15.05/14.65；平均求解时间为 7.17/6.28/7.23 ms，但最大长尾为 258/166/200 ms。三组均无 PyBullet 实际接触，碰撞均被标为 `avoidable_collision`，说明当前恢复/几何包络仍不足以作为仿真安全通过标准。
+
+额外筛选了更保守的 `h=0.10 m`、TTC `0.30 s` 变体（seed 6301，20 回合），结果仍为 success 5%、collision 20%、平均安全违反 20.7 步；因此继续调 recovery 阈值不是当前最优方向。安全相关测试（排除既有 Jacobian 基准）为 `50 passed`。未通过 `max_solve <= 50 ms`、无碰撞且 success 不退化前，不进入 OOD、P4 或真机；下一步应改为固定时间预算的确定性逃逸/投影。
+
+随后修复了固定 link 的 Jacobian：`_link_point_jacobian` 现在把 `tool0` 等固定链上的点转换到最近可动祖先 link，再计算 PyBullet Jacobian；退化为点胶囊的末端也补充了点 Jacobian。全量测试现为 `51 passed`。修复后的同一 TTC + relaxed recovery 复核为 success 5%、collision 35%、最大耗时 582 ms；关闭约束放宽的严格对照为 success 5%、collision 55%，其中 `unavoidable_collision=55%`、`avoidable_collision=0`，平均安全停止率 43%。这证实：严格停止对动态漂移无能为力，而放宽预测约束会产生可避免碰撞；两者都不能冻结为方案。
+
+当前唯一推荐方向是实现固定时间预算的硬约束优先 escape controller（不可行时安全停止并标记 unavoidable），再重新跑仿真回归；在此之前不训练、不进入 OOD/P4、不做真机。
 
 ## 1. 当前状态
 

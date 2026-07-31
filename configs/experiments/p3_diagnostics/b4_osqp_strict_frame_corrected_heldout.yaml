@@ -1,0 +1,18 @@
+# Generated from collision meshes with inertial-to-link frame correction.
+# Offline diagnostic only; do not mix with historical B4 results.
+includes:
+  - b4_osqp_strict_margin30_heldout.yaml
+
+robot:
+  capsules:
+    - {"name": "shoulder", "parent_link_name": "shoulder_link", "child_link_name": "shoulder_link", "start_local_position": [0.0003509977549730984, -0.014487209725000217, 0.06976882837534197], "end_local_position": [0.002518315771231727, -0.010411776836605094, -0.06743607684868788], "radius": 0.08598767561066961}
+    - {"name": "upper_arm", "parent_link_name": "upper_arm_link", "child_link_name": "upper_arm_link", "start_local_position": [0.059750365833608876, -0.0004463111822076507, 0.1517941963205545], "end_local_position": [-0.484898855262643, 0.0003937659935722934, 0.15206697284558368], "radius": 0.10325230532579074}
+    - {"name": "forearm", "parent_link_name": "forearm_link", "child_link_name": "forearm_link", "start_local_position": [0.060610768440588686, 0.0009436596494391024, 0.03788100716785896], "end_local_position": [-0.4313353088743222, -0.00015915866143686742, -0.006775129641211129], "radius": 0.07999408774853851}
+    - {"name": "wrist_1", "parent_link_name": "wrist_1_link", "child_link_name": "wrist_1_link", "start_local_position": [0.0004373161456174086, -0.04944275199763104, -0.012446426902450722], "end_local_position": [-0.0004883245699917316, 0.05919308273201618, -0.004042905760066584], "radius": 0.05569111334476015}
+    - {"name": "wrist_2", "parent_link_name": "wrist_2_link", "child_link_name": "wrist_2_link", "start_local_position": [0.0013896597369976447, 0.049971386767823534, -0.015714480064457217], "end_local_position": [-0.0008838857695132878, -0.05985657980016225, -0.003381973125174658], "radius": 0.05533030881024477}
+    - {"name": "wrist_3", "parent_link_name": "wrist_3_link", "child_link_name": "wrist_3_link", "start_local_position": [-0.0006459325566281911, 0.037341466842793866, -0.0054755323503580325], "end_local_position": [0.0002677807658031294, -0.043955034390519426, -0.013389579569009323], "radius": 0.04837612224317481}
+
+eval:
+  method: link_fixed
+  episodes: 20
+  seed: 6301
