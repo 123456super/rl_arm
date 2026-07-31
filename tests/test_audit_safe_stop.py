@@ -3,9 +3,11 @@ from __future__ import annotations
 import csv
 import json
 
+import numpy as np
 import pytest
 
 from scripts.audit_safe_stop import audit_trace_dir
+from scripts.audit_collision_coverage import point_segment_distances
 
 
 def test_audit_safe_stop_reports_margin_drift(tmp_path) -> None:
@@ -31,3 +33,12 @@ def test_audit_safe_stop_reports_margin_drift(tmp_path) -> None:
     assert rows[0]["h_drift_mps"] == pytest.approx(-0.2)
     assert rows[0]["drift_class"] == "dynamic_drift"
     assert rows[0]["collision"] is True
+
+
+def test_point_segment_distances_handles_degenerate_capsule() -> None:
+    points = point_segment_distances(
+        np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+        np.zeros(3),
+        np.zeros(3),
+    )
+    np.testing.assert_allclose(points, [0.0, 1.0])

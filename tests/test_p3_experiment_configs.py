@@ -87,3 +87,26 @@ def test_osqp_diagnostic_configs_enable_only_the_qp_backend() -> None:
         config = load_config(Path("configs/experiments/p3_diagnostics") / f"{name}.yaml")
         assert config["env"]["safety_filter"]["use_qp_solver"] is True
         assert config["env"]["safety_filter"]["fallback_projection_iterations"] == 640
+
+
+def test_strict_heldout_config_keeps_safe_stop_and_heldout_defaults() -> None:
+    config = load_config("configs/experiments/p3_diagnostics/b4_osqp_strict_margin30_heldout.yaml")
+    safety_filter = config["env"]["safety_filter"]
+    assert config["eval"]["method"] == "link_fixed"
+    assert config["eval"]["episodes"] == 20
+    assert config["eval"]["seed"] == 5101
+    assert safety_filter["use_qp_solver"] is True
+    assert safety_filter["geometry_margin_m"] == 0.03
+    assert safety_filter["recovery_mode_enabled"] is False
+    assert safety_filter["recovery_allow_constraint_relaxation"] is False
+    assert safety_filter["recovery_maximize_min_clearance"] is False
+    assert safety_filter["qp_time_limit_s"] == 0.02
+    assert safety_filter["max_filter_compute_time_s"] == 0.05
+
+
+def test_mesh_capsule_diagnostic_uses_local_endpoint_pairs() -> None:
+    config = load_config("configs/experiments/p3_diagnostics/b4_osqp_strict_mesh_capsules.yaml")
+    for capsule in config["robot"]["capsules"]:
+        assert capsule["parent_link_name"] == capsule["child_link_name"]
+        assert len(capsule["start_local_position"]) == 3
+        assert len(capsule["end_local_position"]) == 3

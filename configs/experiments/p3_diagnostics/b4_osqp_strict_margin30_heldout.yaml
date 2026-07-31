@@ -1,0 +1,9 @@
+# Strict safe-stop held-out evaluation entry point.
+# Checkpoints and output paths stay explicit in scripts/evaluate.py commands.
+includes:
+  - b4_osqp_strict_margin30_budget.yaml
+
+eval:
+  method: link_fixed
+  episodes: 20
+  seed: 5101

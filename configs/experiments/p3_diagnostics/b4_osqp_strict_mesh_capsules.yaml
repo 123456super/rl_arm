@@ -1,0 +1,13 @@
+# Offline geometry diagnostic.  This changes the risk geometry and must not be
+# compared to trained B4 results or used to claim policy performance.
+includes:
+  - b4_osqp_strict_margin30_heldout.yaml
+
+robot:
+  capsules:
+    - {name: shoulder, parent_link_name: shoulder_link, child_link_name: shoulder_link, start_local_position: [0.000350998, -0.014485865, 0.069766002], end_local_position: [0.002518316, -0.010405341, -0.067435114], radius: 0.085988}
+    - {name: upper_arm, parent_link_name: upper_arm_link, child_link_name: upper_arm_link, start_local_position: [-0.484896302, 0.000393747, 0.152067035], end_local_position: [0.059752086, -0.000446319, 0.151794881], radius: 0.103253}
+    - {name: forearm, parent_link_name: forearm_link, child_link_name: forearm_link, start_local_position: [0.060607443, 0.000943677, 0.037883700], end_local_position: [-0.431343198, -0.000159142, -0.006776665], radius: 0.079995}
+    - {name: wrist_1, parent_link_name: wrist_1_link, child_link_name: wrist_1_link, start_local_position: [0.000437277, -0.049442718, -0.012446459], end_local_position: [-0.000488359, 0.059193117, -0.004042941], radius: 0.055692}
+    - {name: wrist_2, parent_link_name: wrist_2_link, child_link_name: wrist_2_link, start_local_position: [0.001389759, 0.049971473, -0.015714475], end_local_position: [-0.000883790, -0.059856493, -0.003381969], radius: 0.055331}
+    - {name: wrist_3, parent_link_name: wrist_3_link, child_link_name: wrist_3_link, start_local_position: [-0.000646004, 0.037341475, -0.005476612], end_local_position: [0.000267716, -0.043955026, -0.013389660], radius: 0.048377}

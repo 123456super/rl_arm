@@ -729,9 +729,19 @@ class UR5DynamicObstacleEnv(gym.Env):
                 continue
             start_link_id = self.capsule_model.link_name_to_id[spec.parent_link_name]
             end_link_id = self.capsule_model.link_name_to_id[spec.child_link_name]
+            start_local = (
+                spec.start_local_position
+                if spec.start_local_position is not None
+                else np.zeros(3, dtype=np.float64)
+            )
+            end_local = (
+                spec.end_local_position
+                if spec.end_local_position is not None
+                else np.zeros(3, dtype=np.float64)
+            )
             point_jacobian = (
-                (1.0 - segment_fraction) * self._link_origin_jacobian(start_link_id)
-                + segment_fraction * self._link_origin_jacobian(end_link_id)
+                (1.0 - segment_fraction) * self._link_point_jacobian(start_link_id, start_local)
+                + segment_fraction * self._link_point_jacobian(end_link_id, end_local)
             )
             safety_jacobian[index] = -(separation / separation_norm) @ point_jacobian
 
@@ -792,6 +802,9 @@ class UR5DynamicObstacleEnv(gym.Env):
         return LinearVelocityConstraints(matrix=np.asarray(rows), lower_bound=np.asarray(bounds), labels=labels)
 
     def _link_origin_jacobian(self, link_id: int) -> np.ndarray:
+        return self._link_point_jacobian(link_id, np.zeros(3, dtype=np.float64))
+
+    def _link_point_jacobian(self, link_id: int, local_position: np.ndarray) -> np.ndarray:
         if link_id < 0:
             return np.zeros((3, self.joint_count), dtype=np.float64)
         joint_states = p.getJointStates(self.robot_id, self.jacobian_joint_ids, physicsClientId=self.physics_client_id)

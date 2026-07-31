@@ -14,6 +14,8 @@ class CapsuleSpec:
     child_link_name: str
     radius: float
     child_offset: np.ndarray
+    start_local_position: np.ndarray | None
+    end_local_position: np.ndarray | None
 
 
 @dataclass
@@ -46,6 +48,16 @@ class UR5CapsuleModel:
                     child_link_name=str(spec["child_link_name"]),
                     radius=float(spec["radius"]),
                     child_offset=np.asarray(spec.get("child_offset", [0.0, 0.0, 0.0]), dtype=np.float32),
+                    start_local_position=(
+                        np.asarray(spec["start_local_position"], dtype=np.float32)
+                        if "start_local_position" in spec
+                        else None
+                    ),
+                    end_local_position=(
+                        np.asarray(spec["end_local_position"], dtype=np.float32)
+                        if "end_local_position" in spec
+                        else None
+                    ),
                 )
             )
         return capsule_specs
@@ -61,11 +73,21 @@ class UR5CapsuleModel:
         for spec in self.specs:
             parent_link = self._resolve_link_id(spec.parent_link_name)
             child_link = self._resolve_link_id(spec.child_link_name)
-            if parent_link < 0:
-                start = base
+            if spec.start_local_position is not None or spec.end_local_position is not None:
+                if spec.start_local_position is None or spec.end_local_position is None:
+                    raise ValueError(f"Capsule {spec.name!r} must define both local endpoints")
+                start = self._link_world_point(
+                    robot_id, parent_link, spec.start_local_position, physics_client_id
+                )
+                end = self._link_world_point(
+                    robot_id, child_link, spec.end_local_position, physics_client_id
+                )
             else:
-                start = self._link_world_position(robot_id, parent_link, physics_client_id)
-            end = self._link_world_position(robot_id, child_link, physics_client_id) + spec.child_offset
+                if parent_link < 0:
+                    start = base
+                else:
+                    start = self._link_world_position(robot_id, parent_link, physics_client_id)
+                end = self._link_world_position(robot_id, child_link, physics_client_id) + spec.child_offset
             states.append(CapsuleState(start=start, end=end, radius=spec.radius, name=spec.name))
         return states
 
@@ -87,3 +109,23 @@ class UR5CapsuleModel:
             physicsClientId=physics_client_id,
         )
         return np.asarray(state[4], dtype=np.float32)
+
+    @staticmethod
+    def _link_world_point(
+        robot_id: int,
+        link_id: int,
+        local_position: np.ndarray,
+        physics_client_id: int,
+    ) -> np.ndarray:
+        if link_id < 0:
+            position, orientation = p.getBasePositionAndOrientation(robot_id, physicsClientId=physics_client_id)
+        else:
+            state = p.getLinkState(robot_id, link_id, computeForwardKinematics=True, physicsClientId=physics_client_id)
+            position, orientation = state[4], state[5]
+        world_position, _ = p.multiplyTransforms(
+            position,
+            orientation,
+            local_position.tolist(),
+            [0.0, 0.0, 0.0, 1.0],
+        )
+        return np.asarray(world_position, dtype=np.float32)

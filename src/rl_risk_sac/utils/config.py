@@ -97,6 +97,10 @@ def validate_config(config: dict[str, Any]) -> None:
     for capsule in config["robot"]["capsules"]:
         if "parent_link_name" not in capsule or "child_link_name" not in capsule:
             raise KeyError("robot.capsules entries must define parent_link_name and child_link_name")
+        has_start = "start_local_position" in capsule
+        has_end = "end_local_position" in capsule
+        if has_start != has_end:
+            raise KeyError("robot.capsules local endpoints must be provided together")
 
     weights = config.get("device_selection", {})
     memory_weight = float(weights.get("memory_weight", 0.7))
