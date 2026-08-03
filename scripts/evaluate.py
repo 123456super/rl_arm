@@ -95,12 +95,15 @@ def main() -> None:
         initial_predictive_h_m = float(reset_info.get("recovery_initial_h_min_m", float("nan")))
         success = False
         collision = False
+        termination_collision = False
+        termination_reason = ""
         collision_capsule_overlap = False
         collision_pybullet_contact = False
         unavoidable_collision = False
         avoidable_collision = False
         final_position_error = 0.0
         closest_link = -1
+        non_end_link_collision = False
         prev_qdot_cmd = np.zeros(env.action_space.shape[0], dtype=np.float32)
         trace_rows = []
         for step in range(int(config["env"]["max_episode_steps"])):
@@ -146,13 +149,23 @@ def main() -> None:
             if np.isfinite(projection_time_s):
                 filter_projection_times_s.append(projection_time_s)
             success = bool(info["success"])
-            collision = bool(info["collision"])
-            collision_capsule_overlap = bool(info.get("collision_capsule_overlap", False))
-            collision_pybullet_contact = bool(info.get("collision_pybullet_contact", False))
+            collision = collision or bool(info["collision_any"])
+            collision_capsule_overlap = collision_capsule_overlap or bool(
+                info.get("collision_capsule_overlap", False)
+            )
+            collision_pybullet_contact = collision_pybullet_contact or bool(
+                info.get("collision_pybullet_contact", False)
+            )
+            if bool(info.get("termination_collision", False)):
+                termination_collision = True
+                termination_reason = str(info.get("termination_reason", ""))
             unavoidable_collision = unavoidable_collision or bool(info.get("unavoidable_collision", False))
             avoidable_collision = avoidable_collision or bool(info.get("avoidable_collision", False))
             final_position_error = float(info["goal_error_norm"])
             closest_link = int(info["closest_link"])
+            non_end_link_collision = non_end_link_collision or bool(
+                info["collision_any"] and 0 <= closest_link < env.capsule_model.count - 1
+            )
             if trace_dir is not None:
                 trace_rows.append(
                     {
@@ -167,8 +180,11 @@ def main() -> None:
                         "closest_link": closest_link,
                         "safety_violation": int(info["safety_violation"]),
                         "collision": int(info["collision"]),
+                        "collision_any": int(info["collision_any"]),
                         "collision_capsule_overlap": int(bool(info.get("collision_capsule_overlap", False))),
                         "collision_pybullet_contact": int(bool(info.get("collision_pybullet_contact", False))),
+                        "termination_collision": int(bool(info.get("termination_collision", False))),
+                        "termination_reason": info.get("termination_reason", ""),
                         "unavoidable_collision": int(bool(info.get("unavoidable_collision", False))),
                         "avoidable_collision": int(bool(info.get("avoidable_collision", False))),
                         "collision_avoidability_reason": info.get("collision_avoidability_reason", ""),
@@ -224,6 +240,12 @@ def main() -> None:
                         ),
                         "predictive_risk_status": info.get("predictive_risk_status", "not_enabled"),
                         "predictive_h_min_m": predictive_h_min,
+                        "predictive_max_link_speed_bound_mps": float(
+                            info.get("predictive_max_link_speed_bound_mps", float("nan"))
+                        ),
+                        "predictive_link_velocity_norms_mps": info.get(
+                            "predictive_link_velocity_norms_mps", ""
+                        ),
                         "predictive_h_by_link_m": info.get("predictive_h_by_link_m", ""),
                         "predictive_distance_by_link_m": info.get("predictive_distance_by_link_m", ""),
                         "predictive_robust_distance_by_link_m": info.get("predictive_robust_distance_by_link_m", ""),
@@ -249,7 +271,6 @@ def main() -> None:
 
         acc = np.asarray(accelerations, dtype=np.float32)
         jerk = np.asarray(jerks, dtype=np.float32)
-        non_end_link_collision = bool(collision and 0 <= closest_link < env.capsule_model.count - 1)
         rows.append(
             {
                 "episode": episode,
@@ -258,8 +279,12 @@ def main() -> None:
                 "length": step + 1,
                 "success": int(success),
                 "collision": int(collision),
+                "collision_any": int(collision),
                 "collision_capsule_overlap": int(collision_capsule_overlap),
                 "collision_pybullet_contact": int(collision_pybullet_contact),
+                "termination_collision": int(termination_collision),
+                "termination_reason": termination_reason,
+                "collision_termination_mode": env.collision_termination_mode,
                 "unavoidable_collision": int(unavoidable_collision),
                 "avoidable_collision": int(avoidable_collision),
                 "collision_contact_link_indices": info.get("collision_contact_link_indices", ""),
@@ -349,8 +374,10 @@ def main() -> None:
         "episodes": len(rows),
         "success_rate": float(np.mean([r["success"] for r in rows])),
         "collision_rate": float(np.mean([r["collision"] for r in rows])),
+        "collision_any_rate": float(np.mean([r["collision_any"] for r in rows])),
         "collision_capsule_overlap_rate": float(np.mean([r["collision_capsule_overlap"] for r in rows])),
         "collision_pybullet_contact_rate": float(np.mean([r["collision_pybullet_contact"] for r in rows])),
+        "termination_collision_rate": float(np.mean([r["termination_collision"] for r in rows])),
         "unavoidable_collision_rate": float(np.mean([r["unavoidable_collision"] for r in rows])),
         "avoidable_collision_rate": float(np.mean([r["avoidable_collision"] for r in rows])),
         "non_end_link_collision_rate": float(np.mean([r["non_end_link_collision"] for r in rows])),

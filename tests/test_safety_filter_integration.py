@@ -92,6 +92,8 @@ def _predictive_risk_for_test(count: int):
         perception_margin_m=0.0,
         delay_margin_m=0.0,
         tracking_margin_m=0.0,
+        link_velocities_mps=np.zeros((count, 3)),
+        max_link_speed_bound_mps=0.0,
     )
 
 
@@ -163,6 +165,8 @@ def test_enabled_filter_produces_runtime_metrics() -> None:
         }
         assert info["collision_capsule_overlap"] is False
         assert info["collision_pybullet_contact"] is False
+        assert info["collision_any"] is False
+        assert info["termination_collision"] is False
         assert info["collision_contact_link_indices"] == ""
         assert info["collision_contact_link_names"] == ""
         assert info["safety_filter_constraint_count"] == 12

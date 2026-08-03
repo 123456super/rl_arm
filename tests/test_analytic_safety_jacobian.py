@@ -12,7 +12,11 @@ def test_analytic_constraint_jacobians_match_finite_difference() -> None:
         env.reset(seed=7)
         predictive_risk = env._compute_predictive_risk()
         analytic_safety, _, analytic_ee = env._analytic_constraint_jacobians(predictive_risk)
-        numeric_safety, numeric_ee = _finite_difference_jacobians(env, predictive_risk)
+        numeric_safety, numeric_ee = _finite_difference_jacobians(
+            env,
+            predictive_risk,
+            predictive_risk.max_link_speed_bound_mps,
+        )
 
         np.testing.assert_allclose(analytic_safety, numeric_safety, atol=5e-4, rtol=1e-2)
         np.testing.assert_allclose(analytic_ee, numeric_ee, atol=5e-4, rtol=1e-2)
@@ -23,6 +27,7 @@ def test_analytic_constraint_jacobians_match_finite_difference() -> None:
 def _finite_difference_jacobians(
     env: UR5DynamicObstacleEnv,
     predictive_risk,
+    max_link_speed_bound_mps: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     joint_positions, _ = env._joint_state()
     ee_position, _ = env._end_effector_state()
@@ -42,7 +47,9 @@ def _finite_difference_jacobians(
                     targetVelocity=0.0,
                     physicsClientId=env.physics_client_id,
                 )
-            perturbed_risk = env._compute_predictive_risk()
+            perturbed_risk = env._compute_predictive_risk(
+                max_link_speed_bound_mps=max_link_speed_bound_mps
+            )
             perturbed_ee_position, _ = env._end_effector_state()
             safety_jacobian[:, index] = (
                 perturbed_risk.safety_functions_m - predictive_risk.safety_functions_m

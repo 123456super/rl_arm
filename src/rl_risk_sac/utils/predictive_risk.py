@@ -71,6 +71,8 @@ class PredictiveLinkRisk:
     perception_margin_m: float
     delay_margin_m: float
     tracking_margin_m: float
+    link_velocities_mps: np.ndarray
+    max_link_speed_bound_mps: float
 
     @property
     def usable(self) -> bool:
@@ -159,6 +161,8 @@ def compute_predictive_link_risk(
         perception_margin_m=perception_margin,
         delay_margin_m=delay_margin,
         tracking_margin_m=tracking_margin,
+        link_velocities_mps=velocities,
+        max_link_speed_bound_mps=float(config.max_link_speed_mps),
     )
 
 
@@ -288,4 +292,6 @@ def _unusable_result(
         perception_margin_m=float("nan"),
         delay_margin_m=float("nan"),
         tracking_margin_m=float("nan"),
+        link_velocities_mps=np.full((count, 3), np.nan, dtype=np.float64),
+        max_link_speed_bound_mps=float("nan"),
     )

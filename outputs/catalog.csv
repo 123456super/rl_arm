@@ -1,0 +1,15 @@
+path,category,status,collision_semantics,usage
+rechecks/heldout_1004_1006/final_3methods,stage1_formal,frozen,legacy_any,stage-one formal baseline
+formal,stage1_historical,frozen,legacy_any,training and historical evaluation
+rechecks/link_fixed_penalty1,stage1_historical,frozen,legacy_any,fixed-penalty selection and replication
+sweeps,stage1_historical,frozen,legacy_any,parameter screening only
+p2_dev,p1_p2_development,development,legacy_any,implementation validation only
+p3_dev,p3_development,pre_20260803,legacy_any,old 10k factor-chain diagnostics
+p3_dev_100k,p3_development,pre_20260803,legacy_any,old 100k single-seed diagnostics
+p3_postfix_dev,p3_development,pending,physical_contact_termination,new post-fix 10k development
+p3_postfix_dev_100k,p3_development,pending,physical_contact_termination,new post-fix 100k development
+p3_diagnostics,p3_failure_diagnostics,pre_20260803,legacy_any,root-cause evidence only
+p3_geometry_fix,p3_failure_diagnostics,pre_20260803,legacy_any,geometry and Jacobian audit history
+paper,derived_material,frozen,legacy_any,generated figures and tables
+deployment_preflight,stage1_preflight,frozen,legacy_any,offline preflight not safety certification
+p3_unified_geometry,p3_current,pending,physical_contact_termination,new post-fix experiments

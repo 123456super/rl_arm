@@ -49,22 +49,28 @@ def read_summary(path: Path) -> dict[str, float]:
     def mean(field: str) -> float:
         return float(np.mean([float(row[field]) for row in rows]))
 
+    def mean_optional(field: str, fallback: str) -> float:
+        return mean(field if field in rows[0] else fallback)
+
     return {
         "episodes": float(len(rows)),
         "mean_reward": mean("reward"),
         "success_rate": mean("success"),
-        "collision_rate": mean("collision"),
+        "collision_rate": mean_optional("collision_any", "collision"),
+        "physical_contact_rate": mean_optional("collision_pybullet_contact", "collision"),
+        "capsule_overlap_rate": mean_optional("collision_capsule_overlap", "collision"),
         "safety_violation_rate": mean("safety_violation_rate"),
         "mean_final_position_error": mean("final_position_error"),
         "mean_min_distance": mean("min_distance"),
     }
 
 
-def selection_key(summary: dict[str, float], metric: str) -> tuple[float, float, float, float, int]:
+def selection_key(summary: dict[str, float], metric: str) -> tuple[float, float, float, float, float, int]:
     # The primary validation metric is configured explicitly. Safety metrics make ties deterministic.
     return (
         -summary[metric],
-        summary["collision_rate"],
+        summary["physical_contact_rate"],
+        summary["capsule_overlap_rate"],
         summary["safety_violation_rate"],
         summary["mean_final_position_error"],
         int(summary["step"]),

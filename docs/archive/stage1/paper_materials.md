@@ -1,6 +1,6 @@
 # 阶段一论文材料与图表清单
 
-> **重构说明（2026-07-28）**：本文件中的产物是原主题的阶段一可复现材料。它们可用于新论文的预研究、基线或附录，但不再自动构成新论文的正文主表。新论文所需的材料矩阵见 [research_direction.md](research_direction.md)。
+> **重构说明（2026-07-28）**：本文件中的产物是原主题的阶段一可复现材料。它们可用于新论文的预研究、基线或附录，但不再自动构成新论文的正文主表。新论文所需的材料矩阵见 [research_direction.md](../../design/research_direction.md)。
 
 本文件将阶段一论文材料、附录与可复现产物对应起来。阶段一结论只使用 `outputs/rechecks/heldout_1004_1006/final_3methods/` 的 held-out 三方法数据；不要以旧四方法矩阵或小规模参数筛选替代阶段一主表。
 
@@ -22,7 +22,7 @@
 | Table A1 | 每个 train seed 的完整 held-out 结果 | `outputs/paper/final_materials/appendix_table_a1_by_train_seed.csv` | 可用于展示跨 seed 波动，不作显著性检验。 |
 | Figure A1 | 固定风险惩罚权重筛选 | `outputs/paper/final_materials/figure_a1_fixed_penalty_sensitivity.png` | 两个 train seeds 的探索性筛选；解释 `w_R=1.0` 的来源，不可替代主表。 |
 | Figure A2 | `ldrc_fixed` 训练诊断 | `outputs/paper/final_materials/figure_a2_ldrc_training_diagnostics.png` | 说明 lambda 与风险代价的训练行为，不作为约束 SAC 整体更优的证据。 |
-| Table A2 | adaptive actor / execution 反事实诊断 | `docs/experiment_progress.md` 第 5 节 | 失败消融；不得纳入主方法排序。 |
+| Table A2 | adaptive actor / execution 反事实诊断 | `docs/archive/p3_pre_20260803/experiment_progress.md` 第 5 节 | 失败消融；不得纳入主方法排序。 |
 | Figure A3 | adaptive 典型轨迹的风险与运动曲线 | `outputs/formal/figures/wrist_ldrc_adaptive_seed1001/` | 仅说明实现的 beta 响应和失败现象，不证明机制有效。 |
 
 ## 一键重建

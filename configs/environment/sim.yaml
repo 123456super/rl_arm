@@ -17,6 +17,12 @@ env:
   # 末端位置到达判定阈值，单位 m；还需要 d_min > d_safe 才算成功。
   success_tolerance: 0.055
 
+  # Episode termination criterion. "any" preserves stage-one behavior by
+  # terminating on capsule overlap or physical contact. New P3 experiments use
+  # "physical_contact" and report capsule overlap as a separate envelope event.
+  collision:
+    termination: any
+
   # 目标和障碍物采样的工作空间范围，单位 m。
   workspace:
     x: [0.25, 0.78]

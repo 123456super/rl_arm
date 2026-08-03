@@ -2,6 +2,8 @@
 
 > 文档状态：2026-07-31 诊断版。本文统一整理当前 P3 仿真失效证据，不改写阶段一（P0）已冻结的主结果。
 
+> **归档状态（2026-08-03）：本文记录单位与碰撞口径修正前的失效诊断。当前状态和结果边界见 [current/research_status.md](../../current/research_status.md) 与 [current/results_summary.md](../../current/results_summary.md)。本文数字不得与修正后的 P3 实验直接合并。**
+
 ## 1. 结论摘要
 
 近期实验持续失败不是单一阈值、求解器或训练种子造成的，而是以下闭环叠加：
@@ -282,7 +284,7 @@ configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_eval_seed5
 
 ## 8. 证据索引
 
-- 阶段决策：`docs/research_direction.md`、`docs/experiment_progress.md`
+- 阶段决策：`docs/design/research_direction.md`、`docs/archive/p3_pre_20260803/experiment_progress.md`
 - 最新 metrics：`outputs/p3_diagnostics/deterministic_escape/*metrics.csv`
 - 最新 trace：`outputs/p3_diagnostics/deterministic_escape/*_traces/`
 - 漂移审计：`outputs/p3_diagnostics/deterministic_escape/safe_stop_drift_audit.json`

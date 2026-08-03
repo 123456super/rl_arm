@@ -47,6 +47,8 @@ def test_prediction_accounts_for_relative_link_motion() -> None:
     assert result.status is PredictionStatus.VALID
     np.testing.assert_allclose(result.predicted_distances_m, [0.10], atol=1e-12)
     np.testing.assert_allclose(result.closest_prediction_times_s, [1.0], atol=1e-12)
+    np.testing.assert_allclose(result.link_velocities_mps, [[0.0, 0.1, 0.0]])
+    assert result.max_link_speed_bound_mps == 0.0
 
 
 def test_robust_clearance_subtracts_all_documented_margins() -> None:

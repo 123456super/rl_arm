@@ -33,9 +33,11 @@ def test_p3_configs_have_distinct_outputs_and_expected_factor_settings() -> None
         assert config["smoke"]["method"] == method
         assert config["risk"]["representation"] == representation
         assert config["env"]["safety_filter"]["enabled"] is filter_enabled
+        assert config["env"]["collision"]["termination"] == "physical_contact"
         assert config["train"]["total_steps"] == 10000
         output_dirs.add(config["train"]["output_dir"])
     assert len(output_dirs) == len(P3_CONFIGS)
+    assert all(str(path).startswith("outputs/p3_postfix_dev/") for path in output_dirs)
 
 
 def test_predictive_risk_representation_runs_without_a_safety_filter() -> None:
@@ -58,11 +60,11 @@ def test_p3_100k_configs_preserve_factors_and_use_an_independent_validation_seed
         short_config = load_config(Path("configs/experiments/p3") / f"{name}.yaml")
         config = load_config(Path("configs/experiments/p3_100k") / f"{name}.yaml")
         assert config["train"]["total_steps"] == 100000
-        assert config["train"]["output_dir"].startswith("outputs/p3_dev_100k/")
         assert config["train"]["method"] == method
         assert config["risk"]["representation"] == representation
         assert config["env"]["safety_filter"]["enabled"] is filter_enabled
         assert config["env"]["safety_filter"] == short_config["env"]["safety_filter"]
+        assert config["train"]["output_dir"].startswith("outputs/p3_postfix_dev_100k/")
         assert config["checkpoint_selection"] == {"seed": 5201, "episodes": 20, "metric": "mean_reward"}
         assert config["checkpoint_selection"]["seed"] != config["seed"]
         assert config["checkpoint_selection"]["seed"] != config["eval"]["seed"]
@@ -155,6 +157,7 @@ def test_unified_geometry_fixed_speed_configs_freeze_non_timing_factors() -> Non
         assert config["robot"]["capsules"] == base["robot"]["capsules"]
         assert config["env"]["obstacle"]["speed_range"] == [0.10, 0.10]
         assert config["env"]["action_scale"] == 0.7
+        assert config["env"]["collision"]["termination"] == "physical_contact"
         assert config["env"]["workspace"] == expected_workspace
         for key, expected_value in expected_filter.items():
             assert safety_filter[key] == expected_value
@@ -170,6 +173,8 @@ def test_unified_geometry_fixed_speed_configs_freeze_non_timing_factors() -> Non
     evaluate_source = Path("scripts/evaluate.py").read_text(encoding="utf-8")
     assert '"collision_capsule_overlap": int(collision_capsule_overlap)' in evaluate_source
     assert '"collision_pybullet_contact": int(collision_pybullet_contact)' in evaluate_source
+    assert '"collision_any": int(collision)' in evaluate_source
+    assert '"termination_collision": int(termination_collision)' in evaluate_source
 def test_low_speed_isolation_configs_separate_obstacle_and_robot_speeds() -> None:
     base = load_config(
         "configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot025_base.yaml"
@@ -189,6 +194,7 @@ def test_low_speed_isolation_configs_separate_obstacle_and_robot_speeds() -> Non
         assert config["robot"]["capsules"] == corrected_geometry["robot"]["capsules"]
         assert config["env"]["obstacle"]["speed_range"] == [0.05, 0.05]
         assert config["env"]["action_scale"] == 0.25
+        assert config["env"]["collision"]["termination"] == "physical_contact"
         assert config["env"]["safety_filter"]["joint_acceleration_limit_radps2"] == 4.0
         assert config["env"]["safety_filter"]["use_qp_solver"] is True
         assert config["env"]["safety_filter"]["recovery_mode_enabled"] is False
@@ -215,6 +221,7 @@ def test_current_low_speed_control_point_uses_robot_speed_one_radps() -> None:
     )
     assert base["env"]["obstacle"]["speed_range"] == [0.05, 0.05]
     assert base["env"]["action_scale"] == 1.0
+    assert base["env"]["collision"]["termination"] == "physical_contact"
     assert prior["env"]["action_scale"] == 0.25
     assert base["env"]["safety_filter"]["joint_acceleration_limit_radps2"] == 4.0
     assert base["env"]["safety_filter"]["geometry_margin_m"] == 0.03

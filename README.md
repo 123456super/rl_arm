@@ -1,8 +1,8 @@
 # Link-Level Dynamic Risk SAC
 
-本项目是 UR5 在单动态球形障碍物场景下的连杆级动态风险 SAC 仿真原型。最终论文主比较使用末端风险基线、连杆级固定风险惩罚 SAC（`w_R=1.0`）和连杆级约束 SAC；当前 held-out 结果支持前者作为部署候选，而非将约束 SAC 表述为整体最优。
+本项目是 UR5 在单动态球形障碍物场景下的连杆级预测风险、安全过滤与安全强化学习仿真原型。阶段一主比较已经冻结为预研究基线；当前 P3 正在按统一速度单位和碰撞事件口径重新建立实验基线，尚无新方法最终结论。
 
-正式结论、论文图表和实机前检查分别见 [实验结论](docs/experiment_conclusions.md)、[论文材料](docs/paper_materials.md) 和 [部署预检](docs/deployment_preflight.md)。
+项目现状、结果可信度和后续协议统一从 [文档入口](docs/README.md) 阅读。旧论文结论、论文材料和部署预检保留为阶段一历史材料。
 
 ## 环境
 
@@ -54,7 +54,7 @@ conda run -n rl python scripts/smoke_test.py
 
 ## 训练
 
-详细训练流程、过程观察和下一步决策见 [docs/training_guide.md](docs/training_guide.md)。
+详细训练流程见 [历史训练参考](docs/reference/training_guide.md)；当前状态、结果边界和下一步决策以 [文档入口](docs/README.md) 为准。
 
 训练命令固定为读取 YAML 配置，方法、步数、seed、输出目录都在配置文件里改：
 

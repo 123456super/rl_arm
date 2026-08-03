@@ -2,6 +2,15 @@
 
 > 文档版本与口径（2026-07-31）：本页按“日期—阶段—证据—结论边界”记录进度。阶段一正式主比较保持冻结；P1/P2 仅表示开发验证完成；P3 进入低速双速度统一配置训练阶段，实时耗时暂不作为本轮阻塞条件。
 
+> **2026-08-03 说明：本文件改为只追加的历史时间线，不再代表当前状态。当前状态和可引用结果分别见 [current/research_status.md](../../current/research_status.md) 与 [current/results_summary.md](../../current/results_summary.md)。2026-07-31 及以前 P3 数字采用旧速度/碰撞口径，仅用于失效诊断。**
+
+## 2026-08-03：速度单位与碰撞口径修正
+
+- 连杆预测速度由胶囊最近点 Jacobian `m/rad` 乘实际关节速度 `rad/s` 得到 `m/s`，不再将 `action_scale` 直接作为线速度。
+- 延迟裕度使用当前姿态下 Jacobian 和关节速度盒计算的局部 `max_link_speed_bound_mps`。
+- 碰撞事件拆分为 capsule overlap、PyBullet contact、二者并集和实际终止事件；统一 P3 配置仅以物理接触终止。
+- 因修正会改变预测裕度、episode 长度、reward/cost 和 checkpoint 选择，旧 P3 数据不再用于新方法性能比较；下一步按新协议重跑 B1--B5。
+
 ## 项目阶段进度总览（截至 2026-07-31）
 
 | 阶段 | 时间/日期 | 当前状态 | 可引用内容 | 进入下一阶段的门槛 |
@@ -9,14 +18,14 @@
 | P0：阶段一基线 | 2026-07-27 至 2026-07-31 | 已冻结 | held-out 三方法主表；link_fixed_penalty1 为仿真候选 | 只允许复现和勘误，不再改写主结论 |
 | P1：预测风险与不确定性 | 2026-07-29 前完成首轮开发验证 | 开发验证完成 | 几何、预测窗口、误差裕度和观测有效性测试 | 需要在冻结配置上补齐独立复核 |
 | P2：仿真安全过滤器 | 2026-07-29 至 2026-07-31 | 开发验证完成，未构成安全保证 | QP/投影/OSQP、命令唯一出口、safe-stop 和 trace 诊断 | 先解决几何漏检、动态漂移和计算长尾 |
-| P3：协同训练与安全失效分析 | 2026-07-29 至今 | 诊断完成，低速双速度统一配置训练/评估进行中，设计未冻结 | B1--B5、mesh/frame 审计、V2 2x2、速度边界、漂移审计、OSQP 约束归因 | 统一几何/碰撞口径、动态可行性、任务收敛和不可行率后再冻结；实时性后置 |
+| P3：协同训练与安全失效分析 | 2026-07-29--07-31 | 当时诊断完成并计划统一训练；现已被 2026-08-03 口径修正取代 | B1--B5、mesh/frame 审计、V2 2x2、速度边界、漂移审计、OSQP 约束归因 | 仅作修正前历史诊断 |
 | P4：独立复核与 OOD | 原计划后置 | 未开始 | 无 | P3 冻结后才可开始 |
 | P5：低速真机 | 原计划后置 | 未开始 | 无 | P4 通过且现场安全签核完成 |
 
-### 当前决策（2026-07-31）
+### 当时决策（2026-07-31，已由 2026-08-03 决策取代）
 
 - 阶段一结果与 P3 诊断严格分开；P3 的任何 success/collision 数值不得回写阶段一主表。
-- 当前只启动一轮低速双速度统一配置的新训练/评估，不扩大速度、几何或 recovery 变量；不进入 P4/OOD、不做真机测试。实时链路暂不处理。
+- 当时计划启动一轮低速双速度统一配置训练/评估；该计划未产出结果，现按 2026-08-03 新口径重建基线。
 - V2 2x2、速度边界、漂移审计和 OSQP 约束归因已完成；当前优先做统一几何/碰撞口径下的训练收敛、动态可达性和不可行原因分析。
 - deterministic escape、relaxed recovery、bounded/maximin escape 和 mesh-fit 胶囊均只保留为离线失效/几何敏感性诊断，不得写成安全成功。
 
@@ -43,7 +52,7 @@ UR5 胶囊映射已修正并补齐后续前臂/腕部段；以下是 eval seed `
 | 4102 | `actor_step_20000.pt` | 7/20 | 1/20 | 123 | 4.42 ms | 206.69 ms |
 | 4103 | `actor_step_15000.pt` | 6/20 | 1/20 | 4 | 4.43 ms | 146.43 ms |
 
-两次碰撞均为 PyBullet 实际接触，胶囊重叠均为 false；这说明该历史几何包络存在漏检。两组严格配置的平均求解时间较低，却仍出现 146--207 ms 的单步长尾，超过 50 ms 控制周期。后续 frame-corrected deterministic escape 的最新结果以本页后文和 `docs/p3_failure_root_cause_analysis.md` 为准。
+两次碰撞均为 PyBullet 实际接触，胶囊重叠均为 false；这说明该历史几何包络存在漏检。两组严格配置的平均求解时间较低，却仍出现 146--207 ms 的单步长尾，超过 50 ms 控制周期。后续 frame-corrected deterministic escape 的最新结果以本页后文和 `docs/archive/p3_pre_20260803/p3_failure_root_cause_analysis.md` 为准。
 
 补充方案没有解决该问题：同一开发分支的 bounded projection（train seed 4103）为 5/20 success、2/20 collisions、137 个违反步；提前降速为 3/20 success、1/20 collision、132 个违反步，并出现 248.41 ms 最大求解时间。因此，bounded projection 和 preemptive speed scale 均只保留为故障诊断，不作为候选方案。
 
@@ -188,7 +197,7 @@ maximin recovery 在预测约束不可行时，保持关节和工作空间硬约
 
 因此，bounded escape、`recovery_relaxed` 和 maximin recovery 均不进入实时链路，也不进入 P4/OOD 或真机验证。该阶段曾暂时保留 strict safe-stop 入口；随后已完成 frame-corrected deterministic escape 的 4×20 复核（success `4/80`、collision `34/80`、最大过滤耗时 `410.4 ms`）。因此这里的 strict 入口应理解为历史诊断配置，不是已通过的部署方案，P3 仍不冻结。
 
-> **口径更新（2026-07-31）**：本节及前面的 bounded/strict 段落是阶段性历史记录。后续 frame-corrected deterministic escape 的 4×20 复核和完整漂移审计已经完成，当前状态以本页“当前口径修正”和 `docs/p3_failure_root_cause_analysis.md` 为准。
+> **口径更新（2026-07-31）**：本节及前面的 bounded/strict 段落是阶段性历史记录。后续 frame-corrected deterministic escape 的 4×20 复核和完整漂移审计已经完成，当前状态以本页“当前口径修正”和 `docs/archive/p3_pre_20260803/p3_failure_root_cause_analysis.md` 为准。
 
 ### 最新进度（2026-07-30，几何修正后的 strict safe-stop 诊断）
 
@@ -207,7 +216,7 @@ UR5 胶囊映射已修正：`upper_arm` 从 `shoulder_link -> upper_arm_link` �
 
 当前主要问题：上臂实际接触仍未被胶囊重叠可靠覆盖；预测安全裕度在动态漂移下会下降；严格 OSQP 平均耗时较低但存在 146--207 ms 长尾；过滤器高干预/不可行时任务成功率明显下降。下一步只做离线碰撞几何变换审计、动态漂移故障分析和独立 held-out 复核，不启动新的训练、P4/OOD 或真机。
 
-主比较的模型训练、checkpoint selection、eval-seed held-out 评估和三-seed汇总均已完成；它们被冻结为阶段一基线，当前不需要继续训练或重跑。新研究的实施基准见 [research_direction.md](research_direction.md)：B1--B5 已在一个开发 train seed 和一个开发 eval seed 上完成 10k step 链路检查，但没有稳定的任务--安全增益，不能进入 P4 或作为论文证据。
+主比较的模型训练、checkpoint selection、eval-seed held-out 评估和三-seed汇总均已完成；它们被冻结为阶段一基线，当前不需要继续训练或重跑。新研究的实施基准见 [research_direction.md](../../design/research_direction.md)：B1--B5 已在一个开发 train seed 和一个开发 eval seed 上完成 10k step 链路检查，但没有稳定的任务--安全增益，不能进入 P4 或作为论文证据。
 
 ## 2. 已完成工作
 
@@ -309,7 +318,7 @@ outputs/rechecks/heldout_1004_1006/final_3methods/eval_summary_macro_across_trai
 
 1. 已使用 held-out 三方法汇总表生成正文 Table 1（`random_crossing`）和 Table 2（四个定向压力场景），统计单位为 train seed，方法名称统一为 `link_fixed_penalty1` 或“连杆级固定风险惩罚 SAC（`w_R=1.0`）”。
 2. 阶段一结论文件已统一为“`link_fixed_penalty1` 是历史综合候选；`ldrc_fixed` 仅在部分场景保留较低碰撞率”的口径；原四方法表格仅作为历史附录。
-3. `docs/paper_materials.md` 已列出正文/附录图表、数据源与一键重建命令，并明确 `w_R=1.0` 筛选与 train seed 复用的局限。
+3. `docs/archive/stage1/paper_materials.md` 已列出正文/附录图表、数据源与一键重建命令，并明确 `w_R=1.0` 筛选与 train seed 复用的局限。
 
 ### 8.2 已完成：阶段一策略离线预检；实机签核待现场完成
 

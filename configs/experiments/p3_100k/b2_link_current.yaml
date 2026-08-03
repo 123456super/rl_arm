@@ -4,7 +4,7 @@ includes:
 
 train:
   total_steps: 100000
-  output_dir: outputs/p3_dev_100k/b2_link_current
+  output_dir: outputs/p3_postfix_dev_100k/b2_link_current
 
 checkpoint_selection:
   seed: 5201

@@ -10,11 +10,15 @@ risk:
 sac:
   fixed_risk_penalty: 1.0
 
+env:
+  collision:
+    termination: physical_contact
+
 train:
   method: ee_fixed
   total_steps: 10000
   save_interval: 5000
-  output_dir: outputs/p3_dev/b1_ee_current
+  output_dir: outputs/p3_postfix_dev/b1_ee_current
 
 eval:
   method: ee_fixed

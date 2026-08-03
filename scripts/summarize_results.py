@@ -12,6 +12,10 @@ GROUP_COLUMNS = ["scenario", "method"]
 METRIC_COLUMNS = [
     "success",
     "collision",
+    "collision_any",
+    "collision_capsule_overlap",
+    "collision_pybullet_contact",
+    "termination_collision",
     "non_end_link_collision",
     "final_position_error",
     "completion_time",

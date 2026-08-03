@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from itertools import product
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -9,14 +11,15 @@ import numpy as np
 import pybullet as p
 from gymnasium import spaces
 
-from rl_risk_sac.robots.ur5_capsules import CapsuleState, UR5CapsuleModel
+from rl_risk_sac.robots.ur5_capsules import CapsuleSpec, CapsuleState, UR5CapsuleModel
+from rl_risk_sac.utils.collision import COLLISION_TERMINATION_MODES, classify_collision_events
 from rl_risk_sac.utils.predictive_risk import (
     ObstacleStateEstimate,
     PredictiveLinkRisk,
     PredictiveRiskConfig,
     compute_predictive_link_risk,
 )
-from rl_risk_sac.utils.risk import LinkRisk, RiskConfig, compute_link_risk
+from rl_risk_sac.utils.risk import LinkRisk, RiskConfig, closest_point_on_segment, compute_link_risk
 from rl_risk_sac.utils.safety_filter import (
     LinearVelocityConstraints,
     SafetyFilterConfig,
@@ -66,6 +69,12 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.safety_filter_enabled = bool(self.safety_filter_cfg.get("enabled", False))
         self.obstacle_enabled = bool(self.obstacle_cfg.get("enabled", True))
         self.obstacle_scenario = str(self.obstacle_cfg.get("scenario", "random"))
+        self.collision_termination_mode = str(env_cfg.get("collision", {}).get("termination", "any"))
+        if self.collision_termination_mode not in COLLISION_TERMINATION_MODES:
+            raise ValueError(
+                f"Unknown env.collision.termination {self.collision_termination_mode!r}; "
+                f"expected one of {sorted(COLLISION_TERMINATION_MODES)}"
+            )
 
         self.beta_min = float(smoothing_cfg["beta_min"])
         self.beta_max = float(smoothing_cfg["beta_max"])
@@ -126,6 +135,10 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.sim_time_s = 0.0
         self.predictive_risk_config: PredictiveRiskConfig | None = None
         self.safety_filter_config: SafetyFilterConfig | None = None
+        self.joint_velocity_limit_corners = np.asarray(
+            list(product((-self.action_scale, self.action_scale), repeat=self.joint_count)),
+            dtype=np.float64,
+        )
         self.last_filter_phase_times_s: dict[str, float] = {}
         self.obstacle_state_estimate_override: ObstacleStateEstimate | None = None
         self.recovery_active = False
@@ -283,13 +296,19 @@ class UR5DynamicObstacleEnv(gym.Env):
             collision_contact_link_names,
             collision_min_contact_distance,
         ) = self._collision_sources(current_risk.d_min)
-        collision = collision_capsule_overlap or collision_pybullet_contact
+        collision_events = classify_collision_events(
+            collision_capsule_overlap,
+            collision_pybullet_contact,
+            self.collision_termination_mode,
+        )
+        collision = collision_events.collision_any
+        termination_collision = collision_events.termination_collision
         success = info["goal_error_norm"] < self.success_tolerance and current_risk.d_min > self.risk_config.d_safe
-        terminated = bool(collision or success)
+        terminated = bool(termination_collision or success)
         truncated = self.step_count >= self.max_episode_steps
 
-        reward = self._reward(qdot_cmd, success, collision)
-        cost = self._cost(policy_risk, collision, bool(info["safety_violation"]))
+        reward = self._reward(qdot_cmd, success, termination_collision)
+        cost = self._cost(policy_risk, termination_collision, bool(info["safety_violation"]))
         if self.method in {"ee_fixed", "link_fixed"}:
             reward -= float(self.config["sac"]["fixed_risk_penalty"]) * cost
 
@@ -300,6 +319,10 @@ class UR5DynamicObstacleEnv(gym.Env):
                 "reward": float(reward),
                 "cost": float(cost),
                 "collision": bool(collision),
+                "collision_any": bool(collision),
+                "termination_collision": bool(termination_collision),
+                "termination_reason": collision_events.termination_reason,
+                "collision_termination_mode": self.collision_termination_mode,
                 "collision_capsule_overlap": bool(collision_capsule_overlap),
                 "collision_pybullet_contact": bool(collision_pybullet_contact),
                 "collision_contact_link_indices": collision_contact_link_indices,
@@ -341,17 +364,19 @@ class UR5DynamicObstacleEnv(gym.Env):
             info.update(filter_link_diagnostics)
             self._record_infeasible_safe_stop(filter_result, predictive_risk)
             safe_stop_drift_mps, safe_stop_drift_class = self._safe_stop_drift()
-            unavoidable_collision = bool(collision and safe_stop_drift_class == "dynamic_drift")
+            unavoidable_collision = bool(termination_collision and safe_stop_drift_class == "dynamic_drift")
             self.unavoidable_collision = self.unavoidable_collision or unavoidable_collision
-            self.avoidable_collision = self.avoidable_collision or bool(collision and not unavoidable_collision)
+            self.avoidable_collision = self.avoidable_collision or bool(
+                termination_collision and not unavoidable_collision
+            )
             info.update(
                 {
                     "unavoidable_collision": unavoidable_collision,
-                    "avoidable_collision": bool(collision and not unavoidable_collision),
+                    "avoidable_collision": bool(termination_collision and not unavoidable_collision),
                     "collision_avoidability_reason": (
                         "dynamic_drift_after_safe_stop" if unavoidable_collision else "avoidable_or_static_failure"
                     )
-                    if collision
+                    if termination_collision
                     else "",
                     "safe_stop_infeasible_first_step": (
                         self.safe_stop_infeasible_first_step
@@ -569,7 +594,7 @@ class UR5DynamicObstacleEnv(gym.Env):
             prediction_horizon_s=float(self.safety_filter_cfg["prediction_horizon_s"]),
             max_observation_age_s=float(self.safety_filter_cfg["max_observation_age_s"]),
             control_delay_s=float(self.safety_filter_cfg["control_delay_s"]),
-            max_link_speed_mps=self.action_scale,
+            max_link_speed_mps=0.0,
             tracking_error_bound_m=float(self.safety_filter_cfg["tracking_error_bound_m"]),
             geometry_margin_m=float(self.safety_filter_cfg["geometry_margin_m"]),
         )
@@ -736,21 +761,92 @@ class UR5DynamicObstacleEnv(gym.Env):
             elapsed_s,
         )
 
-    def _compute_predictive_risk(self) -> PredictiveLinkRisk:
+    def _compute_predictive_risk(
+        self,
+        max_link_speed_bound_mps: float | None = None,
+    ) -> PredictiveLinkRisk:
         if self.predictive_risk_config is None:
             raise RuntimeError("Predictive risk requested while safety filter is disabled")
-        return self._compute_predictive_risk_for_capsules(self._capsules())
+        return self._compute_predictive_risk_for_capsules(
+            self._capsules(),
+            max_link_speed_bound_mps=max_link_speed_bound_mps,
+        )
 
-    def _compute_predictive_risk_for_capsules(self, capsules: list[CapsuleState]) -> PredictiveLinkRisk:
+    def _compute_predictive_risk_for_capsules(
+        self,
+        capsules: list[CapsuleState],
+        max_link_speed_bound_mps: float | None = None,
+    ) -> PredictiveLinkRisk:
         if self.predictive_risk_config is None:
             raise RuntimeError("Predictive risk requested while safety filter is disabled")
+        speed_bound_mps = (
+            self._max_capsule_point_speed_bound_mps()
+            if max_link_speed_bound_mps is None
+            else float(max_link_speed_bound_mps)
+        )
+        predictive_config = replace(
+            self.predictive_risk_config,
+            max_link_speed_mps=speed_bound_mps,
+        )
+        obstacle_estimate = self._obstacle_state_estimate()
         return compute_predictive_link_risk(
             capsules=capsules,
-            # The velocity effect of the next command enters through J_h qdot.
-            link_velocities_mps=np.zeros((self.capsule_model.count, 3), dtype=np.float64),
-            obstacle=self._obstacle_state_estimate(),
+            link_velocities_mps=self._capsule_point_velocities_mps(
+                capsules,
+                np.asarray(obstacle_estimate.position, dtype=np.float64),
+            ),
+            obstacle=obstacle_estimate,
             now_s=self.sim_time_s,
-            config=self.predictive_risk_config,
+            config=predictive_config,
+        )
+
+    def _capsule_point_velocities_mps(
+        self,
+        capsules: list[CapsuleState],
+        obstacle_position_m: np.ndarray,
+    ) -> np.ndarray:
+        joint_velocities_radps = self._joint_state()[1].astype(np.float64)
+        velocities = np.zeros((self.capsule_model.count, 3), dtype=np.float64)
+        for index, (capsule, spec) in enumerate(zip(capsules, self.capsule_model.specs, strict=True)):
+            _, segment_fraction = closest_point_on_segment(
+                obstacle_position_m,
+                np.asarray(capsule.start, dtype=np.float64),
+                np.asarray(capsule.end, dtype=np.float64),
+            )
+            start_jacobian, end_jacobian = self._capsule_endpoint_jacobians(spec)
+            point_jacobian_m_per_rad = (
+                (1.0 - segment_fraction) * start_jacobian + segment_fraction * end_jacobian
+            )
+            velocities[index] = point_jacobian_m_per_rad @ joint_velocities_radps
+        return velocities
+
+    def _max_capsule_point_speed_bound_mps(self) -> float:
+        max_speed_mps = 0.0
+        for spec in self.capsule_model.specs:
+            for point_jacobian_m_per_rad in self._capsule_endpoint_jacobians(spec):
+                endpoint_velocities_mps = self.joint_velocity_limit_corners @ point_jacobian_m_per_rad.T
+                max_speed_mps = max(
+                    max_speed_mps,
+                    float(np.max(np.linalg.norm(endpoint_velocities_mps, axis=1), initial=0.0)),
+                )
+        return max_speed_mps
+
+    def _capsule_endpoint_jacobians(self, spec: CapsuleSpec) -> tuple[np.ndarray, np.ndarray]:
+        start_link_id = self.capsule_model.link_name_to_id[spec.parent_link_name]
+        end_link_id = self.capsule_model.link_name_to_id[spec.child_link_name]
+        start_local = (
+            spec.start_local_position
+            if spec.start_local_position is not None
+            else np.zeros(3, dtype=np.float64)
+        )
+        end_local = (
+            spec.end_local_position
+            if spec.end_local_position is not None
+            else spec.child_offset
+        )
+        return (
+            self._link_point_jacobian(start_link_id, start_local),
+            self._link_point_jacobian(end_link_id, end_local),
         )
 
     def _obstacle_state_estimate(self) -> ObstacleStateEstimate:
@@ -794,11 +890,16 @@ class UR5DynamicObstacleEnv(gym.Env):
         for index, (capsule, spec, prediction_time_s) in enumerate(
             zip(capsules, self.capsule_model.specs, predictive_risk.closest_prediction_times_s, strict=True)
         ):
-            segment = np.asarray(capsule.end, dtype=np.float64) - np.asarray(capsule.start, dtype=np.float64)
+            predicted_translation = (
+                predictive_risk.link_velocities_mps[index] * float(prediction_time_s)
+            )
+            predicted_start = np.asarray(capsule.start, dtype=np.float64) + predicted_translation
+            predicted_end = np.asarray(capsule.end, dtype=np.float64) + predicted_translation
+            segment = predicted_end - predicted_start
             segment_norm_sq = float(np.dot(segment, segment))
             if segment_norm_sq <= 1e-14:
                 predicted_obstacle_position = obstacle_position + obstacle_velocity * float(prediction_time_s)
-                separation = predicted_obstacle_position - np.asarray(capsule.start, dtype=np.float64)
+                separation = predicted_obstacle_position - predicted_start
                 separation_norm = float(np.linalg.norm(separation))
                 if separation_norm > 1e-10:
                     point_link_id = self.capsule_model.link_name_to_id[spec.parent_link_name]
@@ -814,12 +915,12 @@ class UR5DynamicObstacleEnv(gym.Env):
             predicted_obstacle_position = obstacle_position + obstacle_velocity * float(prediction_time_s)
             segment_fraction = float(
                 np.clip(
-                    np.dot(predicted_obstacle_position - capsule.start, segment) / segment_norm_sq,
+                    np.dot(predicted_obstacle_position - predicted_start, segment) / segment_norm_sq,
                     0.0,
                     1.0,
                 )
             )
-            closest_capsule_point = capsule.start + segment_fraction * segment
+            closest_capsule_point = predicted_start + segment_fraction * segment
             separation = predicted_obstacle_position - closest_capsule_point
             separation_norm = float(np.linalg.norm(separation))
             if separation_norm <= 1e-10:
@@ -980,6 +1081,10 @@ class UR5DynamicObstacleEnv(gym.Env):
                 "predictive_risk_reason": predictive_risk.status_reason,
                 "predictive_risk_age_s": float(predictive_risk.observation_age_s),
                 "predictive_h_min_m": float(np.min(predictive_risk.safety_functions_m)),
+                "predictive_max_link_speed_bound_mps": float(predictive_risk.max_link_speed_bound_mps),
+                "predictive_link_velocity_norms_mps": UR5DynamicObstacleEnv._format_diagnostic_vector(
+                    np.linalg.norm(predictive_risk.link_velocities_mps, axis=1)
+                ),
             }
         return {
             "safety_filter_status": result.status.value,

@@ -33,6 +33,10 @@ def test_audit_safe_stop_reports_margin_drift(tmp_path) -> None:
     assert rows[0]["h_drift_mps"] == pytest.approx(-0.2)
     assert rows[0]["drift_class"] == "dynamic_drift"
     assert rows[0]["collision"] is True
+    assert rows[0]["collision_any"] is True
+    assert rows[0]["termination_collision"] is True
+    assert rows[0]["collision_capsule_overlap"] is False
+    assert rows[0]["collision_pybullet_contact"] is False
 
 
 def test_point_segment_distances_handles_degenerate_capsule() -> None:

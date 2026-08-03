@@ -92,6 +92,11 @@ def main() -> None:
         "episode_length",
         "success",
         "collision",
+        "collision_any",
+        "collision_capsule_overlap",
+        "collision_pybullet_contact",
+        "termination_collision",
+        "termination_reason",
         "safety_violation_rate",
         "min_distance",
         "mean_risk",
@@ -124,6 +129,10 @@ def main() -> None:
         "d_min",
         "success",
         "collision",
+        "collision_any",
+        "collision_capsule_overlap",
+        "collision_pybullet_contact",
+        "termination_collision",
         "safety_filter_status",
         "safety_filter_intervention_norm",
         "safety_filter_safe_stop",
@@ -157,6 +166,11 @@ def main() -> None:
     episode_risks: list[float] = []
     episode_distances: list[float] = []
     episode_violations = 0
+    episode_collision_any = False
+    episode_capsule_overlap = False
+    episode_pybullet_contact = False
+    episode_termination_collision = False
+    episode_termination_reason = ""
     safety_filter_enabled = bool(config["env"].get("safety_filter", {}).get("enabled", False))
     episode_filter_interventions = 0
     episode_filter_intervention_norms: list[float] = []
@@ -193,6 +207,12 @@ def main() -> None:
         episode_risks.append(float(info["risk_global"]))
         episode_distances.append(float(info["d_min"]))
         episode_violations += int(info["safety_violation"])
+        episode_collision_any = episode_collision_any or bool(info["collision_any"])
+        episode_capsule_overlap = episode_capsule_overlap or bool(info["collision_capsule_overlap"])
+        episode_pybullet_contact = episode_pybullet_contact or bool(info["collision_pybullet_contact"])
+        if bool(info["termination_collision"]):
+            episode_termination_collision = True
+            episode_termination_reason = str(info["termination_reason"])
         if safety_filter_enabled:
             filter_status = str(info.get("safety_filter_status", "integration_error"))
             intervention_norm = float(info.get("safety_filter_intervention_norm", float("nan")))
@@ -228,6 +248,10 @@ def main() -> None:
                 "d_min": float(info["d_min"]),
                 "success": int(info["success"]),
                 "collision": int(info["collision"]),
+                "collision_any": int(info["collision_any"]),
+                "collision_capsule_overlap": int(info["collision_capsule_overlap"]),
+                "collision_pybullet_contact": int(info["collision_pybullet_contact"]),
+                "termination_collision": int(info["termination_collision"]),
                 "safety_filter_status": info.get("safety_filter_status", "not_enabled"),
                 "safety_filter_intervention_norm": info.get("safety_filter_intervention_norm", float("nan")),
                 "safety_filter_safe_stop": info.get("safety_filter_safe_stop", False),
@@ -270,7 +294,12 @@ def main() -> None:
                     "episode_cost": episode_cost,
                     "episode_length": episode_length,
                     "success": int(info["success"]),
-                    "collision": int(info["collision"]),
+                    "collision": int(episode_collision_any),
+                    "collision_any": int(episode_collision_any),
+                    "collision_capsule_overlap": int(episode_capsule_overlap),
+                    "collision_pybullet_contact": int(episode_pybullet_contact),
+                    "termination_collision": int(episode_termination_collision),
+                    "termination_reason": episode_termination_reason,
                     "safety_violation_rate": episode_violations / max(episode_length, 1),
                     "min_distance": min(episode_distances) if episode_distances else 0.0,
                     "mean_risk": float(np.mean(episode_risks)) if episode_risks else 0.0,
@@ -327,6 +356,11 @@ def main() -> None:
             episode_risks = []
             episode_distances = []
             episode_violations = 0
+            episode_collision_any = False
+            episode_capsule_overlap = False
+            episode_pybullet_contact = False
+            episode_termination_collision = False
+            episode_termination_reason = ""
             episode_filter_interventions = 0
             episode_filter_intervention_norms = []
             episode_filter_safe_stops = 0

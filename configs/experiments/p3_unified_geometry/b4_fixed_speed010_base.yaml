@@ -5,6 +5,8 @@ includes:
   - ../p3_100k/b4_predictive_nonrobust_filter.yaml
 
 env:
+  collision:
+    termination: physical_contact
   # Freeze the policy action limit and task workspace with the safety constraints.
   action_scale: 0.7
   workspace:

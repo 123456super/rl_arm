@@ -1,6 +1,6 @@
 # 研究重构：不确定性连杆预测风险、安全过滤器与协同安全强化学习
 
-> 状态快照（2026-07-31）：阶段一已冻结为历史基线；P1/P2 完成开发验证；P3 进入低速双速度统一配置训练/评估，实时性暂不作为本轮阻塞条件。
+> 状态快照（2026-08-03）：阶段一已冻结为历史基线；P1/P2 实现与测试完成；P3 已修正连杆速度单位和碰撞事件口径，等待按新口径重跑统一实验。当前状态和结果以 [docs/current](../current/research_status.md) 为准。
 
 ## 0. 日期化阶段状态
 
@@ -8,12 +8,19 @@
 | --- | --- | --- |
 | 2026-07-27--07-31 / P0 | 已冻结 | 阶段一 held-out 主比较及 link_fixed_penalty1 候选不变 |
 | 2026-07-29--07-31 / P1-P2 | 开发验证完成 | 风险、过滤器、safe-stop、trace 和测试链路可运行，但不是端到端安全保证 |
-| 2026-07-31 / P3 | 诊断完成，低速双速度统一配置训练/评估进行中，设计未冻结 | 固定障碍物 0.05 m/s、机械臂 1.0 rad/s；先解决非实时问题，耗时后置 |
+| 2026-08-03 / P3 | 单位与碰撞口径已修正，等待重跑，设计未冻结 | 固定障碍物 0.05 m/s、机械臂 1.0 rad/s；旧 P3 数据降级为失效诊断 |
 | 后续 / P4-P5 | 未开始 | 等 P3 统一几何/动态可行性/任务性能问题收敛后再决定；实时性仍是后置冻结门槛 |
 
-### 2026-07-31 的研究决策
+### 2026-08-03 的研究决策
 
-P3 当前先做低速双速度统一变量的离线训练/评估：障碍物固定 0.05 m/s，机械臂关节速度上限固定 1.0 rad/s；同时固定 frame-corrected 几何、geometry_margin_m=0.03、strict QP、recovery/relaxation/maximin 关闭。实时耗时只记录，不作为本轮阻塞条件。
+P3 先按低速双速度统一配置重新建立 B1--B5：障碍物固定 0.05 m/s，机械臂关节速度上限固定 1.0 rad/s；同时固定 frame-corrected 几何、`geometry_margin_m=0.03`、strict QP、recovery/relaxation/maximin 关闭。连杆线速度改为 `J_point qdot` 的 m/s 结果，P3 仅以 PyBullet physical contact 终止，capsule overlap 独立统计。修正前 P3 数据不能作为新方法性能结论。
+
+### 2026-08-03 口径修正
+
+1. `action_scale` 保持为 rad/s，不再直接作为预测模型的 m/s 连杆速度上界。
+2. 逐连杆预测速度由胶囊最近点平移 Jacobian与实际关节速度计算；延迟裕度使用当前姿态、关节速度盒下的局部 m/s 上界。
+3. 新实验分别报告 `collision_capsule_overlap`、`collision_pybullet_contact`、`collision_any` 和 `termination_collision`。
+4. 阶段一继续使用旧综合碰撞定义以保证复现；新 P3 不与阶段一 collision rate 直接横向比较。
 
 ## 1. 定位与阶段衔接
 
@@ -148,7 +155,7 @@ UR5 胶囊映射已修正，重点修复 `upper_arm` 的近零长度错误映射
 
 对提前降速 trace 的 safe-stop 漂移审计显示，11 个不可行停止 episode 中 4 个为 `h` 下降超过 `0.05 m/s` 的动态漂移型，3 次碰撞全部位于动态漂移型；其余 7 个为静态或缓慢漂移型。该结果说明障碍物持续运动时零速度 safe-stop 不能保证保持安全集；后续方案必须区分静态不可行与动态漂移不可行，并明确任何逃逸动作不再属于严格安全保证。
 
-该阶段不继续训练，不启动 P4/OOD 或真机。后续已完成 frame-corrected deterministic escape 首轮复核，但未通过门槛；当前下一步仅保留 geometry mismatch、dynamic drift、碰撞判据和 infeasible 原因的隔离分析，详见 `docs/p3_failure_root_cause_analysis.md`。
+该阶段不继续训练，不启动 P4/OOD 或真机。后续已完成 frame-corrected deterministic escape 首轮复核，但未通过门槛；当前下一步仅保留 geometry mismatch、dynamic drift、碰撞判据和 infeasible 原因的隔离分析，详见 `docs/archive/p3_pre_20260803/p3_failure_root_cause_analysis.md`。
 
 ### 6.4 2026-07-31 TTC 与固定 link Jacobian 复核后的决策
 
@@ -194,7 +201,7 @@ V2 2x2 在 80 episodes 上完成了几何与障碍物运动的因子化比较：
 
 1.0 rad/s 比历史 0.7 rad/s 上限略高，避免机械臂动作能力不足成为失败原因；joint_acceleration_limit_radps2=4.0 仍固定，单独保留加速约束变量。两种速度分别配置、分别记录，不使用一个数值替代另一个。
 
-当前入口为 configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_*，训练 seeds 为 4108/4109，评估 seeds 为 5101/5201。robot025 配置保留为慢机械臂速度对照，旧 fixed_speed010 配置保留为上一轮对照，均不与当前主结果混合。
+待重跑入口为 `configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_*`，预留训练 seeds 为 4108/4109、评估 seeds 为 5101/5201；这些 seed 尚未产出结果。robot025 配置保留为慢机械臂速度对照，旧 fixed_speed010 配置保留为上一轮对照，均不与当前主结果混合。
 
 ## 7. 真机验证边界
 
@@ -209,7 +216,7 @@ V2 2x2 在 80 episodes 上完成了几何与障碍物运动的因子化比较：
 | P0 | 固化阶段一 | 历史结果可复跑，不再修改其结论 |
 | P1 | 预测风险与误差裕度 | **已完成开发验证**：单元测试覆盖几何、预测窗口、误差裕度、无效/未来/过期观测和边界值 |
 | P2 | 仿真安全过滤器 | **开发验证完成，诊断已完成多轮**：约束投影、Dykstra/主动集回退、OSQP QP、端到端命令出口、无效/过期状态注入和逐连杆 trace 已具备；常规过滤器通过 smoke test，仍未构成端到端或实机安全保证 |
-| P3 | 协同训练与消融 | **开发诊断完成，未冻结**：B1--B5、recovery、strict safe-stop 与 deterministic escape 均已完成诊断；最新 4×20 deterministic escape 为 success 4/80、collision 34/80，最大过滤耗时 410.4 ms，不能进入 P4/OOD 或真机 |
+| P3 | 协同训练与消融 | **等待按修正口径重跑，未冻结**：旧 B1--B5、recovery、strict safe-stop 与 deterministic escape 降级为开发/失效诊断；尚无修正后的性能结果 |
 | P4 | 独立复核与 OOD | 新 train/eval seeds 和预定义统计完成 |
 | P5 | 低速真机 | 现场签核和安全受控试验记录齐全 |
 
@@ -224,4 +231,4 @@ V2 2x2 在 80 episodes 上完成了几何与障碍物运动的因子化比较：
 
 0.05 m/s 是已完成速度边界测试的最低非零障碍物速度；1.0 rad/s 比历史 0.7 rad/s 上限略高，避免机械臂动作过慢成为失败原因。joint_acceleration_limit_radps2=4.0 仍保持不变，因此速度上限与加速约束仍可分别归因。
 
-当前入口为 configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_*，训练 seeds 为 4108/4109，评估 seeds 为 5101/5201。robot025 配置保留为低机械臂速度对照，不作为当前主结果。
+待重跑入口为 `configs/experiments/p3_unified_geometry/b4_fixed_obstacle005_robot100_*`，预留训练 seeds 为 4108/4109、评估 seeds 为 5101/5201，当前尚无结果。robot025 配置保留为低机械臂速度对照，不作为当前主结果。

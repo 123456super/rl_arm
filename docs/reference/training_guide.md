@@ -2,6 +2,8 @@
 
 > 当前执行边界（2026-07-31）：阶段一只复现，不改主结论；P3 只做仿真诊断，不训练扩展、不进入 P4/OOD、不做真机。除非后续文档明确写出新的日期和通过门槛，否则不要把任一 P3 配置当作部署候选。
 
+> **2026-08-03：本文件保留为历史运行参考。新实验唯一执行协议见 [current/next_experiment_protocol.md](../current/next_experiment_protocol.md)，当前状态见 [current/research_status.md](../current/research_status.md)。**
+
 ## 0.1 日期化进度与当前可执行事项
 
 | 日期/阶段 | 状态 | 当前可执行事项 |
@@ -23,9 +25,9 @@
 
 ## 1. 当前阶段与使用边界
 
-阶段一仿真主比较已经完成：`ee_fixed`、`link_fixed_penalty1` 和 `ldrc_fixed` 已完成 3 个 train seeds、checkpoint selection、5 个场景和 3 个 held-out eval seeds 的统一评估。阶段一结论口径见 [experiment_conclusions.md](experiment_conclusions.md)；当前不应重跑主比较或将旧四方法结果写成新主题的正文主表。
+阶段一仿真主比较已经完成：`ee_fixed`、`link_fixed_penalty1` 和 `ldrc_fixed` 已完成 3 个 train seeds、checkpoint selection、5 个场景和 3 个 held-out eval seeds 的统一评估。阶段一结论口径见 [experiment_conclusions.md](../archive/stage1/experiment_conclusions.md)；当前不应重跑主比较或将旧四方法结果写成新主题的正文主表。
 
-本分支的新主线是“不确定性连杆预测风险 + 安全过滤器 + 协同安全强化学习”。方法范围、实验矩阵和实施顺序以 [research_direction.md](research_direction.md) 为准；本指南中的既有命令仅服务于阶段一复现、环境检查和新模块的开发基线。
+本分支的新主线是“不确定性连杆预测风险 + 安全过滤器 + 协同安全强化学习”。方法范围、实验矩阵和实施顺序以 [research_direction.md](../design/research_direction.md) 为准；本指南中的既有命令仅服务于阶段一复现、环境检查和新模块的开发基线。
 
 本指南用于三类工作：
 
@@ -33,7 +35,7 @@
 2. 进行与论文主结论隔离的小规模开发或诊断训练。
 3. 使用新的 train seeds 和独立 eval seeds 开展后续研究复核。
 
-若目标是实机低速部署，请直接使用 [deployment_preflight.md](deployment_preflight.md)，不要把本指南中的仿真训练命令当作实机控制流程。
+若目标是实机低速部署，请直接使用 [deployment_preflight.md](../archive/stage1/deployment_preflight.md)，不要把本指南中的仿真训练命令当作实机控制流程。
 
 ## 2. 先做哪一类工作
 
@@ -110,7 +112,7 @@ conda run -n rl python scripts/smoke_test.py \
 
 100k 单 seed 结果仍没有产生可冻结的综合候选。B4/B5 的过滤器已经记录约束类别、真实活动约束、投影失败/确认不可行、Dykstra/主动集回退和 OSQP 状态；此前 OSQP 状态在最终失败路径为空的问题已修复。B4 的提前 recovery 诊断入口为 `b4_osqp_recovery_early.yaml`：它记录逐连杆预测距离、裕度、障碍物漂移、屏障残差和初始不安全状态。`recovery_relaxed` bounded/maximin 复核显示两个 eval seed 的碰撞仍各为 1/20，且出现 154--221 ms 单步长尾，因此仅保留为离线诊断，不进入实时链路、P4/OOD 或真机。当前保留入口为 `b4_osqp_strict_margin30_budget.yaml`：关闭约束放宽和 recovery，使用 OSQP 20 ms 限时及 50 ms 诊断预算。
 
-几何修正后的 B4 20k 开发训练曾在 eval seed `6101` 完成 strict safe-stop 历史诊断：seed `4102`（step 20000）成功 `7/20`、碰撞 `1/20`，seed `4103`（step 15000）成功 `6/20`、碰撞 `1/20`；两次碰撞均为 `upper_arm_link` 的 PyBullet 接触，胶囊重叠为 false，且最大耗时为 `146--207 ms`。该结果只覆盖一个 eval seed，现作为历史基线；后续 frame-corrected deterministic escape 的最新结果见 `docs/p3_failure_root_cause_analysis.md`。
+几何修正后的 B4 20k 开发训练曾在 eval seed `6101` 完成 strict safe-stop 历史诊断：seed `4102`（step 20000）成功 `7/20`、碰撞 `1/20`，seed `4103`（step 15000）成功 `6/20`、碰撞 `1/20`；两次碰撞均为 `upper_arm_link` 的 PyBullet 接触，胶囊重叠为 false，且最大耗时为 `146--207 ms`。该结果只覆盖一个 eval seed，现作为历史基线；后续 frame-corrected deterministic escape 的最新结果见 `docs/archive/p3_pre_20260803/p3_failure_root_cause_analysis.md`。
 
 早期 safe-stop 漂移审计显示，11 个不可行停止 episode 中 4 个属于动态漂移型，3 次碰撞集中在该类别。该结果已被后续完整 deterministic escape 审计（58 个不可行停止、dynamic drift 34 个、其中碰撞 29 个）取代；持续移动障碍物下零速度并不等价于安全保持。在完整根因验证前，不启动新的 train/eval seeds、OOD 或真机工作。
 
@@ -211,7 +213,7 @@ conda run -n rl python scripts/plot_traces.py \
 conda run -n rl python scripts/prepare_paper_materials.py
 ```
 
-它会生成正文 Table 1/2、固定惩罚敏感性图、`ldrc_fixed` 训练诊断图和按 train seed 的附录表，输出到 `outputs/paper/final_materials/`。产物用途和结论边界见 [paper_materials.md](paper_materials.md)。
+它会生成正文 Table 1/2、固定惩罚敏感性图、`ldrc_fixed` 训练诊断图和按 train seed 的附录表，输出到 `outputs/paper/final_materials/`。产物用途和结论边界见 [paper_materials.md](../archive/stage1/paper_materials.md)。
 
 正式主表的数据源固定为：
 
@@ -223,7 +225,7 @@ outputs/rechecks/heldout_1004_1006/final_3methods/
 
 ## 10. 真实低速部署前的离线检查
 
-候选 checkpoint、离线预检命令和现场签核项在 [deployment_preflight.md](deployment_preflight.md)。可重跑：
+候选 checkpoint、离线预检命令和现场签核项在 [deployment_preflight.md](../archive/stage1/deployment_preflight.md)。可重跑：
 
 ```bash
 conda run -n rl python scripts/deployment_preflight.py
