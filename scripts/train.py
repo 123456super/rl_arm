@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import subprocess
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +43,15 @@ def build_run_dir(config: dict[str, Any], method: str, run_name: str | None) -> 
     return output_root / "runs" / name
 
 
+def git_revision() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
@@ -68,6 +78,7 @@ def main() -> None:
             "state": resume_state,
             "start_step": args.start_step,
         }
+    config["git_revision"] = git_revision()
     replay = ReplayBuffer(
         obs_dim=obs_dim,
         action_dim=action_dim,
@@ -138,6 +149,8 @@ def main() -> None:
         "safety_filter_safe_stop",
         "safety_filter_max_constraint_violation",
         "predictive_h_min_m",
+        "predictive_max_link_speed_bound_mps",
+        "predictive_link_velocity_norms_mps",
         "safety_filter_solve_time_s",
         "lambda",
         "alpha",
@@ -259,6 +272,10 @@ def main() -> None:
                     "safety_filter_max_constraint_violation", float("nan")
                 ),
                 "predictive_h_min_m": info.get("predictive_h_min_m", float("nan")),
+                "predictive_max_link_speed_bound_mps": info.get(
+                    "predictive_max_link_speed_bound_mps", float("nan")
+                ),
+                "predictive_link_velocity_norms_mps": info.get("predictive_link_velocity_norms_mps", ""),
                 "safety_filter_solve_time_s": info.get("safety_filter_solve_time_s", float("nan")),
                 "lambda": agent.lagrange_multiplier,
                 "alpha": float(agent.alpha.detach().cpu()),

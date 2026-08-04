@@ -2,7 +2,13 @@
 # safety envelope, action constraints, and one fixed obstacle speed.
 # Timing budgets are intentionally disabled for this offline feasibility run.
 includes:
-  - ../p3_100k/b4_predictive_nonrobust_filter.yaml
+  - ../../default.yaml
+
+risk:
+  representation: predictive
+
+sac:
+  fixed_risk_penalty: 1.0
 
 env:
   collision:
@@ -40,6 +46,15 @@ env:
     max_filter_compute_time_s: null
   obstacle:
     speed_range: [0.10, 0.10]
+
+train:
+  method: link_fixed
+
+eval:
+  method: link_fixed
+
+smoke:
+  method: link_fixed
 
 # Generated from collision meshes with inertial-to-link frame correction.
 robot:

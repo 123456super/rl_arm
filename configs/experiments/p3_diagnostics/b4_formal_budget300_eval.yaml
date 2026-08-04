@@ -1,0 +1,17 @@
+# B4 formal-checkpoint diagnostic under the current 300 ms simulator-side budget.
+# This is an evaluation-only follow-up, not a replacement for the completed
+# no-budget main comparison configuration.
+includes:
+  - ../p3/b4_predictive_nonrobust_filter.yaml
+
+env:
+  safety_filter:
+    # The environment checks this after the filter returns; it is not a hard
+    # pre-emptive real-time deadline.
+    max_filter_compute_time_s: 0.30
+
+eval:
+  method: link_fixed
+  episodes: 144
+  seed: 5101
+  seed_manifest: configs/experiments/p3_manifests/b5_robust_feasible_final.json

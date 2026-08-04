@@ -24,6 +24,70 @@ P3_100K_CONFIGS = {
 }
 
 
+def test_p3_formal_configs_cover_all_methods_and_training_seeds() -> None:
+    config_dir = Path("configs/experiments/p3_formal")
+    configs = sorted(config_dir.glob("*.yaml"))
+    assert len(configs) == 15
+
+    output_dirs = set()
+    for path in configs:
+        name, seed_text = path.stem.rsplit("_seed", maxsplit=1)
+        short_config = load_config(Path("configs/experiments/p3") / f"{name}.yaml")
+        config = load_config(path)
+        assert int(seed_text) in {4108, 4109, 4110}
+        assert config["seed"] == int(seed_text)
+        assert config["train"]["total_steps"] == 100000
+        assert config["train"]["method"] == short_config["train"]["method"]
+        assert config["risk"] == short_config["risk"]
+        assert config["env"]["safety_filter"] == short_config["env"]["safety_filter"]
+        assert config["checkpoint_selection"] == {
+            "seed": 5201,
+            "episodes": 20,
+            "metric": "mean_reward",
+            "seed_manifest": "configs/experiments/p3_manifests/b5_robust_feasible_validation.json",
+        }
+        assert config["eval"]["episodes"] == 144
+        assert config["eval"]["seed_manifest"] == (
+            "configs/experiments/p3_manifests/b5_robust_feasible_final.json"
+        )
+        output_dirs.add(config["train"]["output_dir"])
+    assert len(output_dirs) == len(configs)
+
+
+def test_b4_budget300_followup_preserves_the_formal_b4_factors() -> None:
+    formal = load_config("configs/experiments/p3/b4_predictive_nonrobust_filter.yaml")
+    followup = load_config("configs/experiments/p3_diagnostics/b4_formal_budget300_eval.yaml")
+
+    assert followup["risk"] == formal["risk"]
+    assert followup["env"]["safety_filter"] == {
+        **formal["env"]["safety_filter"],
+        "max_filter_compute_time_s": 0.30,
+    }
+    assert followup["eval"]["episodes"] == 144
+    assert followup["eval"]["seed_manifest"] == (
+        "configs/experiments/p3_manifests/b5_robust_feasible_final.json"
+    )
+
+
+def test_b4_infeasibility_attribution_is_explicitly_offline() -> None:
+    config = load_config("configs/experiments/p3_diagnostics/b4_formal_infeasibility_attribution_eval.yaml")
+
+    assert config["env"]["safety_filter"]["infeasibility_diagnostics_enabled"] is True
+    assert config["env"]["safety_filter"]["max_filter_compute_time_s"] is None
+    assert config["eval"]["episodes"] == 144
+
+
+def test_b4_accel8_ablation_changes_only_the_filter_acceleration_limit() -> None:
+    budget300 = load_config("configs/experiments/p3_diagnostics/b4_formal_budget300_eval.yaml")
+    accel8 = load_config("configs/experiments/p3_diagnostics/b4_formal_accel8_budget300_eval.yaml")
+
+    assert accel8["env"]["safety_filter"] == {
+        **budget300["env"]["safety_filter"],
+        "joint_acceleration_limit_radps2": 8.0,
+    }
+    assert accel8["eval"] == budget300["eval"]
+
+
 def test_p3_configs_have_distinct_outputs_and_expected_factor_settings() -> None:
     output_dirs = set()
     for name, (method, representation, filter_enabled) in P3_CONFIGS.items():
@@ -34,7 +98,17 @@ def test_p3_configs_have_distinct_outputs_and_expected_factor_settings() -> None
         assert config["risk"]["representation"] == representation
         assert config["env"]["safety_filter"]["enabled"] is filter_enabled
         assert config["env"]["collision"]["termination"] == "physical_contact"
+        assert config["env"]["obstacle"]["speed_range"] == [0.05, 0.05]
+        assert config["env"]["action_scale"] == 1.0
+        assert config["env"]["safety_filter"]["geometry_margin_m"] == 0.03
+        assert config["env"]["safety_filter"]["use_qp_solver"] is True
+        assert config["env"]["safety_filter"]["recovery_mode_enabled"] is False
+        assert config["env"]["safety_filter"]["recovery_allow_constraint_relaxation"] is False
+        assert config["env"]["safety_filter"]["recovery_maximize_min_clearance"] is False
         assert config["train"]["total_steps"] == 10000
+        assert config["checkpoint_selection"] == {"seed": 5201, "episodes": 20, "metric": "mean_reward"}
+        assert config["checkpoint_selection"]["seed"] != config["seed"]
+        assert config["checkpoint_selection"]["seed"] != config["eval"]["seed"]
         output_dirs.add(config["train"]["output_dir"])
     assert len(output_dirs) == len(P3_CONFIGS)
     assert all(str(path).startswith("outputs/p3_postfix_dev/") for path in output_dirs)
@@ -51,6 +125,22 @@ def test_predictive_risk_representation_runs_without_a_safety_filter() -> None:
         _, _, _, _, _, info = env.step(np.zeros(env.action_space.shape, dtype=np.float32))
         assert "safety_filter_status" not in info
         assert info["policy_risk_representation"] == "predictive"
+        assert np.isfinite(info["predictive_max_link_speed_bound_mps"])
+        assert info["predictive_link_velocity_norms_mps"]
+    finally:
+        env.close()
+
+
+def test_current_risk_baseline_records_predictive_speed_diagnostics() -> None:
+    config = load_config("configs/experiments/p3/b2_link_current.yaml")
+    env = UR5DynamicObstacleEnv(config, method="link_fixed")
+    try:
+        env.reset(seed=4101)
+        _, _, _, _, _, info = env.step(np.zeros(env.action_space.shape, dtype=np.float32))
+        assert "safety_filter_status" not in info
+        assert info["policy_risk_representation"] == "current"
+        assert np.isfinite(info["predictive_max_link_speed_bound_mps"])
+        assert info["predictive_link_velocity_norms_mps"]
     finally:
         env.close()
 

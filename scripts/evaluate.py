@@ -12,6 +12,11 @@ from rl_risk_sac.utils.config import load_config
 from rl_risk_sac.utils.device import resolve_device
 from rl_risk_sac.utils.seeding import set_seed
 
+try:
+    from scripts.seed_manifest import load_seed_manifest
+except ModuleNotFoundError:
+    from seed_manifest import load_seed_manifest
+
 
 def mean_finite(rows: list[dict[str, float | int]], field: str) -> float:
     values = np.asarray([row[field] for row in rows], dtype=np.float64)
@@ -32,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", default=None)
     parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--seed-manifest", default=None)
     parser.add_argument("--output", default=None)
     parser.add_argument("--trace-output", default=None)
     return parser.parse_args()
@@ -47,6 +53,19 @@ def main() -> None:
         raise ValueError("checkpoint must be provided by --checkpoint or eval.checkpoint")
     episodes = int(args.episodes if args.episodes is not None else eval_cfg.get("episodes", 20))
     seed = int(args.seed if args.seed is not None else eval_cfg.get("seed", 123))
+    seed_manifest_arg = args.seed_manifest if args.seed_manifest is not None else eval_cfg.get("seed_manifest")
+    manifest_seeds = load_seed_manifest(seed_manifest_arg) if seed_manifest_arg else None
+    if episodes <= 0:
+        raise ValueError("Evaluation episodes must be positive")
+    if manifest_seeds is not None and episodes > len(manifest_seeds):
+        raise ValueError(
+            f"Requested {episodes} episodes but seed manifest only contains {len(manifest_seeds)} seeds"
+        )
+    episode_seeds = (
+        manifest_seeds[:episodes]
+        if manifest_seeds is not None
+        else [seed + episode for episode in range(episodes)]
+    )
     output_arg = args.output if args.output is not None else eval_cfg.get("output")
     trace_output_arg = args.trace_output if args.trace_output is not None else eval_cfg.get("trace_output")
     config["seed"] = seed
@@ -63,8 +82,8 @@ def main() -> None:
     if trace_dir is not None:
         trace_dir.mkdir(parents=True, exist_ok=True)
 
-    for episode in range(episodes):
-        observation, reset_info = env.reset(seed=seed + episode)
+    for episode, episode_seed in enumerate(episode_seeds):
+        observation, reset_info = env.reset(seed=episode_seed)
         total_reward = 0.0
         total_cost = 0.0
         risks = []
@@ -274,6 +293,8 @@ def main() -> None:
         rows.append(
             {
                 "episode": episode,
+                "seed": episode_seed,
+                "seed_manifest": str(seed_manifest_arg) if seed_manifest_arg else "",
                 "reward": total_reward,
                 "cost": total_cost,
                 "length": step + 1,

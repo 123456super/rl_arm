@@ -1,0 +1,10 @@
+# Offline-only B4 constraint attribution on the frozen shared final seed set.
+# Each infeasible step runs extra unconstrained-time OSQP probes, so this
+# diagnostic intentionally disables the 300 ms post-return budget.
+includes:
+  - b4_formal_budget300_eval.yaml
+
+env:
+  safety_filter:
+    infeasibility_diagnostics_enabled: true
+    max_filter_compute_time_s: null

@@ -12,6 +12,11 @@ import numpy as np
 
 from rl_risk_sac.utils.config import load_config
 
+try:
+    from scripts.seed_manifest import load_seed_manifest
+except ModuleNotFoundError:
+    from seed_manifest import load_seed_manifest
+
 
 STEP_PATTERN = re.compile(r"actor_step_(\d+)\.pt$")
 METRICS = {"mean_reward", "success_rate"}
@@ -24,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", required=True)
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--seed-manifest", default=None)
     parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--metric", choices=sorted(METRICS), default=None)
     parser.add_argument("--output-dir", default=None)
@@ -92,6 +98,15 @@ def main() -> None:
     selection_config = config.get("checkpoint_selection", {})
     seed = int(args.seed if args.seed is not None else selection_config["seed"])
     episodes = int(args.episodes if args.episodes is not None else selection_config["episodes"])
+    seed_manifest_arg = (
+        args.seed_manifest if args.seed_manifest is not None else selection_config.get("seed_manifest")
+    )
+    if seed_manifest_arg:
+        manifest_seeds = load_seed_manifest(seed_manifest_arg)
+        if episodes > len(manifest_seeds):
+            raise ValueError(
+                f"Requested {episodes} validation episodes but seed manifest only contains {len(manifest_seeds)} seeds"
+            )
     metric = str(args.metric if args.metric is not None else selection_config["metric"])
     if episodes <= 0:
         raise ValueError("Validation episodes must be positive")
@@ -108,8 +123,9 @@ def main() -> None:
     summaries: list[dict[str, Any]] = []
     evaluate_script = Path(__file__).with_name("evaluate.py")
     method = str(config["eval"]["method"])
+    manifest_label = Path(seed_manifest_arg).stem if seed_manifest_arg else f"seed_{seed}"
     for step, checkpoint in checkpoints:
-        output = output_dir / f"step_{step}_seed_{seed}_episodes_{episodes}.csv"
+        output = output_dir / f"step_{step}_{manifest_label}_episodes_{episodes}.csv"
         if args.force or not output.exists():
             command = [
                 sys.executable,
@@ -122,11 +138,13 @@ def main() -> None:
                 str(checkpoint),
                 "--episodes",
                 str(episodes),
-                "--seed",
-                str(seed),
                 "--output",
                 str(output),
             ]
+            if seed_manifest_arg:
+                command += ["--seed-manifest", str(seed_manifest_arg)]
+            else:
+                command += ["--seed", str(seed)]
             subprocess.run(command, check=True)
         summary: dict[str, Any] = read_summary(output)
         summary.update({"step": step, "checkpoint": str(checkpoint), "validation_csv": str(output)})
@@ -136,7 +154,9 @@ def main() -> None:
     for row in summaries:
         row["selected"] = int(row is selected)
         row["selection_metric"] = metric
-        row["validation_seed"] = seed
+        row["validation_seed"] = seed if not seed_manifest_arg else None
+        if seed_manifest_arg:
+            row["validation_seed_manifest"] = str(seed_manifest_arg)
     write_csv(output_dir / "checkpoint_summary.csv", summaries)
     write_csv(output_dir / "selected_checkpoint.csv", [selected])
     print(f"selected checkpoint: {selected['checkpoint']}")

@@ -1,6 +1,6 @@
 # P3 B5: uncertainty-margin predicted-distance SAC with the robust safety filter.
 includes:
-  - ../../default.yaml
+  - ../p3_unified_geometry/b4_fixed_obstacle005_robot100_base.yaml
 
 seed: 4101
 
@@ -11,14 +11,10 @@ sac:
   fixed_risk_penalty: 1.0
 
 env:
-  collision:
-    termination: physical_contact
   safety_filter:
     enabled: true
     control_delay_s: 0.05
-    geometry_margin_m: 0.0
     tracking_error_bound_m: 0.01
-    projection_failure_tolerance: 1.0e-6
 
 train:
   method: link_fixed
@@ -26,6 +22,10 @@ train:
   save_interval: 5000
   output_dir: outputs/p3_postfix_dev/b5_robust_predictive_filter
 
+checkpoint_selection:
+  seed: 5201
+  episodes: 20
+  metric: mean_reward
 eval:
   method: link_fixed
   episodes: 20

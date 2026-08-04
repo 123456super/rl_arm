@@ -1,0 +1,20 @@
+# P3 B2 formal 100k run, training seed 4108.
+includes:
+  - ../p3/b2_link_current.yaml
+
+seed: 4108
+
+train:
+  total_steps: 100000
+  output_dir: outputs/p3_postfix_dev_100k/b2_link_current/seed_4108
+
+checkpoint_selection:
+  seed: 5201
+  episodes: 20
+  metric: mean_reward
+  seed_manifest: configs/experiments/p3_manifests/b5_robust_feasible_validation.json
+
+eval:
+  episodes: 144
+  seed: 5101
+  seed_manifest: configs/experiments/p3_manifests/b5_robust_feasible_final.json

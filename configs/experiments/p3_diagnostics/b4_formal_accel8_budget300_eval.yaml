@@ -1,0 +1,9 @@
+# Evaluation-only B4 reachability ablation: double the filter acceleration
+# bound while holding the frozen actor, geometry, shared seeds, and 300 ms
+# simulator-side budget fixed. It is not a retrained-policy comparison.
+includes:
+  - b4_formal_budget300_eval.yaml
+
+env:
+  safety_filter:
+    joint_acceleration_limit_radps2: 8.0

@@ -218,7 +218,12 @@ class UR5DynamicObstacleEnv(gym.Env):
         action = np.asarray(action, dtype=np.float32)
         action = np.clip(action, -1.0, 1.0)
 
-        pre_risk = self._compute_policy_risk(self._compute_risk())
+        current_risk_before_action = self._compute_risk()
+        predictive_diagnostics_enabled = bool(self.safety_filter_cfg.get("diagnostic_logging", False))
+        policy_predictive_risk = None
+        if (self.risk_representation != "current" or predictive_diagnostics_enabled) and self.obstacle_enabled:
+            policy_predictive_risk = self._compute_predictive_risk()
+        pre_risk = self._compute_policy_risk(current_risk_before_action, policy_predictive_risk)
         predictive_risk_for_scaling = None
         precomputed_risk_time_s = 0.0
         risk_speed_scale = 1.0
@@ -392,6 +397,8 @@ class UR5DynamicObstacleEnv(gym.Env):
                     "safe_stop_drift_class": safe_stop_drift_class,
                 }
             )
+        elif policy_predictive_risk is not None:
+            info.update(self._predictive_risk_info(policy_predictive_risk))
         self.prev_qdot_cmd = qdot_cmd
         self.prev_joint_acc = joint_acc
         self.prev_capsules = self._capsules()
@@ -517,11 +524,16 @@ class UR5DynamicObstacleEnv(gym.Env):
             use_end_effector_only=use_ee_only,
         )
 
-    def _compute_policy_risk(self, current_risk: LinkRisk) -> LinkRisk:
+    def _compute_policy_risk(
+        self,
+        current_risk: LinkRisk,
+        predictive_risk: PredictiveLinkRisk | None = None,
+    ) -> LinkRisk:
         if self.risk_representation == "current" or not self.obstacle_enabled:
             return current_risk
 
-        predictive_risk = self._compute_predictive_risk()
+        if predictive_risk is None:
+            predictive_risk = self._compute_predictive_risk()
         if predictive_risk.requires_safe_stop:
             return LinkRisk(
                 closest_points=current_risk.closest_points,
@@ -586,7 +598,11 @@ class UR5DynamicObstacleEnv(gym.Env):
         )
 
     def _configure_safety_filter(self) -> None:
-        if not self.safety_filter_enabled and self.risk_representation == "current":
+        if (
+            not self.safety_filter_enabled
+            and self.risk_representation == "current"
+            and not bool(self.safety_filter_cfg.get("diagnostic_logging", False))
+        ):
             return
 
         self.predictive_risk_config = PredictiveRiskConfig(
@@ -1063,17 +1079,14 @@ class UR5DynamicObstacleEnv(gym.Env):
         return lower, upper
 
     @staticmethod
-    def _filter_info(
-        result: SafetyFilterResult,
-        predictive_risk: PredictiveLinkRisk | None,
-        solve_time_s: float | None,
-        phase_times_s: dict[str, float] | None = None,
-    ) -> dict[str, Any]:
+    def _predictive_risk_info(predictive_risk: PredictiveLinkRisk | None) -> dict[str, Any]:
         predictive_info = {
             "predictive_risk_status": "integration_error",
             "predictive_risk_reason": "predictive risk was not produced",
             "predictive_risk_age_s": float("nan"),
             "predictive_h_min_m": float("-inf"),
+            "predictive_max_link_speed_bound_mps": float("nan"),
+            "predictive_link_velocity_norms_mps": "",
         }
         if predictive_risk is not None:
             predictive_info = {
@@ -1086,6 +1099,16 @@ class UR5DynamicObstacleEnv(gym.Env):
                     np.linalg.norm(predictive_risk.link_velocities_mps, axis=1)
                 ),
             }
+        return predictive_info
+
+    @staticmethod
+    def _filter_info(
+        result: SafetyFilterResult,
+        predictive_risk: PredictiveLinkRisk | None,
+        solve_time_s: float | None,
+        phase_times_s: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
+        predictive_info = UR5DynamicObstacleEnv._predictive_risk_info(predictive_risk)
         return {
             "safety_filter_status": result.status.value,
             "safety_filter_reason": result.reason,

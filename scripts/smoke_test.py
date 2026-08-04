@@ -51,6 +51,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         if terminated or truncated:
             observation, _ = env.reset()
 
+    safety_filter_cfg = config["env"].get("safety_filter", {})
+    if bool(safety_filter_cfg.get("enabled", False) or safety_filter_cfg.get("diagnostic_logging", False)):
+        link_velocity_norms_mps = np.fromstring(
+            str(info["predictive_link_velocity_norms_mps"]), sep="|", dtype=np.float64
+        )
+        assert link_velocity_norms_mps.size > 0
+        assert np.isfinite(link_velocity_norms_mps).all()
+        assert np.isfinite(float(info["predictive_max_link_speed_bound_mps"]))
+
     batch = replay.sample(int(smoke_cfg["batch_size"]))
     update_info = agent.update(batch)
     env.close()
@@ -71,6 +80,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             "buffer_size": len(replay),
             "risk_global": float(info["risk_global"]),
             "d_min": float(info["d_min"]),
+            "predictive_max_link_speed_bound_mps": info.get("predictive_max_link_speed_bound_mps"),
             "no_obstacle_risk": float(no_obstacle_info["risk_global"]),
             "actor_loss": update_info["loss/actor"],
         }
