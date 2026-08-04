@@ -6,10 +6,12 @@
 
 1. [当前研究状态](current/research_status.md)：研究方向、完成度、阻塞项和下一步。
 2. [结果总表](current/results_summary.md)：哪些数据可以引用、哪些只能用于诊断。
-3. [下一轮实验协议](current/next_experiment_protocol.md)：修正单位与碰撞口径后的唯一实验入口。
+3. [P3 冻结后状态](current/next_experiment_protocol.md)：修正单位与碰撞口径后的固定口径及冻结后约束。
 4. [指标和单位定义](reference/metrics_and_units.md)：速度、风险裕度和碰撞字段的统一定义。
 5. [研究方向](design/research_direction.md)：新论文的研究问题、方法边界与长期实验矩阵。
 6. [输出目录说明](../outputs/README.md)：磁盘结果的分层和可信度。
+
+当前阅读顺序：先看[当前研究状态](current/research_status.md)了解进展、现状与问题，再看[结果总表](current/results_summary.md)核对数字，最后看[P3 冻结后状态](current/next_experiment_protocol.md)确认实验边界。
 
 ## 文档职责
 

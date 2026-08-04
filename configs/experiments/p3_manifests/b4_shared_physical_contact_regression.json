@@ -1,0 +1,13 @@
+{
+  "manifest_version": 1,
+  "role": "targeted_physical_contact_regression",
+  "source_evaluation": "outputs/p3_postfix_dev_100k/b4_accel8_paired_physical_contact_audit.json",
+  "criterion": "B4 baseline and accel8 both produced PyBullet physical contact",
+  "selected_count": 4,
+  "seeds": [
+    7184,
+    7207,
+    7236,
+    7239
+  ]
+}

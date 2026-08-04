@@ -88,6 +88,51 @@ def test_b4_accel8_ablation_changes_only_the_filter_acceleration_limit() -> None
     assert accel8["eval"] == budget300["eval"]
 
 
+def test_b4_bounded_escape_regression_is_limited_to_the_identified_contact_seeds() -> None:
+    baseline = load_config("configs/experiments/p3_diagnostics/b4_formal_budget300_eval.yaml")
+    recovery = load_config(
+        "configs/experiments/p3_diagnostics/b4_formal_bounded_escape_contact_regression.yaml"
+    )
+
+    assert recovery["env"]["safety_filter"] == {
+        **baseline["env"]["safety_filter"],
+        "recovery_mode_enabled": True,
+        "recovery_enter_margin_m": 0.06,
+        "recovery_exit_margin_m": 0.08,
+        "recovery_ttc_threshold_s": 0.15,
+        "recovery_speed_radps": 0.7,
+        "recovery_allow_constraint_relaxation": True,
+        "recovery_maximize_min_clearance": False,
+    }
+    assert recovery["eval"]["episodes"] == 4
+    assert recovery["eval"]["seed_manifest"] == (
+        "configs/experiments/p3_manifests/b4_shared_physical_contact_regression.json"
+    )
+
+
+def test_b4_worst_link_escape_changes_only_recovery_direction_mode() -> None:
+    base = load_config(
+        "configs/experiments/p3_diagnostics/b4_formal_bounded_escape_contact_regression.yaml"
+    )
+    worst = load_config(
+        "configs/experiments/p3_diagnostics/b4_formal_worst_link_escape_contact_regression.yaml"
+    )
+    assert worst["env"]["safety_filter"] == {
+        **base["env"]["safety_filter"],
+        "recovery_direction_mode": "worst_link",
+    }
+
+
+def test_b4_worst_link_eval144_uses_the_shared_final_manifest() -> None:
+    config = load_config("configs/experiments/p3_diagnostics/b4_formal_worst_link_escape_eval144.yaml")
+
+    assert config["env"]["safety_filter"]["recovery_direction_mode"] == "worst_link"
+    assert config["eval"]["episodes"] == 144
+    assert config["eval"]["seed_manifest"] == (
+        "configs/experiments/p3_manifests/b5_robust_feasible_final.json"
+    )
+
+
 def test_p3_configs_have_distinct_outputs_and_expected_factor_settings() -> None:
     output_dirs = set()
     for name, (method, representation, filter_enabled) in P3_CONFIGS.items():

@@ -1,0 +1,19 @@
+# Targeted diagnostic for the four B4 physical-contact seeds. On strict-QP
+# infeasibility, relax only predictive barriers while retaining joint and
+# workspace hard constraints. This is not a main-comparison configuration.
+includes:
+  - b4_formal_budget300_eval.yaml
+
+env:
+  safety_filter:
+    recovery_mode_enabled: true
+    recovery_enter_margin_m: 0.06
+    recovery_exit_margin_m: 0.08
+    recovery_ttc_threshold_s: 0.15
+    recovery_speed_radps: 0.7
+    recovery_allow_constraint_relaxation: true
+    recovery_maximize_min_clearance: false
+
+eval:
+  episodes: 4
+  seed_manifest: configs/experiments/p3_manifests/b4_shared_physical_contact_regression.json

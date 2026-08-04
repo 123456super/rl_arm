@@ -1,0 +1,187 @@
+{
+  "trace_dirs": [
+    "outputs/p3_postfix_dev_100k/b4_predictive_nonrobust_filter/seed_4110/runs/20260804_091539_ur5_link_fixed_seed4110_steps100000/bounded_escape_contact_regression_traces"
+  ],
+  "recovery_episodes": 3,
+  "recovery_successes": 0,
+  "physical_contact_recovery_episodes": 0,
+  "cases": [
+    {
+      "trace_dir": "outputs/p3_postfix_dev_100k/b4_predictive_nonrobust_filter/seed_4110/runs/20260804_091539_ur5_link_fixed_seed4110_steps100000/bounded_escape_contact_regression_traces",
+      "episode": "episode_0000",
+      "eval_seed": null,
+      "recovery_first_step": 56,
+      "recovery_last_step": 223,
+      "recovery_steps": 130,
+      "recovery_trigger_reason": "",
+      "recovery_success": false,
+      "recovery_command_norm_max": 0.7000000476837158,
+      "h_min_start_m": 0.058211110544452355,
+      "h_min_end_m": 0.07855021098202045,
+      "h_min_best_m": 0.07996177057682238,
+      "h_min_delta_m": 0.02033910043756809,
+      "per_link_h_start_m": [
+        0.201882622,
+        0.0582111105,
+        0.151830255,
+        0.177865937,
+        0.212254268,
+        0.189117645
+      ],
+      "per_link_h_end_m": [
+        0.137778159,
+        0.152175908,
+        0.078550211,
+        0.203019133,
+        0.273227313,
+        0.343411801
+      ],
+      "per_link_h_delta_m": [
+        -0.064104463,
+        0.0939647975,
+        -0.073280044,
+        0.02515319599999999,
+        0.06097304500000003,
+        0.15429415600000002
+      ],
+      "first_jacobian_command_by_link_mps": [
+        0.000865672346,
+        0.0412961381,
+        -0.0409499545,
+        -0.0579623964,
+        -0.0599395766,
+        -0.0546622809
+      ],
+      "first_safety_drift_by_link_mps": [
+        -0.0279310864,
+        -0.0239189907,
+        -0.0382243513,
+        -0.0300986338,
+        -0.0222257709,
+        -0.0206580331
+      ],
+      "physical_contact": false,
+      "contact_step": null,
+      "contact_link_names": "",
+      "contact_min_distance_m": null
+    },
+    {
+      "trace_dir": "outputs/p3_postfix_dev_100k/b4_predictive_nonrobust_filter/seed_4110/runs/20260804_091539_ur5_link_fixed_seed4110_steps100000/bounded_escape_contact_regression_traces",
+      "episode": "episode_0001",
+      "eval_seed": null,
+      "recovery_first_step": 103,
+      "recovery_last_step": 239,
+      "recovery_steps": 137,
+      "recovery_trigger_reason": "",
+      "recovery_success": false,
+      "recovery_command_norm_max": 0.7000000476837158,
+      "h_min_start_m": 0.05947654453944781,
+      "h_min_end_m": -0.13325522163312847,
+      "h_min_best_m": 0.07855864789048869,
+      "h_min_delta_m": -0.19273176617257629,
+      "per_link_h_start_m": [
+        0.261511251,
+        0.0594765445,
+        0.171166216,
+        0.318522537,
+        0.424335736,
+        0.406684114
+      ],
+      "per_link_h_end_m": [
+        0.104706031,
+        -0.133255222,
+        -0.00078282349,
+        0.103778727,
+        0.159796983,
+        0.133022406
+      ],
+      "per_link_h_delta_m": [
+        -0.15680522,
+        -0.1927317665,
+        -0.17194903949,
+        -0.21474380999999998,
+        -0.264538753,
+        -0.273661708
+      ],
+      "first_jacobian_command_by_link_mps": [
+        -0.000520141577,
+        0.0677157874,
+        0.0122724644,
+        0.037121186,
+        0.0334705175,
+        0.0339527497
+      ],
+      "first_safety_drift_by_link_mps": [
+        -0.0346363551,
+        -0.048831714,
+        -0.0467435496,
+        -0.0401753015,
+        -0.0380026914,
+        -0.0389279721
+      ],
+      "physical_contact": false,
+      "contact_step": null,
+      "contact_link_names": "",
+      "contact_min_distance_m": null
+    },
+    {
+      "trace_dir": "outputs/p3_postfix_dev_100k/b4_predictive_nonrobust_filter/seed_4110/runs/20260804_091539_ur5_link_fixed_seed4110_steps100000/bounded_escape_contact_regression_traces",
+      "episode": "episode_0002",
+      "eval_seed": null,
+      "recovery_first_step": 16,
+      "recovery_last_step": 239,
+      "recovery_steps": 156,
+      "recovery_trigger_reason": "",
+      "recovery_success": false,
+      "recovery_command_norm_max": 0.7000000476837158,
+      "h_min_start_m": 0.048608631829747034,
+      "h_min_end_m": 0.049048489227117215,
+      "h_min_best_m": 0.07982037755052282,
+      "h_min_delta_m": 0.00043985739737018026,
+      "per_link_h_start_m": [
+        0.408062814,
+        0.349473166,
+        0.0486086318,
+        0.117072685,
+        0.103280149,
+        0.0967256277
+      ],
+      "per_link_h_end_m": [
+        0.0490484892,
+        0.111506383,
+        0.0618413606,
+        0.167052615,
+        0.142679114,
+        0.118821198
+      ],
+      "per_link_h_delta_m": [
+        -0.3590143248,
+        -0.23796678300000002,
+        0.013232728799999996,
+        0.04997992999999999,
+        0.039398964999999994,
+        0.022095570300000006
+      ],
+      "first_jacobian_command_by_link_mps": [
+        -0.00625010331,
+        -0.250735069,
+        -0.00402574308,
+        -0.148532238,
+        -0.190100635,
+        -0.260587223
+      ],
+      "first_safety_drift_by_link_mps": [
+        -0.0442248326,
+        -0.0437596504,
+        -0.0361035649,
+        -0.0396777101,
+        -0.0349087957,
+        -0.0432737086
+      ],
+      "physical_contact": false,
+      "contact_step": null,
+      "contact_link_names": "",
+      "contact_min_distance_m": null
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+# Frozen-actor B4 recovery follow-up on the shared 144-seed final set.
+# This is a diagnostic evaluation, not a replacement for the main comparison.
+includes:
+  - b4_formal_bounded_escape_contact_regression.yaml
+
+env:
+  safety_filter:
+    recovery_direction_mode: worst_link
+
+eval:
+  episodes: 144
+  seed_manifest: configs/experiments/p3_manifests/b5_robust_feasible_final.json

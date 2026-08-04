@@ -1283,8 +1283,16 @@ class UR5DynamicObstacleEnv(gym.Env):
             deficits = np.maximum(exit_margin - margins, 0.0)
         if not np.any(deficits > 0.0):
             return np.zeros(self.joint_count, dtype=np.float32)
-        weights = deficits / float(np.sum(deficits))
-        direction = np.sum(weights[:, None] * safety_jacobian, axis=0)
+        direction_mode = str(self.safety_filter_cfg.get("recovery_direction_mode", "weighted_all_links"))
+        if direction_mode == "worst_link":
+            direction = safety_jacobian[int(np.argmin(margins))].copy()
+        elif direction_mode == "weighted_all_links":
+            weights = deficits / float(np.sum(deficits))
+            direction = np.sum(weights[:, None] * safety_jacobian, axis=0)
+        else:
+            raise ValueError(
+                "recovery_direction_mode must be 'weighted_all_links' or 'worst_link'"
+            )
         norm = float(np.linalg.norm(direction))
         if norm <= 1e-10:
             return np.zeros(self.joint_count, dtype=np.float32)

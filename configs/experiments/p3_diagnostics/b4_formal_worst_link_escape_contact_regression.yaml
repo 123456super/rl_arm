@@ -1,0 +1,9 @@
+# Targeted diagnostic: prioritize the currently worst predictive link when
+# constructing the bounded escape direction. All other recovery settings and
+# the four shared contact seeds remain unchanged.
+includes:
+  - b4_formal_bounded_escape_contact_regression.yaml
+
+env:
+  safety_filter:
+    recovery_direction_mode: worst_link

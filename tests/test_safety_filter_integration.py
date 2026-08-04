@@ -77,6 +77,19 @@ def test_recovery_command_weights_all_below_margin_links() -> None:
     np.testing.assert_allclose(command, [1.0 / np.sqrt(5.0), 0.5 / np.sqrt(5.0)], atol=1e-6)
 
 
+def test_recovery_command_can_prioritize_the_worst_link() -> None:
+    env = _recovery_test_env(np.asarray([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]]))
+    env.safety_filter_cfg["recovery_direction_mode"] = "worst_link"
+    risk = replace(
+        _predictive_risk_for_test(3),
+        safety_functions_m=np.asarray([0.01, -0.10, -0.05]),
+    )
+
+    command = env._recovery_command(risk)
+
+    np.testing.assert_allclose(command, [0.0, 0.5], atol=1e-6)
+
+
 def _predictive_risk_for_test(count: int):
     from rl_risk_sac.utils.predictive_risk import PredictiveLinkRisk
 
