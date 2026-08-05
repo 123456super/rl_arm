@@ -1,0 +1,10 @@
+includes:
+  - v1_base.yaml
+
+seed: 4301
+
+device: cuda:1
+
+train:
+  output_dir: outputs/reaching_recovery_v1/train/seed_4301
+  run_name: link_fixed_no_obstacle_seed4301_steps200000

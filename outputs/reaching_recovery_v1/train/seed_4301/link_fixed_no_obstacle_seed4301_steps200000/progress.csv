@@ -1,0 +1,4 @@
+step,total_steps,episode,episode_length,latest_reward,latest_cost,episode_reward,episode_cost,risk_global,d_min,success,collision,collision_any,collision_capsule_overlap,collision_pybullet_contact,termination_collision,safety_filter_status,safety_filter_intervention_norm,safety_filter_safe_stop,safety_filter_max_constraint_violation,predictive_h_min_m,predictive_max_link_speed_bound_mps,predictive_link_velocity_norms_mps,safety_filter_solve_time_s,lambda,alpha,replay_size
+500,200000,3,59,-0.17017983888644955,0.0,-9.590942420133404,0.0,0.0,1.5,0,0,0,0,0,0,not_enabled,nan,False,nan,nan,nan,,nan,0.0,0.20000000298023224,500
+1000,200000,5,79,-0.6092077367475625,0.0,-19.565324083851902,0.0,0.0,1.5,0,0,0,0,0,0,not_enabled,nan,False,nan,nan,nan,,nan,0.0,0.19993998110294342,1000
+1500,200000,7,99,-0.16380863086198233,0.0,-8.043720885147835,0.0,0.0,1.5,0,0,0,0,0,0,not_enabled,nan,False,nan,nan,nan,,nan,0.0,0.17258702218532562,1500

@@ -1,0 +1,9 @@
+episode,step,episode_reward,episode_cost,episode_length,success,collision,collision_any,collision_capsule_overlap,collision_pybullet_contact,termination_collision,termination_reason,safety_violation_rate,min_distance,mean_risk,safety_filter_intervention_rate,mean_safety_filter_intervention_norm,safety_filter_safe_stop_rate,safety_filter_infeasible_rate,safety_filter_projection_failure_rate,predictive_near_miss_rate,min_predictive_h_m,mean_safety_filter_solve_time_s,lambda,alpha
+1,240,-116.2941572388219,0.0,240,0,0,0,0,0,0,,0.0,1.5,0.0,nan,nan,nan,nan,nan,nan,nan,nan,0.0,0.20000000298023224
+2,290,19.879108634505513,0.0,50,1,0,0,0,0,0,,0.0,1.5,0.0,nan,nan,nan,nan,nan,nan,nan,nan,0.0,0.20000000298023224
+3,441,14.98614718716573,0.0,151,1,0,0,0,0,0,,0.0,1.5,0.0,nan,nan,nan,nan,nan,nan,nan,nan,0.0,0.20000000298023224
+4,681,-40.299393828638514,0.0,240,0,0,0,0,0,0,,0.0,1.5,0.0,nan,nan,nan,nan,nan,nan,nan,nan,0.0,0.20000000298023224
+5,921,-31.654610362095084,0.0,240,0,0,0,0,0,0,,0.0,1.5,0.0,nan,nan,nan,nan,nan,nan,nan,nan,0.0,0.20000000298023224
+6,1161,-84.8343281422169,0.0,240,0,0,0,0,0,0,,0.0,1.5,0.0,nan,nan,nan,nan,nan,nan,nan,nan,0.0,0.19052579998970032
+7,1401,-118.48520028457722,0.0,240,0,0,0,0,0,0,,0.0,1.5,0.0,nan,nan,nan,nan,nan,nan,nan,nan,0.0,0.17748264968395233
+8,1641,-29.210287514264515,0.0,240,0,0,0,0,0,0,,0.0,1.5,0.0,nan,nan,nan,nan,nan,nan,nan,nan,0.0,0.16615891456604004

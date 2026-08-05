@@ -67,6 +67,8 @@
 
 本轮只归档和引用冻结决策包，不再运行或扩展 recovery、M、OOD 或真机实验。严格 B4 仅保留为诊断基线；当前已确认基础无障碍到达能力不合格，不能进入 V2、动态避障性能比较或任何安全方法推进。任何后继方案都必须先单独定义安全目标与评估协议，不能沿用已拒绝的 recovery 分支。
 
+已按基础策略问题新增独立的[基础 reaching 恢复协议](reaching_recovery_protocol.md)：仅在关闭障碍物和安全过滤器的条件下，使用三个新 train seeds 恢复并验证策略到达能力。它与 VAPS G3/G4 完全隔离，不授权动态避障、安全比较、OOD、真机或任何 recovery/relaxation 分支；只有达到协议门槛后才能重新审查后续安全研究。
+
 已新增[后继安全协议](../design/successor_safety_protocol.md)，其方向为可行安全集感知的严格预测控制。G0 已完成：viability 标签、严格约束与 V0/V1 动作等价性测试通过。G1 的 1000-reset coverage audit 已完成，结果保存在 `outputs/vaps_g1/coverage_10001_11000_v3.json`：`certified_viable=83.3%`、严格模型不可行 `16.7%`、unknown/invalid/budget-stop 均为零；求解 P99 `9.86 ms`、最大 `214.95 ms`，仅构成离线筛选证据。确定性抽样的 20 条严格可行和 20 条严格不可行 reset trace 已完成单位、连杆、状态与 safe-stop 命令的结构复核；零自然样本类别由 G0 故障注入测试覆盖。2026-08-05 决议保持为 `approve_g1_g2`：下一步只授权使用既有 V0 actor 的 V0/V1 严格链路比较；仍不授权 V2 训练、checkpoint 选择、最终比较、OOD、真机或任何 recovery/relaxation 分支。
 
 G2 v1 的 `4108` validation 在 `seed=8216, step=129` 出现单侧 `safe_stop_compute_budget`，因此整套 v1 结果未通过且保留在 `outputs/vaps_g2/`，不得用于推进决议。该回退由 post-return 墙钟计时触发，不具备锁步确定性；新建的 G2 v2 仅移除此计时诊断作为比较输入，保留全部严格 QP/几何/速度/加速度约束、无效观测停机和不可行 safe-stop。G1 的 `.30 s` 时间审计仍有效且不可由 G2 替代；v2 结果完成独立审计前，仍不得进入 G3。
