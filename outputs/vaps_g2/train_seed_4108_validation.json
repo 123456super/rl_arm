@@ -1,0 +1,182 @@
+{
+  "protocol": "vaps_g2_strict_execution_v1",
+  "config": "configs/experiments/vaps/v1_g2_strict_execution.yaml",
+  "checkpoint_manifest": "configs/experiments/vaps_manifests/v0_b4_selected_checkpoints.json",
+  "train_seed": 4108,
+  "checkpoint": "outputs/p3_postfix_dev_100k/b4_predictive_nonrobust_filter/seed_4108/runs/20260804_091530_ur5_link_fixed_seed4108_steps100000/actor_step_50000.pt",
+  "checkpoint_step": 50000,
+  "checkpoint_sha256": "d17a6b4c5c92f30ff77c88ccc30135f070464c8c0054ac0c01ee2ef0dba4a5e3",
+  "selection_record": "outputs/p3_postfix_dev_100k/b4_predictive_nonrobust_filter/seed_4108/runs/20260804_091530_ur5_link_fixed_seed4108_steps100000/checkpoint_selection/selected_checkpoint.csv",
+  "selection_record_sha256": "c17f0f3e8718ec4151fb1a4290c53ccb655a2ba91eec5b5d84ddff26521b074d",
+  "seed_manifest": "configs/experiments/vaps_manifests/v1_g2_validation.json",
+  "config_sha256": "ce6a39d0f738486978146694a164e32c1b6500cf82fcc4348f9d31b515899547",
+  "resolved_config_sha256": "355d31f7f16baf1caab4f465631a9820a3369ce6184b3236b4eaf3f7f2a6fb5b",
+  "checkpoint_manifest_sha256": "00ffa7e7dd4f613dac41ba1c343ea1710f09361b18d3f1391586d683e38d3840",
+  "seed_manifest_sha256": "868db0a0d7e09b7893218c3d7401dd3eb1d45bec1a4333ec5b0a92fc55ff26ef",
+  "atol": 1e-07,
+  "passed": false,
+  "episodes_requested": 40,
+  "episodes_completed": 16,
+  "episodes": [
+    {
+      "seed": 8201,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8202,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8203,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8204,
+      "steps": 32,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8205,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8206,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8207,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8208,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8209,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8210,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8211,
+      "steps": 189,
+      "passed": true,
+      "termination_reason": "pybullet_contact",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8212,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8213,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8214,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8215,
+      "steps": 240,
+      "passed": true,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.0,
+      "action_max_abs_diff": 0.0,
+      "qdot_cmd_max_abs_diff": 0.0,
+      "qdot_requested_max_abs_diff": 0.0
+    },
+    {
+      "seed": 8216,
+      "steps": 240,
+      "passed": false,
+      "termination_reason": "",
+      "observation_max_abs_diff": 0.9458494782447815,
+      "action_max_abs_diff": 1.082754522562027,
+      "qdot_cmd_max_abs_diff": 0.9458494782447815,
+      "qdot_requested_max_abs_diff": 0.5685751885175705
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # 当前研究状态
 
-> 更新时间：2026-08-04。本页是项目当前状态的唯一入口。
+> 更新时间：2026-08-05。本页是项目当前状态的唯一入口。
 
 ## 研究方向
 
@@ -49,6 +49,7 @@
 ## 当前阻塞
 
 - 当前 P3 比较未形成可冻结的主方法：B4 严格过滤器仍有不可行停止，B5 的不可行/安全停止占比更高；恢复放宽会恶化 physical contact。
+- G2 v2 的冻结投影失败已完成数值归因：在 11 个原矩阵事件中，10 个在 50000 次 OSQP 迭代内被判为 primal infeasible，另 1 个只在 34625 次迭代后获得严格可行候选。这同时暴露严格约束集合的真实冲突和当前运行时迭代上限的数值不足，不能以单纯提高迭代上限消除问题。
 - 完整方法 M 尚未实现；当前 replay buffer 仍保存策略原始动作，过滤器干预尚未进入训练代价。根据本轮冻结决策，不进入 M 的实现或评估。
 - 实际感知噪声、观测时延和外参扰动尚未形成 OOD 数据。
 - 求解器只有事后耗时检查，尚无硬截止保证；300 ms 通过不构成部署实时性结论。
@@ -64,3 +65,21 @@
 ## 下一步
 
 本轮只归档和引用冻结决策包，不再运行或扩展 recovery、M、OOD 或真机实验。严格 B4 仅保留为诊断基线；任何后继方案都必须先单独定义安全目标与评估协议，不能沿用已拒绝的 recovery 分支。
+
+已新增[后继安全协议](../design/successor_safety_protocol.md)，其方向为可行安全集感知的严格预测控制。G0 已完成：viability 标签、严格约束与 V0/V1 动作等价性测试通过。G1 的 1000-reset coverage audit 已完成，结果保存在 `outputs/vaps_g1/coverage_10001_11000_v3.json`：`certified_viable=83.3%`、严格模型不可行 `16.7%`、unknown/invalid/budget-stop 均为零；求解 P99 `9.86 ms`、最大 `214.95 ms`，仅构成离线筛选证据。确定性抽样的 20 条严格可行和 20 条严格不可行 reset trace 已完成单位、连杆、状态与 safe-stop 命令的结构复核；零自然样本类别由 G0 故障注入测试覆盖。2026-08-05 决议保持为 `approve_g1_g2`：下一步只授权使用既有 V0 actor 的 V0/V1 严格链路比较；仍不授权 V2 训练、checkpoint 选择、最终比较、OOD、真机或任何 recovery/relaxation 分支。
+
+G2 v1 的 `4108` validation 在 `seed=8216, step=129` 出现单侧 `safe_stop_compute_budget`，因此整套 v1 结果未通过且保留在 `outputs/vaps_g2/`，不得用于推进决议。该回退由 post-return 墙钟计时触发，不具备锁步确定性；新建的 G2 v2 仅移除此计时诊断作为比较输入，保留全部严格 QP/几何/速度/加速度约束、无效观测停机和不可行 safe-stop。G1 的 `.30 s` 时间审计仍有效且不可由 G2 替代；v2 结果完成独立审计前，仍不得进入 G3。
+
+G2 v2 的六个固定结果已通过完整性审计：`3×40` validation 与 `3×200` final episode 均完成，所有逐步 V0/V1 观测、动作、请求/执行命令、碰撞、终止和 filter status 差异均为零。trace 中同时出现 `11` 次双方一致的 `safe_stop_projection_failed`，已冻结这 11 个 `(train seed, reset seed, step)` 及原始 trace 哈希。定点回放确认 11/11 保持该状态、V0/V1 和 source 命令精确一致且均为零；零命令在 11/11 个事件中不满足全部瞬时约束，因此它只是拒绝原策略动作的 fail-safe，不能被解释为严格可行。
+
+冻结矩阵的离线数值可行性归因已完成，结果为 `outputs/vaps_g2_v2/projection_feasibility_audit.json`。所有诊断均保留原始 box、predictive 与 workspace 约束，关闭 solver time limit、不开启 recovery/relaxation，并对返回候选独立复核最大残差：
+
+| OSQP 最大迭代 | 11 个事件的结果 | 含义 |
+| ---: | --- | --- |
+| 2000 | 11 个 `indeterminate_max_iterations` | 该上限不足以区分可行与不可行 |
+| 10000 | 9 个 `primal_infeasible`、2 个仍未定 | 多数不是低迭代上限造成的失败 |
+| 50000 | 10 个 `primal_infeasible`、1 个 `strict_feasible` | 原严格约束集合同时存在真实不可行与数值收敛不足 |
+
+唯一严格可行事件为 `(train_seed=4110, seed=9119, step=155)`：OSQP 在 34625 次迭代后返回 `solved`，原约束独立复核最大残差为 `1.60e-08`，低于 `1e-6` 容差。其余 10 个事件在 50000 次上限内获得 primal-infeasible 证书；证书向量出现的约 `2e9` 残差不是候选控制命令或物理违约幅度，不能作为执行量解释。
+
+当前决议为 `do_not_advance`：不得进入 G3、不得训练 V2 或修改运行时控制。把运行时上限直接提高到 50000 只能消除 1 个数值性投影失败且计算代价不可接受，不能解决另 10 个严格不可行事件。下一步仅可对这 10 个事件做离线约束冲突归因，定位 predictive、workspace、关节速度/加速度/位置约束的最小冲突组合；不得放宽约束、启用 recovery 或把诊断候选用于环境执行。

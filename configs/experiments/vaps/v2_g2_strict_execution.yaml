@@ -1,0 +1,11 @@
+# VAPS G2 v2: deterministic V0/V1 strict execution-equivalence check. This is not a training config.
+includes:
+  - v1_g1_coverage.yaml
+
+env:
+  safety_filter:
+    # G1 audits the post-return 0.30 s budget. It is non-deterministic in a lock-step comparison.
+    max_filter_compute_time_s: null
+
+eval:
+  method: link_fixed

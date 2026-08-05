@@ -16,7 +16,9 @@ from rl_risk_sac.utils.safety_filter import (
     SafetyFilterConfig,
     SafetyFilterInput,
     SafetyFilterStatus,
+    ViabilityStatus,
     _dykstra_projection,
+    assess_strict_viability,
     filter_joint_velocity,
 )
 from rl_risk_sac.robots.ur5_capsules import CapsuleState
@@ -167,6 +169,33 @@ def test_infeasible_safety_constraint_falls_back_to_safe_stop() -> None:
     np.testing.assert_array_equal(result.command_joint_velocity_radps, [0.0])
 
 
+def test_viability_classifies_strict_infeasibility_by_safe_stop_drift() -> None:
+    risk = risk_with_safety_function(-0.1)
+    result = filter_joint_velocity(filter_input(risk, requested=0.4, jacobian=0.0), config())
+
+    static_assessment = assess_strict_viability(result, risk, "static_or_slow")
+    dynamic_assessment = assess_strict_viability(result, risk, "dynamic_drift")
+
+    assert static_assessment.status is ViabilityStatus.MODEL_INFEASIBLE_STATIC_OR_SLOW
+    assert dynamic_assessment.status is ViabilityStatus.MODEL_INFEASIBLE_DYNAMIC
+    assert static_assessment.strict_feasible is False
+    assert dynamic_assessment.strict_feasible is False
+
+
+def test_recovery_relaxed_result_is_never_certified_viable() -> None:
+    risk = risk_with_safety_function(-0.1)
+    result = filter_joint_velocity(
+        replace(filter_input(risk, requested=0.4, jacobian=0.0), allow_infeasible_recovery=True),
+        config(),
+    )
+
+    assessment = assess_strict_viability(result, risk, "dynamic_drift")
+
+    assert result.status is SafetyFilterStatus.RECOVERY_RELAXED
+    assert assessment.status is ViabilityStatus.MODEL_INFEASIBLE_STATIC_OR_SLOW
+    assert assessment.strict_feasible is False
+
+
 def test_strict_projection_does_not_enter_iterative_fallback() -> None:
     strict_config = replace(config(), allow_iterative_fallback=False, max_projection_iterations=1)
     result = filter_joint_velocity(
@@ -278,8 +307,9 @@ def test_projection_residual_is_reported_separately_from_confirmed_infeasibility
         control_dt_s=0.1,
     )
     workspace = LinearVelocityConstraints(matrix=np.asarray([[1.0]]), lower_bound=np.asarray([0.5]))
+    risk = risk_with_safety_function(1.0)
     result = filter_joint_velocity(
-        filter_input(risk_with_safety_function(1.0), requested=0.0, workspace=workspace),
+        filter_input(risk, requested=0.0, workspace=workspace),
         constrained_config,
     )
 
@@ -287,6 +317,9 @@ def test_projection_residual_is_reported_separately_from_confirmed_infeasibility
     assert result.requires_safe_stop
     assert result.max_constraint_category == "workspace_0"
     assert result.constraint_count == 2
+    assessment = assess_strict_viability(result, risk)
+    assert assessment.status is ViabilityStatus.UNKNOWN_COMPUTE_BUDGET
+    assert assessment.strict_feasible is False
 
 
 def test_result_reports_limiting_joint_box_constraints() -> None:

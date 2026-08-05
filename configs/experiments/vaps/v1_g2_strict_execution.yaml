@@ -1,0 +1,6 @@
+# VAPS G2: V0/V1 strict execution-equivalence check. This is not a training config.
+includes:
+  - v1_g1_coverage.yaml
+
+eval:
+  method: link_fixed

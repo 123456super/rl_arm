@@ -1,0 +1,26 @@
+{
+  "manifest_version": 1,
+  "protocol": "vaps_g2_projection_failure_audit_v1",
+  "source_protocol": "vaps_g2_strict_execution_v2",
+  "source_trace_sha256": {
+    "outputs/vaps_g2_v2/train_seed_4108_final_trace.csv": "6ec525b39b07c242939b4a0ce10dc8d2fcf53f6355c2bf08997543aa501a6540",
+    "outputs/vaps_g2_v2/train_seed_4108_validation_trace.csv": "b0340fbb5819f176cea5a8031326be2b32c4c338b09579a5a6013ca2e0beaeeb",
+    "outputs/vaps_g2_v2/train_seed_4109_final_trace.csv": "5a0856ecc579bae96f9ce0014b6d85a80a41b25366eed55078cb071d4aedbb94",
+    "outputs/vaps_g2_v2/train_seed_4109_validation_trace.csv": "5d938176c7ad1906352cbb3c1f0a2688b412363b1a5f66b533e56aaa9dd9df7f",
+    "outputs/vaps_g2_v2/train_seed_4110_final_trace.csv": "d26acb31ae71ca527485e90753eb7a7b08b2de9abf3964aa9951f2832d613029",
+    "outputs/vaps_g2_v2/train_seed_4110_validation_trace.csv": "37914f21452fe3f8f78fe278af42d7f8ad0cfb9dc9c28032738b9384e1cad7e3"
+  },
+  "targets": [
+    {"train_seed": 4108, "seed": 9099, "step": 83},
+    {"train_seed": 4108, "seed": 8212, "step": 158},
+    {"train_seed": 4108, "seed": 8224, "step": 201},
+    {"train_seed": 4109, "seed": 9044, "step": 191},
+    {"train_seed": 4109, "seed": 9181, "step": 216},
+    {"train_seed": 4109, "seed": 8240, "step": 150},
+    {"train_seed": 4110, "seed": 9107, "step": 37},
+    {"train_seed": 4110, "seed": 9119, "step": 155},
+    {"train_seed": 4110, "seed": 9151, "step": 106},
+    {"train_seed": 4110, "seed": 9159, "step": 143},
+    {"train_seed": 4110, "seed": 8205, "step": 172}
+  ]
+}

@@ -1,0 +1,3100 @@
+{
+  "protocol": "vaps_g2_projection_failure_audit_v1",
+  "source_protocol": "vaps_g2_strict_execution_v2",
+  "config": "configs/experiments/vaps/v2_g2_strict_execution.yaml",
+  "config_sha256": "fd601e6af85ec4970562e496e8127ca545b57c198b1261f4d666c1d3d33edffb",
+  "resolved_config_sha256": "156d85b146d96aa7177f56ca0e4cb355dfb50735dfa5f8675d84bd0a35c7d2de",
+  "checkpoint_manifest": "configs/experiments/vaps_manifests/v2_b4_selected_checkpoints.json",
+  "checkpoint_manifest_sha256": "eceb42687c92e70930b1222911142a96382b251082ffeb91a7bc5eba5a34502c",
+  "target_manifest": "configs/experiments/vaps_manifests/v1_g2_projection_failure_targets.json",
+  "target_manifest_sha256": "9b0067704d18ba6900b2e87bc0cb1060861c466c3d8e96b1339e0a0320b44ade",
+  "source_trace_sha256": {
+    "outputs/vaps_g2_v2/train_seed_4108_final_trace.csv": "6ec525b39b07c242939b4a0ce10dc8d2fcf53f6355c2bf08997543aa501a6540",
+    "outputs/vaps_g2_v2/train_seed_4108_validation_trace.csv": "b0340fbb5819f176cea5a8031326be2b32c4c338b09579a5a6013ca2e0beaeeb",
+    "outputs/vaps_g2_v2/train_seed_4109_final_trace.csv": "5a0856ecc579bae96f9ce0014b6d85a80a41b25366eed55078cb071d4aedbb94",
+    "outputs/vaps_g2_v2/train_seed_4109_validation_trace.csv": "5d938176c7ad1906352cbb3c1f0a2688b412363b1a5f66b533e56aaa9dd9df7f",
+    "outputs/vaps_g2_v2/train_seed_4110_final_trace.csv": "d26acb31ae71ca527485e90753eb7a7b08b2de9abf3964aa9951f2832d613029",
+    "outputs/vaps_g2_v2/train_seed_4110_validation_trace.csv": "37914f21452fe3f8f78fe278af42d7f8ad0cfb9dc9c28032738b9384e1cad7e3"
+  },
+  "atol": 1e-07,
+  "training_performed": false,
+  "actor_checkpoint_selection_performed": false,
+  "target_count": 11,
+  "source_projection_failure_count": 11,
+  "all_statuses_reproduced": true,
+  "all_commands_zero": true,
+  "all_source_commands_reproduced": true,
+  "all_v0_v1_execution_reproduced": true,
+  "source_requested_exact_reproduction_count": 11,
+  "max_source_requested_abs_diff": 0.0,
+  "zero_command_constraint_feasible_count": 0,
+  "strict_fail_safe_semantics_verified": true,
+  "projection_failures_resolved": false,
+  "g3_authorization": "not_granted_by_this_audit",
+  "merged_shards": [
+    "outputs/vaps_g2_v2/projection_failure_shards/target_00.json",
+    "outputs/vaps_g2_v2/projection_failure_shards/target_01.json",
+    "outputs/vaps_g2_v2/projection_failure_shards/target_02.json",
+    "outputs/vaps_g2_v2/projection_failure_shards/target_03.json",
+    "outputs/vaps_g2_v2/projection_failure_shards/target_04.json",
+    "outputs/vaps_g2_v2/projection_failure_shards/target_05.json",
+    "outputs/vaps_g2_v2/projection_failure_shards/target_06.json",
+    "outputs/vaps_g2_v2/projection_failure_shards/target_07.json",
+    "outputs/vaps_g2_v2/projection_failure_shards/target_08.json",
+    "outputs/vaps_g2_v2/projection_failure_shards/target_09.json",
+    "outputs/vaps_g2_v2/projection_failure_shards/target_10.json"
+  ],
+  "events": [
+    {
+      "train_seed": 4108,
+      "seed": 8212,
+      "step": 158,
+      "source_trace": "outputs/vaps_g2_v2/train_seed_4108_validation_trace.csv",
+      "source_viability_status": "unknown_compute_budget",
+      "source_viability_solver_status": "strict_projection_failed",
+      "source_requested_max_abs_diff": 0.0,
+      "source_command_max_abs_diff": 0.0,
+      "v0_v1_requested_max_abs_diff": 0.0,
+      "v0_v1_command_max_abs_diff": 0.0,
+      "source_requested_exactly_reproduced": true,
+      "source_command_reproduced": true,
+      "v0_v1_execution_reproduced": true,
+      "status_reproduced": true,
+      "command_is_zero": true,
+      "command_differs_from_requested": true,
+      "filter_result": {
+        "status": "safe_stop_projection_failed",
+        "reason": "cyclic projection did not satisfy all constraints within the failure tolerance",
+        "command_joint_velocity_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "intervention_norm_radps": 0.879722038550547,
+        "active_constraint_count": 1,
+        "constraint_count": 12,
+        "active_constraint_categories": [
+          "workspace_z_upper"
+        ],
+        "max_constraint_violation": 0.011283277831533337,
+        "max_constraint_category": "predictive_link_5",
+        "projection_iterations": 80,
+        "fallback_used": false,
+        "qp_solver_used": false,
+        "qp_solver_status": "maximum iterations reached",
+        "fallback_stage": "failed",
+        "infeasible_constraint_categories": [],
+        "infeasibility_diagnostic_status": ""
+      },
+      "constraints": {
+        "joint_positions_rad": [
+          0.2813098132610321,
+          -1.880258560180664,
+          1.2912054061889648,
+          -2.0603859424591064,
+          -2.738929510116577,
+          0.53985196352005
+        ],
+        "previous_command_radps": [
+          0.04734471067786217,
+          0.03137305751442909,
+          -0.03810859099030495,
+          0.31881725788116455,
+          -0.47870826721191406,
+          0.19188322126865387
+        ],
+        "requested_joint_velocity_radps": [
+          0.34137946367263794,
+          -0.3122764229774475,
+          -0.35794347524642944,
+          -0.056779906153678894,
+          -0.5715106725692749,
+          0.31919026374816895
+        ],
+        "joint_lower_radps": [
+          -0.15265528932213784,
+          -0.16862694248557092,
+          -0.23810859099030496,
+          0.11881725788116454,
+          -0.678708267211914,
+          -0.008116778731346141
+        ],
+        "joint_upper_radps": [
+          0.24734471067786218,
+          0.2313730575144291,
+          0.16189140900969506,
+          0.5188172578811645,
+          -0.27870826721191405,
+          0.3918832212686539
+        ],
+        "constraint_labels": [
+          "predictive_link_0",
+          "predictive_link_1",
+          "predictive_link_2",
+          "predictive_link_3",
+          "predictive_link_4",
+          "predictive_link_5",
+          "workspace_x_lower",
+          "workspace_x_upper",
+          "workspace_y_lower",
+          "workspace_y_upper",
+          "workspace_z_lower",
+          "workspace_z_upper"
+        ],
+        "constraint_lower_bounds": [
+          -0.6028192203741012,
+          -0.5306034308607673,
+          0.023547855224594513,
+          0.01614601536624431,
+          -0.09279298716962688,
+          0.0029542895643718987,
+          0.00012087821960449219,
+          -2.1201208782196046,
+          -2.2281388521194456,
+          -1.3718611478805542,
+          -2.4002864646911624,
+          0.0002864646911620028
+        ],
+        "zero_command_constraint_residuals": [
+          -0.6028192203741012,
+          -0.5306034308607673,
+          0.023547855224594513,
+          0.01614601536624431,
+          -0.09279298716962688,
+          0.0029542895643718987,
+          0.00012087821960449219,
+          -2.1201208782196046,
+          -2.2281388521194456,
+          -1.3718611478805542,
+          -2.4002864646911624,
+          0.0002864646911620028
+        ],
+        "zero_command_constraint_violations": [
+          0.0,
+          0.0,
+          0.023547855224594513,
+          0.01614601536624431,
+          0.0,
+          0.0029542895643718987,
+          0.00012087821960449219,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0002864646911620028
+        ],
+        "zero_command_max_constraint_violation": 0.27870826721191405,
+        "zero_command_max_constraint_label": "joint_4_acceleration_upper",
+        "zero_command_max_constraint_category": "joint_acceleration",
+        "zero_command_satisfies_all_constraints": false,
+        "predictive_risk_status": "valid",
+        "predictive_risk_age_s": 0.0,
+        "predictive_h_by_link_m": [
+          0.1525255665116212,
+          0.13252054036107275,
+          0.0012387305698094292,
+          -0.0002257988825713625,
+          0.02838247061241314,
+          0.005083558114998138
+        ],
+        "predictive_predicted_distance_by_link_m": [
+          0.3922188933951527,
+          0.3722138672446042,
+          0.2409320574533409,
+          0.2394675280009601,
+          0.2680757974959446,
+          0.24477688499852962
+        ],
+        "predictive_robust_distance_by_link_m": [
+          0.2725255665116212,
+          0.25252054036107274,
+          0.12123873056980942,
+          0.11977420111742863,
+          0.14838247061241314,
+          0.12508355811499813
+        ],
+        "predictive_link_velocity_norms_mps": [
+          0.0006861636205147864,
+          0.013954351560319158,
+          0.0105390505933447,
+          0.019791839662856244,
+          0.008277681080762066,
+          0.0081303472307436
+        ],
+        "obstacle_position_m": [
+          0.4081558883190155,
+          0.24281172454357147,
+          0.4401460886001587
+        ],
+        "obstacle_velocity_mps": [
+          0.006854773499071598,
+          -0.047716788947582245,
+          0.01327102817595005
+        ],
+        "capsules": [
+          {
+            "name": "shoulder",
+            "start_m": [
+              -0.004359056241810322,
+              0.013820313848555088,
+              0.1589278280735016
+            ],
+            "end_m": [
+              -0.005309784784913063,
+              0.009303396567702293,
+              0.02172292023897171
+            ],
+            "radius_m": 0.08598767561066961
+          },
+          {
+            "name": "upper_arm",
+            "start_m": [
+              -0.024250324815511703,
+              0.15099726617336273,
+              0.03238282725214958
+            ],
+            "end_m": [
+              -0.18444585800170898,
+              0.10498902946710587,
+              0.5509040355682373
+            ],
+            "radius_m": 0.10325230532579074
+          },
+          {
+            "name": "forearm",
+            "start_m": [
+              -0.1837795078754425,
+              -0.013676375150680542,
+              0.46108129620552063
+            ],
+            "end_m": [
+              0.22216518223285675,
+              0.05714741349220276,
+              0.7334768176078796
+            ],
+            "radius_m": 0.07999408774853851
+          },
+          {
+            "name": "wrist_1",
+            "start_m": [
+              0.18494713306427002,
+              0.15410497784614563,
+              0.7552624344825745
+            ],
+            "end_m": [
+              0.132515087723732,
+              0.14770089089870453,
+              0.6599571704864502
+            ],
+            "radius_m": 0.05569111334476015
+          },
+          {
+            "name": "wrist_2",
+            "start_m": [
+              0.22292158007621765,
+              0.12961161136627197,
+              0.77281254529953
+            ],
+            "end_m": [
+              0.16555291414260864,
+              0.21913927793502808,
+              0.8030296564102173
+            ],
+            "radius_m": 0.05533030881024477
+          },
+          {
+            "name": "wrist_3",
+            "start_m": [
+              0.24559925496578217,
+              0.11907071620225906,
+              0.744563639163971
+            ],
+            "end_m": [
+              0.2438654601573944,
+              0.10878387093544006,
+              0.8255806565284729
+            ],
+            "radius_m": 0.04837612224317481
+          }
+        ]
+      }
+    },
+    {
+      "train_seed": 4108,
+      "seed": 8224,
+      "step": 201,
+      "source_trace": "outputs/vaps_g2_v2/train_seed_4108_validation_trace.csv",
+      "source_viability_status": "unknown_compute_budget",
+      "source_viability_solver_status": "strict_projection_failed",
+      "source_requested_max_abs_diff": 0.0,
+      "source_command_max_abs_diff": 0.0,
+      "v0_v1_requested_max_abs_diff": 0.0,
+      "v0_v1_command_max_abs_diff": 0.0,
+      "source_requested_exactly_reproduced": true,
+      "source_command_reproduced": true,
+      "v0_v1_execution_reproduced": true,
+      "status_reproduced": true,
+      "command_is_zero": true,
+      "command_differs_from_requested": true,
+      "filter_result": {
+        "status": "safe_stop_projection_failed",
+        "reason": "cyclic projection did not satisfy all constraints within the failure tolerance",
+        "command_joint_velocity_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "intervention_norm_radps": 1.4487359962387099,
+        "active_constraint_count": 0,
+        "constraint_count": 12,
+        "active_constraint_categories": [
+          "joint_4_velocity_lower"
+        ],
+        "max_constraint_violation": 0.009255857353981572,
+        "max_constraint_category": "predictive_link_5",
+        "projection_iterations": 80,
+        "fallback_used": false,
+        "qp_solver_used": false,
+        "qp_solver_status": "maximum iterations reached",
+        "fallback_stage": "failed",
+        "infeasible_constraint_categories": [],
+        "infeasibility_diagnostic_status": ""
+      },
+      "constraints": {
+        "joint_positions_rad": [
+          0.5896959900856018,
+          -1.9294301271438599,
+          2.088038682937622,
+          -2.8010590076446533,
+          -2.088071823120117,
+          -0.04453073441982269
+        ],
+        "previous_command_radps": [
+          -0.6519426703453064,
+          -0.6251211166381836,
+          0.8659547567367554,
+          0.3341132402420044,
+          -0.9782150983810425,
+          0.04923474043607712
+        ],
+        "requested_joint_velocity_radps": [
+          -0.5453820824623108,
+          -0.30577191710472107,
+          0.8383617401123047,
+          -0.10851098597049713,
+          -0.9646642208099365,
+          0.25039130449295044
+        ],
+        "joint_lower_radps": [
+          -0.8519426703453064,
+          -0.8251211166381835,
+          0.6659547567367554,
+          0.13411324024200438,
+          -1.0,
+          -0.1507652595639229
+        ],
+        "joint_upper_radps": [
+          -0.4519426703453064,
+          -0.4251211166381836,
+          1.0,
+          0.5341132402420044,
+          -0.7782150983810425,
+          0.24923474043607713
+        ],
+        "constraint_labels": [
+          "predictive_link_0",
+          "predictive_link_1",
+          "predictive_link_2",
+          "predictive_link_3",
+          "predictive_link_4",
+          "predictive_link_5",
+          "workspace_x_lower",
+          "workspace_x_upper",
+          "workspace_y_lower",
+          "workspace_y_upper",
+          "workspace_z_lower",
+          "workspace_z_upper"
+        ],
+        "constraint_lower_bounds": [
+          -1.0863391504101172,
+          -1.2875418064638904,
+          0.019543414141256252,
+          -0.42587273706898243,
+          -0.23279746383317004,
+          -0.147696686542862,
+          0.0011286735534667969,
+          -2.121128673553467,
+          -2.7978064894676207,
+          -0.8021935105323792,
+          -1.176107792854309,
+          -1.223892207145691
+        ],
+        "zero_command_constraint_residuals": [
+          -1.0863391504101172,
+          -1.2875418064638904,
+          0.019543414141256252,
+          -0.42587273706898243,
+          -0.23279746383317004,
+          -0.147696686542862,
+          0.0011286735534667969,
+          -2.121128673553467,
+          -2.7978064894676207,
+          -0.8021935105323792,
+          -1.176107792854309,
+          -1.223892207145691
+        ],
+        "zero_command_constraint_violations": [
+          0.0,
+          0.0,
+          0.019543414141256252,
+          0.0,
+          0.0,
+          0.0,
+          0.0011286735534667969,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "zero_command_max_constraint_violation": 0.7782150983810425,
+        "zero_command_max_constraint_label": "joint_4_acceleration_upper",
+        "zero_command_max_constraint_category": "joint_acceleration",
+        "zero_command_satisfies_all_constraints": false,
+        "predictive_risk_status": "valid",
+        "predictive_risk_age_s": 0.0,
+        "predictive_h_by_link_m": [
+          0.27608791967103063,
+          0.32453092306096964,
+          -0.004569347166359469,
+          0.10446922404677861,
+          0.0552322625059295,
+          0.03361249884694434
+        ],
+        "predictive_predicted_distance_by_link_m": [
+          0.5007775276823856,
+          0.5492205310723246,
+          0.22012026084499547,
+          0.3291588320581335,
+          0.27992187051728445,
+          0.2583021068582993
+        ],
+        "predictive_robust_distance_by_link_m": [
+          0.39608791967103063,
+          0.44453092306096964,
+          0.11543065283364053,
+          0.2244692240467786,
+          0.1752322625059295,
+          0.15361249884694433
+        ],
+        "predictive_link_velocity_norms_mps": [
+          0.00944741019543445,
+          0.1586240902005099,
+          0.13660713449911,
+          0.3166645249204253,
+          0.386591116192747,
+          0.42351236760420974
+        ],
+        "obstacle_position_m": [
+          0.6002770662307739,
+          0.10028544813394547,
+          0.4002649784088135
+        ],
+        "obstacle_velocity_mps": [
+          -0.008159208111464977,
+          -0.047691892832517624,
+          -0.012605984695255756
+        ],
+        "capsules": [
+          {
+            "name": "shoulder",
+            "start_m": [
+              -0.008348176255822182,
+              0.011845270171761513,
+              0.1589278280735016
+            ],
+            "end_m": [
+              -0.007883073762059212,
+              0.007252873852849007,
+              0.02172292023897171
+            ],
+            "radius_m": 0.08598767561066961
+          },
+          {
+            "name": "upper_arm",
+            "start_m": [
+              -0.0666365921497345,
+              0.1380528062582016,
+              0.03336675092577934
+            ],
+            "end_m": [
+              -0.22632475197315216,
+              0.031531188637018204,
+              0.5430690050125122
+            ],
+            "radius_m": 0.10325230532579074
+          },
+          {
+            "name": "forearm",
+            "start_m": [
+              -0.19466307759284973,
+              -0.08467328548431396,
+              0.4976242780685425
+            ],
+            "end_m": [
+              0.23375490307807922,
+              0.14825715124607086,
+              0.4188351333141327
+            ],
+            "radius_m": 0.07999408774853851
+          },
+          {
+            "name": "wrist_1",
+            "start_m": [
+              0.1641429215669632,
+              0.22618532180786133,
+              0.46836668252944946
+            ],
+            "end_m": [
+              0.11557567864656448,
+              0.20379941165447235,
+              0.37342819571495056
+            ],
+            "radius_m": 0.05569111334476015
+          },
+          {
+            "name": "wrist_2",
+            "start_m": [
+              0.21424177289009094,
+              0.24349641799926758,
+              0.4740089476108551
+            ],
+            "end_m": [
+              0.11900904029607773,
+              0.24750050902366638,
+              0.5299923419952393
+            ],
+            "radius_m": 0.05533030881024477
+          },
+          {
+            "name": "wrist_3",
+            "start_m": [
+              0.23001155257225037,
+              0.2384602427482605,
+              0.4437674582004547
+            ],
+            "end_m": [
+              0.25481051206588745,
+              0.262592613697052,
+              0.5177622437477112
+            ],
+            "radius_m": 0.04837612224317481
+          }
+        ]
+      }
+    },
+    {
+      "train_seed": 4108,
+      "seed": 9099,
+      "step": 83,
+      "source_trace": "outputs/vaps_g2_v2/train_seed_4108_final_trace.csv",
+      "source_viability_status": "unknown_compute_budget",
+      "source_viability_solver_status": "strict_projection_failed",
+      "source_requested_max_abs_diff": 0.0,
+      "source_command_max_abs_diff": 0.0,
+      "v0_v1_requested_max_abs_diff": 0.0,
+      "v0_v1_command_max_abs_diff": 0.0,
+      "source_requested_exactly_reproduced": true,
+      "source_command_reproduced": true,
+      "v0_v1_execution_reproduced": true,
+      "status_reproduced": true,
+      "command_is_zero": true,
+      "command_differs_from_requested": true,
+      "filter_result": {
+        "status": "safe_stop_projection_failed",
+        "reason": "cyclic projection did not satisfy all constraints within the failure tolerance",
+        "command_joint_velocity_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "intervention_norm_radps": 0.46022643444658484,
+        "active_constraint_count": 0,
+        "constraint_count": 12,
+        "active_constraint_categories": [
+          "joint_2_acceleration_lower"
+        ],
+        "max_constraint_violation": 0.005084110406529632,
+        "max_constraint_category": "predictive_link_5",
+        "projection_iterations": 80,
+        "fallback_used": false,
+        "qp_solver_used": false,
+        "qp_solver_status": "maximum iterations reached",
+        "fallback_stage": "failed",
+        "infeasible_constraint_categories": [],
+        "infeasibility_diagnostic_status": ""
+      },
+      "constraints": {
+        "joint_positions_rad": [
+          -0.504149317741394,
+          -1.1019618511199951,
+          1.9454753398895264,
+          -2.537055015563965,
+          -0.0835985466837883,
+          0.9459607005119324
+        ],
+        "previous_command_radps": [
+          0.41423892974853516,
+          0.382982462644577,
+          -0.44797107577323914,
+          -0.4875972270965576,
+          0.009536121971905231,
+          0.46802854537963867
+        ],
+        "requested_joint_velocity_radps": [
+          0.25655844807624817,
+          -0.009534955024719238,
+          -0.04555502533912659,
+          -0.20588980615139008,
+          -0.20279528200626373,
+          0.24556754529476166
+        ],
+        "joint_lower_radps": [
+          0.21423892974853515,
+          0.18298246264457702,
+          -0.6479710757732391,
+          -0.6875972270965576,
+          -0.19046387802809478,
+          0.26802854537963866
+        ],
+        "joint_upper_radps": [
+          0.6142389297485351,
+          0.582982462644577,
+          -0.24797107577323912,
+          -0.2875972270965576,
+          0.20953612197190524,
+          0.6680285453796386
+        ],
+        "constraint_labels": [
+          "predictive_link_0",
+          "predictive_link_1",
+          "predictive_link_2",
+          "predictive_link_3",
+          "predictive_link_4",
+          "predictive_link_5",
+          "workspace_x_lower",
+          "workspace_x_upper",
+          "workspace_y_lower",
+          "workspace_y_upper",
+          "workspace_z_lower",
+          "workspace_z_upper"
+        ],
+        "constraint_lower_bounds": [
+          -0.8321346909251537,
+          0.12887677779244822,
+          -0.27693093988741024,
+          -0.2324951104137955,
+          -0.21452999097544945,
+          -0.08558826513646936,
+          -1.2872521877288818,
+          -0.8327478122711183,
+          -1.4114189326763154,
+          -2.1885810673236845,
+          -0.0002540040016174583,
+          -2.3997459959983827
+        ],
+        "zero_command_constraint_residuals": [
+          -0.8321346909251537,
+          0.12887677779244822,
+          -0.27693093988741024,
+          -0.2324951104137955,
+          -0.21452999097544945,
+          -0.08558826513646936,
+          -1.2872521877288818,
+          -0.8327478122711183,
+          -1.4114189326763154,
+          -2.1885810673236845,
+          -0.0002540040016174583,
+          -2.3997459959983827
+        ],
+        "zero_command_constraint_violations": [
+          0.0,
+          0.12887677779244822,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "zero_command_max_constraint_violation": 0.2875972270965576,
+        "zero_command_max_constraint_label": "joint_3_acceleration_upper",
+        "zero_command_max_constraint_category": "joint_acceleration",
+        "zero_command_satisfies_all_constraints": false,
+        "predictive_risk_status": "valid",
+        "predictive_risk_age_s": 0.0,
+        "predictive_h_by_link_m": [
+          0.21270128418963674,
+          -0.023547859379322578,
+          0.07977725486553633,
+          0.06694316449617088,
+          0.06281794693582532,
+          0.03085060178768484
+        ],
+        "predictive_predicted_distance_by_link_m": [
+          0.4444071079911727,
+          0.2081579644222134,
+          0.3114830786670723,
+          0.29864898829770686,
+          0.2945237707373613,
+          0.2625564255892208
+        ],
+        "predictive_robust_distance_by_link_m": [
+          0.33270128418963674,
+          0.09645214062067742,
+          0.19977725486553632,
+          0.18694316449617088,
+          0.18281794693582532,
+          0.15085060178768483
+        ],
+        "predictive_link_velocity_norms_mps": [
+          0.006002921635262708,
+          0.20717280355354756,
+          0.14003602963857015,
+          0.22375525523952375,
+          0.24072690882519712,
+          0.23178216895018972
+        ],
+        "obstacle_position_m": [
+          0.508599579334259,
+          0.29002538323402405,
+          0.344876766204834
+        ],
+        "obstacle_velocity_mps": [
+          -0.003136345883831382,
+          -0.04711495712399483,
+          0.016442153602838516
+        ],
+        "capsules": [
+          {
+            "name": "shoulder",
+            "start_m": [
+              0.006690903101116419,
+              0.012854348868131638,
+              0.1589278280735016
+            ],
+            "end_m": [
+              0.002824540250003338,
+              0.010332908481359482,
+              0.02172292023897171
+            ],
+            "radius_m": 0.08598767561066961
+          },
+          {
+            "name": "upper_arm",
+            "start_m": [
+              0.05003564804792404,
+              0.14575821161270142,
+              0.03565426170825958
+            ],
+            "end_m": [
+              0.26499122381210327,
+              0.027478329837322235,
+              0.5219129920005798
+            ],
+            "radius_m": 0.10325230532579074
+          },
+          {
+            "name": "forearm",
+            "start_m": [
+              0.15177595615386963,
+              -0.04047154635190964,
+              0.5142022371292114
+            ],
+            "end_m": [
+              0.41585785150527954,
+              -0.2371675968170166,
+              0.14599335193634033
+            ],
+            "radius_m": 0.07999408774853851
+          },
+          {
+            "name": "wrist_1",
+            "start_m": [
+              0.48620855808258057,
+              -0.15779799222946167,
+              0.18091486394405365
+            ],
+            "end_m": [
+              0.39576444029808044,
+              -0.09830215573310852,
+              0.16853249073028564
+            ],
+            "radius_m": 0.05569111334476015
+          },
+          {
+            "name": "wrist_2",
+            "start_m": [
+              0.5423980355262756,
+              -0.11784277111291885,
+              0.17944425344467163
+            ],
+            "end_m": [
+              0.4991121292114258,
+              -0.21874065697193146,
+              0.19230453670024872
+            ],
+            "radius_m": 0.05533030881024477
+          },
+          {
+            "name": "wrist_3",
+            "start_m": [
+              0.5485626459121704,
+              -0.08762539178133011,
+              0.20823396742343903
+            ],
+            "end_m": [
+              0.5897837281227112,
+              -0.12571322917938232,
+              0.14888139069080353
+            ],
+            "radius_m": 0.04837612224317481
+          }
+        ]
+      }
+    },
+    {
+      "train_seed": 4109,
+      "seed": 8240,
+      "step": 150,
+      "source_trace": "outputs/vaps_g2_v2/train_seed_4109_validation_trace.csv",
+      "source_viability_status": "unknown_compute_budget",
+      "source_viability_solver_status": "strict_projection_failed",
+      "source_requested_max_abs_diff": 0.0,
+      "source_command_max_abs_diff": 0.0,
+      "v0_v1_requested_max_abs_diff": 0.0,
+      "v0_v1_command_max_abs_diff": 0.0,
+      "source_requested_exactly_reproduced": true,
+      "source_command_reproduced": true,
+      "v0_v1_execution_reproduced": true,
+      "status_reproduced": true,
+      "command_is_zero": true,
+      "command_differs_from_requested": true,
+      "filter_result": {
+        "status": "safe_stop_projection_failed",
+        "reason": "cyclic projection did not satisfy all constraints within the failure tolerance",
+        "command_joint_velocity_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "intervention_norm_radps": 0.5599858401724391,
+        "active_constraint_count": 0,
+        "constraint_count": 12,
+        "active_constraint_categories": [
+          "joint_1_acceleration_lower",
+          "joint_3_acceleration_lower",
+          "joint_0_acceleration_upper"
+        ],
+        "max_constraint_violation": 0.001717762709201695,
+        "max_constraint_category": "predictive_link_2",
+        "projection_iterations": 80,
+        "fallback_used": false,
+        "qp_solver_used": false,
+        "qp_solver_status": "maximum iterations reached",
+        "fallback_stage": "failed",
+        "infeasible_constraint_categories": [],
+        "infeasibility_diagnostic_status": ""
+      },
+      "constraints": {
+        "joint_positions_rad": [
+          0.256144255399704,
+          -1.9043430089950562,
+          1.5585631132125854,
+          -1.7432786226272583,
+          -2.5200064182281494,
+          -0.19936460256576538
+        ],
+        "previous_command_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "requested_joint_velocity_radps": [
+          -0.26050448417663574,
+          0.32087254524230957,
+          0.25878220796585083,
+          -0.2509903907775879,
+          0.06670141220092773,
+          -0.09137219935655594
+        ],
+        "joint_lower_radps": [
+          -0.2,
+          -0.2,
+          -0.2,
+          -0.2,
+          -0.2,
+          -0.2
+        ],
+        "joint_upper_radps": [
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2,
+          0.2
+        ],
+        "constraint_labels": [
+          "predictive_link_0",
+          "predictive_link_1",
+          "predictive_link_2",
+          "predictive_link_3",
+          "predictive_link_4",
+          "predictive_link_5",
+          "workspace_x_lower",
+          "workspace_x_upper",
+          "workspace_y_lower",
+          "workspace_y_upper",
+          "workspace_z_lower",
+          "workspace_z_upper"
+        ],
+        "constraint_lower_bounds": [
+          -0.48827063998912484,
+          -0.7682710097127469,
+          0.03316911338900978,
+          -0.33394408837632694,
+          -0.18521698381759502,
+          -0.10632423455680581,
+          -0.25676536560058594,
+          -1.8632346343994142,
+          -2.3038171410560606,
+          -1.2961828589439393,
+          -1.7957461166381836,
+          -0.6042538833618165
+        ],
+        "zero_command_constraint_residuals": [
+          -0.48827063998912484,
+          -0.7682710097127469,
+          0.03316911338900978,
+          -0.33394408837632694,
+          -0.18521698381759502,
+          -0.10632423455680581,
+          -0.25676536560058594,
+          -1.8632346343994142,
+          -2.3038171410560606,
+          -1.2961828589439393,
+          -1.7957461166381836,
+          -0.6042538833618165
+        ],
+        "zero_command_constraint_violations": [
+          0.0,
+          0.0,
+          0.03316911338900978,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "zero_command_max_constraint_violation": 0.03316911338900978,
+        "zero_command_max_constraint_label": "predictive_link_2",
+        "zero_command_max_constraint_category": "predictive_barrier",
+        "zero_command_satisfies_all_constraints": false,
+        "predictive_risk_status": "valid",
+        "predictive_risk_age_s": 0.0,
+        "predictive_h_by_link_m": [
+          0.12352910403517858,
+          0.19497197775998765,
+          -0.008273543934601058,
+          0.08584453948272364,
+          0.04881232482381981,
+          0.028637406164597756
+        ],
+        "predictive_predicted_distance_by_link_m": [
+          0.3572079068309807,
+          0.4286507805557897,
+          0.225405258861201,
+          0.3195233422785257,
+          0.28249112761962186,
+          0.2623162089603998
+        ],
+        "predictive_robust_distance_by_link_m": [
+          0.24352910403517858,
+          0.31497197775998764,
+          0.11172645606539894,
+          0.20584453948272363,
+          0.1688123248238198,
+          0.14863740616459775
+        ],
+        "predictive_link_velocity_norms_mps": [
+          8.334666095838722e-37,
+          1.2351163538279824e-35,
+          7.580491154813076e-35,
+          1.8454018549796537e-34,
+          2.655790502948138e-34,
+          2.6120977836059716e-34
+        ],
+        "obstacle_position_m": [
+          0.4533045291900635,
+          -0.1052926629781723,
+          0.361354261636734
+        ],
+        "obstacle_velocity_mps": [
+          0.01211631204932928,
+          0.04529310017824173,
+          -0.01737038604915142
+        ],
+        "capsules": [
+          {
+            "name": "shoulder",
+            "start_m": [
+              -0.004009917378425598,
+              0.013925623148679733,
+              0.1589278280735016
+            ],
+            "end_m": [
+              -0.005074002780020237,
+              0.009434059262275696,
+              0.02172292023897171
+            ],
+            "radius_m": 0.08598767561066961
+          },
+          {
+            "name": "upper_arm",
+            "start_m": [
+              -0.01912565715610981,
+              0.15190470218658447,
+              0.03284773230552673
+            ],
+            "end_m": [
+              -0.19246110320091248,
+              0.1067906841635704,
+              0.5472047328948975
+            ],
+            "radius_m": 0.10325230532579074
+          },
+          {
+            "name": "forearm",
+            "start_m": [
+              -0.19967323541641235,
+              -0.013135271146893501,
+              0.4710809588432312
+            ],
+            "end_m": [
+              0.2597302794456482,
+              0.06101902201771736,
+              0.6367790102958679
+            ],
+            "radius_m": 0.07999408774853851
+          },
+          {
+            "name": "wrist_1",
+            "start_m": [
+              0.23964762687683105,
+              0.16272807121276855,
+              0.6477941870689392
+            ],
+            "end_m": [
+              0.14578399062156677,
+              0.14683237671852112,
+              0.5947831869125366
+            ],
+            "radius_m": 0.05569111334476015
+          },
+          {
+            "name": "wrist_2",
+            "start_m": [
+              0.2849694490432739,
+              0.1446327567100525,
+              0.6384870409965515
+            ],
+            "end_m": [
+              0.24261444807052612,
+              0.22720524668693542,
+              0.6985477209091187
+            ],
+            "radius_m": 0.05533030881024477
+          },
+          {
+            "name": "wrist_3",
+            "start_m": [
+              0.2790333926677704,
+              0.11727739125490189,
+              0.6182870268821716
+            ],
+            "end_m": [
+              0.34599071741104126,
+              0.15061689913272858,
+              0.6511166095733643
+            ],
+            "radius_m": 0.04837612224317481
+          }
+        ]
+      }
+    },
+    {
+      "train_seed": 4109,
+      "seed": 9044,
+      "step": 191,
+      "source_trace": "outputs/vaps_g2_v2/train_seed_4109_final_trace.csv",
+      "source_viability_status": "unknown_compute_budget",
+      "source_viability_solver_status": "strict_projection_failed",
+      "source_requested_max_abs_diff": 0.0,
+      "source_command_max_abs_diff": 0.0,
+      "v0_v1_requested_max_abs_diff": 0.0,
+      "v0_v1_command_max_abs_diff": 0.0,
+      "source_requested_exactly_reproduced": true,
+      "source_command_reproduced": true,
+      "v0_v1_execution_reproduced": true,
+      "status_reproduced": true,
+      "command_is_zero": true,
+      "command_differs_from_requested": true,
+      "filter_result": {
+        "status": "safe_stop_projection_failed",
+        "reason": "cyclic projection did not satisfy all constraints within the failure tolerance",
+        "command_joint_velocity_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "intervention_norm_radps": 0.9174428256421583,
+        "active_constraint_count": 1,
+        "constraint_count": 12,
+        "active_constraint_categories": [
+          "workspace_y_upper"
+        ],
+        "max_constraint_violation": 0.0051497262686789474,
+        "max_constraint_category": "predictive_link_2",
+        "projection_iterations": 80,
+        "fallback_used": false,
+        "qp_solver_used": false,
+        "qp_solver_status": "maximum iterations reached",
+        "fallback_stage": "failed",
+        "infeasible_constraint_categories": [],
+        "infeasibility_diagnostic_status": ""
+      },
+      "constraints": {
+        "joint_positions_rad": [
+          0.9971911311149597,
+          -0.27589812874794006,
+          -1.263772964477539,
+          0.030579321086406708,
+          -2.715301752090454,
+          1.2559491395950317
+        ],
+        "previous_command_radps": [
+          0.07437820732593536,
+          0.2963109314441681,
+          -0.32731524109840393,
+          0.5906791687011719,
+          -1.0,
+          0.7632586359977722
+        ],
+        "requested_joint_velocity_radps": [
+          0.07553553581237793,
+          -0.1265941560268402,
+          0.08887887001037598,
+          0.4503174424171448,
+          -0.33845996856689453,
+          0.7033699154853821
+        ],
+        "joint_lower_radps": [
+          -0.12562179267406465,
+          0.09631093144416808,
+          -0.5273152410984039,
+          0.39067916870117186,
+          -1.0,
+          0.5632586359977723
+        ],
+        "joint_upper_radps": [
+          0.2743782073259354,
+          0.4963109314441681,
+          -0.12731524109840392,
+          0.7906791687011718,
+          -0.8,
+          0.9632586359977722
+        ],
+        "constraint_labels": [
+          "predictive_link_0",
+          "predictive_link_1",
+          "predictive_link_2",
+          "predictive_link_3",
+          "predictive_link_4",
+          "predictive_link_5",
+          "workspace_x_lower",
+          "workspace_x_upper",
+          "workspace_y_lower",
+          "workspace_y_upper",
+          "workspace_z_lower",
+          "workspace_z_upper"
+        ],
+        "constraint_lower_bounds": [
+          -0.7365648887346328,
+          -0.7404963239215366,
+          0.02377190305385784,
+          -0.42600236219282117,
+          -0.43502811458792895,
+          -0.409837826196679,
+          0.00031429529190063477,
+          -2.1203142952919007,
+          -3.5995444536209105,
+          -0.0004555463790893999,
+          -1.508764533996582,
+          -0.8912354660034181
+        ],
+        "zero_command_constraint_residuals": [
+          -0.7365648887346328,
+          -0.7404963239215366,
+          0.02377190305385784,
+          -0.42600236219282117,
+          -0.43502811458792895,
+          -0.409837826196679,
+          0.00031429529190063477,
+          -2.1203142952919007,
+          -3.5995444536209105,
+          -0.0004555463790893999,
+          -1.508764533996582,
+          -0.8912354660034181
+        ],
+        "zero_command_constraint_violations": [
+          0.0,
+          0.0,
+          0.02377190305385784,
+          0.0,
+          0.0,
+          0.0,
+          0.00031429529190063477,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "zero_command_max_constraint_violation": 0.8,
+        "zero_command_max_constraint_label": "joint_4_acceleration_upper",
+        "zero_command_max_constraint_category": "joint_acceleration",
+        "zero_command_satisfies_all_constraints": false,
+        "predictive_risk_status": "valid",
+        "predictive_risk_age_s": 0.0,
+        "predictive_h_by_link_m": [
+          0.18348056749901864,
+          0.19199967161465825,
+          0.004849098551547956,
+          0.11581954724585874,
+          0.12013640937974557,
+          0.11403631289372584
+        ],
+        "predictive_predicted_distance_by_link_m": [
+          0.41792369110879546,
+          0.426442795224435,
+          0.23929222216132473,
+          0.3502626708556355,
+          0.3545795329895224,
+          0.3484794365035026
+        ],
+        "predictive_robust_distance_by_link_m": [
+          0.30348056749901864,
+          0.31199967161465825,
+          0.12484909855154795,
+          0.23581954724585874,
+          0.24013640937974556,
+          0.23403631289372584
+        ],
+        "predictive_link_velocity_norms_mps": [
+          0.0010778130957752917,
+          0.059518173845461264,
+          0.12527740847513147,
+          0.09328382814614009,
+          0.11975318744759458,
+          0.1099574637642186
+        ],
+        "obstacle_position_m": [
+          0.4378136694431305,
+          0.02407267317175865,
+          0.5145208239555359
+        ],
+        "obstacle_velocity_mps": [
+          -0.002555720042437315,
+          0.049663644284009933,
+          0.0051952810026705265
+        ],
+        "capsules": [
+          {
+            "name": "shoulder",
+            "start_m": [
+              -0.012359004467725754,
+              0.007566862273961306,
+              0.1589278280735016
+            ],
+            "end_m": [
+              -0.010111968964338303,
+              0.003534833900630474,
+              0.02172292023897171
+            ],
+            "radius_m": 0.08598767561066961
+          },
+          {
+            "name": "upper_arm",
+            "start_m": [
+              -0.15863168239593506,
+              0.03418605402112007,
+              0.07245288789272308
+            ],
+            "end_m": [
+              0.12539857625961304,
+              0.47431862354278564,
+              0.2216297835111618
+            ],
+            "radius_m": 0.10325230532579074
+          },
+          {
+            "name": "forearm",
+            "start_m": [
+              0.1885562241077423,
+              0.3616582155227661,
+              0.14438167214393616
+            ],
+            "end_m": [
+              0.23497119545936584,
+              0.3512100279331207,
+              0.6360552310943604
+            ],
+            "radius_m": 0.07999408774853851
+          },
+          {
+            "name": "wrist_1",
+            "start_m": [
+              0.1740729808807373,
+              0.4476366341114044,
+              0.5935084223747253
+            ],
+            "end_m": [
+              0.10820489376783371,
+              0.36116984486579895,
+              0.6011313796043396
+            ],
+            "radius_m": 0.05569111334476015
+          },
+          {
+            "name": "wrist_2",
+            "start_m": [
+              0.21765804290771484,
+              0.4531314969062805,
+              0.5727654099464417
+            ],
+            "end_m": [
+              0.14100433886051178,
+              0.5204914808273315,
+              0.6152658462524414
+            ],
+            "radius_m": 0.05533030881024477
+          },
+          {
+            "name": "wrist_3",
+            "start_m": [
+              0.22638992965221405,
+              0.44985753297805786,
+              0.5276775360107422
+            ],
+            "end_m": [
+              0.2629218101501465,
+              0.46056464314460754,
+              0.5999504327774048
+            ],
+            "radius_m": 0.04837612224317481
+          }
+        ]
+      }
+    },
+    {
+      "train_seed": 4109,
+      "seed": 9181,
+      "step": 216,
+      "source_trace": "outputs/vaps_g2_v2/train_seed_4109_final_trace.csv",
+      "source_viability_status": "unknown_compute_budget",
+      "source_viability_solver_status": "strict_projection_failed",
+      "source_requested_max_abs_diff": 0.0,
+      "source_command_max_abs_diff": 0.0,
+      "v0_v1_requested_max_abs_diff": 0.0,
+      "v0_v1_command_max_abs_diff": 0.0,
+      "source_requested_exactly_reproduced": true,
+      "source_command_reproduced": true,
+      "v0_v1_execution_reproduced": true,
+      "status_reproduced": true,
+      "command_is_zero": true,
+      "command_differs_from_requested": true,
+      "filter_result": {
+        "status": "safe_stop_projection_failed",
+        "reason": "cyclic projection did not satisfy all constraints within the failure tolerance",
+        "command_joint_velocity_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "intervention_norm_radps": 1.7073583585226193,
+        "active_constraint_count": 0,
+        "constraint_count": 12,
+        "active_constraint_categories": [
+          "joint_0_acceleration_upper",
+          "joint_1_acceleration_upper"
+        ],
+        "max_constraint_violation": 0.00030263868366714464,
+        "max_constraint_category": "predictive_link_2",
+        "projection_iterations": 80,
+        "fallback_used": false,
+        "qp_solver_used": false,
+        "qp_solver_status": "maximum iterations reached",
+        "fallback_stage": "failed",
+        "infeasible_constraint_categories": [],
+        "infeasibility_diagnostic_status": ""
+      },
+      "constraints": {
+        "joint_positions_rad": [
+          0.7241056561470032,
+          -1.3423835039138794,
+          1.9634884595870972,
+          -1.3322585821151733,
+          -3.8611245155334473,
+          0.14415356516838074
+        ],
+        "previous_command_radps": [
+          -0.2941356897354126,
+          0.5120131373405457,
+          -0.7328490018844604,
+          0.944316029548645,
+          -0.29682815074920654,
+          0.9786722660064697
+        ],
+        "requested_joint_velocity_radps": [
+          -0.532407283782959,
+          -0.017186641693115234,
+          -0.7970046997070312,
+          0.9247734546661377,
+          -0.41326388716697693,
+          0.9849417209625244
+        ],
+        "joint_lower_radps": [
+          -0.4941356897354126,
+          0.31201313734054564,
+          -0.9328490018844604,
+          0.7443160295486451,
+          -0.49682815074920655,
+          0.7786722660064698
+        ],
+        "joint_upper_radps": [
+          -0.09413568973541259,
+          0.7120131373405456,
+          -0.5328490018844605,
+          1.0,
+          -0.09682815074920653,
+          1.0
+        ],
+        "constraint_labels": [
+          "predictive_link_0",
+          "predictive_link_1",
+          "predictive_link_2",
+          "predictive_link_3",
+          "predictive_link_4",
+          "predictive_link_5",
+          "workspace_x_lower",
+          "workspace_x_upper",
+          "workspace_y_lower",
+          "workspace_y_upper",
+          "workspace_z_lower",
+          "workspace_z_upper"
+        ],
+        "constraint_lower_bounds": [
+          -0.4743723201917478,
+          -0.7036236319026684,
+          0.04835803625809604,
+          -0.41778906423217677,
+          -0.4283529980629218,
+          -0.34340162613993713,
+          -0.42719709873199463,
+          -1.6928029012680055,
+          -3.314463901519775,
+          -0.28553609848022465,
+          -0.2342038440704346,
+          -2.1657961559295655
+        ],
+        "zero_command_constraint_residuals": [
+          -0.4743723201917478,
+          -0.7036236319026684,
+          0.04835803625809604,
+          -0.41778906423217677,
+          -0.4283529980629218,
+          -0.34340162613993713,
+          -0.42719709873199463,
+          -1.6928029012680055,
+          -3.314463901519775,
+          -0.28553609848022465,
+          -0.2342038440704346,
+          -2.1657961559295655
+        ],
+        "zero_command_constraint_violations": [
+          0.0,
+          0.0,
+          0.04835803625809604,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "zero_command_max_constraint_violation": 0.7786722660064698,
+        "zero_command_max_constraint_label": "joint_5_acceleration_lower",
+        "zero_command_max_constraint_category": "joint_acceleration",
+        "zero_command_satisfies_all_constraints": false,
+        "predictive_risk_status": "valid",
+        "predictive_risk_age_s": 0.0,
+        "predictive_h_by_link_m": [
+          0.11713498908370201,
+          0.1776167686033584,
+          -0.0035277016443718695,
+          0.11305188186800808,
+          0.11721515939264071,
+          0.09614542136914928
+        ],
+        "predictive_predicted_distance_by_link_m": [
+          0.3473731487211892,
+          0.4078549282408455,
+          0.22671045799311523,
+          0.3432900415054952,
+          0.3474533190301279,
+          0.3263835810066364
+        ],
+        "predictive_robust_distance_by_link_m": [
+          0.237134989083702,
+          0.2976167686033584,
+          0.11647229835562813,
+          0.23305188186800807,
+          0.2372151593926407,
+          0.21614542136914927
+        ],
+        "predictive_link_velocity_norms_mps": [
+          0.0042625839157267075,
+          0.020693143171327196,
+          0.3170984160721157,
+          0.3321033922786268,
+          0.29833492084764934,
+          0.3078828326479938
+        ],
+        "obstacle_position_m": [
+          0.4739621579647064,
+          -0.07331454753875732,
+          0.2695762515068054
+        ],
+        "obstacle_velocity_mps": [
+          0.013219877146184444,
+          0.04795017093420029,
+          0.00510060740634799
+        ],
+        "capsules": [
+          {
+            "name": "shoulder",
+            "start_m": [
+              -0.009860209189355373,
+              0.01061972975730896,
+              0.1589278280735016
+            ],
+            "end_m": [
+              -0.008783895522356033,
+              0.006131081376224756,
+              0.02172292023897171
+            ],
+            "radius_m": 0.08598767561066961
+          },
+          {
+            "name": "upper_arm",
+            "start_m": [
+              -0.11036756634712219,
+              0.10503309220075607,
+              0.030859462916851044
+            ],
+            "end_m": [
+              -0.018778707832098007,
+              0.1863945722579956,
+              0.5615527629852295
+            ],
+            "radius_m": 0.10325230532579074
+          },
+          {
+            "name": "forearm",
+            "start_m": [
+              0.010480858385562897,
+              0.059838056564331055,
+              0.5391592979431152
+            ],
+            "end_m": [
+              0.33927130699157715,
+              0.2909928560256958,
+              0.25198233127593994
+            ],
+            "radius_m": 0.07999408774853851
+          },
+          {
+            "name": "wrist_1",
+            "start_m": [
+              0.2709055542945862,
+              0.36867183446884155,
+              0.2371131032705307
+            ],
+            "end_m": [
+              0.21274754405021667,
+              0.32845765352249146,
+              0.32002079486846924
+            ],
+            "radius_m": 0.05569111334476015
+          },
+          {
+            "name": "wrist_2",
+            "start_m": [
+              0.3209032416343689,
+              0.38055264949798584,
+              0.2372322380542755
+            ],
+            "end_m": [
+              0.23115628957748413,
+              0.4094550609588623,
+              0.17952974140644073
+            ],
+            "radius_m": 0.05533030881024477
+          },
+          {
+            "name": "wrist_3",
+            "start_m": [
+              0.3340587317943573,
+              0.3587211072444916,
+              0.2611749470233917
+            ],
+            "end_m": [
+              0.36630550026893616,
+              0.4062548577785492,
+              0.20309501886367798
+            ],
+            "radius_m": 0.04837612224317481
+          }
+        ]
+      }
+    },
+    {
+      "train_seed": 4110,
+      "seed": 8205,
+      "step": 172,
+      "source_trace": "outputs/vaps_g2_v2/train_seed_4110_validation_trace.csv",
+      "source_viability_status": "unknown_compute_budget",
+      "source_viability_solver_status": "strict_projection_failed",
+      "source_requested_max_abs_diff": 0.0,
+      "source_command_max_abs_diff": 0.0,
+      "v0_v1_requested_max_abs_diff": 0.0,
+      "v0_v1_command_max_abs_diff": 0.0,
+      "source_requested_exactly_reproduced": true,
+      "source_command_reproduced": true,
+      "v0_v1_execution_reproduced": true,
+      "status_reproduced": true,
+      "command_is_zero": true,
+      "command_differs_from_requested": true,
+      "filter_result": {
+        "status": "safe_stop_projection_failed",
+        "reason": "cyclic projection did not satisfy all constraints within the failure tolerance",
+        "command_joint_velocity_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "intervention_norm_radps": 1.3266061848428925,
+        "active_constraint_count": 0,
+        "constraint_count": 12,
+        "active_constraint_categories": [
+          "joint_2_velocity_lower",
+          "joint_3_acceleration_lower"
+        ],
+        "max_constraint_violation": 0.00020454824675592703,
+        "max_constraint_category": "workspace_x_lower",
+        "projection_iterations": 80,
+        "fallback_used": false,
+        "qp_solver_used": false,
+        "qp_solver_status": "maximum iterations reached",
+        "fallback_stage": "failed",
+        "infeasible_constraint_categories": [],
+        "infeasibility_diagnostic_status": ""
+      },
+      "constraints": {
+        "joint_positions_rad": [
+          0.562727689743042,
+          -1.6145204305648804,
+          1.9032423496246338,
+          -5.734971523284912,
+          -3.982222557067871,
+          5.343355178833008
+        ],
+        "previous_command_radps": [
+          0.5318285226821899,
+          -0.7562714219093323,
+          -0.8248904347419739,
+          -0.6646734476089478,
+          -0.9866515398025513,
+          0.7803633213043213
+        ],
+        "requested_joint_velocity_radps": [
+          0.13740959763526917,
+          -0.25345903635025024,
+          -0.19772544503211975,
+          -0.24187928438186646,
+          -0.9912213087081909,
+          0.7724250555038452
+        ],
+        "joint_lower_radps": [
+          0.33182852268218993,
+          -0.9562714219093322,
+          -1.0,
+          -0.8646734476089477,
+          -1.0,
+          0.5803633213043213
+        ],
+        "joint_upper_radps": [
+          0.7318285226821899,
+          -0.5562714219093323,
+          -0.6248904347419739,
+          -0.46467344760894774,
+          -0.7866515398025513,
+          0.9803633213043212
+        ],
+        "constraint_labels": [
+          "predictive_link_0",
+          "predictive_link_1",
+          "predictive_link_2",
+          "predictive_link_3",
+          "predictive_link_4",
+          "predictive_link_5",
+          "workspace_x_lower",
+          "workspace_x_upper",
+          "workspace_y_lower",
+          "workspace_y_upper",
+          "workspace_z_lower",
+          "workspace_z_upper"
+        ],
+        "constraint_lower_bounds": [
+          -1.101877296185016,
+          -1.1694430241324587,
+          0.09931381669186912,
+          -0.41233164880443984,
+          -0.45159222926115455,
+          -0.4130602193596219,
+          0.005349159240722656,
+          -2.1253491592407228,
+          -2.683973240852356,
+          -0.9160267591476441,
+          -0.4525702285766602,
+          -1.94742977142334
+        ],
+        "zero_command_constraint_residuals": [
+          -1.101877296185016,
+          -1.1694430241324587,
+          0.09931381669186912,
+          -0.41233164880443984,
+          -0.45159222926115455,
+          -0.4130602193596219,
+          0.005349159240722656,
+          -2.1253491592407228,
+          -2.683973240852356,
+          -0.9160267591476441,
+          -0.4525702285766602,
+          -1.94742977142334
+        ],
+        "zero_command_constraint_violations": [
+          0.0,
+          0.0,
+          0.09931381669186912,
+          0.0,
+          0.0,
+          0.0,
+          0.005349159240722656,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "zero_command_max_constraint_violation": 0.7866515398025513,
+        "zero_command_max_constraint_label": "joint_4_acceleration_upper",
+        "zero_command_max_constraint_category": "joint_acceleration",
+        "zero_command_satisfies_all_constraints": false,
+        "predictive_risk_status": "valid",
+        "predictive_risk_age_s": 0.0,
+        "predictive_h_by_link_m": [
+          0.28080892871167773,
+          0.2983904233326914,
+          -0.01369351885484689,
+          0.1141766752964336,
+          0.12339319702904195,
+          0.1129245005677173
+        ],
+        "predictive_predicted_distance_by_link_m": [
+          0.4955531702456229,
+          0.5131346648666366,
+          0.2010507226790983,
+          0.3289209168303788,
+          0.3381374385629871,
+          0.32766874210166247
+        ],
+        "predictive_robust_distance_by_link_m": [
+          0.4008089287116777,
+          0.4183904233326914,
+          0.1063064811451531,
+          0.2341766752964336,
+          0.24339319702904194,
+          0.2329245005677173
+        ],
+        "predictive_link_velocity_norms_mps": [
+          0.007706840573881432,
+          0.06982709284800237,
+          0.5472535829863706,
+          0.7689427523067568,
+          0.526673672689547,
+          0.4039101164797448
+        ],
+        "obstacle_position_m": [
+          0.5707592964172363,
+          -0.048947110772132874,
+          0.4572128653526306
+        ],
+        "obstacle_velocity_mps": [
+          -0.012644924223423004,
+          0.04635394364595413,
+          -0.013835380785167217
+        ],
+        "capsules": [
+          {
+            "name": "shoulder",
+            "start_m": [
+              -0.008025732822716236,
+              0.0120660699903965,
+              0.1589278280735016
+            ],
+            "end_m": [
+              -0.007684632204473019,
+              0.007462802808731794,
+              0.02172292023897171
+            ],
+            "radius_m": 0.08598767561066961
+          },
+          {
+            "name": "upper_arm",
+            "start_m": [
+              -0.07839537411928177,
+              0.1300191879272461,
+              0.029485177248716354
+            ],
+            "end_m": [
+              -0.09938658773899078,
+              0.11710145324468613,
+              0.5735771656036377
+            ],
+            "radius_m": 0.10325230532579074
+          },
+          {
+            "name": "forearm",
+            "start_m": [
+              -0.08483722805976868,
+              -0.008724559098482132,
+              0.5319149494171143
+            ],
+            "end_m": [
+              0.3375878930091858,
+              0.2049252986907959,
+              0.3907873034477234
+            ],
+            "radius_m": 0.07999408774853851
+          },
+          {
+            "name": "wrist_1",
+            "start_m": [
+              0.21942859888076782,
+              0.2527393400669098,
+              0.3692794144153595
+            ],
+            "end_m": [
+              0.2837026119232178,
+              0.3032160997390747,
+              0.44134998321533203
+            ],
+            "radius_m": 0.05569111334476015
+          },
+          {
+            "name": "wrist_2",
+            "start_m": [
+              0.2333572506904602,
+              0.23805752396583557,
+              0.3208656907081604
+            ],
+            "end_m": [
+              0.14022153615951538,
+              0.26391834020614624,
+              0.37449777126312256
+            ],
+            "radius_m": 0.05533030881024477
+          },
+          {
+            "name": "wrist_3",
+            "start_m": [
+              0.25798168778419495,
+              0.2574140429496765,
+              0.2965293526649475
+            ],
+            "end_m": [
+              0.22251930832862854,
+              0.1839366853237152,
+              0.3005404472351074
+            ],
+            "radius_m": 0.04837612224317481
+          }
+        ]
+      }
+    },
+    {
+      "train_seed": 4110,
+      "seed": 9107,
+      "step": 37,
+      "source_trace": "outputs/vaps_g2_v2/train_seed_4110_final_trace.csv",
+      "source_viability_status": "unknown_compute_budget",
+      "source_viability_solver_status": "strict_projection_failed",
+      "source_requested_max_abs_diff": 0.0,
+      "source_command_max_abs_diff": 0.0,
+      "v0_v1_requested_max_abs_diff": 0.0,
+      "v0_v1_command_max_abs_diff": 0.0,
+      "source_requested_exactly_reproduced": true,
+      "source_command_reproduced": true,
+      "v0_v1_execution_reproduced": true,
+      "status_reproduced": true,
+      "command_is_zero": true,
+      "command_differs_from_requested": true,
+      "filter_result": {
+        "status": "safe_stop_projection_failed",
+        "reason": "cyclic projection did not satisfy all constraints within the failure tolerance",
+        "command_joint_velocity_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "intervention_norm_radps": 0.978876008568835,
+        "active_constraint_count": 1,
+        "constraint_count": 12,
+        "active_constraint_categories": [
+          "workspace_z_upper"
+        ],
+        "max_constraint_violation": 0.009259302567940483,
+        "max_constraint_category": "predictive_link_5",
+        "projection_iterations": 80,
+        "fallback_used": false,
+        "qp_solver_used": false,
+        "qp_solver_status": "maximum iterations reached",
+        "fallback_stage": "failed",
+        "infeasible_constraint_categories": [],
+        "infeasibility_diagnostic_status": ""
+      },
+      "constraints": {
+        "joint_positions_rad": [
+          0.08661498874425888,
+          -1.3638182878494263,
+          0.5268043279647827,
+          -1.276764154434204,
+          -1.1991620063781738,
+          -1.1103646755218506
+        ],
+        "previous_command_radps": [
+          -0.03786950558423996,
+          0.27934524416923523,
+          -0.34783050417900085,
+          -0.10343039035797119,
+          -0.5164350271224976,
+          -0.6874567866325378
+        ],
+        "requested_joint_velocity_radps": [
+          0.2803199589252472,
+          -0.14549320936203003,
+          -0.48400986194610596,
+          -0.22365571558475494,
+          -0.2121807485818863,
+          -0.7274218797683716
+        ],
+        "joint_lower_radps": [
+          -0.23786950558423997,
+          0.07934524416923522,
+          -0.5478305041790008,
+          -0.3034303903579712,
+          -0.7164350271224975,
+          -0.8874567866325378
+        ],
+        "joint_upper_radps": [
+          0.16213049441576005,
+          0.47934524416923524,
+          -0.14783050417900084,
+          0.09656960964202882,
+          -0.31643502712249755,
+          -0.48745678663253783
+        ],
+        "constraint_labels": [
+          "predictive_link_0",
+          "predictive_link_1",
+          "predictive_link_2",
+          "predictive_link_3",
+          "predictive_link_4",
+          "predictive_link_5",
+          "workspace_x_lower",
+          "workspace_x_upper",
+          "workspace_y_lower",
+          "workspace_y_upper",
+          "workspace_z_lower",
+          "workspace_z_upper"
+        ],
+        "constraint_lower_bounds": [
+          -1.0235196347888167,
+          0.04053162644005117,
+          -0.09578187360034889,
+          -0.032044729228736926,
+          0.012579916107226308,
+          0.038441203874879044,
+          -0.8275508880615234,
+          -1.2924491119384767,
+          -2.516928243637085,
+          -1.083071756362915,
+          -2.3985727119445803,
+          -0.0014272880554200285
+        ],
+        "zero_command_constraint_residuals": [
+          -1.0235196347888167,
+          0.04053162644005117,
+          -0.09578187360034889,
+          -0.032044729228736926,
+          0.012579916107226308,
+          0.038441203874879044,
+          -0.8275508880615234,
+          -1.2924491119384767,
+          -2.516928243637085,
+          -1.083071756362915,
+          -2.3985727119445803,
+          -0.0014272880554200285
+        ],
+        "zero_command_constraint_violations": [
+          0.0,
+          0.04053162644005117,
+          0.0,
+          0.0,
+          0.012579916107226308,
+          0.038441203874879044,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "zero_command_max_constraint_violation": 0.48745678663253783,
+        "zero_command_max_constraint_label": "joint_5_acceleration_upper",
+        "zero_command_max_constraint_category": "joint_acceleration",
+        "zero_command_satisfies_all_constraints": false,
+        "predictive_risk_status": "valid",
+        "predictive_risk_age_s": 0.0,
+        "predictive_h_by_link_m": [
+          0.2627482982561622,
+          -0.002004693317123593,
+          0.03516779120418359,
+          0.017776814544385067,
+          0.005876922739694201,
+          -0.000990765434028526
+        ],
+        "predictive_predicted_distance_by_link_m": [
+          0.5118129139141545,
+          0.24705992234086865,
+          0.2842324068621759,
+          0.2668414302023773,
+          0.25494153839768646,
+          0.24807385022396372
+        ],
+        "predictive_robust_distance_by_link_m": [
+          0.3827482982561622,
+          0.1179953066828764,
+          0.15516779120418359,
+          0.13777681454438506,
+          0.1258769227396942,
+          0.11900923456597147
+        ],
+        "predictive_link_velocity_norms_mps": [
+          0.0005493249830623651,
+          0.02480899165608716,
+          0.1273898654849869,
+          0.10703402186360378,
+          0.11307060815196579,
+          0.11317406048381061
+        ],
+        "obstacle_position_m": [
+          0.42306870222091675,
+          0.40626123547554016,
+          0.5019958019256592
+        ],
+        "obstacle_velocity_mps": [
+          -0.004049763083457947,
+          -0.04936634376645088,
+          0.006823777686804533
+        ],
+        "capsules": [
+          {
+            "name": "shoulder",
+            "start_m": [
+              -0.0016029230318963528,
+              0.014402536675333977,
+              0.1589278280735016
+            ],
+            "end_m": [
+              -0.0034095640294253826,
+              0.01015489362180233,
+              0.02172292023897171
+            ],
+            "radius_m": 0.08598767561066961
+          },
+          {
+            "name": "upper_arm",
+            "start_m": [
+              -0.024928933009505272,
+              0.1502007246017456,
+              0.030592180788517
+            ],
+            "end_m": [
+              0.08573602139949799,
+              0.1600838601589203,
+              0.5637892484664917
+            ],
+            "radius_m": 0.10325230532579074
+          },
+          {
+            "name": "forearm",
+            "start_m": [
+              0.04259851947426796,
+              0.04172246903181076,
+              0.46070754528045654
+            ],
+            "end_m": [
+              0.375490665435791,
+              0.025804059579968452,
+              0.8253111243247986
+            ],
+            "radius_m": 0.07999408774853851
+          },
+          {
+            "name": "wrist_1",
+            "start_m": [
+              0.3827425241470337,
+              0.1303018480539322,
+              0.8215633630752563
+            ],
+            "end_m": [
+              0.28887680172920227,
+              0.1305864304304123,
+              0.7662246823310852
+            ],
+            "radius_m": 0.05569111334476015
+          },
+          {
+            "name": "wrist_2",
+            "start_m": [
+              0.4293659031391144,
+              0.16375866532325745,
+              0.7968809008598328
+            ],
+            "end_m": [
+              0.39005187153816223,
+              0.12243841588497162,
+              0.8915724754333496
+            ],
+            "radius_m": 0.05533030881024477
+          },
+          {
+            "name": "wrist_3",
+            "start_m": [
+              0.44866031408309937,
+              0.14550381898880005,
+              0.7648276090621948
+            ],
+            "end_m": [
+              0.4572472870349884,
+              0.21109898388385773,
+              0.8127455711364746
+            ],
+            "radius_m": 0.04837612224317481
+          }
+        ]
+      }
+    },
+    {
+      "train_seed": 4110,
+      "seed": 9119,
+      "step": 155,
+      "source_trace": "outputs/vaps_g2_v2/train_seed_4110_final_trace.csv",
+      "source_viability_status": "unknown_compute_budget",
+      "source_viability_solver_status": "strict_projection_failed",
+      "source_requested_max_abs_diff": 0.0,
+      "source_command_max_abs_diff": 0.0,
+      "v0_v1_requested_max_abs_diff": 0.0,
+      "v0_v1_command_max_abs_diff": 0.0,
+      "source_requested_exactly_reproduced": true,
+      "source_command_reproduced": true,
+      "v0_v1_execution_reproduced": true,
+      "status_reproduced": true,
+      "command_is_zero": true,
+      "command_differs_from_requested": true,
+      "filter_result": {
+        "status": "safe_stop_projection_failed",
+        "reason": "cyclic projection did not satisfy all constraints within the failure tolerance",
+        "command_joint_velocity_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "intervention_norm_radps": 0.9112129340963022,
+        "active_constraint_count": 1,
+        "constraint_count": 12,
+        "active_constraint_categories": [
+          "workspace_z_lower"
+        ],
+        "max_constraint_violation": 0.004995058867470975,
+        "max_constraint_category": "predictive_link_5",
+        "projection_iterations": 80,
+        "fallback_used": false,
+        "qp_solver_used": false,
+        "qp_solver_status": "maximum iterations reached",
+        "fallback_stage": "failed",
+        "infeasible_constraint_categories": [],
+        "infeasibility_diagnostic_status": ""
+      },
+      "constraints": {
+        "joint_positions_rad": [
+          0.219996839761734,
+          -1.5299345254898071,
+          2.7203383445739746,
+          -2.3747735023498535,
+          -4.789531230926514,
+          0.08262527734041214
+        ],
+        "previous_command_radps": [
+          0.12746793031692505,
+          -0.09064177423715591,
+          -0.03803854435682297,
+          0.7073416709899902,
+          -0.5235484838485718,
+          -0.39876535534858704
+        ],
+        "requested_joint_velocity_radps": [
+          0.08490823209285736,
+          -0.4041041135787964,
+          -0.28897687792778015,
+          0.10998108983039856,
+          -0.6762409806251526,
+          -0.3269466757774353
+        ],
+        "joint_lower_radps": [
+          -0.07253206968307496,
+          -0.2906417742371559,
+          -0.23803854435682298,
+          0.5073416709899903,
+          -0.7235484838485717,
+          -0.598765355348587
+        ],
+        "joint_upper_radps": [
+          0.32746793031692506,
+          0.1093582257628441,
+          0.16196145564317704,
+          0.9073416709899902,
+          -0.32354848384857177,
+          -0.19876535534858703
+        ],
+        "constraint_labels": [
+          "predictive_link_0",
+          "predictive_link_1",
+          "predictive_link_2",
+          "predictive_link_3",
+          "predictive_link_4",
+          "predictive_link_5",
+          "workspace_x_lower",
+          "workspace_x_upper",
+          "workspace_y_lower",
+          "workspace_y_upper",
+          "workspace_z_lower",
+          "workspace_z_upper"
+        ],
+        "constraint_lower_bounds": [
+          -0.610186698070434,
+          0.028247113902065954,
+          0.05372346009637703,
+          -0.2704224189455509,
+          -0.06692628068510038,
+          0.010775118594223984,
+          0.0015870928764343262,
+          -2.1215870928764344,
+          -2.4966405510902403,
+          -1.1033594489097596,
+          -0.03970196723937991,
+          -2.3602980327606202
+        ],
+        "zero_command_constraint_residuals": [
+          -0.610186698070434,
+          0.028247113902065954,
+          0.05372346009637703,
+          -0.2704224189455509,
+          -0.06692628068510038,
+          0.010775118594223984,
+          0.0015870928764343262,
+          -2.1215870928764344,
+          -2.4966405510902403,
+          -1.1033594489097596,
+          -0.03970196723937991,
+          -2.3602980327606202
+        ],
+        "zero_command_constraint_violations": [
+          0.0,
+          0.028247113902065954,
+          0.05372346009637703,
+          0.0,
+          0.0,
+          0.010775118594223984,
+          0.0015870928764343262,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "zero_command_max_constraint_violation": 0.5073416709899903,
+        "zero_command_max_constraint_label": "joint_3_acceleration_lower",
+        "zero_command_max_constraint_category": "joint_acceleration",
+        "zero_command_satisfies_all_constraints": false,
+        "predictive_risk_status": "valid",
+        "predictive_risk_age_s": 0.0,
+        "predictive_h_by_link_m": [
+          0.1546907828115393,
+          -0.009086332575930237,
+          -0.010464080739177609,
+          0.06849432234544642,
+          0.0171434010760331,
+          -0.0022337609656060825
+        ],
+        "predictive_predicted_distance_by_link_m": [
+          0.36595839382724715,
+          0.20218127843977757,
+          0.2008035302765302,
+          0.27976193336115424,
+          0.22841101209174092,
+          0.20903385005010172
+        ],
+        "predictive_robust_distance_by_link_m": [
+          0.2746907828115393,
+          0.11091366742406976,
+          0.10953591926082239,
+          0.1884943223454464,
+          0.1371434010760331,
+          0.11776623903439391
+        ],
+        "predictive_link_velocity_norms_mps": [
+          0.0018456643657754988,
+          0.03956291282154979,
+          0.05971176617992728,
+          0.031091176640273523,
+          0.06837408249948049,
+          0.09324467673776209
+        ],
+        "obstacle_position_m": [
+          0.3558172583580017,
+          0.195770263671875,
+          0.4928123354911804
+        ],
+        "obstacle_velocity_mps": [
+          0.013670566491782665,
+          -0.04799371957778931,
+          -0.0031175182666629553
+        ],
+        "capsules": [
+          {
+            "name": "shoulder",
+            "start_m": [
+              -0.0035040320362895727,
+              0.01406144443899393,
+              0.1589278280735016
+            ],
+            "end_m": [
+              -0.004729745909571648,
+              0.009611270390450954,
+              0.02172292023897171
+            ],
+            "radius_m": 0.08598767561066961
+          },
+          {
+            "name": "upper_arm",
+            "start_m": [
+              -0.035072341561317444,
+              0.14770033955574036,
+              0.029440227895975113
+            ],
+            "end_m": [
+              -0.014238111674785614,
+              0.1526387333869934,
+              0.5736691951751709
+            ],
+            "radius_m": 0.10325230532579074
+          },
+          {
+            "name": "forearm",
+            "start_m": [
+              -0.012430032715201378,
+              0.03603701293468475,
+              0.5704329013824463
+            ],
+            "end_m": [
+              0.17456573247909546,
+              0.03209320455789566,
+              0.11324211955070496
+            ],
+            "radius_m": 0.07999408774853851
+          },
+          {
+            "name": "wrist_1",
+            "start_m": [
+              0.18249839544296265,
+              0.13990145921707153,
+              0.13055355846881866
+            ],
+            "end_m": [
+              0.08280502259731293,
+              0.1262194812297821,
+              0.17235374450683594
+            ],
+            "radius_m": 0.05569111334476015
+          },
+          {
+            "name": "wrist_2",
+            "start_m": [
+              0.2237452268600464,
+              0.16724467277526855,
+              0.165893092751503
+            ],
+            "end_m": [
+              0.1970248967409134,
+              0.15027379989624023,
+              0.0599806010723114
+            ],
+            "radius_m": 0.05533030881024477
+          },
+          {
+            "name": "wrist_3",
+            "start_m": [
+              0.21501262485980988,
+              0.16218651831150055,
+              0.19913993775844574
+            ],
+            "end_m": [
+              0.28353771567344666,
+              0.18466992676258087,
+              0.1607811450958252
+            ],
+            "radius_m": 0.04837612224317481
+          }
+        ]
+      }
+    },
+    {
+      "train_seed": 4110,
+      "seed": 9151,
+      "step": 106,
+      "source_trace": "outputs/vaps_g2_v2/train_seed_4110_final_trace.csv",
+      "source_viability_status": "unknown_compute_budget",
+      "source_viability_solver_status": "strict_projection_failed",
+      "source_requested_max_abs_diff": 0.0,
+      "source_command_max_abs_diff": 0.0,
+      "v0_v1_requested_max_abs_diff": 0.0,
+      "v0_v1_command_max_abs_diff": 0.0,
+      "source_requested_exactly_reproduced": true,
+      "source_command_reproduced": true,
+      "v0_v1_execution_reproduced": true,
+      "status_reproduced": true,
+      "command_is_zero": true,
+      "command_differs_from_requested": true,
+      "filter_result": {
+        "status": "safe_stop_projection_failed",
+        "reason": "cyclic projection did not satisfy all constraints within the failure tolerance",
+        "command_joint_velocity_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "intervention_norm_radps": 1.4353832114925653,
+        "active_constraint_count": 0,
+        "constraint_count": 12,
+        "active_constraint_categories": [
+          "joint_2_acceleration_lower"
+        ],
+        "max_constraint_violation": 0.0025710414766038636,
+        "max_constraint_category": "predictive_link_1",
+        "projection_iterations": 80,
+        "fallback_used": false,
+        "qp_solver_used": false,
+        "qp_solver_status": "maximum iterations reached",
+        "fallback_stage": "failed",
+        "infeasible_constraint_categories": [],
+        "infeasibility_diagnostic_status": ""
+      },
+      "constraints": {
+        "joint_positions_rad": [
+          -1.1100332736968994,
+          -1.1670359373092651,
+          0.712890088558197,
+          -2.431805372238159,
+          2.06067156791687,
+          -1.8991419076919556
+        ],
+        "previous_command_radps": [
+          0.30314284563064575,
+          0.2532808482646942,
+          -0.7858495116233826,
+          -0.8051080703735352,
+          0.6042572259902954,
+          0.6699020266532898
+        ],
+        "requested_joint_velocity_radps": [
+          0.40776705741882324,
+          0.17139539122581482,
+          -0.7022536993026733,
+          -0.7321540117263794,
+          0.6776618957519531,
+          0.613383412361145
+        ],
+        "joint_lower_radps": [
+          0.10314284563064574,
+          0.0532808482646942,
+          -0.9858495116233825,
+          -1.0,
+          0.4042572259902954,
+          0.4699020266532898
+        ],
+        "joint_upper_radps": [
+          0.5031428456306457,
+          0.4532808482646942,
+          -0.5858495116233826,
+          -0.6051080703735352,
+          0.8042572259902954,
+          0.8699020266532898
+        ],
+        "constraint_labels": [
+          "predictive_link_0",
+          "predictive_link_1",
+          "predictive_link_2",
+          "predictive_link_3",
+          "predictive_link_4",
+          "predictive_link_5",
+          "workspace_x_lower",
+          "workspace_x_upper",
+          "workspace_y_lower",
+          "workspace_y_upper",
+          "workspace_z_lower",
+          "workspace_z_upper"
+        ],
+        "constraint_lower_bounds": [
+          -1.0335832148771396,
+          0.14701631688386885,
+          -0.215335857921951,
+          -0.056763403032464965,
+          -0.3701896454542499,
+          -0.462947281020339,
+          -0.09381437301635742,
+          -2.0261856269836427,
+          -0.2300758838653565,
+          -3.3699241161346434,
+          -2.328000812530518,
+          -0.07199918746948253
+        ],
+        "zero_command_constraint_residuals": [
+          -1.0335832148771396,
+          0.14701631688386885,
+          -0.215335857921951,
+          -0.056763403032464965,
+          -0.3701896454542499,
+          -0.462947281020339,
+          -0.09381437301635742,
+          -2.0261856269836427,
+          -0.2300758838653565,
+          -3.3699241161346434,
+          -2.328000812530518,
+          -0.07199918746948253
+        ],
+        "zero_command_constraint_violations": [
+          0.0,
+          0.14701631688386885,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "zero_command_max_constraint_violation": 0.6051080703735352,
+        "zero_command_max_constraint_label": "joint_3_acceleration_upper",
+        "zero_command_max_constraint_category": "joint_acceleration",
+        "zero_command_satisfies_all_constraints": false,
+        "predictive_risk_status": "valid",
+        "predictive_risk_age_s": 0.0,
+        "predictive_h_by_link_m": [
+          0.26237977415129826,
+          -0.03182413739459172,
+          0.05375979498083677,
+          0.00941288102370258,
+          0.0872142368641437,
+          0.11377728518883162
+        ],
+        "predictive_predicted_distance_by_link_m": [
+          0.5099506780331402,
+          0.21574676648725016,
+          0.3013306988626787,
+          0.25698378490554447,
+          0.33478514074598564,
+          0.3613481890706735
+        ],
+        "predictive_robust_distance_by_link_m": [
+          0.38237977415129826,
+          0.08817586260540827,
+          0.17375979498083677,
+          0.12941288102370258,
+          0.2072142368641437,
+          0.23377728518883162
+        ],
+        "predictive_link_velocity_norms_mps": [
+          0.004393126142720541,
+          0.18391503795765074,
+          0.08556820700829919,
+          0.20406671532893675,
+          0.3604352734164877,
+          0.22484234624401433
+        ],
+        "obstacle_position_m": [
+          0.5913327932357788,
+          -0.1731424629688263,
+          0.44020235538482666
+        ],
+        "obstacle_velocity_mps": [
+          -0.008947755210101604,
+          0.04813428968191147,
+          0.010150264017283916
+        ],
+        "capsules": [
+          {
+            "name": "shoulder",
+            "start_m": [
+              0.01282032486051321,
+              0.00675586611032486,
+              0.1589278280735016
+            ],
+            "end_m": [
+              0.008206246420741081,
+              0.006885095499455929,
+              0.02172292023897171
+            ],
+            "radius_m": 0.08598767561066961
+          },
+          {
+            "name": "upper_arm",
+            "start_m": [
+              0.12570902705192566,
+              0.0881514623761177,
+              0.034037839621305466
+            ],
+            "end_m": [
+              0.22075271606445312,
+              -0.10270125418901443,
+              0.5352219343185425
+            ],
+            "radius_m": 0.10325230532579074
+          },
+          {
+            "name": "forearm",
+            "start_m": [
+              0.08377047628164291,
+              -0.08355982601642609,
+              0.45424318313598633
+            ],
+            "end_m": [
+              0.2405495047569275,
+              -0.4998261332511902,
+              0.669066309928894
+            ],
+            "radius_m": 0.07999408774853851
+          },
+          {
+            "name": "wrist_1",
+            "start_m": [
+              0.32333579659461975,
+              -0.43387067317962646,
+              0.6997881531715393
+            ],
+            "end_m": [
+              0.3182505667209625,
+              -0.404726505279541,
+              0.5949169397354126
+            ],
+            "radius_m": 0.05569111334476015
+          },
+          {
+            "name": "wrist_2",
+            "start_m": [
+              0.2984001934528351,
+              -0.4057677686214447,
+              0.7397483587265015
+            ],
+            "end_m": [
+              0.38642618060112,
+              -0.4713870584964752,
+              0.7269039750099182
+            ],
+            "radius_m": 0.05533030881024477
+          },
+          {
+            "name": "wrist_3",
+            "start_m": [
+              0.30002978444099426,
+              -0.36966443061828613,
+              0.7760675549507141
+            ],
+            "end_m": [
+              0.25809991359710693,
+              -0.4301239252090454,
+              0.7405834794044495
+            ],
+            "radius_m": 0.04837612224317481
+          }
+        ]
+      }
+    },
+    {
+      "train_seed": 4110,
+      "seed": 9159,
+      "step": 143,
+      "source_trace": "outputs/vaps_g2_v2/train_seed_4110_final_trace.csv",
+      "source_viability_status": "unknown_compute_budget",
+      "source_viability_solver_status": "strict_projection_failed",
+      "source_requested_max_abs_diff": 0.0,
+      "source_command_max_abs_diff": 0.0,
+      "v0_v1_requested_max_abs_diff": 0.0,
+      "v0_v1_command_max_abs_diff": 0.0,
+      "source_requested_exactly_reproduced": true,
+      "source_command_reproduced": true,
+      "v0_v1_execution_reproduced": true,
+      "status_reproduced": true,
+      "command_is_zero": true,
+      "command_differs_from_requested": true,
+      "filter_result": {
+        "status": "safe_stop_projection_failed",
+        "reason": "cyclic projection did not satisfy all constraints within the failure tolerance",
+        "command_joint_velocity_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "intervention_norm_radps": 0.8960260443574268,
+        "active_constraint_count": 1,
+        "constraint_count": 12,
+        "active_constraint_categories": [
+          "workspace_z_lower"
+        ],
+        "max_constraint_violation": 0.0067153128499971605,
+        "max_constraint_category": "predictive_link_5",
+        "projection_iterations": 80,
+        "fallback_used": false,
+        "qp_solver_used": false,
+        "qp_solver_status": "maximum iterations reached",
+        "fallback_stage": "failed",
+        "infeasible_constraint_categories": [],
+        "infeasibility_diagnostic_status": ""
+      },
+      "constraints": {
+        "joint_positions_rad": [
+          0.2057306170463562,
+          -1.4403547048568726,
+          2.7268617153167725,
+          -3.892592430114746,
+          -2.2955219745635986,
+          1.3631505966186523
+        ],
+        "previous_command_radps": [
+          -0.1642787754535675,
+          -0.04770820587873459,
+          0.10531771928071976,
+          -0.12122856080532074,
+          0.7704473733901978,
+          0.41640159487724304
+        ],
+        "requested_joint_velocity_radps": [
+          -0.006227709352970123,
+          -0.23801873624324799,
+          -0.16342870891094208,
+          -0.3842718005180359,
+          0.7522341012954712,
+          -0.07707831263542175
+        ],
+        "joint_lower_radps": [
+          -0.3642787754535675,
+          -0.2477082058787346,
+          -0.09468228071928025,
+          -0.32122856080532075,
+          0.5704473733901978,
+          0.21640159487724303
+        ],
+        "joint_upper_radps": [
+          0.035721224546432506,
+          0.15229179412126542,
+          0.30531771928071977,
+          0.07877143919467927,
+          0.9704473733901977,
+          0.616401594877243
+        ],
+        "constraint_labels": [
+          "predictive_link_0",
+          "predictive_link_1",
+          "predictive_link_2",
+          "predictive_link_3",
+          "predictive_link_4",
+          "predictive_link_5",
+          "workspace_x_lower",
+          "workspace_x_upper",
+          "workspace_y_lower",
+          "workspace_y_upper",
+          "workspace_z_lower",
+          "workspace_z_upper"
+        ],
+        "constraint_lower_bounds": [
+          -0.6732005540390604,
+          -0.0703312941150587,
+          -0.007424847705638331,
+          -0.16110396784944297,
+          -0.01170346791830168,
+          0.03486234327769593,
+          0.0007523894309997559,
+          -2.120752389431,
+          -2.2315936267375944,
+          -1.3684063732624054,
+          -0.01600530624389651,
+          -2.3839946937561036
+        ],
+        "zero_command_constraint_residuals": [
+          -0.6732005540390604,
+          -0.0703312941150587,
+          -0.007424847705638331,
+          -0.16110396784944297,
+          -0.01170346791830168,
+          0.03486234327769593,
+          0.0007523894309997559,
+          -2.120752389431,
+          -2.2315936267375944,
+          -1.3684063732624054,
+          -0.01600530624389651,
+          -2.3839946937561036
+        ],
+        "zero_command_constraint_violations": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.03486234327769593,
+          0.0007523894309997559,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "zero_command_max_constraint_violation": 0.5704473733901978,
+        "zero_command_max_constraint_label": "joint_4_acceleration_lower",
+        "zero_command_max_constraint_category": "joint_acceleration",
+        "zero_command_satisfies_all_constraints": false,
+        "predictive_risk_status": "valid",
+        "predictive_risk_age_s": 0.0,
+        "predictive_h_by_link_m": [
+          0.17611383244626977,
+          0.019297095326879704,
+          0.009162283137974486,
+          0.04667751451287891,
+          0.00995664186124659,
+          -0.0006168428360234929
+        ],
+        "predictive_predicted_distance_by_link_m": [
+          0.3814346078536729,
+          0.2246178707342828,
+          0.21448305854537758,
+          0.251998289920282,
+          0.21527741726864968,
+          0.2047039325713796
+        ],
+        "predictive_robust_distance_by_link_m": [
+          0.29611383244626976,
+          0.1392970953268797,
+          0.12916228313797448,
+          0.1666775145128789,
+          0.12995664186124659,
+          0.1193831571639765
+        ],
+        "predictive_link_velocity_norms_mps": [
+          0.0023808800421399713,
+          0.0753695393823592,
+          0.011899490615356861,
+          0.042491518523260115,
+          0.020571222812742766,
+          0.035979673222621196
+        ],
+        "obstacle_position_m": [
+          0.4278610944747925,
+          0.1708657145500183,
+          0.4483569264411926
+        ],
+        "obstacle_velocity_mps": [
+          -0.009189254604279995,
+          -0.044037725776433945,
+          -0.021822845563292503
+        ],
+        "capsules": [
+          {
+            "name": "shoulder",
+            "start_m": [
+              -0.003303078468888998,
+              0.014110000804066658,
+              0.1589278280735016
+            ],
+            "end_m": [
+              -0.004592152778059244,
+              0.00967776495963335,
+              0.02172292023897171
+            ],
+            "radius_m": 0.08598767561066961
+          },
+          {
+            "name": "upper_arm",
+            "start_m": [
+              -0.03818366304039955,
+              0.14709588885307312,
+              0.02985815703868866
+            ],
+            "end_m": [
+              0.030294878408312798,
+              0.16166488826274872,
+              0.5699896216392517
+            ],
+            "radius_m": 0.10325230532579074
+          },
+          {
+            "name": "forearm",
+            "start_m": [
+              0.03062177076935768,
+              0.0450873002409935,
+              0.5689910054206848
+            ],
+            "end_m": [
+              0.17377705872058868,
+              0.02934325486421585,
+              0.09648177027702332
+            ],
+            "radius_m": 0.07999408774853851
+          },
+          {
+            "name": "wrist_1",
+            "start_m": [
+              0.16712208092212677,
+              0.13366234302520752,
+              0.1763409674167633
+            ],
+            "end_m": [
+              0.11036073416471481,
+              0.13040179014205933,
+              0.0833854004740715
+            ],
+            "radius_m": 0.05569111334476015
+          },
+          {
+            "name": "wrist_2",
+            "start_m": [
+              0.2166445404291153,
+              0.12180739641189575,
+              0.183307483792305
+            ],
+            "end_m": [
+              0.13962846994400024,
+              0.18185099959373474,
+              0.2351026087999344
+            ],
+            "radius_m": 0.05533030881024477
+          },
+          {
+            "name": "wrist_3",
+            "start_m": [
+              0.256947785615921,
+              0.14114311337471008,
+              0.16761073470115662
+            ],
+            "end_m": [
+              0.2265060842037201,
+              0.07916512340307236,
+              0.21125267446041107
+            ],
+            "radius_m": 0.04837612224317481
+          }
+        ]
+      }
+    }
+  ]
+}

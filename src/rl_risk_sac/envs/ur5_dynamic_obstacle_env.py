@@ -26,6 +26,7 @@ from rl_risk_sac.utils.safety_filter import (
     SafetyFilterInput,
     SafetyFilterResult,
     SafetyFilterStatus,
+    assess_strict_viability,
     filter_joint_velocity,
 )
 
@@ -397,6 +398,8 @@ class UR5DynamicObstacleEnv(gym.Env):
                     "safe_stop_drift_class": safe_stop_drift_class,
                 }
             )
+            if bool(self.safety_filter_cfg.get("viability_monitor_enabled", False)):
+                info.update(self._viability_info(filter_result, predictive_risk, safe_stop_drift_class))
         elif policy_predictive_risk is not None:
             info.update(self._predictive_risk_info(policy_predictive_risk))
         self.prev_qdot_cmd = qdot_cmd
@@ -1131,6 +1134,27 @@ class UR5DynamicObstacleEnv(gym.Env):
             "safety_filter_jacobian_workspace_time_s": float((phase_times_s or {}).get("jacobian_workspace", 0.0)),
             "safety_filter_projection_time_s": float((phase_times_s or {}).get("projection", 0.0)),
             **predictive_info,
+        }
+
+    def _viability_info(
+        self,
+        result: SafetyFilterResult,
+        predictive_risk: PredictiveLinkRisk | None,
+        safe_stop_drift_class: str,
+    ) -> dict[str, Any]:
+        """Return V1 diagnostic fields after the strict command is finalized."""
+
+        assessment = assess_strict_viability(result, predictive_risk, safe_stop_drift_class)
+        viable_risk = predictive_risk is not None and predictive_risk.usable
+        return {
+            "viability_status": assessment.status.value,
+            "viability_horizon_s": float(self.safety_filter_cfg["prediction_horizon_s"]),
+            "viability_min_h_m": (
+                float(np.min(predictive_risk.safety_functions_m)) if viable_risk else float("-inf")
+            ),
+            "viability_strict_feasible": assessment.strict_feasible,
+            "viability_solver_status": assessment.solver_status,
+            "viability_model_assumptions_valid": assessment.model_assumptions_valid,
         }
 
     def _filter_link_diagnostics(

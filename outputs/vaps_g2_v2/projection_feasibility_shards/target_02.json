@@ -1,0 +1,294 @@
+{
+  "protocol": "vaps_g2_projection_feasibility_audit_v1",
+  "source_protocol": "vaps_g2_strict_execution_v2",
+  "config": "configs/experiments/vaps/v2_g2_strict_execution.yaml",
+  "config_sha256": "fd601e6af85ec4970562e496e8127ca545b57c198b1261f4d666c1d3d33edffb",
+  "resolved_config_sha256": "156d85b146d96aa7177f56ca0e4cb355dfb50735dfa5f8675d84bd0a35c7d2de",
+  "checkpoint_manifest": "configs/experiments/vaps_manifests/v2_b4_selected_checkpoints.json",
+  "checkpoint_manifest_sha256": "eceb42687c92e70930b1222911142a96382b251082ffeb91a7bc5eba5a34502c",
+  "target_manifest": "configs/experiments/vaps_manifests/v1_g2_projection_failure_targets.json",
+  "target_manifest_sha256": "9b0067704d18ba6900b2e87bc0cb1060861c466c3d8e96b1339e0a0320b44ade",
+  "source_trace_sha256": {
+    "outputs/vaps_g2_v2/train_seed_4108_final_trace.csv": "6ec525b39b07c242939b4a0ce10dc8d2fcf53f6355c2bf08997543aa501a6540",
+    "outputs/vaps_g2_v2/train_seed_4108_validation_trace.csv": "b0340fbb5819f176cea5a8031326be2b32c4c338b09579a5a6013ca2e0beaeeb",
+    "outputs/vaps_g2_v2/train_seed_4109_final_trace.csv": "5a0856ecc579bae96f9ce0014b6d85a80a41b25366eed55078cb071d4aedbb94",
+    "outputs/vaps_g2_v2/train_seed_4109_validation_trace.csv": "5d938176c7ad1906352cbb3c1f0a2688b412363b1a5f66b533e56aaa9dd9df7f",
+    "outputs/vaps_g2_v2/train_seed_4110_final_trace.csv": "d26acb31ae71ca527485e90753eb7a7b08b2de9abf3964aa9951f2832d613029",
+    "outputs/vaps_g2_v2/train_seed_4110_validation_trace.csv": "37914f21452fe3f8f78fe278af42d7f8ad0cfb9dc9c28032738b9384e1cad7e3"
+  },
+  "atol": 1e-07,
+  "projection_failure_tolerance": 1e-06,
+  "iteration_budgets": [
+    2000,
+    10000,
+    50000
+  ],
+  "training_performed": false,
+  "actor_checkpoint_selection_performed": false,
+  "recovery_or_relaxation_performed": false,
+  "target_count": 1,
+  "total_frozen_target_count": 11,
+  "target_index": 2,
+  "source_projection_failure_count": 11,
+  "baseline_failure_reproduced": true,
+  "baseline_zero_command_reproduced": true,
+  "source_requested_reproduced": true,
+  "source_command_reproduced": true,
+  "strict_feasible_attempt_count": 0,
+  "g3_authorization": "not_granted_by_this_audit",
+  "event": {
+    "train_seed": 4108,
+    "seed": 8224,
+    "step": 201,
+    "source_trace": "outputs/vaps_g2_v2/train_seed_4108_validation_trace.csv",
+    "baseline_status": "safe_stop_projection_failed",
+    "baseline_qp_solver_status": "maximum iterations reached",
+    "baseline_command_joint_velocity_radps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "baseline_command_is_zero": true,
+    "source_requested_max_abs_diff": 0.0,
+    "source_command_max_abs_diff": 0.0,
+    "constraint_snapshot": {
+      "requested_joint_velocity_radps": [
+        -0.5453820824623108,
+        -0.30577191710472107,
+        0.8383617401123047,
+        -0.10851098597049713,
+        -0.9646642208099365,
+        0.25039130449295044
+      ],
+      "joint_lower_radps": [
+        -0.8519426703453064,
+        -0.8251211166381835,
+        0.6659547567367554,
+        0.13411324024200438,
+        -1.0,
+        -0.1507652595639229
+      ],
+      "joint_upper_radps": [
+        -0.4519426703453064,
+        -0.4251211166381836,
+        1.0,
+        0.5341132402420044,
+        -0.7782150983810425,
+        0.24923474043607713
+      ],
+      "constraint_rows": [
+        [
+          0.011956923062489057,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.10653111692439536,
+          0.12613858247759085,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.23008525993227066,
+          -0.2907821930081261,
+          0.000587206285976087,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.255111611562799,
+          -0.28467237854312266,
+          -0.023183739636321133,
+          -0.03192001888790985,
+          0.0,
+          0.0
+        ],
+        [
+          0.2884163040711831,
+          -0.286567668173283,
+          -0.040442973600537155,
+          -0.0401386441611612,
+          0.01556410978242149,
+          0.0
+        ],
+        [
+          0.31899189751667273,
+          -0.33093647498486745,
+          -0.1224522092640684,
+          -0.07753808725766358,
+          0.026096529563291695,
+          -0.013671487609417096
+        ],
+        [
+          -0.24945156340561705,
+          0.31986747760863926,
+          -0.010881237026266371,
+          0.04060911403839569,
+          -0.010081814604813288,
+          -2.587294496383196e-08
+        ],
+        [
+          0.24945156340561705,
+          -0.31986747760863926,
+          0.010881237026266371,
+          -0.04060911403839569,
+          0.010081814604813288,
+          2.587294496383196e-08
+        ],
+        [
+          0.24971782158091563,
+          0.21402827794831106,
+          -0.007280804163426729,
+          0.027172186452211308,
+          0.07932294261462557,
+          4.287925130482379e-08
+        ],
+        [
+          -0.24971782158091563,
+          -0.21402827794831106,
+          0.007280804163426729,
+          -0.027172186452211308,
+          -0.07932294261462557,
+          -4.287925130482379e-08
+        ],
+        [
+          -2.775557576661896e-17,
+          -0.3462650309672688,
+          -0.495438010900693,
+          -0.10811153661204266,
+          -0.01948127926920047,
+          -5.516407934119874e-08
+        ],
+        [
+          2.775557576661896e-17,
+          0.3462650309672688,
+          0.495438010900693,
+          0.10811153661204266,
+          0.01948127926920047,
+          5.516407934119874e-08
+        ]
+      ],
+      "constraint_lower_bounds": [
+        -1.0863391504101172,
+        -1.2875418064638904,
+        0.019543414141256252,
+        -0.42587273706898243,
+        -0.23279746383317004,
+        -0.147696686542862,
+        0.0011286735534667969,
+        -2.121128673553467,
+        -2.7978064894676207,
+        -0.8021935105323792,
+        -1.176107792854309,
+        -1.223892207145691
+      ],
+      "constraint_labels": [
+        "predictive_link_0",
+        "predictive_link_1",
+        "predictive_link_2",
+        "predictive_link_3",
+        "predictive_link_4",
+        "predictive_link_5",
+        "workspace_x_lower",
+        "workspace_x_upper",
+        "workspace_y_lower",
+        "workspace_y_upper",
+        "workspace_z_lower",
+        "workspace_z_upper"
+      ],
+      "joint_lower_labels": [
+        "joint_0_acceleration_lower",
+        "joint_1_acceleration_lower",
+        "joint_2_acceleration_lower",
+        "joint_3_acceleration_lower",
+        "joint_4_velocity_lower",
+        "joint_5_acceleration_lower"
+      ],
+      "joint_upper_labels": [
+        "joint_0_acceleration_upper",
+        "joint_1_acceleration_upper",
+        "joint_2_velocity_upper",
+        "joint_3_acceleration_upper",
+        "joint_4_acceleration_upper",
+        "joint_5_acceleration_upper"
+      ]
+    },
+    "attempts": [
+      {
+        "maximum_iterations": 2000,
+        "osqp_status": "maximum iterations reached",
+        "osqp_iterations_used": 2000,
+        "candidate_joint_velocity_radps": [
+          -0.4544190779281517,
+          -0.42493351757402914,
+          0.6656239397912007,
+          0.5333220108719952,
+          -0.8745104482537527,
+          -0.1507968112246944
+        ],
+        "residual_audit": {
+          "candidate_available": true,
+          "candidate_is_finite": true,
+          "max_constraint_violation": 0.000463957930435379,
+          "max_constraint_label": "workspace_x_lower",
+          "max_constraint_category": "workspace",
+          "satisfies_all_constraints": false
+        },
+        "classification": "indeterminate_max_iterations"
+      },
+      {
+        "maximum_iterations": 10000,
+        "osqp_status": "primal infeasible",
+        "osqp_iterations_used": 2125,
+        "candidate_joint_velocity_radps": [
+          2143289344.0,
+          2143289344.0,
+          2143289344.0,
+          2143289344.0,
+          2143289344.0,
+          2143289344.0
+        ],
+        "residual_audit": {
+          "candidate_available": true,
+          "candidate_is_finite": true,
+          "max_constraint_violation": 2143289344.7782152,
+          "max_constraint_label": "joint_4_acceleration_upper",
+          "max_constraint_category": "joint_acceleration",
+          "satisfies_all_constraints": false
+        },
+        "classification": "primal_infeasible"
+      },
+      {
+        "maximum_iterations": 50000,
+        "osqp_status": "primal infeasible",
+        "osqp_iterations_used": 2125,
+        "candidate_joint_velocity_radps": [
+          2143289344.0,
+          2143289344.0,
+          2143289344.0,
+          2143289344.0,
+          2143289344.0,
+          2143289344.0
+        ],
+        "residual_audit": {
+          "candidate_available": true,
+          "candidate_is_finite": true,
+          "max_constraint_violation": 2143289344.7782152,
+          "max_constraint_label": "joint_4_acceleration_upper",
+          "max_constraint_category": "joint_acceleration",
+          "satisfies_all_constraints": false
+        },
+        "classification": "primal_infeasible"
+      }
+    ]
+  }
+}

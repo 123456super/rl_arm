@@ -70,6 +70,8 @@ env:
     # Diagnostic only: retain an escape command when predictive constraints are infeasible.
     recovery_allow_constraint_relaxation: false
     recovery_maximize_min_clearance: false
+    # V1-only diagnostics. This must never alter the command selected by the strict filter.
+    viability_monitor_enabled: false
     # Per-link diagnostics are opt-in because they require an additional Jacobian evaluation.
     diagnostic_logging: false
     max_projection_iterations: 80

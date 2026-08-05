@@ -1,0 +1,315 @@
+{
+  "protocol": "vaps_g2_projection_failure_audit_v1",
+  "source_protocol": "vaps_g2_strict_execution_v2",
+  "config": "configs/experiments/vaps/v2_g2_strict_execution.yaml",
+  "config_sha256": "fd601e6af85ec4970562e496e8127ca545b57c198b1261f4d666c1d3d33edffb",
+  "resolved_config_sha256": "156d85b146d96aa7177f56ca0e4cb355dfb50735dfa5f8675d84bd0a35c7d2de",
+  "checkpoint_manifest": "configs/experiments/vaps_manifests/v2_b4_selected_checkpoints.json",
+  "checkpoint_manifest_sha256": "eceb42687c92e70930b1222911142a96382b251082ffeb91a7bc5eba5a34502c",
+  "target_manifest": "configs/experiments/vaps_manifests/v1_g2_projection_failure_targets.json",
+  "target_manifest_sha256": "9b0067704d18ba6900b2e87bc0cb1060861c466c3d8e96b1339e0a0320b44ade",
+  "source_trace_sha256": {
+    "outputs/vaps_g2_v2/train_seed_4108_final_trace.csv": "6ec525b39b07c242939b4a0ce10dc8d2fcf53f6355c2bf08997543aa501a6540",
+    "outputs/vaps_g2_v2/train_seed_4108_validation_trace.csv": "b0340fbb5819f176cea5a8031326be2b32c4c338b09579a5a6013ca2e0beaeeb",
+    "outputs/vaps_g2_v2/train_seed_4109_final_trace.csv": "5a0856ecc579bae96f9ce0014b6d85a80a41b25366eed55078cb071d4aedbb94",
+    "outputs/vaps_g2_v2/train_seed_4109_validation_trace.csv": "5d938176c7ad1906352cbb3c1f0a2688b412363b1a5f66b533e56aaa9dd9df7f",
+    "outputs/vaps_g2_v2/train_seed_4110_final_trace.csv": "d26acb31ae71ca527485e90753eb7a7b08b2de9abf3964aa9951f2832d613029",
+    "outputs/vaps_g2_v2/train_seed_4110_validation_trace.csv": "37914f21452fe3f8f78fe278af42d7f8ad0cfb9dc9c28032738b9384e1cad7e3"
+  },
+  "atol": 1e-07,
+  "training_performed": false,
+  "actor_checkpoint_selection_performed": false,
+  "target_count": 1,
+  "total_frozen_target_count": 11,
+  "target_index": 0,
+  "source_projection_failure_count": 11,
+  "all_statuses_reproduced": true,
+  "all_commands_zero": true,
+  "all_source_commands_reproduced": true,
+  "all_v0_v1_execution_reproduced": true,
+  "source_requested_exact_reproduction_count": 1,
+  "max_source_requested_abs_diff": 0.0,
+  "zero_command_constraint_feasible_count": 0,
+  "strict_fail_safe_semantics_verified": true,
+  "projection_failures_resolved": false,
+  "g3_authorization": "not_granted_by_this_audit",
+  "events": [
+    {
+      "train_seed": 4108,
+      "seed": 9099,
+      "step": 83,
+      "source_trace": "outputs/vaps_g2_v2/train_seed_4108_final_trace.csv",
+      "source_viability_status": "unknown_compute_budget",
+      "source_viability_solver_status": "strict_projection_failed",
+      "source_requested_max_abs_diff": 0.0,
+      "source_command_max_abs_diff": 0.0,
+      "v0_v1_requested_max_abs_diff": 0.0,
+      "v0_v1_command_max_abs_diff": 0.0,
+      "source_requested_exactly_reproduced": true,
+      "source_command_reproduced": true,
+      "v0_v1_execution_reproduced": true,
+      "status_reproduced": true,
+      "command_is_zero": true,
+      "command_differs_from_requested": true,
+      "filter_result": {
+        "status": "safe_stop_projection_failed",
+        "reason": "cyclic projection did not satisfy all constraints within the failure tolerance",
+        "command_joint_velocity_radps": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "intervention_norm_radps": 0.46022643444658484,
+        "active_constraint_count": 0,
+        "constraint_count": 12,
+        "active_constraint_categories": [
+          "joint_2_acceleration_lower"
+        ],
+        "max_constraint_violation": 0.005084110406529632,
+        "max_constraint_category": "predictive_link_5",
+        "projection_iterations": 80,
+        "fallback_used": false,
+        "qp_solver_used": false,
+        "qp_solver_status": "maximum iterations reached",
+        "fallback_stage": "failed",
+        "infeasible_constraint_categories": [],
+        "infeasibility_diagnostic_status": ""
+      },
+      "constraints": {
+        "joint_positions_rad": [
+          -0.504149317741394,
+          -1.1019618511199951,
+          1.9454753398895264,
+          -2.537055015563965,
+          -0.0835985466837883,
+          0.9459607005119324
+        ],
+        "previous_command_radps": [
+          0.41423892974853516,
+          0.382982462644577,
+          -0.44797107577323914,
+          -0.4875972270965576,
+          0.009536121971905231,
+          0.46802854537963867
+        ],
+        "requested_joint_velocity_radps": [
+          0.25655844807624817,
+          -0.009534955024719238,
+          -0.04555502533912659,
+          -0.20588980615139008,
+          -0.20279528200626373,
+          0.24556754529476166
+        ],
+        "joint_lower_radps": [
+          0.21423892974853515,
+          0.18298246264457702,
+          -0.6479710757732391,
+          -0.6875972270965576,
+          -0.19046387802809478,
+          0.26802854537963866
+        ],
+        "joint_upper_radps": [
+          0.6142389297485351,
+          0.582982462644577,
+          -0.24797107577323912,
+          -0.2875972270965576,
+          0.20953612197190524,
+          0.6680285453796386
+        ],
+        "constraint_labels": [
+          "predictive_link_0",
+          "predictive_link_1",
+          "predictive_link_2",
+          "predictive_link_3",
+          "predictive_link_4",
+          "predictive_link_5",
+          "workspace_x_lower",
+          "workspace_x_upper",
+          "workspace_y_lower",
+          "workspace_y_upper",
+          "workspace_z_lower",
+          "workspace_z_upper"
+        ],
+        "constraint_lower_bounds": [
+          -0.8321346909251537,
+          0.12887677779244822,
+          -0.27693093988741024,
+          -0.2324951104137955,
+          -0.21452999097544945,
+          -0.08558826513646936,
+          -1.2872521877288818,
+          -0.8327478122711183,
+          -1.4114189326763154,
+          -2.1885810673236845,
+          -0.0002540040016174583,
+          -2.3997459959983827
+        ],
+        "zero_command_constraint_residuals": [
+          -0.8321346909251537,
+          0.12887677779244822,
+          -0.27693093988741024,
+          -0.2324951104137955,
+          -0.21452999097544945,
+          -0.08558826513646936,
+          -1.2872521877288818,
+          -0.8327478122711183,
+          -1.4114189326763154,
+          -2.1885810673236845,
+          -0.0002540040016174583,
+          -2.3997459959983827
+        ],
+        "zero_command_constraint_violations": [
+          0.0,
+          0.12887677779244822,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "zero_command_max_constraint_violation": 0.2875972270965576,
+        "zero_command_max_constraint_label": "joint_3_acceleration_upper",
+        "zero_command_max_constraint_category": "joint_acceleration",
+        "zero_command_satisfies_all_constraints": false,
+        "predictive_risk_status": "valid",
+        "predictive_risk_age_s": 0.0,
+        "predictive_h_by_link_m": [
+          0.21270128418963674,
+          -0.023547859379322578,
+          0.07977725486553633,
+          0.06694316449617088,
+          0.06281794693582532,
+          0.03085060178768484
+        ],
+        "predictive_predicted_distance_by_link_m": [
+          0.4444071079911727,
+          0.2081579644222134,
+          0.3114830786670723,
+          0.29864898829770686,
+          0.2945237707373613,
+          0.2625564255892208
+        ],
+        "predictive_robust_distance_by_link_m": [
+          0.33270128418963674,
+          0.09645214062067742,
+          0.19977725486553632,
+          0.18694316449617088,
+          0.18281794693582532,
+          0.15085060178768483
+        ],
+        "predictive_link_velocity_norms_mps": [
+          0.006002921635262708,
+          0.20717280355354756,
+          0.14003602963857015,
+          0.22375525523952375,
+          0.24072690882519712,
+          0.23178216895018972
+        ],
+        "obstacle_position_m": [
+          0.508599579334259,
+          0.29002538323402405,
+          0.344876766204834
+        ],
+        "obstacle_velocity_mps": [
+          -0.003136345883831382,
+          -0.04711495712399483,
+          0.016442153602838516
+        ],
+        "capsules": [
+          {
+            "name": "shoulder",
+            "start_m": [
+              0.006690903101116419,
+              0.012854348868131638,
+              0.1589278280735016
+            ],
+            "end_m": [
+              0.002824540250003338,
+              0.010332908481359482,
+              0.02172292023897171
+            ],
+            "radius_m": 0.08598767561066961
+          },
+          {
+            "name": "upper_arm",
+            "start_m": [
+              0.05003564804792404,
+              0.14575821161270142,
+              0.03565426170825958
+            ],
+            "end_m": [
+              0.26499122381210327,
+              0.027478329837322235,
+              0.5219129920005798
+            ],
+            "radius_m": 0.10325230532579074
+          },
+          {
+            "name": "forearm",
+            "start_m": [
+              0.15177595615386963,
+              -0.04047154635190964,
+              0.5142022371292114
+            ],
+            "end_m": [
+              0.41585785150527954,
+              -0.2371675968170166,
+              0.14599335193634033
+            ],
+            "radius_m": 0.07999408774853851
+          },
+          {
+            "name": "wrist_1",
+            "start_m": [
+              0.48620855808258057,
+              -0.15779799222946167,
+              0.18091486394405365
+            ],
+            "end_m": [
+              0.39576444029808044,
+              -0.09830215573310852,
+              0.16853249073028564
+            ],
+            "radius_m": 0.05569111334476015
+          },
+          {
+            "name": "wrist_2",
+            "start_m": [
+              0.5423980355262756,
+              -0.11784277111291885,
+              0.17944425344467163
+            ],
+            "end_m": [
+              0.4991121292114258,
+              -0.21874065697193146,
+              0.19230453670024872
+            ],
+            "radius_m": 0.05533030881024477
+          },
+          {
+            "name": "wrist_3",
+            "start_m": [
+              0.5485626459121704,
+              -0.08762539178133011,
+              0.20823396742343903
+            ],
+            "end_m": [
+              0.5897837281227112,
+              -0.12571322917938232,
+              0.14888139069080353
+            ],
+            "radius_m": 0.04837612224317481
+          }
+        ]
+      }
+    }
+  ]
+}

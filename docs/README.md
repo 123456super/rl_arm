@@ -10,6 +10,7 @@
 4. [指标和单位定义](reference/metrics_and_units.md)：速度、风险裕度和碰撞字段的统一定义。
 5. [研究方向](design/research_direction.md)：新论文的研究问题、方法边界与长期实验矩阵。
 6. [输出目录说明](../outputs/README.md)：磁盘结果的分层和可信度。
+7. [后继安全协议](design/successor_safety_protocol.md)：P3 冻结后可行安全集方向的独立安全目标、评估协议和审查门槛；G0/G1 已完成，当前仅批准 G2 的既有 V0 actor 严格链路比较。
 
 当前阅读顺序：先看[当前研究状态](current/research_status.md)了解进展、现状与问题，再看[结果总表](current/results_summary.md)核对数字，最后看[P3 冻结后状态](current/next_experiment_protocol.md)确认实验边界。
 

@@ -167,6 +167,7 @@ def test_enabled_filter_is_the_only_command_path() -> None:
 def test_enabled_filter_produces_runtime_metrics() -> None:
     config = copy.deepcopy(load_config("configs/default.yaml"))
     config["env"]["safety_filter"]["enabled"] = True
+    config["env"]["safety_filter"]["viability_monitor_enabled"] = True
     env = UR5DynamicObstacleEnv(config, method="link_fixed")
     try:
         env.reset(seed=8)
@@ -197,6 +198,12 @@ def test_enabled_filter_produces_runtime_metrics() -> None:
         assert info["safety_filter_projection_time_s"] >= 0.0
         assert np.isfinite(info["qdot_cmd"]).all()
         assert info["risk_speed_scale"] == 1.0
+        assert info["viability_status"] == "certified_viable"
+        assert info["viability_horizon_s"] == 0.15
+        assert np.isfinite(info["viability_min_h_m"])
+        assert info["viability_strict_feasible"] is True
+        assert info["viability_solver_status"] == "one_step_strict_sufficient"
+        assert info["viability_model_assumptions_valid"] is True
     finally:
         env.close()
 
@@ -204,6 +211,7 @@ def test_enabled_filter_produces_runtime_metrics() -> None:
 def test_filter_compute_budget_forces_zero_velocity_after_an_overrun() -> None:
     config = copy.deepcopy(load_config("configs/default.yaml"))
     config["env"]["safety_filter"]["enabled"] = True
+    config["env"]["safety_filter"]["viability_monitor_enabled"] = True
     config["env"]["safety_filter"]["max_filter_compute_time_s"] = 1.0e-12
     env = UR5DynamicObstacleEnv(config, method="link_fixed")
     try:
@@ -213,6 +221,9 @@ def test_filter_compute_budget_forces_zero_velocity_after_an_overrun() -> None:
         np.testing.assert_array_equal(info["qdot_cmd"], np.zeros(env.action_space.shape))
         assert info["safety_filter_status"] == SafetyFilterStatus.SAFE_STOP_COMPUTE_BUDGET.value
         assert info["safety_filter_safe_stop"] is True
+        assert info["viability_status"] == "unknown_compute_budget"
+        assert info["viability_strict_feasible"] is False
+        assert info["viability_model_assumptions_valid"] is False
     finally:
         env.close()
 
@@ -220,6 +231,7 @@ def test_filter_compute_budget_forces_zero_velocity_after_an_overrun() -> None:
 def test_invalid_perception_estimate_forces_end_to_end_safe_stop() -> None:
     config = copy.deepcopy(load_config("configs/default.yaml"))
     config["env"]["safety_filter"]["enabled"] = True
+    config["env"]["safety_filter"]["viability_monitor_enabled"] = True
     env = UR5DynamicObstacleEnv(config, method="link_fixed")
     try:
         env.reset(seed=9)
@@ -242,6 +254,8 @@ def test_invalid_perception_estimate_forces_end_to_end_safe_stop() -> None:
         assert info["safety_filter_status"] == SafetyFilterStatus.SAFE_STOP_RISK_UNUSABLE.value
         assert info["safety_filter_safe_stop"] is True
         assert np.isneginf(info["predictive_h_min_m"])
+        assert info["viability_status"] == "invalid_or_stale_observation"
+        assert info["viability_strict_feasible"] is False
     finally:
         env.close()
 
@@ -249,6 +263,7 @@ def test_invalid_perception_estimate_forces_end_to_end_safe_stop() -> None:
 def test_stale_perception_estimate_forces_end_to_end_safe_stop() -> None:
     config = copy.deepcopy(load_config("configs/default.yaml"))
     config["env"]["safety_filter"]["enabled"] = True
+    config["env"]["safety_filter"]["viability_monitor_enabled"] = True
     env = UR5DynamicObstacleEnv(config, method="link_fixed")
     try:
         env.reset(seed=10)
@@ -269,5 +284,53 @@ def test_stale_perception_estimate_forces_end_to_end_safe_stop() -> None:
         assert info["predictive_risk_status"] == PredictionStatus.STALE.value
         assert info["safety_filter_status"] == SafetyFilterStatus.SAFE_STOP_RISK_UNUSABLE.value
         assert info["safety_filter_safe_stop"] is True
+        assert info["viability_status"] == "invalid_or_stale_observation"
     finally:
         env.close()
+
+
+def test_v1_viability_monitor_preserves_v0_commands() -> None:
+    v0_config = copy.deepcopy(load_config("configs/default.yaml"))
+    v0_config["env"]["safety_filter"].update(
+        {
+            "enabled": True,
+            "use_qp_solver": True,
+            "recovery_mode_enabled": False,
+            "recovery_allow_constraint_relaxation": False,
+            "recovery_maximize_min_clearance": False,
+            "viability_monitor_enabled": False,
+        }
+    )
+    v1_config = copy.deepcopy(v0_config)
+    v1_config["env"]["safety_filter"]["viability_monitor_enabled"] = True
+    v0 = UR5DynamicObstacleEnv(v0_config, method="link_fixed")
+    v1 = UR5DynamicObstacleEnv(v1_config, method="link_fixed")
+    actions = (
+        np.zeros(v0.action_space.shape, dtype=np.float32),
+        np.full(v0.action_space.shape, 0.2, dtype=np.float32),
+        np.full(v0.action_space.shape, -0.15, dtype=np.float32),
+    )
+    try:
+        v0.reset(seed=23)
+        v1.reset(seed=23)
+        for action in actions:
+            _, _, _, v0_terminated, v0_truncated, v0_info = v0.step(action)
+            _, _, _, v1_terminated, v1_truncated, v1_info = v1.step(action)
+
+            np.testing.assert_array_equal(v1_info["qdot_cmd"], v0_info["qdot_cmd"])
+            assert v1_info["safety_filter_status"] == v0_info["safety_filter_status"]
+            assert v1_terminated == v0_terminated
+            assert v1_truncated == v0_truncated
+            assert "viability_status" not in v0_info
+            assert v1_info["viability_status"] in {
+                "certified_viable",
+                "model_infeasible_dynamic",
+                "model_infeasible_static_or_slow",
+                "invalid_or_stale_observation",
+                "unknown_compute_budget",
+            }
+            if v0_terminated or v0_truncated:
+                break
+    finally:
+        v0.close()
+        v1.close()

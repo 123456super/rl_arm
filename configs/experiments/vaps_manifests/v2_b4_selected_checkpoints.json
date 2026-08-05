@@ -1,0 +1,25 @@
+{
+  "manifest_version": 1,
+  "protocol": "vaps_g2_strict_execution_v2",
+  "method": "link_fixed",
+  "actors": [
+    {
+      "train_seed": 4108,
+      "checkpoint_step": 50000,
+      "checkpoint": "outputs/p3_postfix_dev_100k/b4_predictive_nonrobust_filter/seed_4108/runs/20260804_091530_ur5_link_fixed_seed4108_steps100000/actor_step_50000.pt",
+      "selection_record": "outputs/p3_postfix_dev_100k/b4_predictive_nonrobust_filter/seed_4108/runs/20260804_091530_ur5_link_fixed_seed4108_steps100000/checkpoint_selection/selected_checkpoint.csv"
+    },
+    {
+      "train_seed": 4109,
+      "checkpoint_step": 85000,
+      "checkpoint": "outputs/p3_postfix_dev_100k/b4_predictive_nonrobust_filter/seed_4109/runs/20260804_091535_ur5_link_fixed_seed4109_steps100000/actor_step_85000.pt",
+      "selection_record": "outputs/p3_postfix_dev_100k/b4_predictive_nonrobust_filter/seed_4109/runs/20260804_091535_ur5_link_fixed_seed4109_steps100000/checkpoint_selection/selected_checkpoint.csv"
+    },
+    {
+      "train_seed": 4110,
+      "checkpoint_step": 90000,
+      "checkpoint": "outputs/p3_postfix_dev_100k/b4_predictive_nonrobust_filter/seed_4110/runs/20260804_091539_ur5_link_fixed_seed4110_steps100000/actor_step_90000.pt",
+      "selection_record": "outputs/p3_postfix_dev_100k/b4_predictive_nonrobust_filter/seed_4110/runs/20260804_091539_ur5_link_fixed_seed4110_steps100000/checkpoint_selection/selected_checkpoint.csv"
+    }
+  ]
+}

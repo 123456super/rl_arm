@@ -28,6 +28,16 @@ class SafetyFilterStatus(str, Enum):
     RECOVERY_RELAXED = "recovery_relaxed"
 
 
+class ViabilityStatus(str, Enum):
+    """Protocol-level outcome of a strict safety-filter control cycle."""
+
+    CERTIFIED_VIABLE = "certified_viable"
+    MODEL_INFEASIBLE_DYNAMIC = "model_infeasible_dynamic"
+    MODEL_INFEASIBLE_STATIC_OR_SLOW = "model_infeasible_static_or_slow"
+    INVALID_OR_STALE_OBSERVATION = "invalid_or_stale_observation"
+    UNKNOWN_COMPUTE_BUDGET = "unknown_compute_budget"
+
+
 @dataclass(frozen=True)
 class SafetyFilterConfig:
     """Joint-command limits and numerical settings for the safety filter."""
@@ -110,6 +120,86 @@ class SafetyFilterResult:
             SafetyFilterStatus.SAFE_STOP_PROJECTION_FAILED,
             SafetyFilterStatus.SAFE_STOP_COMPUTE_BUDGET,
         }
+
+
+@dataclass(frozen=True)
+class ViabilityAssessment:
+    """Read-only G0 classification derived from an executed filter result.
+
+    ``one_step_strict_sufficient`` denotes the current implemented sufficient
+    condition. It does not introduce a multi-step optimizer or alter the
+    command selected by :func:`filter_joint_velocity`.
+    """
+
+    status: ViabilityStatus
+    strict_feasible: bool
+    solver_status: str
+    model_assumptions_valid: bool
+
+
+def assess_strict_viability(
+    result: SafetyFilterResult,
+    predictive_risk: PredictiveLinkRisk | None,
+    safe_stop_drift_class: str = "not_applicable",
+) -> ViabilityAssessment:
+    """Classify a completed strict-filter cycle without changing its command."""
+
+    observations_usable = predictive_risk is not None and predictive_risk.usable
+    if result.status is SafetyFilterStatus.SAFE_STOP_COMPUTE_BUDGET:
+        return ViabilityAssessment(
+            status=ViabilityStatus.UNKNOWN_COMPUTE_BUDGET,
+            strict_feasible=False,
+            solver_status="compute_budget_exceeded",
+            model_assumptions_valid=False,
+        )
+    if not observations_usable or result.status is SafetyFilterStatus.SAFE_STOP_RISK_UNUSABLE:
+        return ViabilityAssessment(
+            status=ViabilityStatus.INVALID_OR_STALE_OBSERVATION,
+            strict_feasible=False,
+            solver_status="strict_result_unavailable_observation",
+            model_assumptions_valid=False,
+        )
+    if result.status is SafetyFilterStatus.SAFE_STOP_INVALID_INPUT:
+        return ViabilityAssessment(
+            status=ViabilityStatus.INVALID_OR_STALE_OBSERVATION,
+            strict_feasible=False,
+            solver_status="strict_result_unavailable_invalid_input",
+            model_assumptions_valid=False,
+        )
+    if result.status is SafetyFilterStatus.SAFE_STOP_PROJECTION_FAILED:
+        return ViabilityAssessment(
+            status=ViabilityStatus.UNKNOWN_COMPUTE_BUDGET,
+            strict_feasible=False,
+            solver_status="strict_projection_failed",
+            model_assumptions_valid=False,
+        )
+    if result.status in {SafetyFilterStatus.PASSTHROUGH, SafetyFilterStatus.FILTERED}:
+        return ViabilityAssessment(
+            status=ViabilityStatus.CERTIFIED_VIABLE,
+            strict_feasible=True,
+            solver_status="one_step_strict_sufficient",
+            model_assumptions_valid=True,
+        )
+    if result.status is SafetyFilterStatus.SAFE_STOP_INFEASIBLE:
+        if safe_stop_drift_class == "dynamic_drift":
+            return ViabilityAssessment(
+                status=ViabilityStatus.MODEL_INFEASIBLE_DYNAMIC,
+                strict_feasible=False,
+                solver_status="strict_infeasible_dynamic_drift",
+                model_assumptions_valid=True,
+            )
+        return ViabilityAssessment(
+            status=ViabilityStatus.MODEL_INFEASIBLE_STATIC_OR_SLOW,
+            strict_feasible=False,
+            solver_status="strict_infeasible_static_or_slow",
+            model_assumptions_valid=True,
+        )
+    return ViabilityAssessment(
+        status=ViabilityStatus.MODEL_INFEASIBLE_STATIC_OR_SLOW,
+        strict_feasible=False,
+        solver_status="recovery_relaxed_not_strict",
+        model_assumptions_valid=True,
+    )
 
 
 def filter_joint_velocity(

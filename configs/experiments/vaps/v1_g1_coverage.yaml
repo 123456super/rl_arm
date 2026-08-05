@@ -1,0 +1,29 @@
+# VAPS G1: reset-only viability coverage audit. This is not a training config.
+includes:
+  - ../p3_diagnostics/b4_osqp_strict_frame_corrected_heldout.yaml
+
+env:
+  action_scale: 1.0
+  collision:
+    termination: physical_contact
+  safety_filter:
+    enabled: true
+    viability_monitor_enabled: true
+    prediction_horizon_s: 0.15
+    max_observation_age_s: 0.10
+    control_delay_s: 0.05
+    geometry_margin_m: 0.03
+    tracking_error_bound_m: 0.01
+    joint_acceleration_limit_radps2: 4.0
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+    use_qp_solver: true
+    # 640 iterations leaves seed 10965 indeterminate; 2000 proves primal infeasibility.
+    fallback_projection_iterations: 2000
+    max_filter_compute_time_s: 0.30
+  obstacle:
+    speed_range: [0.05, 0.05]
+
+eval:
+  method: link_fixed

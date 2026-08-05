@@ -1,0 +1,53 @@
+{
+  "protocol": "vaps_g2_strict_execution_v2",
+  "passed": true,
+  "config": "configs/experiments/vaps/v2_g2_strict_execution.yaml",
+  "config_sha256": "fd601e6af85ec4970562e496e8127ca545b57c198b1261f4d666c1d3d33edffb",
+  "resolved_config_sha256": "156d85b146d96aa7177f56ca0e4cb355dfb50735dfa5f8675d84bd0a35c7d2de",
+  "checkpoint_manifest": "configs/experiments/vaps_manifests/v2_b4_selected_checkpoints.json",
+  "checkpoint_manifest_sha256": "eceb42687c92e70930b1222911142a96382b251082ffeb91a7bc5eba5a34502c",
+  "atol": 1e-07,
+  "train_seeds": [
+    4108,
+    4109,
+    4110
+  ],
+  "groups": {
+    "final": {
+      "episodes_per_train_seed": [
+        200,
+        200,
+        200
+      ],
+      "max_abs_differences": {
+        "observation_max_abs_diff": 0.0,
+        "action_max_abs_diff": 0.0,
+        "qdot_cmd_max_abs_diff": 0.0,
+        "qdot_requested_max_abs_diff": 0.0
+      },
+      "result_files": [
+        "outputs/vaps_g2_v2/train_seed_4108_final.json",
+        "outputs/vaps_g2_v2/train_seed_4109_final.json",
+        "outputs/vaps_g2_v2/train_seed_4110_final.json"
+      ]
+    },
+    "validation": {
+      "episodes_per_train_seed": [
+        40,
+        40,
+        40
+      ],
+      "max_abs_differences": {
+        "observation_max_abs_diff": 0.0,
+        "action_max_abs_diff": 0.0,
+        "qdot_cmd_max_abs_diff": 0.0,
+        "qdot_requested_max_abs_diff": 0.0
+      },
+      "result_files": [
+        "outputs/vaps_g2_v2/train_seed_4108_validation.json",
+        "outputs/vaps_g2_v2/train_seed_4109_validation.json",
+        "outputs/vaps_g2_v2/train_seed_4110_validation.json"
+      ]
+    }
+  }
+}
