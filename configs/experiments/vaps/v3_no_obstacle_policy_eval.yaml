@@ -1,0 +1,23 @@
+# VAPS offline policy reachability evaluation.  No training is performed.
+# The actor architecture/command scale stays aligned with the selected B4 V0
+# checkpoints; only the obstacle and runtime safety filter are disabled.
+includes:
+  - ../p3/b4_predictive_nonrobust_filter.yaml
+
+env:
+  collision:
+    termination: physical_contact
+  safety_filter:
+    enabled: false
+    viability_monitor_enabled: false
+    diagnostic_logging: false
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+  obstacle:
+    enabled: false
+
+eval:
+  method: link_fixed
+  episodes: 200
+  seed_manifest: configs/experiments/vaps_manifests/v2_g2_final.json

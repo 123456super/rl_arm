@@ -1,0 +1,21 @@
+{
+  "manifest_version": 1,
+  "protocol": "vaps_g2_constraint_conflict_audit_v1",
+  "source_protocol": "vaps_g2_projection_feasibility_audit_v1",
+  "source_audit": "outputs/vaps_g2_v2/projection_feasibility_audit.json",
+  "source_audit_sha256": "157bc717b1a1fc1ece29074fc97dfe1be5a633b832c9afa6ba4c12683053c765",
+  "required_iteration_budget": 50000,
+  "required_classification": "primal_infeasible",
+  "targets": [
+    {"train_seed": 4108, "seed": 9099, "step": 83},
+    {"train_seed": 4108, "seed": 8212, "step": 158},
+    {"train_seed": 4108, "seed": 8224, "step": 201},
+    {"train_seed": 4109, "seed": 9044, "step": 191},
+    {"train_seed": 4109, "seed": 9181, "step": 216},
+    {"train_seed": 4109, "seed": 8240, "step": 150},
+    {"train_seed": 4110, "seed": 9107, "step": 37},
+    {"train_seed": 4110, "seed": 9151, "step": 106},
+    {"train_seed": 4110, "seed": 9159, "step": 143},
+    {"train_seed": 4110, "seed": 8205, "step": 172}
+  ]
+}

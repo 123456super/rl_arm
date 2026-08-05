@@ -1,0 +1,2537 @@
+{
+  "protocol": "vaps_task_feasibility_precheck_v1",
+  "config": "configs/experiments/vaps/v3_task_feasibility_precheck.yaml",
+  "seed_manifest": "configs/experiments/vaps_manifests/v2_g2_final.json",
+  "seed_count": 200,
+  "executed_seeds": [
+    9003,
+    9011,
+    9019,
+    9027,
+    9035,
+    9043,
+    9051,
+    9059,
+    9067,
+    9075,
+    9083,
+    9091,
+    9099,
+    9107,
+    9115,
+    9123,
+    9131,
+    9139,
+    9147,
+    9155,
+    9163,
+    9171,
+    9179,
+    9187,
+    9195
+  ],
+  "shard": {
+    "index": 2,
+    "count": 8
+  },
+  "actor_loaded": false,
+  "training_performed": false,
+  "runtime_control_modified": false,
+  "candidate_search_is_not_completeness_proof": true,
+  "status_counts": {
+    "ik_status": {
+      "reachable": 25
+    },
+    "no_obstacle_task_status": {
+      "candidate_path_found": 25
+    },
+    "dynamic_obstacle_path_status": {
+      "candidate_path_found": 18,
+      "not_found": 7
+    }
+  },
+  "episodes_detail": [
+    {
+      "seed": 9003,
+      "goal_m": [
+        0.510016679763794,
+        0.4373528063297272,
+        0.2925204932689667
+      ],
+      "initial_joint_positions_rad": [
+        0.15125302970409393,
+        -1.3739030361175537,
+        1.4551796913146973,
+        -1.1280063390731812,
+        -1.1804966926574707,
+        0.006791320163756609
+      ],
+      "obstacle_position_m": [
+        0.6988133788108826,
+        -0.49598777294158936,
+        0.2489803582429886
+      ],
+      "obstacle_velocity_mps": [
+        -0.016565879806876183,
+        0.04283445328474045,
+        0.019768187776207924
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.75,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.48517037742226465,
+              -1.0568269833527562,
+              1.2129694184308912,
+              -1.287132473316394,
+              -1.0818876707599234,
+              0.006791320163756609
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.75,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.75,
+        "min_capsule_clearance_m": 0.48662128455908,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.48517037742226465,
+              -1.0568269833527562,
+              1.2129694184308912,
+              -1.287132473316394,
+              -1.0818876707599234,
+              0.006791320163756609
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.75,
+            "min_capsule_clearance_m": 0.48662128455908,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9011,
+      "goal_m": [
+        0.5608811378479004,
+        0.42477425932884216,
+        0.5830913782119751
+      ],
+      "initial_joint_positions_rad": [
+        -0.08355259150266647,
+        -1.4227557182312012,
+        1.3287568092346191,
+        -0.7803722620010376,
+        -1.1179171800613403,
+        0.16897642612457275
+      ],
+      "obstacle_position_m": [
+        0.4579482674598694,
+        -0.4526648223400116,
+        0.2576884925365448
+      ],
+      "obstacle_velocity_mps": [
+        -0.008940170519053936,
+        0.04865814745426178,
+        0.007242789026349783
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.2000000000000002,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.4114709778637582,
+              -1.0071544237760355,
+              0.5366084317812693,
+              -1.2618833816611579,
+              -0.8453091812331944,
+              0.16897642612457275
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.2000000000000002,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.2000000000000002,
+        "min_capsule_clearance_m": 0.3495231678883451,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.4114709778637582,
+              -1.0071544237760355,
+              0.5366084317812693,
+              -1.2618833816611579,
+              -0.8453091812331944,
+              0.16897642612457275
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.2000000000000002,
+            "min_capsule_clearance_m": 0.3495231678883451,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9019,
+      "goal_m": [
+        0.3202974796295166,
+        0.03634938970208168,
+        0.48585379123687744
+      ],
+      "initial_joint_positions_rad": [
+        0.1653536707162857,
+        -1.3359792232513428,
+        1.3198020458221436,
+        -0.9512550234794617,
+        -1.1728160381317139,
+        0.13843567669391632
+      ],
+      "obstacle_position_m": [
+        0.6244223117828369,
+        0.5185324549674988,
+        0.2500264048576355
+      ],
+      "obstacle_velocity_mps": [
+        -0.01646929606795311,
+        -0.04536140710115433,
+        0.013080728240311146
+      ],
+      "obstacle_speed_mps": 0.05000000447034836,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 31,
+        "rejected_reason_counts": {
+          "position_residual": 1
+        },
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.9,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 31,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.2855713937665117,
+              -1.8465422066246415,
+              1.570309810185649,
+              -0.7336118473678247,
+              -1.338381973628643,
+              0.13843567669391632
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.9,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.9,
+        "min_capsule_clearance_m": 0.21549377633750594,
+        "required_clearance_m": 0.16250000022351743,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 31,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.2855713937665117,
+              -1.8465422066246415,
+              1.570309810185649,
+              -0.7336118473678247,
+              -1.338381973628643,
+              0.13843567669391632
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.9,
+            "min_capsule_clearance_m": 0.21549377633750594,
+            "required_clearance_m": 0.16250000022351743,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9027,
+      "goal_m": [
+        0.6487277150154114,
+        0.44578102231025696,
+        0.2878356873989105
+      ],
+      "initial_joint_positions_rad": [
+        -0.10856086760759354,
+        -1.3153750896453857,
+        1.2561767101287842,
+        -0.8936020135879517,
+        -1.2118072509765625,
+        -0.07642484456300735
+      ],
+      "obstacle_position_m": [
+        0.4671536386013031,
+        0.5631759762763977,
+        0.4029713273048401
+      ],
+      "obstacle_velocity_mps": [
+        -0.010330664925277233,
+        -0.048760246485471725,
+        0.0039643715135753155
+      ],
+      "obstacle_speed_mps": 0.05000000447034836,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.9500000000000001,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.4061628703185293,
+              -0.7625184805482086,
+              0.760637254259891,
+              -1.2535597742917892,
+              -1.0220159754304285,
+              -0.07642484456300735
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.9500000000000001,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "not_found",
+        "reason": "candidate_capsule_clearance_violation",
+        "min_capsule_clearance_m": 0.1447895847043638,
+        "required_clearance_m": 0.16250000022351743,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 0,
+        "candidate_paths": []
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": false,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9035,
+      "goal_m": [
+        0.48136118054389954,
+        0.24405716359615326,
+        0.23359155654907227
+      ],
+      "initial_joint_positions_rad": [
+        0.07647380232810974,
+        -1.4600248336791992,
+        1.5450142621994019,
+        -0.7459602952003479,
+        -0.8917062282562256,
+        0.0005332888104021549
+      ],
+      "obstacle_position_m": [
+        0.6194106340408325,
+        -0.5089532732963562,
+        0.3095458745956421
+      ],
+      "obstacle_velocity_mps": [
+        -0.01842445507645607,
+        0.04633026570081711,
+        0.0037478399462997913
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.65,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.15836359791944066,
+              -1.1918029022866667,
+              1.5510275254036805,
+              -0.8118593726210512,
+              -0.8514076357593121,
+              0.0005332888104021549
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.65,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.65,
+        "min_capsule_clearance_m": 0.4134303485052503,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.15836359791944066,
+              -1.1918029022866667,
+              1.5510275254036805,
+              -0.8118593726210512,
+              -0.8514076357593121,
+              0.0005332888104021549
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.65,
+            "min_capsule_clearance_m": 0.4134303485052503,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9043,
+      "goal_m": [
+        0.6448178291320801,
+        -0.2675127685070038,
+        0.2827971577644348
+      ],
+      "initial_joint_positions_rad": [
+        0.02165115624666214,
+        -1.0386302471160889,
+        1.2279002666473389,
+        -0.9338349103927612,
+        -1.3005304336547852,
+        -0.1837511658668518
+      ],
+      "obstacle_position_m": [
+        0.5132134556770325,
+        -0.6020484566688538,
+        0.40568995475769043
+      ],
+      "obstacle_velocity_mps": [
+        -0.0032606397289782763,
+        0.049603164196014404,
+        -0.005375328939408064
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.9500000000000001,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.5773136617639913,
+              -0.9258390485833962,
+              0.9961179285310511,
+              -1.0648937359592872,
+              -1.3487911039340206,
+              -0.1837511658668518
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.9500000000000001,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "not_found",
+        "reason": "candidate_capsule_clearance_violation",
+        "min_capsule_clearance_m": 0.14414904396353845,
+        "required_clearance_m": 0.1625000000372529,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 0,
+        "candidate_paths": []
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": false,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9051,
+      "goal_m": [
+        0.4790661036968231,
+        0.41221868991851807,
+        0.4971853196620941
+      ],
+      "initial_joint_positions_rad": [
+        0.2010629028081894,
+        -1.1999708414077759,
+        1.5221844911575317,
+        -0.8751529455184937,
+        -1.0173232555389404,
+        -0.16708344221115112
+      ],
+      "obstacle_position_m": [
+        0.32067763805389404,
+        -0.5506490468978882,
+        0.5849916338920593
+      ],
+      "obstacle_velocity_mps": [
+        0.015125534497201443,
+        0.047017764300107956,
+        -0.0077812704257667065
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.9500000000000001,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.44965824334192256,
+              -1.209674356226941,
+              0.9692669236623731,
+              -1.0803991290403872,
+              -0.8758909564529135,
+              -0.16708344221115112
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.9500000000000001,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.9500000000000001,
+        "min_capsule_clearance_m": 0.48788757092031015,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.44965824334192256,
+              -1.209674356226941,
+              0.9692669236623731,
+              -1.0803991290403872,
+              -0.8758909564529135,
+              -0.16708344221115112
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.9500000000000001,
+            "min_capsule_clearance_m": 0.48788757092031015,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9059,
+      "goal_m": [
+        0.7489269971847534,
+        -0.43877795338630676,
+        0.407252699136734
+      ],
+      "initial_joint_positions_rad": [
+        0.04428970441222191,
+        -1.1734699010849,
+        1.2263906002044678,
+        -0.9262760877609253,
+        -1.196654200553894,
+        -0.11916439980268478
+      ],
+      "obstacle_position_m": [
+        0.5147643089294434,
+        0.5971167683601379,
+        0.5382298231124878
+      ],
+      "obstacle_velocity_mps": [
+        0.0016976631013676524,
+        -0.04693397134542465,
+        -0.01715576834976673
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 29,
+        "rejected_reason_counts": {
+          "position_residual": 3
+        },
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.5,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 29,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.6982041773137898,
+              -0.5552274677525577,
+              0.2431130329066428,
+              -1.6885992463888249,
+              -1.13179547102339,
+              -0.11787064665458569
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.5,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.5,
+        "min_capsule_clearance_m": 0.34430635700742535,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 29,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.6982041773137898,
+              -0.5552274677525577,
+              0.2431130329066428,
+              -1.6885992463888249,
+              -1.13179547102339,
+              -0.11787064665458569
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.5,
+            "min_capsule_clearance_m": 0.34430635700742535,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9067,
+      "goal_m": [
+        0.3106544017791748,
+        0.30032098293304443,
+        0.7023636102676392
+      ],
+      "initial_joint_positions_rad": [
+        -0.21693238615989685,
+        -1.414024829864502,
+        1.3035264015197754,
+        -0.8465074896812439,
+        -1.1834226846694946,
+        0.11082123965024948
+      ],
+      "obstacle_position_m": [
+        0.3749278783798218,
+        0.5487990379333496,
+        0.5112088322639465
+      ],
+      "obstacle_velocity_mps": [
+        0.011740006506443024,
+        -0.048500966280698776,
+        0.00313502736389637
+      ],
+      "obstacle_speed_mps": 0.04999999701976776,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.0,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.4012467474771459,
+              -1.580650431296476,
+              0.9006065879123079,
+              -0.974796618760039,
+              -1.003810953452035,
+              0.11082123965024948
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.0,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.0,
+        "min_capsule_clearance_m": 0.16274225135157525,
+        "required_clearance_m": 0.1624999998509884,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 5,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.4011043229713484,
+              -1.5783268001137387,
+              0.8971039358970925,
+              -0.9844915652922875,
+              -1.0022141001186298,
+              0.10280791169169846
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.0,
+            "min_capsule_clearance_m": 0.16274225135157525,
+            "required_clearance_m": 0.1624999998509884,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9075,
+      "goal_m": [
+        0.5016101002693176,
+        0.3816014230251312,
+        0.31070077419281006
+      ],
+      "initial_joint_positions_rad": [
+        -0.03534971550107002,
+        -1.070044755935669,
+        1.3018076419830322,
+        -1.0518040657043457,
+        -1.186956524848938,
+        0.12586836516857147
+      ],
+      "obstacle_position_m": [
+        0.671245813369751,
+        -0.4423958957195282,
+        0.2351405918598175
+      ],
+      "obstacle_velocity_mps": [
+        -0.02080993354320526,
+        0.04105299711227417,
+        0.019534537568688393
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.8500000000000001,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.4161714365918136,
+              -1.1181006778825662,
+              1.2351324741511251,
+              -1.0669421153755605,
+              -1.1216553846597184,
+              0.12586836516857147
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.8500000000000001,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.8500000000000001,
+        "min_capsule_clearance_m": 0.2854847378029657,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.4161714365918136,
+              -1.1181006778825662,
+              1.2351324741511251,
+              -1.0669421153755605,
+              -1.1216553846597184,
+              0.12586836516857147
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.8500000000000001,
+            "min_capsule_clearance_m": 0.2854847378029657,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9083,
+      "goal_m": [
+        0.6214098930358887,
+        -0.1075906753540039,
+        0.5167578458786011
+      ],
+      "initial_joint_positions_rad": [
+        0.1442902833223343,
+        -1.2184122800827026,
+        1.3249166011810303,
+        -1.1328637599945068,
+        -1.0396194458007812,
+        0.16157658398151398
+      ],
+      "obstacle_position_m": [
+        0.43107888102531433,
+        -0.4336356222629547,
+        0.43096837401390076
+      ],
+      "obstacle_velocity_mps": [
+        0.014137725345790386,
+        0.04774351418018341,
+        -0.0045477175153791904
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.9500000000000001,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.41203833323629663,
+              -1.2400676304439524,
+              0.9834795417595088,
+              -1.2702243539878901,
+              -1.057181403199479,
+              0.16157658398151398
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.9500000000000001,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "not_found",
+        "reason": "candidate_capsule_clearance_violation",
+        "min_capsule_clearance_m": 0.16035358803288252,
+        "required_clearance_m": 0.1625000000372529,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 0,
+        "candidate_paths": []
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": false,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9091,
+      "goal_m": [
+        0.42203179001808167,
+        0.14936409890651703,
+        0.30664151906967163
+      ],
+      "initial_joint_positions_rad": [
+        -0.17099536955356598,
+        -1.1265360116958618,
+        1.189074158668518,
+        -0.7372093796730042,
+        -1.03488028049469,
+        -0.038408514112234116
+      ],
+      "obstacle_position_m": [
+        0.23921851813793182,
+        0.6123613119125366,
+        0.30890780687332153
+      ],
+      "obstacle_velocity_mps": [
+        0.003997833002358675,
+        -0.0497368685901165,
+        -0.003203384578227997
+      ],
+      "obstacle_speed_mps": 0.05000000819563866,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.8,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.012712672951722622,
+              -1.3704592322389795,
+              1.5900940684393685,
+              -0.5404518228295481,
+              -1.1128939997024347,
+              -0.038408514112234116
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.8,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.8,
+        "min_capsule_clearance_m": 0.29471979073569804,
+        "required_clearance_m": 0.16250000040978194,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.012712672951722622,
+              -1.3704592322389795,
+              1.5900940684393685,
+              -0.5404518228295481,
+              -1.1128939997024347,
+              -0.038408514112234116
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.8,
+            "min_capsule_clearance_m": 0.29471979073569804,
+            "required_clearance_m": 0.16250000040978194,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9099,
+      "goal_m": [
+        0.6537061333656311,
+        -0.31173285841941833,
+        0.18918417394161224
+      ],
+      "initial_joint_positions_rad": [
+        -0.1274399310350418,
+        -1.1964645385742188,
+        1.2015562057495117,
+        -1.0739264488220215,
+        -1.0230025053024292,
+        0.09398630261421204
+      ],
+      "obstacle_position_m": [
+        0.5216007828712463,
+        0.4855480492115021,
+        0.2766352891921997
+      ],
+      "obstacle_velocity_mps": [
+        -0.003136345883831382,
+        -0.04711495712399483,
+        0.016442153602838516
+      ],
+      "obstacle_speed_mps": 0.05000000447034836,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.9,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.6553754974175522,
+              -0.8240552537032289,
+              1.078540539083314,
+              -1.205907328818692,
+              -1.0438754107801949,
+              0.09398630261421204
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.9,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.9,
+        "min_capsule_clearance_m": 0.3103330156893877,
+        "required_clearance_m": 0.16250000022351743,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.6553754974175522,
+              -0.8240552537032289,
+              1.078540539083314,
+              -1.205907328818692,
+              -1.0438754107801949,
+              0.09398630261421204
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.9,
+            "min_capsule_clearance_m": 0.3103330156893877,
+            "required_clearance_m": 0.16250000022351743,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9107,
+      "goal_m": [
+        0.4459441900253296,
+        0.3056167662143707,
+        0.7113847732543945
+      ],
+      "initial_joint_positions_rad": [
+        -0.12838038802146912,
+        -1.314511775970459,
+        1.2981714010238647,
+        -0.8601407408714294,
+        -1.0756402015686035,
+        -0.19866526126861572
+      ],
+      "obstacle_position_m": [
+        0.43055814504623413,
+        0.4975900948047638,
+        0.48937225341796875
+      ],
+      "obstacle_velocity_mps": [
+        -0.004049763083457947,
+        -0.04936634376645088,
+        0.006823777686804533
+      ],
+      "obstacle_speed_mps": 0.05000000447034836,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.0,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              0.2949799196771276,
+              -1.3372883732659082,
+              0.6652892357536458,
+              -1.1458511155171338,
+              -0.8817696337170905,
+              -0.19866526126861572
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.0,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "not_found",
+        "reason": "candidate_capsule_clearance_violation",
+        "min_capsule_clearance_m": 0.15431468585160754,
+        "required_clearance_m": 0.16250000022351743,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 0,
+        "candidate_paths": []
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": false,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9115,
+      "goal_m": [
+        0.4112806022167206,
+        -0.2843031585216522,
+        0.6597631573677063
+      ],
+      "initial_joint_positions_rad": [
+        0.12395884841680527,
+        -1.2255730628967285,
+        1.364723563194275,
+        -1.1334019899368286,
+        -1.2911224365234375,
+        0.04711027070879936
+      ],
+      "obstacle_position_m": [
+        0.30488482117652893,
+        0.420661062002182,
+        0.5071985125541687
+      ],
+      "obstacle_velocity_mps": [
+        0.020908111706376076,
+        -0.04529952257871628,
+        -0.0032869738060981035
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.5,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.8494404386440582,
+              -1.4873820688626518,
+              0.9455818939939382,
+              -1.2561280330024789,
+              -1.4281305841270326,
+              0.04711027070879936
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.5,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "not_found",
+        "reason": "candidate_capsule_clearance_violation",
+        "min_capsule_clearance_m": 0.12628822784288798,
+        "required_clearance_m": 0.1625000000372529,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 0,
+        "candidate_paths": []
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": false,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9123,
+      "goal_m": [
+        0.33779558539390564,
+        0.07024087011814117,
+        0.572376012802124
+      ],
+      "initial_joint_positions_rad": [
+        0.11752092093229294,
+        -1.339440107345581,
+        1.4413042068481445,
+        -0.8190352916717529,
+        -1.0463836193084717,
+        -0.05405116826295853
+      ],
+      "obstacle_position_m": [
+        0.2209276556968689,
+        0.6075159311294556,
+        0.294877290725708
+      ],
+      "obstacle_velocity_mps": [
+        0.019320152699947357,
+        -0.04611235484480858,
+        0.0006184439989738166
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.8500000000000001,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.21512957840367358,
+              -1.797237325049573,
+              1.3367381298098535,
+              -0.7372461750141218,
+              -1.1370388104997233,
+              -0.05405116826295853
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.8500000000000001,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.8500000000000001,
+        "min_capsule_clearance_m": 0.31317442808364887,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.21512957840367358,
+              -1.797237325049573,
+              1.3367381298098535,
+              -0.7372461750141218,
+              -1.1370388104997233,
+              -0.05405116826295853
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.8500000000000001,
+            "min_capsule_clearance_m": 0.31317442808364887,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9131,
+      "goal_m": [
+        0.48283451795578003,
+        -0.21306739747524261,
+        0.5221275687217712
+      ],
+      "initial_joint_positions_rad": [
+        -0.009165632538497448,
+        -1.4695287942886353,
+        1.2903603315353394,
+        -0.744956910610199,
+        -1.0118236541748047,
+        -0.02785615250468254
+      ],
+      "obstacle_position_m": [
+        0.2339034080505371,
+        -0.4447101950645447,
+        0.31768038868904114
+      ],
+      "obstacle_velocity_mps": [
+        0.018157364800572395,
+        0.04614624008536339,
+        -0.006390188820660114
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.05,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.7017952833907247,
+              -1.3993926192593429,
+              1.0955619525452236,
+              -0.8396628470986184,
+              -1.0753345288354637,
+              -0.02785615250468254
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.05,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.05,
+        "min_capsule_clearance_m": 0.1820455678097005,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.7017952833907247,
+              -1.3993926192593429,
+              1.0955619525452236,
+              -0.8396628470986184,
+              -1.0753345288354637,
+              -0.02785615250468254
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.05,
+            "min_capsule_clearance_m": 0.1820455678097005,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9139,
+      "goal_m": [
+        0.612162172794342,
+        0.07028570026159286,
+        0.3791757822036743
+      ],
+      "initial_joint_positions_rad": [
+        0.0398491732776165,
+        -1.3655493259429932,
+        1.542681336402893,
+        -1.0516510009765625,
+        -1.0566960573196411,
+        -0.125742569565773
+      ],
+      "obstacle_position_m": [
+        0.323164701461792,
+        0.4542323350906372,
+        0.43306222558021545
+      ],
+      "obstacle_velocity_mps": [
+        0.015801334753632545,
+        -0.04724450036883354,
+        -0.004274915903806686
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.7000000000000001,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.13627299696759848,
+              -1.2292979980256942,
+              1.2526314781074164,
+              -1.1863679380529806,
+              -1.025459131068352,
+              -0.125742569565773
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.7000000000000001,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.7000000000000001,
+        "min_capsule_clearance_m": 0.16921961203412192,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.13627299696759848,
+              -1.2292979980256942,
+              1.2526314781074164,
+              -1.1863679380529806,
+              -1.025459131068352,
+              -0.125742569565773
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.7000000000000001,
+            "min_capsule_clearance_m": 0.16921961203412192,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9147,
+      "goal_m": [
+        0.44669196009635925,
+        0.03104052133858204,
+        0.7035029530525208
+      ],
+      "initial_joint_positions_rad": [
+        -0.15281498432159424,
+        -1.043565273284912,
+        1.424712896347046,
+        -0.8213448524475098,
+        -1.3190838098526,
+        0.1982097029685974
+      ],
+      "obstacle_position_m": [
+        0.699817955493927,
+        0.4682878851890564,
+        0.30572420358657837
+      ],
+      "obstacle_velocity_mps": [
+        -0.02517862431704998,
+        -0.04303714632987976,
+        0.0037203417159616947
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.0,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.23353640073183451,
+              -1.5114541611245706,
+              0.8012825383514085,
+              -0.9612805224141444,
+              -1.2821597063481338,
+              0.1982097029685974
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.0,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.0,
+        "min_capsule_clearance_m": 0.31527553572744343,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.23353640073183451,
+              -1.5114541611245706,
+              0.8012825383514085,
+              -0.9612805224141444,
+              -1.2821597063481338,
+              0.1982097029685974
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.0,
+            "min_capsule_clearance_m": 0.31527553572744343,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9155,
+      "goal_m": [
+        0.4089789092540741,
+        0.035807590931653976,
+        0.5789486169815063
+      ],
+      "initial_joint_positions_rad": [
+        0.20875303447246552,
+        -1.2436875104904175,
+        1.3108798265457153,
+        -1.0843786001205444,
+        -1.0777658224105835,
+        0.0646883100271225
+      ],
+      "obstacle_position_m": [
+        0.6830320358276367,
+        0.5690826177597046,
+        0.5844652056694031
+      ],
+      "obstacle_velocity_mps": [
+        -0.013830053620040417,
+        -0.04474267363548279,
+        -0.017516357824206352
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 30,
+        "rejected_reason_counts": {
+          "position_residual": 2
+        },
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.8500000000000001,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 30,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.25664261087750645,
+              -1.6914225753839756,
+              1.2732974881285848,
+              -0.9979170566021539,
+              -1.1761782131858003,
+              0.0646883100271225
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.8500000000000001,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 0.8500000000000001,
+        "min_capsule_clearance_m": 0.2608444312998167,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 30,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.25664261087750645,
+              -1.6914225753839756,
+              1.2732974881285848,
+              -0.9979170566021539,
+              -1.1761782131858003,
+              0.0646883100271225
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 0.8500000000000001,
+            "min_capsule_clearance_m": 0.2608444312998167,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9163,
+      "goal_m": [
+        0.3143889605998993,
+        -0.12407944351434708,
+        0.37925755977630615
+      ],
+      "initial_joint_positions_rad": [
+        -0.11420276761054993,
+        -1.3841642141342163,
+        1.2464721202850342,
+        -0.9502986669540405,
+        -1.1933696269989014,
+        -0.06682969629764557
+      ],
+      "obstacle_position_m": [
+        0.34689220786094666,
+        0.5168611407279968,
+        0.39051181077957153
+      ],
+      "obstacle_velocity_mps": [
+        0.0038124658167362213,
+        -0.049436260014772415,
+        -0.006443697959184647
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 15,
+        "rejected_reason_counts": {
+          "position_residual": 7,
+          "self_collision": 10
+        },
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.0,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 15,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.7386302291403644,
+              -1.735800530614884,
+              1.7456541413015707,
+              -0.6865957626870602,
+              -1.4020938941548038,
+              -0.06682969629764557
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.0,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.0,
+        "min_capsule_clearance_m": 0.25654741916742924,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 15,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.7386302291403644,
+              -1.735800530614884,
+              1.7456541413015707,
+              -0.6865957626870602,
+              -1.4020938941548038,
+              -0.06682969629764557
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.0,
+            "min_capsule_clearance_m": 0.25654741916742924,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9171,
+      "goal_m": [
+        0.7118353247642517,
+        -0.3418526351451874,
+        0.2088886946439743
+      ],
+      "initial_joint_positions_rad": [
+        0.1839391142129898,
+        -1.0949652194976807,
+        1.3288116455078125,
+        -0.8622553944587708,
+        -1.282248854637146,
+        0.11430715769529343
+      ],
+      "obstacle_position_m": [
+        0.5140170454978943,
+        0.4895577132701874,
+        0.30619606375694275
+      ],
+      "obstacle_velocity_mps": [
+        0.009595959447324276,
+        -0.04834917187690735,
+        0.00838303193449974
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.2000000000000002,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.613881032244354,
+              -0.6775782210439425,
+              0.7666441706844855,
+              -1.2272252360955276,
+              -1.3120324009816493,
+              0.11430715769529343
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.2000000000000002,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "not_found",
+        "reason": "candidate_capsule_clearance_violation",
+        "min_capsule_clearance_m": 0.13760500964489827,
+        "required_clearance_m": 0.1625000000372529,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 0,
+        "candidate_paths": []
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": false,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9179,
+      "goal_m": [
+        0.3278859257698059,
+        -0.26766660809516907,
+        0.5938667058944702
+      ],
+      "initial_joint_positions_rad": [
+        0.1149156466126442,
+        -1.295822024345398,
+        1.2806386947631836,
+        -0.9580742716789246,
+        -0.9798239469528198,
+        -0.051994599401950836
+      ],
+      "obstacle_position_m": [
+        0.6076850891113281,
+        -0.5471439957618713,
+        0.19723160564899445
+      ],
+      "obstacle_velocity_mps": [
+        -0.013966529630124569,
+        0.04341305419802666,
+        0.0204998217523098
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.7000000000000002,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -1.0162502292217068,
+              -1.641236428355963,
+              1.1838368706386526,
+              -0.916264997737283,
+              -1.1788697777011514,
+              -0.051994599401950836
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.7000000000000002,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.7000000000000002,
+        "min_capsule_clearance_m": 0.32785409213954425,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -1.0162502292217068,
+              -1.641236428355963,
+              1.1838368706386526,
+              -0.916264997737283,
+              -1.1788697777011514,
+              -0.051994599401950836
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.7000000000000002,
+            "min_capsule_clearance_m": 0.32785409213954425,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9187,
+      "goal_m": [
+        0.36317986249923706,
+        -0.1891913115978241,
+        0.5037829875946045
+      ],
+      "initial_joint_positions_rad": [
+        0.09765540063381195,
+        -1.1875834465026855,
+        1.175355315208435,
+        -0.8578783869743347,
+        -1.1021308898925781,
+        0.002415422350168228
+      ],
+      "obstacle_position_m": [
+        0.6306907534599304,
+        -0.6137727499008179,
+        0.479031503200531
+      ],
+      "obstacle_velocity_mps": [
+        -0.0006013204692862928,
+        0.04900633916258812,
+        -0.009900360368192196
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 32,
+        "rejected_reason_counts": {},
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.35,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.7987581025556514,
+              -1.613990914991335,
+              1.3286122903333222,
+              -0.688588038257399,
+              -1.3039117226762886,
+              0.002415422350168228
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.35,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.35,
+        "min_capsule_clearance_m": 0.27267353453181237,
+        "required_clearance_m": 0.1625000000372529,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 32,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.7987581025556514,
+              -1.613990914991335,
+              1.3286122903333222,
+              -0.688588038257399,
+              -1.3039117226762886,
+              0.002415422350168228
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.35,
+            "min_capsule_clearance_m": 0.27267353453181237,
+            "required_clearance_m": 0.1625000000372529,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": true,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    },
+    {
+      "seed": 9195,
+      "goal_m": [
+        0.6208875179290771,
+        -0.33262091875076294,
+        0.6921948194503784
+      ],
+      "initial_joint_positions_rad": [
+        0.12326984852552414,
+        -1.186214566230774,
+        1.1921017169952393,
+        -0.9828479886054993,
+        -0.9300539493560791,
+        -0.04320244863629341
+      ],
+      "obstacle_position_m": [
+        0.4951363801956177,
+        -0.5960928201675415,
+        0.5156615972518921
+      ],
+      "obstacle_velocity_mps": [
+        -0.008725479245185852,
+        0.049051206558942795,
+        0.004224340431392193
+      ],
+      "obstacle_speed_mps": 0.05000000074505806,
+      "ik": {
+        "attempts": 32,
+        "accepted_candidate_count": 29,
+        "rejected_reason_counts": {
+          "position_residual": 3
+        },
+        "status": "reachable"
+      },
+      "no_obstacle_task": {
+        "status": "candidate_path_found",
+        "reason": "candidate_path_found",
+        "duration_s": 1.6500000000000001,
+        "min_capsule_clearance_m": null,
+        "required_clearance_m": null,
+        "max_workspace_violation_m": 0.0,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 29,
+        "candidate_paths": [
+          {
+            "goal_q_rad": [
+              -0.6916139888808923,
+              -0.9730358161479571,
+              0.423090483880422,
+              -2.0677244170159317,
+              -1.1759066609661692,
+              -0.6622668035328878
+            ],
+            "status": "candidate_path_found",
+            "reason": "candidate_path_found",
+            "duration_s": 1.6500000000000001,
+            "min_capsule_clearance_m": null,
+            "required_clearance_m": null,
+            "max_workspace_violation_m": 0.0,
+            "max_position_violation_rad": 0.0,
+            "max_velocity_violation_radps": 0.0,
+            "max_acceleration_violation_radps2": 0.0
+          }
+        ]
+      },
+      "dynamic_obstacle_path": {
+        "status": "not_found",
+        "reason": "candidate_capsule_clearance_violation",
+        "min_capsule_clearance_m": 0.15273735430526575,
+        "required_clearance_m": 0.1625000000372529,
+        "max_position_violation_rad": 0.0,
+        "max_velocity_violation_radps": 0.0,
+        "max_acceleration_violation_radps2": 0.0,
+        "candidate_count": 0,
+        "candidate_paths": []
+      },
+      "precheck_interpretation": {
+        "ik_reachable": true,
+        "no_obstacle_candidate_found": true,
+        "dynamic_obstacle_candidate_found": false,
+        "candidate_search_is_not_completeness_proof": true
+      }
+    }
+  ]
+}

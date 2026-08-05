@@ -1,0 +1,14 @@
+# VAPS task-feasibility precheck. Offline labels only; this is not a training config.
+includes:
+  - v2_g2_strict_execution.yaml
+
+precheck:
+  protocol: vaps_task_feasibility_precheck_v1
+  ik_attempts: 32
+  ik_position_tolerance_m: 0.005
+  path_dt_s: 0.05
+  path_max_duration_s: 12.0
+  path_joint_tolerance_rad: 1.0e-7
+  path_workspace_tolerance_m: 1.0e-6
+  path_clearance_tolerance_m: 1.0e-6
+  self_collision_distance_m: 0.0

@@ -116,6 +116,18 @@ V2 的训练记录必须区分 `qdot_requested` 与严格过滤后的 `qdot_cmd`
 
 四类种子互斥。所有方法使用同一 validation/final 清单；不得按方法、checkpoint 或 `certified_viable` 标签重新采样。训练重复的统计单位是 train seed，episode 只用于计算每个 train seed 的比率。
 
+### 6.1 任务可行性预检查标签
+
+在任何后继训练或性能比较前，必须对每个 validation/final reset 生成以下三个**离线标签**。标签用于解释样本与分层报告，不得用于删除 episode、重新采样或改变全分布主结果。
+
+1. `ik`：以固定 URDF、关节限位和末端位置容差做多初值 IK。`reachable` 表示至少找到一个满足限位、末端误差和自碰撞检查的关节解；`not_reachable` 表示当前 IK 搜索未找到，不可写成工作空间中的绝对不可达。
+2. `no_obstacle_task`：对 IK 候选生成满足同一关节位置、速度、加速度和末端工作空间约束的平滑关节路径。`candidate_path_found` 表示无障碍时找到候选任务路径；`not_found` 仅表示该固定候选搜索未找到。
+3. `dynamic_obstacle_path`：沿 reset 时确定的障碍物轨迹和反弹边界，对同一候选路径检查全部胶囊的保守净距。净距必须包含 `d_safe`、几何裕度、跟踪误差和控制时延位移。`candidate_path_found` 只是存在性下界；`not_found` 不得解释为物理上绝对无路可走。
+
+预检查实现为 `configs/experiments/vaps/v3_task_feasibility_precheck.yaml` 和 `scripts/audit_vaps_task_feasibility.py`。它不加载 actor、不执行策略命令、不启用 recovery/relaxation，也不修改运行时控制。输出必须保留每个 seed 的目标、初始关节状态、障碍物初始状态、三个标签、候选数和失败原因。
+
+正式报告必须同时给出全部 reset 分布及按这三层标签分组的结果。不能因某一标签为 `not_found` 而将其从 physical contact、success、不可行率或覆盖率的全分布统计中移除。
+
 每次 final 评估必须同时输出：
 
 1. 全部 200 个无条件 reset episode 的结果；
@@ -138,6 +150,13 @@ V2 的训练记录必须区分 `qdot_requested` 与严格过滤后的 `qdot_cmd`
 - 报告初始 `h_min`、`certified_viable` 覆盖率、初始不安全率和各不可行类别。
 - 对每个自然出现的状态抽样人工复核至少 20 个 trace，检查单位、连杆名称、障碍物速度和状态标签一致；自然计数为零的状态不得伪造样本，必须记录零计数并引用 G0 故障注入测试作为行为证据。
 - 通过条件：无 NaN/Inf、状态标签互斥、观测无效必停机、V1 不改变 V0 命令；G1 不形成性能结论。
+
+### G1-T：无学习的任务可行性预检查
+
+- 在 validation、final（以及需要报告覆盖率时的 1000-reset coverage）清单上运行三层任务可行性预检查，不加载 actor，不执行策略动作。
+- 固定记录 `ik`、`no_obstacle_task` 和 `dynamic_obstacle_path` 的状态、候选数量、失败原因和使用的几何/运动学边界。
+- 通过条件是所有 seed 均有完整标签、输入和路径检查无 NaN/Inf、候选搜索失败被标记为 `not_found` 而不是绝对不可达；G1-T 不形成性能结论，也不授权 G3。
+- 任一方法不得根据这些标签删除 final episode。条件子集只用于解释性分组，全分布结果必须保留。
 
 ### G2：V0/V1 严格执行层比较
 
@@ -227,3 +246,7 @@ termination_reason
 | 2026-08-05 | `do_not_advance` | 仅重放并审计 G2 v2 trace 中冻结的 11 次 `safe_stop_projection_failed` | G3/G4、V2 训练、checkpoint 选择、最终比较、OOD、真机、recovery/relaxation | G2 v2 的 V0/V1 执行等价性通过，但 11 次双方同步投影失败尚未完成残差、约束和零命令 fail-safe 审计；不得将同步性等同于严格可行性 |
 | 2026-08-05 | `do_not_advance` | 对已冻结的 11 次投影失败执行原矩阵、无时限的离线 OSQP 迭代上限归因（`2000/10000/50000`）及独立残差复核 | G3/G4、V2 训练、checkpoint 选择、最终比较、OOD、真机、recovery/relaxation，以及运行时控制改动 | 定点回放已确认 11/11 为零命令 fail-safe，但零命令均不满足瞬时严格约束；必须区分严格问题实际不可行与当前 OSQP 迭代上限不足，且该数值诊断不构成阶段授权 |
 | 2026-08-05 | `do_not_advance` | 仅对 10 个经 50000 次 OSQP 迭代判为 primal infeasible 的冻结事件进行离线约束冲突归因 | G3/G4、V2 训练、checkpoint 选择、最终比较、OOD、真机、recovery/relaxation、运行时迭代上限调整及环境命令改动 | 数值归因完整覆盖 11 个冻结事件：`2000` 次均未定，`10000` 次为 9 个不可行/2 个未定，`50000` 次为 10 个严格不可行/1 个严格可行；唯一可行事件 `(4110,9119,155)` 在 34625 次迭代获得最大原约束残差 `1.60e-08`。因此运行时投影失败不能全归咎于迭代上限，且提高上限不能解除多数严格约束冲突或授权 G3 |
+| 2026-08-05 | `do_not_advance` | 实现离线三层任务可行性预检查标签，不运行训练、策略评估或运行时控制改动 | G3/G4、V2 训练、checkpoint 选择、最终比较、OOD、真机、recovery/relaxation、按标签删样本 | 当前随机目标仅按笛卡尔工作空间采样，尚未记录 IK、无障碍候选路径和给定动态障碍轨迹下的候选路径可行性；必须先将目标/场景问题与局部严格控制不可行区分 |
+| 2026-08-05 | `do_not_advance` | 将三层任务可行性标签与既有 G2 v2 trace 做离线解释性对照 | G3/G4、V2 训练、checkpoint 选择、最终比较、OOD、真机、recovery/relaxation、按标签删样本 | final 交叉分组显示“动态候选路径未找到”组的 safe-stop 为 `97/120=80.8%`，而三层候选均找到组为 `227/447=50.8%`；但 G2 trace 没有 `success` 字段，不能据此声称策略到达率或推进训练 |
+| 2026-08-05 | `do_not_advance` | 对三个已冻结 V0 actor 在 G2 final seed 上执行无障碍到达能力诊断 | G3/G4、V2 训练、checkpoint 选择、动态障碍最终比较、OOD、真机、recovery/relaxation、按标签删样本 | 用户要求补齐既有策略的真实无障碍 `success` 证据；诊断固定关闭障碍物和安全过滤器，保留原目标/初始状态及 200-seed 清单，只用于区分基础到达能力与动态避障问题 |
+| 2026-08-05 | `do_not_advance` | 归档冻结 B4 actor 的无障碍实际执行结果 | G3/G4、V2 训练、checkpoint 选择、动态避障主比较、OOD、真机、recovery/relaxation | 三个 actor 在 600 个无障碍 episode 中仅 `31/600=5.17%` success，`569/600` 超时未到达，且无 physical contact；基础 reaching 未通过，不能在其上评估或宣称安全协同收益 |
