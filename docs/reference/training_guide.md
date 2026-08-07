@@ -1,6 +1,6 @@
 # 阶段一复现与新研究开发指南（状态更新至 2026-07-31）
 
-> 当前执行边界（2026-07-31）：阶段一只复现，不改主结论；P3 只做仿真诊断，不训练扩展、不进入 P4/OOD、不做真机。除非后续文档明确写出新的日期和通过门槛，否则不要把任一 P3 配置当作部署候选。
+> 当前执行边界（2026-08-07）：阶段一只复现，不改主结论；独立 reaching v2 基础 actor 已冻结，但 P3 只保留安全方法诊断，不进入 P4/OOD、不做真机。除非后续文档明确写出新的日期和通过门槛，否则不要把任一 P3 配置当作部署候选。
 
 > **2026-08-03：本文件保留为历史运行参考。新实验唯一执行协议见 [current/next_experiment_protocol.md](../current/next_experiment_protocol.md)，当前状态见 [current/research_status.md](../current/research_status.md)。**
 
@@ -11,6 +11,7 @@
 | 2026-07-27--07-31 / P0 | 已冻结 | 复现阶段一主表、检查文档和输出归档 |
 | 2026-07-29--07-31 / P1-P2 | 开发验证完成 | 运行测试、smoke test、trace 和几何/漂移审计 |
 | 2026-07-31 / P3 | 未冻结 | 仅分析固定预算硬约束 escape；不可行时记录 safe-stop，并区分 dynamic drift/static or slow |
+| 独立 reaching v2 | 已冻结 | 无障碍基础 actor：全量 582/600（97.0%），固定可达子集 582/582（100%） |
 | 后续 / P4-P5 | 未开始 | 不运行新训练、OOD 或真机流程 |
 
 当前推荐的无长训练校验命令（在项目根目录执行）：
@@ -138,6 +139,8 @@ conda run -n rl python scripts/train.py --config configs/experiments/ur5_short_t
 ```bash
 conda run -n rl python scripts/train.py --config configs/experiments/no_obstacle.yaml
 ```
+
+已冻结的独立 reaching v2 结果见 [reaching_recovery_protocol.md](../current/reaching_recovery_protocol.md)。统一报告全量 `97.0%` 与固定可达条件 `100%`；不能把条件子集结果写成全分布 99%，也不能把该无障碍基线写成安全或动态避障结论。
 
 开发实验应遵循以下约束：
 

@@ -1,12 +1,14 @@
 # P3 冻结后状态
 
-> 更新时间：2026-08-04。原 B1--B5 实验协议已执行完成；本页保留固定口径，并记录其冻结后约束。
+> 更新时间：2026-08-07。原 B1--B5 实验协议已执行完成；本页保留固定口径，并记录其冻结后约束。独立基础 reaching v2 已完成，但不改变 P3 安全方法决议。
 
 ## 冻结结论
 
 `outputs/p3_postfix_dev_100k/p3_freeze_decision.json` 的结论为 `do_not_freeze_p3_or_expand_recovery`。严格 B4 留作诊断基线；worst-link recovery 在共享最终集上使 physical contact 从 4/432 上升到 22/432，已拒绝。
 
 因此不得继续运行或扩展 recovery、完整方法 M、OOD 或真机实验。任何后继研究必须另行定义安全目标和独立评估协议，不能将本页固定设置解释为已批准的后续执行命令。
+
+基础 reaching v2 是独立的无障碍执行基线，不属于 P3 V2/G3/G4。其固定结果为全量 `582/600=97.0%`、固定 IK 可达且无障碍候选路径子集 `582/582=100%`；该结果只能用于确认基础 reaching 链路恢复，不能解除本页的 P3 `do_not_freeze_p3_or_expand_recovery` 决议。
 
 ## 已完成的目标
 

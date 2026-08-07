@@ -1,0 +1,10 @@
+includes:
+  - s1_static_obstacle_finetune_base.yaml
+
+seed: 4303
+device: cuda:0
+
+train:
+  total_steps: 420000
+  output_dir: outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4303
+  run_name: link_fixed_static_obstacle_finetune_seed4303_steps420000

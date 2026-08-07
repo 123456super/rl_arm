@@ -397,5 +397,5 @@
     "metric": "success_rate",
     "seed_manifest": "configs/experiments/reaching_recovery/manifests/v1_validation.json"
   },
-  "git_revision": "09a39464129b868b008209dcffd8efdbba2d0e87"
+  "git_revision": "e2a8b3dd4500b3c26c530379b712049c4eb4331d"
 }

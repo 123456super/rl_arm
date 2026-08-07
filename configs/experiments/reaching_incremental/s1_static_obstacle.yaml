@@ -1,0 +1,22 @@
+# S1: add only a static random obstacle to the frozen reaching v2 actors.
+# The safety filter and all recovery/relaxation branches remain disabled.
+includes:
+  - s0_no_obstacle.yaml
+
+env:
+  obstacle:
+    enabled: true
+    scenario: random
+    speed_range: [0.0, 0.0]
+  safety_filter:
+    enabled: false
+    viability_monitor_enabled: false
+    diagnostic_logging: false
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+
+eval:
+  method: link_fixed
+  episodes: 200
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json

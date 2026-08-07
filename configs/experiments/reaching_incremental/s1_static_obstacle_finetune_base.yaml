@@ -1,0 +1,45 @@
+# S1 repair: fine-tune a frozen reaching-v2 actor in a static-obstacle task.
+# The actor and SAC state are supplied with --resume-actor/--resume-state.
+# Safety filtering and all recovery/relaxation branches remain disabled.
+includes:
+  - s1_static_obstacle.yaml
+
+risk:
+  representation: current
+
+sac:
+  # Dense current-link risk signal for learning to route around the obstacle.
+  fixed_risk_penalty: 1.0
+
+env:
+  obstacle:
+    enabled: true
+    scenario: random
+    speed_range: [0.0, 0.0]
+  safety_filter:
+    enabled: false
+    viability_monitor_enabled: false
+    diagnostic_logging: false
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+
+train:
+  method: link_fixed
+  # Each seed config sets selected-checkpoint step + 200000 exactly.
+  total_steps: 440000
+  progress_interval: 500
+  log_interval: 10
+  save_interval: 20000
+  output_dir: outputs/reaching_incremental/s1_static_obstacle_finetune/train
+  run_name: null
+
+checkpoint_selection:
+  episodes: 40
+  metric: success_rate
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_validation.json
+
+eval:
+  method: link_fixed
+  episodes: 200
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json

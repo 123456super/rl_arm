@@ -1,0 +1,11 @@
+includes:
+  - v2_base.yaml
+
+seed: 4303
+
+device: cuda:0
+
+train:
+  output_dir: outputs/reaching_recovery_v2/train/seed_4303
+  run_name: link_fixed_no_obstacle_speed100_seed4303_steps300000
+

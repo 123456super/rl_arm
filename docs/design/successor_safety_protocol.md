@@ -167,13 +167,13 @@ V2 的训练记录必须区分 `qdot_requested` 与严格过滤后的 `qdot_cmd`
 
 ### G3：V2 开发与 checkpoint 选择
 
-- V2 使用五个新的 train seeds，训练执行严格过滤后的 `qdot_cmd`。
+- 安全协议 V2 使用五个新的 train seeds，训练执行严格过滤后的 `qdot_cmd`；这里的安全 V2 尚未运行，不得与独立 reaching recovery v2 的 `4301/4302/4303` 无障碍 actor 混同。
 - 仅使用 40 个 validation seeds 选择固定 checkpoint 和有限候选权重；选择规则、候选集合和 tie-break 必须在运行前写入配置。
 - 开发轮次只检查日志、稳定性和失败分类，不写入论文主结论。
 
 ### G4：一次性最终比较
 
-- 对 V0 与 V2 使用相同的 5 个 train seeds、同一 200-seed final manifest 和固定 checkpoint 选择规则。
+- 对安全协议 V0 与 V2 使用相同的 5 个 train seeds、同一 200-seed final manifest 和固定 checkpoint 选择规则；独立 reaching recovery v2 的 final 结果不属于本比较。
 - 主结果同时报告全分布和 `certified_viable` 条件分布；两者不得混合排名。
 - 最终清单运行完成后，任何参数、代码或样本修改都必须开启新协议版本和新输出根目录。
 
@@ -249,4 +249,5 @@ termination_reason
 | 2026-08-05 | `do_not_advance` | 实现离线三层任务可行性预检查标签，不运行训练、策略评估或运行时控制改动 | G3/G4、V2 训练、checkpoint 选择、最终比较、OOD、真机、recovery/relaxation、按标签删样本 | 当前随机目标仅按笛卡尔工作空间采样，尚未记录 IK、无障碍候选路径和给定动态障碍轨迹下的候选路径可行性；必须先将目标/场景问题与局部严格控制不可行区分 |
 | 2026-08-05 | `do_not_advance` | 将三层任务可行性标签与既有 G2 v2 trace 做离线解释性对照 | G3/G4、V2 训练、checkpoint 选择、最终比较、OOD、真机、recovery/relaxation、按标签删样本 | final 交叉分组显示“动态候选路径未找到”组的 safe-stop 为 `97/120=80.8%`，而三层候选均找到组为 `227/447=50.8%`；但 G2 trace 没有 `success` 字段，不能据此声称策略到达率或推进训练 |
 | 2026-08-05 | `do_not_advance` | 对三个已冻结 V0 actor 在 G2 final seed 上执行无障碍到达能力诊断 | G3/G4、V2 训练、checkpoint 选择、动态障碍最终比较、OOD、真机、recovery/relaxation、按标签删样本 | 用户要求补齐既有策略的真实无障碍 `success` 证据；诊断固定关闭障碍物和安全过滤器，保留原目标/初始状态及 200-seed 清单，只用于区分基础到达能力与动态避障问题 |
-| 2026-08-05 | `do_not_advance` | 归档冻结 B4 actor 的无障碍实际执行结果 | G3/G4、V2 训练、checkpoint 选择、动态避障主比较、OOD、真机、recovery/relaxation | 三个 actor 在 600 个无障碍 episode 中仅 `31/600=5.17%` success，`569/600` 超时未到达，且无 physical contact；基础 reaching 未通过，不能在其上评估或宣称安全协同收益 |
+| 2026-08-05 | `do_not_advance` | 归档冻结 B4 actor 的无障碍实际执行结果 | G3/G4、安全方法 V2 训练、checkpoint 选择、动态避障主比较、OOD、真机、recovery/relaxation | 历史 B4 actor 在 600 个无障碍 episode 中仅 `31/600=5.17%` success，`569/600` 超时未到达，且无 physical contact；该旧 actor 诊断不能作为新 reaching v2 或安全方法结果 |
+| 2026-08-07 | `do_not_advance` | 仅冻结独立 reaching recovery v2 的无障碍基础 actor，不改变安全协议授权 | G3/G4 安全方法训练与最终比较、recovery/relaxation、OOD、真机 | 新 v2 actor 在固定 final 清单全量 `582/600=97.0%`、固定可达条件 `582/582=100%`；结果关闭动态障碍物和安全过滤器，只证明基础 reaching 链路恢复，不能作为安全或动态避障性能结论 |

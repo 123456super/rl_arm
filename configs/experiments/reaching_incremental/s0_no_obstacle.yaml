@@ -1,0 +1,20 @@
+# S0: re-evaluate the frozen reaching v2 actors without obstacles.
+# This is an evaluation-only configuration; it does not train or select a checkpoint.
+includes:
+  - ../reaching_recovery/v2_base.yaml
+
+env:
+  obstacle:
+    enabled: false
+  safety_filter:
+    enabled: false
+    viability_monitor_enabled: false
+    diagnostic_logging: false
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+
+eval:
+  method: link_fixed
+  episodes: 200
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json

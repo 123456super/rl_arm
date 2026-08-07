@@ -1,0 +1,5 @@
+includes:
+  - s0_no_obstacle.yaml
+
+seed: 4302
+device: cuda:4

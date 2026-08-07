@@ -1,6 +1,6 @@
 # 当前研究状态
 
-> 更新时间：2026-08-05。本页是项目当前状态的唯一入口。
+> 更新时间：2026-08-07。本页是项目当前状态的唯一入口。
 
 ## 研究方向
 
@@ -16,6 +16,7 @@
 | 预测风险（P1） | 单元测试、单位修正、逐连杆 Jacobian 速度 | 实现链路成立，尚无泛化安全保证 |
 | 安全过滤器（P2） | strict QP、投影/回退、safe-stop、审计链路 | 可运行但不是硬实时或安全证明 |
 | P3 因子化比较 | B1--B5、3 train seeds、共享 final manifest | 完成诊断，未形成可冻结主方法 |
+| 基础 reaching v1/v2 | 独立无障碍训练、checkpoint 选择、3×200 final 评估 | v2 基础 reaching actor 已冻结；全量 97.0%，固定可达子集 100% |
 | 归档与决策 | 冻结包、recovery 对照、初始可行性审计 | 停止当前 recovery 分支扩张 |
 
 ## 2026-08-03 修正
@@ -46,9 +47,17 @@
 - 严格 B4 基线为 4 次 physical contact、78 次 success；冻结 actor 后的 worst-link recovery 为 22 次 physical contact、79 次 success，故拒绝该 recovery。
 - 无条件 reset 初始不安全覆盖率：B4 为 3.5%（7/200），B5 为 18.0%（36/200）；二者不混入共享可行初始集的主比较。
 
+## 基础 reaching v2 冻结决策（2026-08-07）
+
+- 独立协议 `docs/current/reaching_recovery_protocol.md` 已完成 v2 训练、checkpoint 选择和最终评估；该协议关闭动态障碍物、安全过滤器、viability monitor 和 recovery/relaxation 分支。
+- 三个新 train seeds（`4301/4302/4303`）各完成 `300000` steps；选中 checkpoint 分别为 step `240000/280000/220000`，validation success 均为 `39/40=97.5%`。
+- 固定 final manifest `9001--9200` 上，三个 actor 各为全量 `194/200=97.0%`、固定 IK 可达且无障碍候选路径子集 `194/194=100%`；pooled 为 `582/600=97.0%` 与 `582/582=100%`。
+- 三个 actor 共同失败的 6 个 reset 为 `9021、9065、9095、9098、9120、9142`，均为 12 s 超时，collision、capsule overlap 和 physical contact 均为零。由于这 6 个 reset 的固定 IK 搜索未找到候选，全量口径不能诚实宣称 99%。
+- 冻结范围仅为三个 v2 actor、配置、checkpoint 选择规则、validation manifest 和 final manifest；这不是 P3/VAPS 方法冻结，也不授权 G3/G4、OOD、真机或安全结论。
+
 ## 当前阻塞
 
-- **基础到达策略未通过**：三个冻结 B4 V0 actor 在关闭障碍物和安全过滤器的同一 200-seed final 清单上共运行 600 回合，仅成功 31 次（5.17%）；569 次跑满 12 s 仍未到达，且零 physical contact。即使在 IK 可达、无障碍候选路径找到的 567 个 actor--episode 中，也只成功 31 次（5.47%）。这说明当前 actor 的基础无障碍到达能力不足，不能把后续动态障碍失败主要归因于安全约束、动态轨迹或可行性标签。
+- **历史 B4 基础 actor 诊断（已由独立 v2 基线补齐）**：三个冻结 B4 V0 actor 在同一无障碍 final 清单上共运行 600 回合，仅成功 31 次（5.17%）；该旧 actor 结果仍作为 P3/VAPS 失效诊断保留。独立 reaching recovery v2 已在新 actor 上达到全量 582/600（97.0%）和固定可达子集 582/582（100%），因此基础 reaching 基线门槛已解决，但不能把新基线结果写成 P3 安全性能。
 - 当前 P3 比较未形成可冻结的主方法：B4 严格过滤器仍有不可行停止，B5 的不可行/安全停止占比更高；恢复放宽会恶化 physical contact。
 - G2 v2 的冻结投影失败已完成数值归因：在 11 个原矩阵事件中，10 个在 50000 次 OSQP 迭代内被判为 primal infeasible，另 1 个只在 34625 次迭代后获得严格可行候选。这同时暴露严格约束集合的真实冲突和当前运行时迭代上限的数值不足，不能以单纯提高迭代上限消除问题。
 - 完整方法 M 尚未实现；当前 replay buffer 仍保存策略原始动作，过滤器干预尚未进入训练代价。根据本轮冻结决策，不进入 M 的实现或评估。
@@ -57,7 +66,7 @@
 
 ## 问题清单
 
-1. **基础策略问题（首要）**：当前冻结 B4 actor 在无障碍、无安全过滤器下的真实 success 仅为 5.17%，三位 train seed 分别为 3.5%、0.5%、11.5%，且 200 个目标中仅 27 个至少被一个 actor 到达。必须先恢复稳定的基础到达能力，不能直接把安全过滤器包装到一个未学会 reaching 的策略上。
+1. **基础策略问题（已解决但保留历史边界）**：旧冻结 B4 actor 在无障碍、无安全过滤器下的真实 success 为 31/600（5.17%）；该结果仍是 P3/VAPS 的历史诊断。新独立 reaching v2 基线为全量 582/600（97.0%）、固定可达子集 582/582（100%），可作为后续基础到达基线，但不等于安全过滤器或动态避障性能。
 2. **可行性问题**：动态障碍物漂移与预测屏障、关节加速度约束存在联合冲突，safe-stop 不能阻止障碍物继续接近。
 3. **覆盖问题**：无条件 reset 的初始不安全率 B4/B5 为 3.5%/18.0%；共享可行集只适用于主比较，不能代表全 reset 分布。
 4. **实时性问题**：当前 300 ms 是 simulator-side post-return 检查；缺少可中断求解、外部 watchdog 和端到端延迟预算。
@@ -65,11 +74,13 @@
 
 ## 下一步
 
-本轮只归档和引用冻结决策包，不再运行或扩展 recovery、M、OOD 或真机实验。严格 B4 仅保留为诊断基线；当前已确认基础无障碍到达能力不合格，不能进入 V2、动态避障性能比较或任何安全方法推进。任何后继方案都必须先单独定义安全目标与评估协议，不能沿用已拒绝的 recovery 分支。
+基础 reaching v2 已完成并可冻结为独立无障碍到达基线；严格 B4 仍仅保留为 P3/VAPS 诊断基线。该进展不改变 `do_not_freeze_p3_or_expand_recovery` 决议：不得把 reaching v2 结果写成动态避障、安全、OOD、真机或完整方法 M 结果。任何后继安全方案仍必须遵循独立安全目标与评估协议，不能沿用已拒绝的 recovery 分支。
 
-已按基础策略问题新增独立的[基础 reaching 恢复协议](reaching_recovery_protocol.md)：仅在关闭障碍物和安全过滤器的条件下，使用三个新 train seeds 恢复并验证策略到达能力。它与 VAPS G3/G4 完全隔离，不授权动态避障、安全比较、OOD、真机或任何 recovery/relaxation 分支；只有达到协议门槛后才能重新审查后续安全研究。
+静态障碍物 S1 冻结 actor 已完成复核但未通过：pooled success `428/600=71.3%`，其中 `156/172` 个失败为 timeout，另有 4 次 capsule overlap 和 13 次 physical contact。按渐进协议，当前下一步是 S1-R 静态障碍物迁移训练：从三个 v2 selected actor 及其 SAC state 各继续 `200000` steps，仅加入零速度随机静态障碍物和 `fixed_risk_penalty=1.0`，保持安全过滤器、viability、recovery 和 relaxation 全部关闭。训练、选点和 final 评估命令见[后续渐进式实验协议](successor_incremental_experiment_protocol.md)；S1-R 未通过前不运行 S2 动态障碍物。
 
-已新增[后继安全协议](../design/successor_safety_protocol.md)，其方向为可行安全集感知的严格预测控制。G0 已完成：viability 标签、严格约束与 V0/V1 动作等价性测试通过。G1 的 1000-reset coverage audit 已完成，结果保存在 `outputs/vaps_g1/coverage_10001_11000_v3.json`：`certified_viable=83.3%`、严格模型不可行 `16.7%`、unknown/invalid/budget-stop 均为零；求解 P99 `9.86 ms`、最大 `214.95 ms`，仅构成离线筛选证据。确定性抽样的 20 条严格可行和 20 条严格不可行 reset trace 已完成单位、连杆、状态与 safe-stop 命令的结构复核；零自然样本类别由 G0 故障注入测试覆盖。2026-08-05 决议保持为 `approve_g1_g2`：下一步只授权使用既有 V0 actor 的 V0/V1 严格链路比较；仍不授权 V2 训练、checkpoint 选择、最终比较、OOD、真机或任何 recovery/relaxation 分支。
+独立的[基础 reaching 恢复协议](reaching_recovery_protocol.md)已完成 v2 验证并冻结基础 actor；它与 VAPS G3/G4 完全隔离。该协议只证明无障碍 reaching 执行链路恢复，不授权动态避障、安全比较、OOD、真机或任何 recovery/relaxation 分支。
+
+已新增[后继安全协议](../design/successor_safety_protocol.md)，其方向为可行安全集感知的严格预测控制。G0 已完成：viability 标签、严格约束与 V0/V1 动作等价性测试通过。G1 的 1000-reset coverage audit 已完成，结果保存在 `outputs/vaps_g1/coverage_10001_11000_v3.json`：`certified_viable=83.3%`、严格模型不可行 `16.7%`、unknown/invalid/budget-stop 均为零；求解 P99 `9.86 ms`、最大 `214.95 ms`，仅构成离线筛选证据。确定性抽样的 20 条严格可行和 20 条严格不可行 reset trace 已完成单位、连杆、状态与 safe-stop 命令的结构复核；零自然样本类别由 G0 故障注入测试覆盖。2026-08-05 决议保持为 `approve_g1_g2`：下一步只授权使用既有 V0 actor 的 V0/V1 严格链路比较；仍不授权安全方法 V2 训练、checkpoint 选择、最终比较、OOD、真机或任何 recovery/relaxation 分支。
 
 G2 v1 的 `4108` validation 在 `seed=8216, step=129` 出现单侧 `safe_stop_compute_budget`，因此整套 v1 结果未通过且保留在 `outputs/vaps_g2/`，不得用于推进决议。该回退由 post-return 墙钟计时触发，不具备锁步确定性；新建的 G2 v2 仅移除此计时诊断作为比较输入，保留全部严格 QP/几何/速度/加速度约束、无效观测停机和不可行 safe-stop。G1 的 `.30 s` 时间审计仍有效且不可由 G2 替代；v2 结果完成独立审计前，仍不得进入 G3。
 
@@ -107,7 +118,7 @@ final 三层交叉分组的 pooled 结果如下：
 
 上述结果是解释性证据，不是成功率，也不表示 `not_found` 是数学上的绝对无解。P3 正式评估的 144-seed 清单为 `7127--7300`，与本次 G2 final 的 `9001--9200` 不同，不能直接和三层标签拼接；如果论文需要“无障碍策略真实到达率”，必须另行使用同一 seed manifest 跑正式评估。
 
-根据本轮明确请求，新增一项**冻结 actor 的无障碍到达能力诊断**：使用 G2 v2 已冻结的三个 B4 actor、同一 `9001--9200` final seed、原有随机目标和初始关节状态，关闭障碍物与安全过滤器，记录策略真实 `success`、最终位置误差和目标坐标。配置为 `configs/experiments/vaps/v3_no_obstacle_policy_eval.yaml`，汇总器为 `scripts/summarize_no_obstacle_reachability.py`。该诊断不训练、不选 checkpoint、不修改运行时控制，结果只回答“既有策略在无障碍下能否到达”，不授权 G3/G4，也不能替代动态障碍全分布主结果。
+历史 B4 actor 的无障碍到达能力诊断使用 G2 v2 已冻结的三个 B4 actor、同一 `9001--9200` final seed、原有随机目标和初始关节状态，关闭障碍物与安全过滤器，记录策略真实 `success`、最终位置误差和目标坐标。配置为 `configs/experiments/vaps/v3_no_obstacle_policy_eval.yaml`，汇总器为 `scripts/summarize_no_obstacle_reachability.py`。该诊断不训练、不选 checkpoint、不修改运行时控制，结果只回答旧 actor 在无障碍下能否到达；它已由独立 reaching recovery v2 基线补充，但不能替代动态障碍全分布主结果。
 
 诊断结果已完成，汇总位于 `outputs/vaps_no_obstacle_policy_eval/summary.json`，逐 episode 结果位于 `outputs/vaps_no_obstacle_policy_eval/episodes_joined.csv`：
 
@@ -118,4 +129,4 @@ final 三层交叉分组的 pooled 结果如下：
 | 4110 | 200 | 23 | 11.5% | 0.585 m |
 | pooled | 600 | 31 | 5.17% | 0.656 m |
 
-其中 569/600 回合运行到 12 s 上限仍未成功，physical contact 和 termination collision 均为零；200 个 reset 中只有 27 个（13.5%）被至少一个 actor 成功到达。即使离线标签为“IK 可达 + 无障碍候选路径找到”的 189 个 reset，仍只有 27 个被至少一个 actor 到达。这是当前已定位的首要问题：**冻结 B4 基础策略没有学会稳定 reaching**。结论仅适用于这三个冻结的 B4 actor 和该无障碍观测设置；它不等于证明 SAC 或机械臂本身无法完成 reaching，也不应与动态障碍结果混合为安全指标。
+其中 569/600 回合运行到 12 s 上限仍未成功，physical contact 和 termination collision 均为零；200 个 reset 中只有 27 个（13.5%）被至少一个 actor 成功到达。即使离线标签为“IK 可达 + 无障碍候选路径找到”的 189 个 reset，仍只有 27 个被至少一个 actor 到达。该段是旧冻结 B4 actor 的历史失效证据；独立 reaching recovery v2 已在同一 final manifest 上达到全量 582/600（97.0%）和固定可达子集 582/582（100%）。两者不能混为同一 actor 或同一方法结论。

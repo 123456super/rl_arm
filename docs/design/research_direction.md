@@ -1,6 +1,6 @@
 # 研究重构：不确定性连杆预测风险、安全过滤器与协同安全强化学习
 
-> 状态快照（2026-08-04）：阶段一已冻结为历史基线；P1/P2 实现与测试完成；P3 B1--B5 已按修正口径完成比较并形成“未冻结”决策。当前状态和结果以 [docs/current](../current/research_status.md) 为准。
+> 状态快照（2026-08-07）：阶段一已冻结为历史基线；独立基础 reaching v2 已完成并冻结为无障碍执行基线；P1/P2 实现与测试完成；P3 B1--B5 仍为未冻结安全方法。当前状态和结果以 [docs/current](../current/research_status.md) 为准。
 
 ## 0. 日期化阶段状态
 
@@ -9,6 +9,7 @@
 | 2026-07-27--07-31 / P0 | 已冻结 | 阶段一 held-out 主比较及 link_fixed_penalty1 候选不变 |
 | 2026-07-29--07-31 / P1-P2 | 开发验证完成 | 风险、过滤器、safe-stop、trace 和测试链路可运行，但不是端到端安全保证 |
 | 2026-08-03--08-04 / P3 | 统一比较完成，设计未冻结 | 固定障碍物 0.05 m/s、机械臂 1.0 rad/s；严格 B4 保留为诊断基线，recovery 已拒绝 |
+| 2026-08-07 / 独立 reaching v2 | 基础执行基线已冻结 | 全量 582/600（97.0%），固定可达子集 582/582（100%）；不构成安全方法结论 |
 | 后续 / P4-P5 | 未开始 | 等 P3 统一几何/动态可行性/任务性能问题收敛后再决定；实时性仍是后置冻结门槛 |
 
 ### 2026-08-03 的研究决策
@@ -24,7 +25,7 @@ P3 先按低速双速度统一配置重新建立 B1--B5：障碍物固定 0.05 m
 
 ### 2026-08-04 冻结后决策
 
-冻结包 `outputs/p3_postfix_dev_100k/p3_freeze_decision.json` 的决策为 `do_not_freeze_p3_or_expand_recovery`。严格 B4 在共享最终集上为 4/432 次 physical contact、78/432 次 success；worst-link recovery 为 22/432 次 physical contact、79/432 次 success，因接触增加而拒绝。B4/B5 无条件初始不安全率分别为 3.5% 和 18.0%。因此本设计文档继续保留方法目标和长期实验矩阵，但不把 P3 结果写成已冻结方法，也不启动 M、OOD 或真机。
+冻结包 `outputs/p3_postfix_dev_100k/p3_freeze_decision.json` 的决策为 `do_not_freeze_p3_or_expand_recovery`。严格 B4 在共享最终集上为 4/432 次 physical contact、78/432 次 success；worst-link recovery 为 22/432 次 physical contact、79/432 次 success，因接触增加而拒绝。B4/B5 无条件初始不安全率分别为 3.5% 和 18.0%。因此本设计文档继续保留方法目标和长期实验矩阵，但不把 P3 结果写成已冻结方法，也不启动 M、OOD 或真机。独立 reaching v2 已完成无障碍基础链路恢复并冻结三个 actor；其全量与条件口径必须同时报告。该冻结不等于 P3/VAPS 安全方法冻结，不改变 recovery、OOD、真机和 G3/G4 的未授权边界。
 
 ## 1. 定位与阶段衔接
 

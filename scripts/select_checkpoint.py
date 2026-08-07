@@ -96,11 +96,14 @@ def main() -> None:
     args = parse_args()
     config = load_config(args.config)
     selection_config = config.get("checkpoint_selection", {})
-    seed = int(args.seed if args.seed is not None else selection_config["seed"])
     episodes = int(args.episodes if args.episodes is not None else selection_config["episodes"])
     seed_manifest_arg = (
         args.seed_manifest if args.seed_manifest is not None else selection_config.get("seed_manifest")
     )
+    if seed_manifest_arg:
+        seed = args.seed
+    else:
+        seed = int(args.seed if args.seed is not None else selection_config["seed"])
     if seed_manifest_arg:
         manifest_seeds = load_seed_manifest(seed_manifest_arg)
         if episodes > len(manifest_seeds):

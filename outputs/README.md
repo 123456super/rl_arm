@@ -13,5 +13,8 @@
 | 论文生成材料 | `paper/` | 派生文件，不是原始数据 |
 | 部署预检 | `deployment_preflight/` | 阶段一离线预检 |
 | 新统一实验 | `p3_unified_geometry/` | 未作为当前主结果目录；结果归档于 `p3_postfix_dev*` |
+| 独立基础 reaching | `reaching_recovery_v1/`、`reaching_recovery_v2/` | v2 已冻结为无障碍基础基线；全量 582/600（97.0%），固定可达子集 582/582（100%） |
 
 2026-08-03 前的 P3 输出采用旧连杆速度/碰撞口径，只能用于失效分析。2026-08-03 后的结果目录保存 `config.json`、checkpoint 选择 CSV、逐 episode metrics 和三类碰撞事件字段；冻结决策及其证据索引见 `p3_postfix_dev_100k/p3_freeze_decision.json`。
+
+`reaching_recovery_v2/` 与 P3/VAPS 安全方法分开统计：它关闭动态障碍物和安全过滤器，只证明基础 reaching 执行链路；最终报告必须同时给出全量和固定可达条件口径，不得将条件 `100%` 写成全分布 `99%`。

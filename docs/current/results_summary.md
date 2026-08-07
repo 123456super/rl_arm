@@ -1,8 +1,38 @@
 # 实验结果总表
 
-> 更新时间：2026-08-05。结果按“正式证据、开发证据、失效诊断、待完成”分层。
+> 更新时间：2026-08-07。结果按“正式证据、独立冻结基线、开发证据、失效诊断、待完成”分层。
 
-## 当前首要失效：冻结 B4 基础到达策略不合格
+## 独立冻结基线：基础 reaching recovery v2
+
+该协议与 P3/VAPS 安全方法完全隔离：关闭动态障碍物、安全过滤器、viability monitor 和 recovery/relaxation 分支，固定使用 `9001--9200` final manifest。三个新 train seeds 均完成 `300000` steps，并按独立 40-seed validation manifest 选择 checkpoint。
+
+| train seed | selected step | final 全量 success | final 可达子集 success | collision / capsule overlap / physical contact |
+| ---: | ---: | ---: | ---: | ---: |
+| 4301 | 240000 | 194/200 = 97.0% | 194/194 = 100% | 0 / 0 / 0 |
+| 4302 | 280000 | 194/200 = 97.0% | 194/194 = 100% | 0 / 0 / 0 |
+| 4303 | 220000 | 194/200 = 97.0% | 194/194 = 100% | 0 / 0 / 0 |
+| pooled | — | 582/600 = 97.0% | 582/582 = 100% | 0 / 0 / 0 |
+
+三个 actor 共同失败的 reset 为 `9021、9065、9095、9098、9120、9142`，均为 12 s 超时。固定 IK 搜索在这些 reset 上未找到候选，因此全量结果不能宣称 99%；报告必须同时保留全量 `97.0%` 和条件可达 `100%`。
+
+冻结范围：三个 v2 actor、配置、checkpoint selection 规则、validation manifest 和 final manifest。该冻结只表示基础 reaching 基线可复现，不表示 P3/VAPS 安全方法、动态避障、泛化、OOD、真机或完整方法 M 已冻结。
+
+数据源：`outputs/reaching_recovery_v2/eval/seed_430{1,2,3}_final.csv`、对应 `checkpoint_selection/selected_checkpoint.csv` 和 [基础 reaching 恢复协议](reaching_recovery_protocol.md)。
+
+## S1 静态障碍物：冻结 actor 未通过
+
+在相同 `9001--9200` final manifest、随机零速度障碍物、关闭安全过滤器的条件下，冻结 v2 actor 的 pooled success 为 `428/600=71.3%`。失败中 `156/172` 为 timeout；另有 `4` 次 capsule overlap 和 `13` 次 physical contact。该分布说明主要问题是策略没有稳定学会绕开静态障碍物，而不是 safety filter/QP 造成的失败。
+
+| actor | success | timeout | capsule overlap | physical contact |
+| ---: | ---: | ---: | ---: | ---: |
+| 4301 | 174/200 | 22 | 1 | 3 |
+| 4302 | 106/200 | 89 | 1 | 4 |
+| 4303 | 148/200 | 45 | 2 | 6 |
+| pooled | 428/600 | 156 | 4 | 13 |
+
+当前处理路径是 S1-R 静态障碍物迁移训练：从三个 v2 selected actor 及 SAC state 各继续 `200000` steps，只加入零速度随机障碍物和 `fixed_risk_penalty=1.0`，安全过滤器、viability、recovery、relaxation 全部关闭。S1-R 完成前不进入动态障碍物 S2。命令和停止规则见[后续渐进式实验协议](successor_incremental_experiment_protocol.md)。
+
+## 历史失效诊断：冻结 B4 基础到达策略
 
 为区分“动态障碍/安全过滤器导致失败”和“策略本身不会 reaching”，对 G2 v2 固定的三个 B4 actor（train seeds `4108/4109/4110`）进行了无障碍实际执行诊断。固定 final reset 清单 `9001--9200`，保留原目标和初始关节状态，关闭障碍物与安全过滤器；每个 actor 运行 200 回合。结果为策略真实 `success`，不是 IK 或候选路径存在率。
 
@@ -15,7 +45,7 @@
 
 - 三个 actor 均无 physical contact，说明失败形式是长期未到达目标，不是碰撞终止。
 - 200 个目标中仅 27 个（13.5%）被至少一个 actor 到达；而离线预检查在 189/200 个 reset 中找到 IK 和无障碍候选路径。
-- 因此当前已定位的首要问题是：**冻结 B4 actor 的基础无障碍 reaching 能力不行**。在此问题解决并重新验证前，不能把动态障碍下的低完成率主要归因于障碍物、严格安全约束或三层可行性标签，也不能推进 V2、动态避障主比较、OOD 或真机。
+- 该结果仍作为旧 B4 actor 的 P3/VAPS 失效诊断保留；基础 reaching 门槛已由独立 v2 基线重新验证，但不得把 v2 的无障碍结果与 P3 动态安全指标混合。
 
 数据源：`outputs/vaps_no_obstacle_policy_eval/summary.json` 和 `outputs/vaps_no_obstacle_policy_eval/episodes_joined.csv`。本结论仅针对这三个冻结 B4 actor 在无障碍观测下的表现；它不等于 SAC、UR5 或目标空间在数学上不可达。
 

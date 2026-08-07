@@ -1,0 +1,5 @@
+includes:
+  - s1_static_obstacle.yaml
+
+seed: 4301
+device: cuda:1

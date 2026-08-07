@@ -1,0 +1,12 @@
+# V2 targets failures on IK-reachable no-obstacle resets. It retains the v1
+# full-distribution final manifest and changes only the robot command limit.
+includes:
+  - v1_base.yaml
+
+env:
+  action_scale: 1.0
+
+train:
+  total_steps: 300000
+  save_interval: 20000
+
