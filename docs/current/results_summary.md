@@ -32,6 +32,21 @@
 
 当前处理路径是 S1-R 静态障碍物迁移训练：从三个 v2 selected actor 及 SAC state 各继续 `200000` steps，只加入零速度随机障碍物和 `fixed_risk_penalty=1.0`，安全过滤器、viability、recovery、relaxation 全部关闭。S1-R 完成前不进入动态障碍物 S2。命令和停止规则见[后续渐进式实验协议](successor_incremental_experiment_protocol.md)。
 
+### S1-R 静态障碍物迁移训练结果
+
+S1-R 使用独立 validation manifest 选点后，在完整 `9001--9200` final manifest 上完成评估。三个选中 checkpoint 分别为 4301 step `240000`、4302 step `480000`、4303 step `320000`。
+
+| actor | selected step | success | timeout | capsule overlap | physical contact | mean final error |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4301 | 240000 | 174/200 = 87.0% | 22 | 1 | 3 | 0.0660 m |
+| 4302 | 480000 | 164/200 = 82.0% | 36 | 1 | 1 | 0.0795 m |
+| 4303 | 320000 | 153/200 = 76.5% | 47 | 0 | 0 | 0.1014 m |
+| pooled | — | 491/600 = 81.8% | 105 | 2 | 4 | 0.0823 m |
+
+相较冻结 S1 的 pooled `428/600=71.3%`、timeout `156`、capsule overlap `4`、physical contact `13`，S1-R 成功数增加 `63`，timeout 减少 `51`，physical contact 减少 `9`。因此静态障碍物迁移训练通过预设 S1-R 门槛，但仍明显低于无障碍 S0 的 `582/600=97.0%`。4301 选中了迁移起点，说明该 seed 的训练没有带来收益；总体改善主要来自 4302 和 4303。
+
+数据源：`outputs/reaching_incremental/s1_static_obstacle_finetune/eval/seed_430{1,2,3}_final.csv`。
+
 ## 历史失效诊断：冻结 B4 基础到达策略
 
 为区分“动态障碍/安全过滤器导致失败”和“策略本身不会 reaching”，对 G2 v2 固定的三个 B4 actor（train seeds `4108/4109/4110`）进行了无障碍实际执行诊断。固定 final reset 清单 `9001--9200`，保留原目标和初始关节状态，关闭障碍物与安全过滤器；每个 actor 运行 200 回合。结果为策略真实 `success`，不是 IK 或候选路径存在率。

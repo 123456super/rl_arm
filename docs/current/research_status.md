@@ -78,6 +78,8 @@
 
 静态障碍物 S1 冻结 actor 已完成复核但未通过：pooled success `428/600=71.3%`，其中 `156/172` 个失败为 timeout，另有 4 次 capsule overlap 和 13 次 physical contact。按渐进协议，当前下一步是 S1-R 静态障碍物迁移训练：从三个 v2 selected actor 及其 SAC state 各继续 `200000` steps，仅加入零速度随机静态障碍物和 `fixed_risk_penalty=1.0`，保持安全过滤器、viability、recovery 和 relaxation 全部关闭。训练、选点和 final 评估命令见[后续渐进式实验协议](successor_incremental_experiment_protocol.md)；S1-R 未通过前不运行 S2 动态障碍物。
 
+S1-R 训练、validation checkpoint 选择和 final 评估均已完成。选中 checkpoint 为：4301 step `240000`、4302 step `480000`、4303 step `320000`。final pooled success 为 `491/600=81.8%`，timeout `105`，capsule overlap `2`，physical contact `4`。相较冻结 S1 的 `428/600=71.3%`、timeout `156`、capsule overlap `4`、physical contact `13`，迁移训练有效改善静态障碍物表现；但 pooled success 仍低于无障碍 S0 的 `97.0%`，且 actor 4301 没有改善（仍 `174/200`）。S1-R 通过，允许进入 S2 低速动态障碍物；S2 仍必须保持安全过滤器、viability、recovery 和 relaxation 关闭。
+
 独立的[基础 reaching 恢复协议](reaching_recovery_protocol.md)已完成 v2 验证并冻结基础 actor；它与 VAPS G3/G4 完全隔离。该协议只证明无障碍 reaching 执行链路恢复，不授权动态避障、安全比较、OOD、真机或任何 recovery/relaxation 分支。
 
 已新增[后继安全协议](../design/successor_safety_protocol.md)，其方向为可行安全集感知的严格预测控制。G0 已完成：viability 标签、严格约束与 V0/V1 动作等价性测试通过。G1 的 1000-reset coverage audit 已完成，结果保存在 `outputs/vaps_g1/coverage_10001_11000_v3.json`：`certified_viable=83.3%`、严格模型不可行 `16.7%`、unknown/invalid/budget-stop 均为零；求解 P99 `9.86 ms`、最大 `214.95 ms`，仅构成离线筛选证据。确定性抽样的 20 条严格可行和 20 条严格不可行 reset trace 已完成单位、连杆、状态与 safe-stop 命令的结构复核；零自然样本类别由 G0 故障注入测试覆盖。2026-08-05 决议保持为 `approve_g1_g2`：下一步只授权使用既有 V0 actor 的 V0/V1 严格链路比较；仍不授权安全方法 V2 训练、checkpoint 选择、最终比较、OOD、真机或任何 recovery/relaxation 分支。

@@ -81,6 +81,8 @@ S1-R 只改变训练适应，不加入动态速度、安全过滤器、viability
 
 S1-R 的通过条件：三个 seed 在 final 全量分布上均重新评估；pooled success 必须高于冻结 actor 的 `71.3%`，且任何单个 actor 不得低于其对应冻结基线（`87.0%/53.0%/74.0%`），physical contact 总数不得高于旧 S1 的 `13/600`。任何提升都必须同时报告 capsule overlap、timeout 和最终误差，不能只报告 success。若仍失败，先分析静态场景的任务可行性和失败 reset，不进入 S2。
 
+本轮 S1-R final 已满足上述门槛：pooled `491/600=81.8%`，三个 actor 分别为 `87.0%/82.0%/76.5%`，physical contact `4/600`。因此允许进入 S2；S2 只把 `speed_range` 改为 `[0.05, 0.05]`，继续关闭安全过滤器、viability、recovery 和 relaxation，且仍使用相同的 actor、validation 规则和 final manifest。
+
 ### S2：低速动态障碍物，仍关闭安全过滤器
 
 **唯一新增因素**：在 S1 设置上把障碍物速度改为固定 `0.05 m/s`，其余不变。
