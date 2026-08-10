@@ -1,0 +1,10 @@
+includes:
+  - s1_static_random_stateful_confirm_base.yaml
+
+seed: 4303
+device: cuda:0
+
+train:
+  total_steps: 720000
+  output_dir: outputs/reaching_incremental/s1_static_random_stateful_confirm/train/seed_4303
+  run_name: link_fixed_static_random_stateful_confirm_seed4303_steps720000

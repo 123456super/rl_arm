@@ -1,0 +1,38 @@
+# S1-R2: continue S1-R actors with broader static-obstacle coverage.
+# This is still a static, unfiltered training stage; no recovery or relaxation.
+includes:
+  - s1_static_obstacle_finetune_base.yaml
+
+sac:
+  # Stronger dense current-link risk signal for learning to route around
+  # controlled upper-arm/elbow/forearm/wrist crossing bands.
+  fixed_risk_penalty: 2.0
+
+env:
+  obstacle:
+    enabled: true
+    scenario: mixed_static
+    speed_range: [0.0, 0.0]
+  safety_filter:
+    enabled: false
+    viability_monitor_enabled: false
+    diagnostic_logging: false
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+
+train:
+  method: link_fixed
+  progress_interval: 500
+  log_interval: 10
+  save_interval: 20000
+
+checkpoint_selection:
+  episodes: 40
+  metric: success_rate
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_validation.json
+
+eval:
+  method: link_fixed
+  episodes: 200
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json

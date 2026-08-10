@@ -81,6 +81,36 @@ class SACAgent:
         return action.squeeze(0).cpu().numpy()
 
     def update(self, batch: Batch) -> dict[str, float]:
+        reward_q_loss, cost_q_loss = self._update_critics(batch)
+        action, log_prob = self.actor.sample(batch.observations)
+        reward_q = torch.min(self.reward_q1(batch.observations, action), self.reward_q2(batch.observations, action))
+        cost_q = torch.min(self.cost_q1(batch.observations, action), self.cost_q2(batch.observations, action))
+        actor_loss = (self.alpha.detach() * log_prob - reward_q).mean()
+        if self.constrained:
+            actor_loss = actor_loss + self.lagrange_multiplier * cost_q.mean()
+
+        self.actor_optimizer.zero_grad(set_to_none=True)
+        actor_loss.backward()
+        self.actor_optimizer.step()
+
+        alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
+        self.alpha_optimizer.zero_grad(set_to_none=True)
+        alpha_loss.backward()
+        self.alpha_optimizer.step()
+
+        self._soft_update_critics()
+
+        return {
+            "loss/actor": float(actor_loss.detach().cpu()),
+            "loss/reward_q": reward_q_loss,
+            "loss/cost_q": cost_q_loss,
+            "loss/alpha": float(alpha_loss.detach().cpu()),
+            "alpha": float(self.alpha.detach().cpu()),
+            "lambda": float(self.lagrange_multiplier),
+            "cost_ema": float(self.cost_ema),
+        }
+
+    def _update_critics(self, batch: Batch) -> tuple[float, float]:
         with torch.no_grad():
             next_action, next_log_prob = self.actor.sample(batch.next_observations)
             target_reward_q = torch.min(
@@ -111,32 +141,21 @@ class SACAgent:
         cost_q_loss.backward()
         self.cost_q_optimizer.step()
 
-        action, log_prob = self.actor.sample(batch.observations)
-        reward_q = torch.min(self.reward_q1(batch.observations, action), self.reward_q2(batch.observations, action))
-        cost_q = torch.min(self.cost_q1(batch.observations, action), self.cost_q2(batch.observations, action))
-        actor_loss = (self.alpha.detach() * log_prob - reward_q).mean()
-        if self.constrained:
-            actor_loss = actor_loss + self.lagrange_multiplier * cost_q.mean()
+        return float(reward_q_loss.detach().cpu()), float(cost_q_loss.detach().cpu())
 
-        self.actor_optimizer.zero_grad(set_to_none=True)
-        actor_loss.backward()
-        self.actor_optimizer.step()
-
-        alpha_loss = -(self.log_alpha * (log_prob + self.target_entropy).detach()).mean()
-        self.alpha_optimizer.zero_grad(set_to_none=True)
-        alpha_loss.backward()
-        self.alpha_optimizer.step()
-
+    def _soft_update_critics(self) -> None:
         soft_update(self.reward_q1, self.reward_target_q1, self.tau)
         soft_update(self.reward_q2, self.reward_target_q2, self.tau)
         soft_update(self.cost_q1, self.cost_target_q1, self.tau)
         soft_update(self.cost_q2, self.cost_target_q2, self.tau)
 
+    def update_critics(self, batch: Batch) -> dict[str, float]:
+        reward_q_loss, cost_q_loss = self._update_critics(batch)
+        self._soft_update_critics()
+
         return {
-            "loss/actor": float(actor_loss.detach().cpu()),
-            "loss/reward_q": float(reward_q_loss.detach().cpu()),
-            "loss/cost_q": float(cost_q_loss.detach().cpu()),
-            "loss/alpha": float(alpha_loss.detach().cpu()),
+            "loss/reward_q": reward_q_loss,
+            "loss/cost_q": cost_q_loss,
             "alpha": float(self.alpha.detach().cpu()),
             "lambda": float(self.lagrange_multiplier),
             "cost_ema": float(self.cost_ema),

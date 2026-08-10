@@ -1,0 +1,42 @@
+# S1-R2.2: short, low-learning-rate confirmation on the original static-random task.
+# Keep the matched SAC state, change no safety or dynamics branch, and only
+# reduce update magnitude after the mixed-static run.
+includes:
+  - s1_static_mixed_stateful_finetune_base.yaml
+
+sac:
+  # Preserve the actor while allowing the critics to adapt to random-static
+  # replay.  These are lower than the default 3e-4 rates.
+  actor_lr: 0.00005
+  critic_lr: 0.0001
+  alpha_lr: 0.00005
+  fixed_risk_penalty: 2.0
+
+env:
+  obstacle:
+    enabled: true
+    scenario: random
+    speed_range: [0.0, 0.0]
+  safety_filter:
+    enabled: false
+    viability_monitor_enabled: false
+    diagnostic_logging: false
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+
+train:
+  method: link_fixed
+  progress_interval: 500
+  log_interval: 10
+  save_interval: 20000
+
+checkpoint_selection:
+  episodes: 40
+  metric: success_rate
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_validation.json
+
+eval:
+  method: link_fixed
+  episodes: 200
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json

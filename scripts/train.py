@@ -25,6 +25,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--resume-actor", default=None)
     parser.add_argument("--resume-state", default=None)
+    parser.add_argument(
+        "--reset-agent-state",
+        action="store_true",
+        help="load only the actor checkpoint and reinitialize SAC critics/alpha state",
+    )
+    parser.add_argument(
+        "--reset-state-warmup-steps",
+        type=int,
+        default=10000,
+        help="critic-only replay warmup after --reset-agent-state",
+    )
+    parser.add_argument(
+        "--resume-replay-warmup-steps",
+        type=int,
+        default=10000,
+        help="collect fresh replay samples before updates after any resume",
+    )
+    parser.add_argument(
+        "--resume-critic-warmup-steps",
+        type=int,
+        default=10000,
+        help="critic-only updates after replay warmup for a full-state resume",
+    )
     parser.add_argument("--start-step", type=int, default=0)
     parser.add_argument("--run-name", default=None)
     return parser.parse_args()
@@ -60,6 +83,14 @@ def main() -> None:
     method = config["train"]["method"]
     if args.start_step < 0:
         raise ValueError("--start-step must be non-negative")
+    if args.reset_agent_state and args.resume_actor is None:
+        raise ValueError("--reset-agent-state requires --resume-actor")
+    if args.reset_state_warmup_steps < 0:
+        raise ValueError("--reset-state-warmup-steps must be non-negative")
+    if args.resume_replay_warmup_steps < 0:
+        raise ValueError("--resume-replay-warmup-steps must be non-negative")
+    if args.resume_critic_warmup_steps < 0:
+        raise ValueError("--resume-critic-warmup-steps must be non-negative")
 
     config["device"] = resolve_device(config)
     set_seed(int(config["seed"]))
@@ -68,15 +99,24 @@ def main() -> None:
     action_dim = env.action_space.shape[0]
     agent = SACAgent(obs_dim, action_dim, config, method=method)
     if args.resume_actor is not None:
+        if args.reset_agent_state and args.resume_state is not None:
+            raise ValueError("--reset-agent-state cannot be combined with --resume-state")
         resume_state = args.resume_state
-        if resume_state is None:
+        if resume_state is None and not args.reset_agent_state:
             actor_path = Path(args.resume_actor)
             resume_state = str(actor_path.with_name(actor_path.name.replace("actor", "agent_state", 1)))
-        agent.load(args.resume_actor, resume_state)
+        if args.reset_agent_state:
+            agent.load_actor(args.resume_actor)
+        else:
+            agent.load(args.resume_actor, resume_state)
         config["resume"] = {
             "actor": args.resume_actor,
             "state": resume_state,
             "start_step": args.start_step,
+            "agent_state_reset": bool(args.reset_agent_state),
+            "agent_state_warmup_steps": args.reset_state_warmup_steps if args.reset_agent_state else 0,
+            "resume_replay_warmup_steps": args.resume_replay_warmup_steps,
+            "resume_critic_warmup_steps": args.resume_critic_warmup_steps,
         }
     config["git_revision"] = git_revision()
     replay = ReplayBuffer(
@@ -166,6 +206,10 @@ def main() -> None:
     warmup_steps = int(config["sac"]["warmup_steps"])
     update_after = int(config["sac"]["update_after"])
     update_every = int(config["sac"]["update_every"])
+    resume_critic_warmup_steps = (
+        args.reset_state_warmup_steps if args.reset_agent_state else args.resume_critic_warmup_steps
+    ) if args.resume_actor is not None else 0
+    resume_replay_warmup_steps = args.resume_replay_warmup_steps if args.resume_actor is not None else 0
     save_interval = int(config["train"]["save_interval"])
     log_interval = int(config["train"]["log_interval"])
     progress_interval = max(1, int(config["train"].get("progress_interval", 100)))
@@ -201,9 +245,27 @@ def main() -> None:
         f"run_dir={run_dir} progress_interval={progress_interval} start_step={args.start_step}",
         flush=True,
     )
+    if args.reset_agent_state and resume_critic_warmup_steps:
+        print(
+            f"agent-state warmup: steps={resume_critic_warmup_steps} mode=critic_only",
+            flush=True,
+        )
+    if args.resume_actor is not None and resume_replay_warmup_steps:
+        print(
+            f"resume replay warmup: steps={resume_replay_warmup_steps} mode=collect_only",
+            flush=True,
+        )
+    if args.resume_actor is not None and resume_critic_warmup_steps and not args.reset_agent_state:
+        print(
+            f"resume critic warmup: steps={resume_critic_warmup_steps} mode=critic_only",
+            flush=True,
+        )
     progress = trange(args.start_step + 1, total_steps + 1, desc=f"train:{method}")
     for step in progress:
-        if step <= warmup_steps:
+        schedule_step = step - args.start_step if args.resume_actor is not None else step
+        if args.resume_actor is not None:
+            action = agent.select_action(observation, deterministic=False)
+        elif schedule_step <= warmup_steps:
             action = env.action_space.sample()
         else:
             action = agent.select_action(observation, deterministic=False)
@@ -243,9 +305,26 @@ def main() -> None:
             if np.isfinite(solve_time_s):
                 episode_filter_solve_times_s.append(solve_time_s)
 
-        if step >= update_after and len(replay) >= agent.batch_size and step % update_every == 0:
+        collect_only = (
+            args.resume_actor is not None
+            and schedule_step <= resume_replay_warmup_steps
+        )
+        critic_only = (
+            args.resume_actor is not None
+            and schedule_step > resume_replay_warmup_steps
+            and schedule_step <= resume_replay_warmup_steps + resume_critic_warmup_steps
+        )
+        if (
+            not collect_only
+            and schedule_step >= update_after
+            and len(replay) >= agent.batch_size
+            and schedule_step % update_every == 0
+        ):
             batch = replay.sample(agent.batch_size)
-            update_info = agent.update(batch)
+            if critic_only:
+                update_info = agent.update_critics(batch)
+            else:
+                update_info = agent.update(batch)
 
         if step % progress_interval == 0 or step == total_steps:
             progress_row = {

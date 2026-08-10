@@ -1,0 +1,12 @@
+# Diagnostic only: evaluate the selected S1-R actor with a more responsive
+# fixed action smoother. No training or safety-filter branch is enabled.
+includes:
+  - s1_static_finetune_seed4302.yaml
+
+env:
+  fixed_beta: 0.50
+
+eval:
+  method: link_fixed
+  episodes: 200
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json

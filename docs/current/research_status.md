@@ -78,7 +78,19 @@
 
 静态障碍物 S1 冻结 actor 已完成复核但未通过：pooled success `428/600=71.3%`，其中 `156/172` 个失败为 timeout，另有 4 次 capsule overlap 和 13 次 physical contact。按渐进协议，当前下一步是 S1-R 静态障碍物迁移训练：从三个 v2 selected actor 及其 SAC state 各继续 `200000` steps，仅加入零速度随机静态障碍物和 `fixed_risk_penalty=1.0`，保持安全过滤器、viability、recovery 和 relaxation 全部关闭。训练、选点和 final 评估命令见[后续渐进式实验协议](successor_incremental_experiment_protocol.md)；S1-R 未通过前不运行 S2 动态障碍物。
 
-S1-R 训练、validation checkpoint 选择和 final 评估均已完成。选中 checkpoint 为：4301 step `240000`、4302 step `480000`、4303 step `320000`。final pooled success 为 `491/600=81.8%`，timeout `105`，capsule overlap `2`，physical contact `4`。相较冻结 S1 的 `428/600=71.3%`、timeout `156`、capsule overlap `4`、physical contact `13`，迁移训练有效改善静态障碍物表现；但 pooled success 仍低于无障碍 S0 的 `97.0%`，且 actor 4301 没有改善（仍 `174/200`）。S1-R 通过，允许进入 S2 低速动态障碍物；S2 仍必须保持安全过滤器、viability、recovery 和 relaxation 关闭。
+S1-R 训练、validation checkpoint 选择和 final 评估均已完成。选中 checkpoint 为：4301 step `240000`、4302 step `480000`、4303 step `320000`。final pooled success 为 `491/600=81.8%`，timeout `105`，capsule overlap `2`，physical contact `4`。相较冻结 S1 的 `428/600=71.3%`、timeout `156`、capsule overlap `4`、physical contact `13`，迁移训练有效改善静态障碍物表现；但 pooled success 仍低于无障碍 S0 的 `97.0%`，且 actor 4301 没有改善（仍 `174/200`）。S1-R 按原门槛通过，但由于静态候选子集仍未达到目标，当前暂停 S2，先进行 S1-R2 静态混合场景迁移训练。
+
+S1-R2 actor-only 迁移已完成 validation：4301 选中起点 step `240000`（35/40=87.5%），4302 选中起点 step `480000`（30/40=75.0%，较 S1-R 起点下降 3 回合），4303 选中 step `580000`（33/40=82.5%，较起点增加 1 回合）。pooled validation 为 `98/120=81.7%`，低于 S1-R 起点 `100/120=83.3%`。该结果不能区分 mixed-static 覆盖和 dense reward 的真实效果，因为 actor-only 迁移同时重置了 critic/alpha/replay，并从较大 `start_step` 跳过了原 warmup，造成随机 critic 立即更新已训练 actor。当前不进入 S2；先做 S1-R2.1 匹配 SAC state 的迁移重跑。
+
+S1-R2.1 三个 seed 使用同一步匹配的 actor 与 SAC critic/target/alpha state（旧 checkpoint 不含 optimizer moments，因此优化器仍重新初始化），并在 resumed training 中按本次迁移重新计数：前 `10000` 步收集新 replay、禁止更新，之后再开始 SAC 更新。4301 的 actor 与 S1-R 起点完全相同，因此使用 v2 的匹配 `agent_state_step_240000.pt`；4302/4303 使用 S1-R 对应的 `agent_state_step_480000.pt`/`agent_state_step_320000.pt`。S1-R2.1 仍保持静态 mixed 场景、零速度、`fixed_risk_penalty=2.0`，安全过滤器、动态障碍物、viability、recovery 和 relaxation 全部关闭。
+
+S1-R2.1 已完成 validation 和 full final。validation 选中 step 为 4301=`520000`、4302=`480000`、4303=`620000`，分别为 `38/40=95.0%`、`30/40=75.0%`、`35/40=87.5%`，pooled `103/120=85.8%`。在完整 `9001--9200` 原始 random 静态障碍物 final 上，成功分别为 `168/200=84.0%`、`164/200=82.0%`、`165/200=82.5%`，pooled `497/600=82.8%`；相较 S1-R 的 `491/600=81.8%` 提升 6 个 episode。physical contact 从 `4` 降至 `1`，capsule overlap 保持 `2`，collision_any 从 `5` 降至 `2`。静态候选路径子集从 `434/483=89.9%` 提升到 `443/483=91.7%`，但仍不能宣称 99%。
+
+该提升主要由 4303 贡献：`153/200→165/200`，候选子集 `136/161→148/161`；4302 选回完全相同的 S1-R 起点，结果不变；4301 full random 从 `174/200→168/200` 反而下降。配对 episode 为 `35` 个失败转成功、`29` 个成功转失败，说明不是所有 reset 都稳定改善。当前结论是 warm-start 修复有效地消除了 actor-only 的灾难性退化，但 mixed-static 覆盖和 dense reward 尚未形成跨 seed 稳定收益；不进入动态障碍物，下一步只针对 4301/4303 做静态随机分布上的低学习率/短迁移确认，并继续保留完整 final manifest 和所有失败 reset。
+
+静态 S1-R 的离线有限候选预检查已完成，输出为 `outputs/reaching_incremental/s1_static_obstacle_finetune/static_feasibility_precheck.json`。200 个 reset 中 IK reachable 为 190、无障碍候选路径找到为 189、静态障碍物候选路径找到为 161。与三个 S1-R final CSV 按 reset 对齐后，静态候选子集 pooled success 为 `434/483=89.9%`；其中 49 个失败均为 12 s timeout，且该子集中无 capsule overlap 或 physical contact。由于预检查的 `not_found` 是有限搜索标签而非数学无解证明，且候选子集仍显著低于 99%，后续应优先改进静态到达/脱困训练与动作响应，不应把剩余失败全部剔除为“无解”。
+
+固定动作响应诊断已完成：原始 `fixed_beta=0.35`、`0.50`、`0.65` 的全量 success 分别为 `491/600`、`485/600`、`489/600`；静态候选子集分别为 `434/483`、`428/483`、`432/483`。`beta=0.65` 仅改善 actor 4301，反而降低 4302/4303，不能作为统一修复。当前暂停 S2，优先进行带静态障碍物覆盖增强和 `fixed_risk_penalty=2.0` 的第二轮迁移训练；训练仍保持完整 final manifest，安全过滤器、动态速度、viability、recovery 和 relaxation 全部关闭。
 
 独立的[基础 reaching 恢复协议](reaching_recovery_protocol.md)已完成 v2 验证并冻结基础 actor；它与 VAPS G3/G4 完全隔离。该协议只证明无障碍 reaching 执行链路恢复，不授权动态避障、安全比较、OOD、真机或任何 recovery/relaxation 分支。
 

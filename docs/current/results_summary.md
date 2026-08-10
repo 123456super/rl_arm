@@ -47,6 +47,59 @@ S1-R 使用独立 validation manifest 选点后，在完整 `9001--9200` final m
 
 数据源：`outputs/reaching_incremental/s1_static_obstacle_finetune/eval/seed_430{1,2,3}_final.csv`。
 
+### S1-R2 actor-only 迁移结果：不作为最终改进证据
+
+S1-R2 使用 `mixed_static` 和 `fixed_risk_penalty=2.0`，但三组均通过 `--reset-agent-state` 只加载 actor，重新初始化 critic/target/alpha/replay。validation 结果如下：
+
+| seed | S1-R 起点 | S1-R2 选中点 | validation 结果 | physical contact / capsule overlap |
+| ---: | ---: | ---: | ---: | ---: |
+| 4301 | 35/40 = 87.5% | step 240000 | 35/40 = 87.5% | 0 / 0 |
+| 4302 | 33/40 = 82.5% | step 480000 | 30/40 = 75.0% | 0 / 0 |
+| 4303 | 32/40 = 80.0% | step 580000 | 33/40 = 82.5% | 0 / 0 |
+| pooled | 100/120 = 83.3% | — | 98/120 = 81.7% | 0 / 0 |
+
+4301/4302 的最佳点都是迁移起点，4303 仅增加 1 个成功。该轮不能作为 mixed-static 或 dense reward 的独立效果证据，因为 actor-only 恢复方式使随机 critic 在大 `start_step` 下立即参与更新，存在灾难性遗忘混杂因素。当前应先完成匹配 SAC state 的 S1-R2.1 重跑，再进行 `9001--9200` final 评估。
+
+### S1-R2.1 匹配 SAC state 迁移结果
+
+S1-R2.1 使用匹配的 actor/SAC state、`10000` 步 replay 收集和 `10000` 步 critic-only warmup。validation 只用于 mixed-static 选点，final 仍使用原始 random 静态障碍物分布和完整 `9001--9200` manifest。
+
+| seed | selected step | validation | final success | final physical / capsule / any |
+| ---: | ---: | ---: | ---: | ---: |
+| 4301 | 520000 | 38/40 = 95.0% | 168/200 = 84.0% | 0 / 0 / 0 |
+| 4302 | 480000 | 30/40 = 75.0% | 164/200 = 82.0% | 1 / 1 / 1 |
+| 4303 | 620000 | 35/40 = 87.5% | 165/200 = 82.5% | 0 / 1 / 1 |
+| pooled | — | 103/120 = 85.8% | 497/600 = 82.8% | 1 / 2 / 2 |
+
+相较 S1-R pooled `491/600=81.8%`，成功增加 6 个，physical contact 从 4 降到 1；静态候选路径子集从 `434/483=89.9%` 提升到 `443/483=91.7%`。但 4301 从 `174/200` 降到 `168/200`，4302 完全回到 S1-R 起点，提升主要来自 4303 的 `153/200→165/200`。因此这是有方向但跨 seed 不稳定的改进，不能作为 99% 静态避障能力证据，也不授权进入动态障碍物。
+
+### S1-R 静态可行性与失败归因（离线）
+
+为区分“候选路径未找到”和策略执行失败，使用相同 `9001--9200` reset manifest、零速度障碍物运行了离线有限候选预检查，结果保存在 `outputs/reaching_incremental/s1_static_obstacle_finetune/static_feasibility_precheck.json`。该脚本不加载 actor、不执行策略、不修改运行时控制；`not_found` 仅表示有限搜索未找到 witness，不是数学上的无解证明。
+
+| 标签 | reset 数 | S1-R pooled episode success |
+| --- | ---: | ---: |
+| IK reachable | 190/200 | 487/570 = 85.4% |
+| 无障碍候选路径找到 | 189/200 | 484/567 = 85.4% |
+| 静态障碍物候选路径找到 | 161/200 | 434/483 = 89.9% |
+| 静态候选路径未找到（含 IK 未找到） | 39/200 | 53/117 = 45.3% |
+
+在静态候选路径已找到的 483 个 pooled episode 中仍有 49 个超时失败，且没有 capsule overlap 或 physical contact；因此当前主要瓶颈是策略到达/脱困，而不是可以全部归因于无解静态场景。按 reset 统计，161 个静态候选 reset 中 116 个由三个 actor 全部成功，另有 45 个至少一个 actor 失败。当前不能诚实宣称“排除无解后 99%”：候选子集观测值为 89.9%，远低于 99%。
+
+该预检查的 `required_clearance_m=0.16` 包含 `d_safe=0.12`、几何裕度 `0.03` 和跟踪误差界 `0.01`；静态速度为零时没有延迟漂移项。
+
+### S1-R 动作响应诊断：`fixed_beta` 不构成稳定修复
+
+在相同 S1-R selected actor、相同 `9001--9200` final manifest 和相同静态场景上，只把固定动作平滑系数改为 `0.50` 或 `0.65`，结果如下。三组均为 `3×200=600` episode；静态候选子集固定为 161 个 reset、483 个 episode。
+
+| 设置 | 全量 success | 静态候选子集 success | 全量 timeout | capsule / physical contact |
+| --- | ---: | ---: | ---: | ---: |
+| S1-R 原始 `beta=0.35` | 491/600 = 81.8% | 434/483 = 89.9% | 105 | 2 / 4 |
+| 诊断 `beta=0.50` | 485/600 = 80.8% | 428/483 = 88.6% | 111 | 2 / 3 |
+| 诊断 `beta=0.65` | 489/600 = 81.5% | 432/483 = 89.4% | 107 | 2 / 4 |
+
+配对到相同 actor/reset 后，`beta=0.50` 在候选子集出现 10 个原始成功变失败、4 个失败变成功；`beta=0.65` 出现 13 个原始成功变失败、11 个失败变成功。`beta=0.65` 虽使 actor 4301 从 `174/200` 提升到 `178/200`，但 4302 从 `164/200` 降至 `162/200`、4303 从 `153/200` 降至 `149/200`。因此动作响应只改变失败 reset 的分配，没有形成跨 seed 的稳定增益；不建议把 beta=0.50 或 0.65 直接作为下一轮统一训练配置。下一轮改为静态混合场景迁移训练：保留 50% 原始 random，另外 50% 均匀覆盖 upper-arm/elbow/forearm/wrist crossing，并把 `fixed_risk_penalty` 从 1.0 提高到 2.0；S2 暂停。
+
 ## 历史失效诊断：冻结 B4 基础到达策略
 
 为区分“动态障碍/安全过滤器导致失败”和“策略本身不会 reaching”，对 G2 v2 固定的三个 B4 actor（train seeds `4108/4109/4110`）进行了无障碍实际执行诊断。固定 final reset 清单 `9001--9200`，保留原目标和初始关节状态，关闭障碍物与安全过滤器；每个 actor 运行 200 回合。结果为策略真实 `success`，不是 IK 或候选路径存在率。

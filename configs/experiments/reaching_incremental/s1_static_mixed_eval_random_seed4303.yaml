@@ -1,0 +1,8 @@
+# Evaluate S1-R2 on the original random static-obstacle distribution for a
+# direct comparison with S1/S1-R. Training itself uses mixed_static.
+includes:
+  - s1_static_mixed_finetune_seed4303.yaml
+
+env:
+  obstacle:
+    scenario: random

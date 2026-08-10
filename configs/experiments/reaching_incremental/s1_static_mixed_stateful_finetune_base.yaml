@@ -1,0 +1,4 @@
+# S1-R2.1: retry the static mixed training distribution with matching SAC state.
+# This isolates state initialization from the mixed coverage and dense reward changes.
+includes:
+  - s1_static_mixed_finetune_base.yaml

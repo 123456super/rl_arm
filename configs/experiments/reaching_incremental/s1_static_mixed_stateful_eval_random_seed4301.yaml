@@ -1,0 +1,6 @@
+includes:
+  - s1_static_mixed_stateful_finetune_seed4301.yaml
+
+env:
+  obstacle:
+    scenario: random

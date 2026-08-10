@@ -1438,9 +1438,22 @@ class UR5DynamicObstacleEnv(gym.Env):
         if not self.obstacle_enabled:
             return np.asarray(self.obstacle_cfg["disabled_position"], dtype=np.float32), np.zeros(3, dtype=np.float32)
 
+        if self.obstacle_scenario == "mixed_static":
+            # Keep half of the original random distribution while covering
+            # each controlled link-crossing band equally in the other half.
+            choices = ("random", "upper_arm_crossing", "elbow_crossing", "forearm_crossing", "wrist_crossing")
+            probabilities = (0.50, 0.125, 0.125, 0.125, 0.125)
+            selected = str(self.rng.choice(choices, p=probabilities))
+            if selected == "random":
+                return self._sample_random_obstacle()
+            return self._sample_named_obstacle(selected)
+
         if self.obstacle_scenario != "random":
             return self._sample_named_obstacle(self.obstacle_scenario)
 
+        return self._sample_random_obstacle()
+
+    def _sample_random_obstacle(self) -> tuple[np.ndarray, np.ndarray]:
         random_cfg = self.obstacle_cfg["random"]
         target_band_z = self.rng.uniform(*random_cfg["z_range"])
         side = -1.0 if self.rng.random() < 0.5 else 1.0
