@@ -1,6 +1,6 @@
 # 后续渐进式实验协议
 
-> 更新时间：2026-08-07。本文把已完成的无障碍 reaching v2 作为唯一基础策略，规定后续逐层增加环境和安全机制的实验顺序。每一级只改变一个主要因素；前一级未通过时，不进入后一级，也不同时修改训练、障碍物和过滤器。
+> 更新时间：2026-08-11。当前唯一待执行步骤为 S1-R4；S0--S1-R3 均为已完成结果或诊断归档，S2 及以后尚未授权。本文把无障碍 reaching v2 作为唯一基础策略，规定后续逐层增加环境和安全机制的顺序。
 
 ## 1. 总原则
 
@@ -16,11 +16,13 @@
 
 禁止把多个新因素放在同一次实验中。尤其不得在尚未完成冻结 actor 评估前同时加入动态障碍物、predictive risk、strict QP、viability monitor、recovery 或新的训练目标。
 
+S1-R4 是这一规则的显式例外：它用于修复已确认的 checkpoint/replay/timeout 训练正确性问题，并同时验证保守稳定机制，因此只能判断修复后整体方案是否可继续，不能归因各组件贡献。R4 通过后仍需单因素消融。
+
 ## 2. 固定不变的基线
 
 ### 2.1 Actor 与 checkpoint
 
-后续冻结 actor 只使用以下三个 checkpoint，不重新选择、不静默替换：
+S0/S1 冻结基线只使用以下三个 v2 checkpoint，不重新选择、不静默替换。S1-R 及以后若使用迁移 actor，必须在对应阶段显式记录起点、selected checkpoint 和评估配置，不能把迁移 actor 冒充以下冻结基线：
 
 | train seed | checkpoint |
 | ---: | --- |
@@ -81,11 +83,11 @@ S1-R 只改变训练适应，不加入动态速度、安全过滤器、viability
 
 S1-R 的通过条件：三个 seed 在 final 全量分布上均重新评估；pooled success 必须高于冻结 actor 的 `71.3%`，且任何单个 actor 不得低于其对应冻结基线（`87.0%/53.0%/74.0%`），physical contact 总数不得高于旧 S1 的 `13/600`。任何提升都必须同时报告 capsule overlap、timeout 和最终误差，不能只报告 success。若仍失败，先分析静态场景的任务可行性和失败 reset，不进入 S2。
 
-本轮 S1-R final 已满足上述门槛：pooled `491/600=81.8%`，三个 actor 分别为 `87.0%/82.0%/76.5%`，physical contact `4/600`。按原门槛本可进入 S2；但静态候选子集仍只有 `89.9%`，因此当前决策是先执行 S1-R2，不启动 S2。S2 若后续获准，只把 `speed_range` 改为 `[0.05, 0.05]`，继续关闭安全过滤器、viability、recovery 和 relaxation，且仍使用相同的 actor、validation 规则和 final manifest。
+本轮 S1-R final 已满足上述门槛：pooled `491/600=81.8%`，三个 actor 分别为 `87.0%/82.0%/76.5%`，physical contact `4/600`。按原门槛本可进入 S2；但静态候选子集仍只有 `89.9%`，因此当时的决议是先执行 S1-R2，不启动 S2。S1-R2 及其后续诊断现已完成，当前步骤见 S1-R4。S2 若后续获准，只把 `speed_range` 改为 `[0.05, 0.05]`，继续关闭安全过滤器、viability、recovery 和 relaxation，且仍使用相同的 actor、validation 规则和 final manifest。
 
 ### S1-R 后续诊断：先检查动作响应，再决定是否二次迁移训练
 
-离线有限候选预检查显示静态候选路径存在的 reset 为 161/200，但其策略执行成功率只有 434/483=89.9%；49 个失败均为 timeout，且没有碰撞。因此“排除无解后 99%”目前没有证据支持，不能按标签删除失败 reset。建议先在相同 S1-R selected actor、相同 final manifest、相同静态场景下做只改变 `env.fixed_beta` 的响应性诊断：`0.50` 与 `0.65`，不训练、不启用过滤器、不改变 success threshold。若某个 beta 在三个 actor 上都降低候选子集 timeout 且 collision_any 不增加，再以该 beta 作为下一轮静态迁移训练的唯一新增变量；若无改善，则停止盲目加训，转向逐 reset 轨迹和目标/障碍物几何归因。
+离线有限候选预检查显示静态候选路径存在的 reset 为 161/200，但其策略执行成功率只有 434/483=89.9%；49 个失败均为 timeout，且没有碰撞。因此“排除无解后 99%”没有证据支持，不能按标签删除失败 reset。当时先在相同 S1-R selected actor、相同 final manifest、相同静态场景下执行了只改变 `env.fixed_beta` 的 `0.50/0.65` 响应性诊断；两组都没有跨 seed 稳定改善，随后才进入 S1-R2。
 
 诊断配置：`configs/experiments/reaching_incremental/s1_static_beta050_seed430{1,2,3}.yaml`、`s1_static_beta065_seed430{1,2,3}.yaml`。这些配置只覆盖固定动作平滑系数，继承 S1-R 的静态零速度障碍物和关闭安全过滤器设置。
 
@@ -102,64 +104,100 @@ python scripts/evaluate.py --config configs/experiments/reaching_incremental/s1_
 
 ### S1-R2：静态混合场景迁移训练（actor-only 诊断，已完成）
 
-由于 S1-R 的静态候选子集仍只有 `434/483=89.9%`，且 beta 响应诊断没有跨 seed 稳定收益，当前先做第二轮静态迁移训练。S1-R2 只改变训练分布和 dense 风险惩罚：障碍物保持零速度，`scenario: mixed_static` 以 50% 原始 `random`、12.5% `upper_arm_crossing`、12.5% `elbow_crossing`、12.5% `forearm_crossing`、12.5% `wrist_crossing` 采样，`fixed_risk_penalty: 2.0`。安全过滤器、动态速度、viability、recovery、relaxation 和 maximin 全部关闭。
+由于 S1-R 的静态候选子集仍只有 `434/483=89.9%`，且 beta 响应诊断没有跨 seed 稳定收益，当时执行了第二轮静态迁移训练。S1-R2 只改变训练分布和 dense 风险惩罚：障碍物保持零速度，`scenario: mixed_static` 以 50% 原始 `random`、12.5% `upper_arm_crossing`、12.5% `elbow_crossing`、12.5% `forearm_crossing`、12.5% `wrist_crossing` 采样，`fixed_risk_penalty: 2.0`。安全过滤器、动态速度、viability、recovery、relaxation 和 maximin 全部关闭。
 
-S1-R2 从 S1-R selected actor 继续训练 300000 steps；起始 checkpoint 也作为不得退化候选复制到新 run 目录。为保持三个 train seed 的迁移口径一致，三组均使用 actor-only 迁移并重新初始化 critic、target critic、alpha 和优化器状态，不恢复旧 SAC state。由于 actor-only 迁移不能让随机 critic 立即接管已训练 actor，训练入口必须按本次迁移重新计数：先用新场景数据填充 replay，并执行默认 `10000` 步 critic-only warmup，期间冻结 actor 和 alpha；之后才开启完整 SAC 更新。4301 的起点 `actor_step_240000.pt` 没有同一步保存的 agent state，不能拿 `step_260000` 或最终 state 冒充匹配状态。validation 仍使用 `9301--9340`，final 仍使用完整 `9001--9200`，不能删除 reset。训练输出目录与 S1-R 分开，不覆盖既有结果。
+S1-R2 从 S1-R selected actor 继续训练 300000 steps；三组均使用 actor-only 迁移并重新初始化 critic、target critic、alpha 和优化器状态。实际 run 的 `config.json` 只记录 `agent_state_reset=true`，`progress.csv` 在迁移起点后 500 步时 alpha 已经变化，证明当次执行没有 transfer-relative collect-only/critic-only warmup，随机 critic 很早就参与了 actor 更新。后来协议中补写的 `--reset-state-warmup-steps 10000` 不代表已产生的 R2 结果，现已删除，避免错误复现。
 
-训练配置为 `configs/experiments/reaching_incremental/s1_static_mixed_finetune_seed430{1,2,3}.yaml`。三个终端分别运行：
+R2 的事实来源固定为 `outputs/reaching_incremental/s1_static_mixed_finetune/train/seed_430{1,2,3}/.../config.json`、`progress.csv` 和 `checkpoint_selection/selected_checkpoint.csv`。validation 使用 `9301--9340`；本轮没有形成可引用的 full final。当前训练入口已修复恢复调度，重新执行同名配置会产生不同训练语义，因此不得与历史 R2 数字合并。
+
+### S1-R2.1：同一步部分训练状态的静态混合迁移（已完成）
+
+S1-R2 的 actor-only 结果显示，随机初始化的 critic 在跳过原始 `start_step` warmup 后立即接管已训练 actor，导致 4301/4302 退化。R2.1 因此恢复了与 actor 同一步的旧 `agent_state`，不使用 `--reset-agent-state`。后续审计确认旧文件只含 online reward/cost critic、alpha、lambda 和 cost EMA，不含 target critic、optimizer、replay、训练步数或 RNG；故本轮统一定义为“同一步部分训练状态 warm-start”，不是完整 SAC 恢复。4301 使用 v2 的 `agent_state_step_240000.pt`，4302/4303 使用 S1-R 的 `agent_state_step_480000.pt`/`agent_state_step_320000.pt`。训练输出使用新目录，不覆盖 S1-R 或 S1-R2。
+
+R2.1 的实际起点 actor/state 路径和恢复参数保存在三个 run 的 `config.json` 中：`resume_replay_warmup_steps=10000`、`resume_critic_warmup_steps=10000`。完成后只使用 `9301--9340` validation 选点，再用完整 `9001--9200` final manifest 在原始 `random` 静态分布评估。当前代码增加了签名校验、timeout bootstrap 和完整 checkpoint 语义，重新运行旧命令不会复现同一训练链路；R2.1 仅按现有产物归档。
+
+S1-R2.1 结果：validation 选中 4301=`520000`、4302=`480000`、4303=`620000`；full final pooled success 为 `497/600=82.8%`，静态候选路径子集为 `443/483=91.7%`，collision_any/capsule overlap/physical contact 为 `2/2/1`。相较 S1-R，成功增加 6 个、physical contact 减少 3 个，但 4301 退化、4302 回退起点、提升主要由 4303 贡献，暂不进入 S2。
+
+### S1-D1：候选失败时间窗诊断（已完成）
+
+S1-R2.2 在旧部分状态恢复链路下没有产生可选收益：4301/4303 的短周期低学习率 random-static 续训都选回迁移起点。该结果只否定当时的恢复方式和超参数组合，不能外推为修复后的续训必然无效。对 S1-R2.1 full final trace 的离线归因显示，静态候选路径存在的 40 条失败均为 timeout，其中 32 条曾进入 `0.08 m` 目标误差内且无碰撞。随后只把 episode 上限从 `240` 控制步（12 s）改为 `480`（24 s），形成 S1-D1 时间窗诊断。
+
+固定清单 `configs/experiments/reaching_incremental/manifests/s1_static_candidate_failure_union_v1.json` 包含 36 个 reset：它们在静态候选路径预检查中有 witness，且至少一个 S1-R2.1 actor 在 final 中失败。该清单是失败诊断样本，不得参与 checkpoint selection、不得替代完整 final manifest、不得用于宣称全量 success。S1-D1 保持 static random、零障碍物速度、相同 actor、`success_tolerance=0.055 m`、同一碰撞定义，安全过滤器、viability、recovery、relaxation 均保持关闭。
+
+可在三个终端并行运行：
 
 ```bash
-RUN=outputs/reaching_incremental/s1_static_mixed_finetune/train/seed_4301/link_fixed_static_mixed_finetune_seed4301_steps540000
+python scripts/evaluate.py --config configs/experiments/reaching_incremental/s1_static_horizon_diagnostic_seed4301.yaml --checkpoint outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4301/link_fixed_static_mixed_stateful_finetune_seed4301_steps540000/actor_step_520000.pt --seed-manifest configs/experiments/reaching_incremental/manifests/s1_static_candidate_failure_union_v1.json --episodes 36 --output outputs/reaching_incremental/s1_static_horizon_diagnostic/eval/seed_4301.csv --trace-output outputs/reaching_incremental/s1_static_horizon_diagnostic/eval/seed_4301_traces
+```
+
+```bash
+python scripts/evaluate.py --config configs/experiments/reaching_incremental/s1_static_horizon_diagnostic_seed4302.yaml --checkpoint outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4302/link_fixed_static_mixed_stateful_finetune_seed4302_steps780000/actor_step_480000.pt --seed-manifest configs/experiments/reaching_incremental/manifests/s1_static_candidate_failure_union_v1.json --episodes 36 --output outputs/reaching_incremental/s1_static_horizon_diagnostic/eval/seed_4302.csv --trace-output outputs/reaching_incremental/s1_static_horizon_diagnostic/eval/seed_4302_traces
+```
+
+```bash
+python scripts/evaluate.py --config configs/experiments/reaching_incremental/s1_static_horizon_diagnostic_seed4303.yaml --checkpoint outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4303/link_fixed_static_mixed_stateful_finetune_seed4303_steps620000/actor_step_620000.pt --seed-manifest configs/experiments/reaching_incremental/manifests/s1_static_candidate_failure_union_v1.json --episodes 36 --output outputs/reaching_incremental/s1_static_horizon_diagnostic/eval/seed_4303.csv --trace-output outputs/reaching_incremental/s1_static_horizon_diagnostic/eval/seed_4303_traces
+```
+
+结果：原 12 s 的 40 条候选 timeout 中，仅 2 条（4302 的 reset `9116`/`9200`）在 24 s 内成功，耗时 `16.95 s`/`14.25 s`；其余 38 条均至 24 s 仍 timeout，且三 actor 无新增 collision。因此未达到“超过半数被延长时间救回”的判据，时间窗不是主因。24 s 结果不能写成原 12 s final 提升，后续保持 `max_episode_steps=240`。
+
+S1-D1 完成后，当时只新增终端到达 dense reward，用于成功阈值附近的停滞与回退，形成 S1-R3；没有改动 obstacle distribution、`fixed_risk_penalty`、速度、平滑响应、安全过滤器、viability、recovery 或 relaxation。R3 仍使用原 40-reset validation manifest 选点，并计划在通过后使用完整 200-reset final manifest 复核。
+
+### S1-R3：终端到达 shaping（已完成，恢复状态存在混杂）
+
+**唯一新增因素**：原 reward 保持不变；当上一步或当前末端目标误差进入 `0.12 m` 时，额外加入有符号 `w_terminal_progress * (e_{t-1} - e_t)`。本轮固定 `w_terminal_progress=30.0`：继续接近目标会加分，回退会等量扣分。默认值为 `0.0`，所以不会改变所有历史实验。该项直接针对 21 条 near-goal timeout 和 11 条 near-goal regression，不更改成功阈值。
+
+训练相对 S1-R2.1 只改变这一个 reward shaping 项：继续使用 `mixed_static`、零速度、`fixed_risk_penalty=2.0`、原 SAC learning rate、同一步部分训练状态 warm-start、`10000` replay warmup 和 `10000` critic-only warmup；安全过滤器、viability、recovery、relaxation 保持关闭。final 仍计划在原始 random 静态分布和完整 `9001--9200` manifest 评估。4302 的 S1-R2.1 起点没有在 stateful 输出目录重存 `agent_state_step_480000.pt`，因此使用了与该 actor 同一步的 S1-R state。
+
+R3 的实际 actor/state 起点和 `10000+10000` warmup 参数保存在三个 run 的 `config.json` 中。由于当前代码会识别 reward 签名变化并重置旧 reward critic，重新执行旧命令将成为一个不同实验，不能覆盖或补写 R3 结果。
+
+选择时先把三个迁移起点 actor 复制到各自 R3 run directory，再执行原 40-reset validation selection；这保证所有继续训练 checkpoint 都必须胜过起点才能进入 final。当时预注册的通过条件是：selected checkpoint 在完整 final 上提高候选路径子集 success、减少 near-goal timeout/regression，且 pooled collision_any 不高于 S1-R2.1 的 `2/600`。R3 validation 未通过；后续训练状态审计又确认其恢复链路存在混杂，因此实际决议改为先修复训练基础设施并执行 R4，而不是把 R3 解释为 shaping 失败。
+
+S1-R3 validation 实际结果：4301 选回 `520000`=`38/40`，4302 选回 `480000`=`30/40`，4303 选回 `620000`=`35/40`；三个起点均与 S1-R2.1 selected actor 相同。4301 的 `540000`、4302 的 `500000`、4303 的 `640000` 虽与各自起点 validation 成功率持平，但 deterministic tie-break 选择更早 step；其余点明显退化。因此 R3 未通过，不运行新的 full final。
+
+训练状态审计随后发现，R3 在 reward 定义改变后继续加载了按旧 reward 训练的 reward critic；旧 checkpoint 同时缺少 target critic、optimizer、replay、训练步数和 RNG。故上述结果保留为旧恢复链路的失效证据，不能独立归因为 terminal progress reward 无效。
+
+### S1-R4：修复后的静态终端迁移（已配置，待运行）
+
+R4 先修复训练正确性，再验证整体方案。新的 checkpoint 格式保存 online/target critic、全部 optimizer、alpha/lambda/cost EMA、actor reference 和训练 RNG；replay 另存为压缩 `.npz`。加载时对 reward 和完整 risk 配置生成签名，不兼容的 critic 自动重置。time-limit truncation 只结束 episode，不再切断 Bellman bootstrap。旧 checkpoint 无法补出缺失的 optimizer/replay，因此首轮 R4 必须重建；新 checkpoint 恢复完整学习状态，但中途 checkpoint 恢复会从新的 episode 继续，不宣称仿真器逐步状态等价。
+
+R4 固定设置如下：
+
+- 三个 actor 从 R2.1 selected step `520000/480000/620000` 各训练 `200000` steps；
+- terminal progress reward 保持 radius `0.12 m`、weight `30.0`，旧 reward critic因签名不匹配自动重置；
+- 前 `50000` 步只收集 replay，接着 `50000` 步只更新 critic，最后 `100000` 步才更新完整 SAC；
+- actor/critic/alpha learning rate 为 `1e-5/1e-4/1e-5`，actor output anchor 权重为 `10.0`；
+- 一个零速度静态障碍物，场景为原始 `random`；25% episode 从固定 36-reset 失败清单抽样，75% 保持完整随机采样；
+- replay 中 50% batch 配额按完整成功/失败轨迹分层，其余保持随机采样；
+- 安全过滤器、动态障碍物、viability、recovery、relaxation 和 maximin 全部关闭。
+
+R4 是基础设施、数据覆盖和稳定性机制的整体恢复实验，不是单因素消融。若整体结果通过，后续还需要单独消融 focused reset、stratified replay、anchor 和 terminal reward，才能声明各自贡献。
+
+三个训练命令可以并行运行。先把起点 actor 放入新 run directory，使 validation 选择器可以保留未退化起点：
+
+```bash
+RUN=outputs/reaching_incremental/s1_static_terminal_repaired_finetune/train/seed_4301/link_fixed_static_terminal_repaired_finetune_seed4301_steps720000
 mkdir -p "$RUN"
-cp -n outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4301/link_fixed_static_obstacle_finetune_seed4301_steps440000/actor_step_240000.pt "$RUN/actor_step_240000.pt"
-python scripts/train.py --config configs/experiments/reaching_incremental/s1_static_mixed_finetune_seed4301.yaml --resume-actor outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4301/link_fixed_static_obstacle_finetune_seed4301_steps440000/actor_step_240000.pt --reset-agent-state --reset-state-warmup-steps 10000 --start-step 240000
+cp -n outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4301/link_fixed_static_mixed_stateful_finetune_seed4301_steps540000/actor_step_520000.pt "$RUN/actor_step_520000.pt"
+python scripts/train.py --config configs/experiments/reaching_incremental/s1_static_terminal_repaired_finetune_seed4301.yaml --resume-actor outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4301/link_fixed_static_mixed_stateful_finetune_seed4301_steps540000/actor_step_520000.pt --resume-state outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4301/link_fixed_static_mixed_stateful_finetune_seed4301_steps540000/agent_state_step_520000.pt --start-step 520000
 ```
 
 ```bash
-RUN=outputs/reaching_incremental/s1_static_mixed_finetune/train/seed_4302/link_fixed_static_mixed_finetune_seed4302_steps780000
+RUN=outputs/reaching_incremental/s1_static_terminal_repaired_finetune/train/seed_4302/link_fixed_static_terminal_repaired_finetune_seed4302_steps680000
 mkdir -p "$RUN"
-cp -n outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4302/link_fixed_static_obstacle_finetune_seed4302_steps480000/actor_step_480000.pt "$RUN/actor_step_480000.pt"
-python scripts/train.py --config configs/experiments/reaching_incremental/s1_static_mixed_finetune_seed4302.yaml --resume-actor outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4302/link_fixed_static_obstacle_finetune_seed4302_steps780000/actor_step_480000.pt --reset-agent-state --reset-state-warmup-steps 10000 --start-step 480000
+cp -n outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4302/link_fixed_static_mixed_stateful_finetune_seed4302_steps780000/actor_step_480000.pt "$RUN/actor_step_480000.pt"
+python scripts/train.py --config configs/experiments/reaching_incremental/s1_static_terminal_repaired_finetune_seed4302.yaml --resume-actor outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4302/link_fixed_static_mixed_stateful_finetune_seed4302_steps780000/actor_step_480000.pt --resume-state outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4302/link_fixed_static_obstacle_finetune_seed4302_steps480000/agent_state_step_480000.pt --start-step 480000
 ```
 
 ```bash
-RUN=outputs/reaching_incremental/s1_static_mixed_finetune/train/seed_4303/link_fixed_static_mixed_finetune_seed4303_steps620000
+RUN=outputs/reaching_incremental/s1_static_terminal_repaired_finetune/train/seed_4303/link_fixed_static_terminal_repaired_finetune_seed4303_steps820000
 mkdir -p "$RUN"
-cp -n outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4303/link_fixed_static_obstacle_finetune_seed4303_steps420000/actor_step_320000.pt "$RUN/actor_step_320000.pt"
-python scripts/train.py --config configs/experiments/reaching_incremental/s1_static_mixed_finetune_seed4303.yaml --resume-actor outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4303/link_fixed_static_obstacle_finetune_seed4303_steps620000/actor_step_320000.pt --reset-agent-state --reset-state-warmup-steps 10000 --start-step 320000
+cp -n outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4303/link_fixed_static_mixed_stateful_finetune_seed4303_steps620000/actor_step_620000.pt "$RUN/actor_step_620000.pt"
+python scripts/train.py --config configs/experiments/reaching_incremental/s1_static_terminal_repaired_finetune_seed4303.yaml --resume-actor outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4303/link_fixed_static_mixed_stateful_finetune_seed4303_steps620000/actor_step_620000.pt --resume-state outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4303/link_fixed_static_mixed_stateful_finetune_seed4303_steps620000/agent_state_step_620000.pt --start-step 620000
 ```
 
-训练完成后，只在 `mixed_static` 的 `9301--9340` validation 上选择 checkpoint：
+运行开始时三组日志都必须显示 `reward_critics_loaded=False`、`cost_critics_loaded=True`、`optimizers_loaded=False`、`replay=fresh`，随后依次显示 50000 步 collect-only 和 50000 步 critic-only。任一项不符立即停止该 seed。
 
-```bash
-python scripts/select_checkpoint.py --config configs/experiments/reaching_incremental/s1_static_mixed_finetune_seed4301.yaml --run-dir outputs/reaching_incremental/s1_static_mixed_finetune/train/seed_4301/link_fixed_static_mixed_finetune_seed4301_steps540000 --seed-manifest configs/experiments/reaching_recovery/manifests/v1_validation.json --episodes 40 --metric success_rate
-python scripts/select_checkpoint.py --config configs/experiments/reaching_incremental/s1_static_mixed_finetune_seed4302.yaml --run-dir outputs/reaching_incremental/s1_static_mixed_finetune/train/seed_4302/link_fixed_static_mixed_finetune_seed4302_steps780000 --seed-manifest configs/experiments/reaching_recovery/manifests/v1_validation.json --episodes 40 --metric success_rate
-python scripts/select_checkpoint.py --config configs/experiments/reaching_incremental/s1_static_mixed_finetune_seed4303.yaml --run-dir outputs/reaching_incremental/s1_static_mixed_finetune/train/seed_4303/link_fixed_static_mixed_finetune_seed4303_steps620000 --seed-manifest configs/experiments/reaching_recovery/manifests/v1_validation.json --episodes 40 --metric success_rate
-```
-
-选择完成后，再读取 `selected_checkpoint.csv`，使用完整 `9001--9200` final manifest 在原始 `random` 静态障碍物分布上评估；评估配置为 `s1_static_mixed_eval_random_seed430{1,2,3}.yaml`。不能用 final manifest 选点，也不能删失败 reset。
-
-### S1-R2.1：匹配 SAC state 的静态混合迁移（已完成）
-
-S1-R2 的 actor-only 结果显示，随机初始化的 critic 在跳过原始 `start_step` warmup 后立即接管已训练 actor，导致 4301/4302 退化。下一轮先修复迁移初始化，不改变 mixed-static 覆盖或 `fixed_risk_penalty=2.0`：恢复 actor 与同一步匹配的 SAC state，完整恢复 critic/target critic/alpha；不使用 `--reset-agent-state`。4301 的 actor 与 S1-R 起始时完全相同，因此使用原始 v2 的 `agent_state_step_240000.pt` 作为严格匹配 state；4302/4303 使用 S1-R 对应的 `agent_state_step_480000.pt`/`agent_state_step_320000.pt`。训练输出使用新目录，不覆盖 S1-R 或 S1-R2。
-
-三个训练命令如下：
-
-```bash
-python scripts/train.py --config configs/experiments/reaching_incremental/s1_static_mixed_stateful_finetune_seed4301.yaml --resume-actor outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4301/link_fixed_static_obstacle_finetune_seed4301_steps440000/actor_step_240000.pt --resume-state outputs/reaching_recovery_v2/train/seed_4301/link_fixed_no_obstacle_speed100_seed4301_steps300000/agent_state_step_240000.pt --start-step 240000
-```
-
-```bash
-python scripts/train.py --config configs/experiments/reaching_incremental/s1_static_mixed_stateful_finetune_seed4302.yaml --resume-actor outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4302/link_fixed_static_obstacle_finetune_seed4302_steps480000/actor_step_480000.pt --resume-state outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4302/link_fixed_static_obstacle_finetune_seed4302_steps480000/agent_state_step_480000.pt --start-step 480000
-```
-
-```bash
-python scripts/train.py --config configs/experiments/reaching_incremental/s1_static_mixed_stateful_finetune_seed4303.yaml --resume-actor outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4303/link_fixed_static_obstacle_finetune_seed4303_steps420000/actor_step_320000.pt --resume-state outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4303/link_fixed_static_obstacle_finetune_seed4303_steps420000/agent_state_step_320000.pt --start-step 320000
-```
-
-完成后仍只使用 `9301--9340` validation 选点，再用完整 `9001--9200` final manifest 在原始 `random` 静态分布评估。S1-R2.1 期间不进入动态障碍物、不启用安全过滤器、viability、recovery 或 relaxation。
-
-S1-R2.1 结果：validation 选中 4301=`520000`、4302=`480000`、4303=`620000`；full final pooled success 为 `497/600=82.8%`，静态候选路径子集为 `443/483=91.7%`，physical contact `1/600`。相较 S1-R，成功增加 6 个、physical contact 减少 3 个，但 4301 退化、4302 回退起点、提升主要由 4303 贡献，暂不进入 S2。
+训练完成后仍只用 `9301--9340` validation manifest 选点，并把起点 actor 作为候选。只有三个 seed 都不低于各自起点、候选失败 reset 的 near-goal timeout/regression 下降且 validation collision_any 不增加，才运行完整 `9001--9200` final。final 必须保留所有 reset；R4 未通过前不进入 S2。
 
 ### S2：低速动态障碍物，仍关闭安全过滤器
 
@@ -231,9 +269,11 @@ S6 不是当前默认下一步，不能因为 S4 失败就直接通过训练“�
 
 停止意味着保留失败证据并分析原因，不是继续增加配置或调整多个超参数。
 
-## 5. 推荐的第一轮执行
+## 5. 已执行命令归档：S1-R
 
-下一步先执行 S1-R（S0 已通过）：
+本节命令已执行完成，仅用于复现 S1-R，不是当前下一步。当前唯一待执行训练是第 3 节的 S1-R4。
+
+S1-R 当时的执行顺序为：
 
 1. 从三个 v2 selected actor 继续静态障碍物训练 `200000` steps；
 2. 只使用 `9301--9340` validation manifest 选择 checkpoint；
@@ -243,9 +283,9 @@ S6 不是当前默认下一步，不能因为 S4 失败就直接通过训练“�
 
 本轮不启用安全过滤器、不启用 recovery；v2 actor 原文件不修改。
 
-### S1-R 可直接执行的命令
+### S1-R 历史命令
 
-以下命令假设从仓库根目录执行，使用当前环境中的 `python`，不需要 `conda run`。三个训练可以分别放在三个终端并行运行；每个终端固定一张 GPU，不能把同一个输出目录交给多个进程。
+以下命令仅用于历史复现，假设从仓库根目录执行并使用当前环境中的 `python`。不要用它们代替 S1-R4 命令。
 
 终端 1（GPU 1，seed 4301）：
 

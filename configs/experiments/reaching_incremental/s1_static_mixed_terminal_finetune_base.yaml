@@ -1,0 +1,41 @@
+# S1-R3: one-factor terminal approach shaping on the matched S1-R2.1 state.
+# Keep the mixed-static task and all safety branches unchanged.
+includes:
+  - s1_static_mixed_stateful_finetune_base.yaml
+
+reward:
+  # Fixed protocol radius; only the shaping weight is enabled in this round.
+  terminal_goal_radius_m: 0.12
+  w_terminal_progress: 30.0
+
+sac:
+  fixed_risk_penalty: 2.0
+
+env:
+  obstacle:
+    enabled: true
+    scenario: mixed_static
+    speed_range: [0.0, 0.0]
+  safety_filter:
+    enabled: false
+    viability_monitor_enabled: false
+    diagnostic_logging: false
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+
+train:
+  method: link_fixed
+  progress_interval: 500
+  log_interval: 10
+  save_interval: 20000
+
+checkpoint_selection:
+  episodes: 40
+  metric: success_rate
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_validation.json
+
+eval:
+  method: link_fixed
+  episodes: 200
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json

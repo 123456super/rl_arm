@@ -1,0 +1,10 @@
+includes:
+  - s1_static_mixed_terminal_finetune_base.yaml
+
+seed: 4302
+device: cuda:4
+
+train:
+  total_steps: 580000
+  output_dir: outputs/reaching_incremental/s1_static_mixed_terminal_finetune/train/seed_4302
+  run_name: link_fixed_static_mixed_terminal_finetune_seed4302_steps580000

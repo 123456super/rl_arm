@@ -1,0 +1,14 @@
+{
+  "manifest_version": 1,
+  "protocol": "s1_static_obstacle_failure_diagnostic_v1",
+  "role": "candidate_path_timeout_horizon_diagnostic",
+  "source": "outputs/reaching_incremental/s1_static_failure_diagnostics/reset_diagnostics.csv",
+  "selection_rule": "static_candidate_path_status=candidate_path_found and success_count<actor_count under frozen S1-R2.1 final evaluation",
+  "not_for_checkpoint_selection": true,
+  "not_a_final_evaluation_manifest": true,
+  "seeds": [
+    9012, 9014, 9023, 9024, 9032, 9034, 9042, 9047, 9056, 9058, 9059, 9063,
+    9066, 9075, 9084, 9085, 9090, 9091, 9096, 9100, 9116, 9122, 9140, 9145,
+    9148, 9152, 9157, 9161, 9176, 9179, 9183, 9185, 9189, 9191, 9199, 9200
+  ]
+}

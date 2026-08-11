@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import subprocess
 from collections import deque
 from datetime import datetime
@@ -17,7 +18,12 @@ from rl_risk_sac.algorithms.replay_buffer import ReplayBuffer
 from rl_risk_sac.envs import UR5DynamicObstacleEnv
 from rl_risk_sac.utils.config import load_config
 from rl_risk_sac.utils.device import resolve_device
-from rl_risk_sac.utils.seeding import set_seed
+from rl_risk_sac.utils.seeding import capture_rng_state, restore_rng_state, set_seed
+
+try:
+    from scripts.seed_manifest import load_seed_manifest
+except ModuleNotFoundError:
+    from seed_manifest import load_seed_manifest
 
 
 def parse_args() -> argparse.Namespace:
@@ -25,6 +31,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--resume-actor", default=None)
     parser.add_argument("--resume-state", default=None)
+    parser.add_argument("--resume-replay", default=None)
+    parser.add_argument(
+        "--reset-reward-critics",
+        action="store_true",
+        help="keep the actor/cost state but reinitialize reward critics for a changed reward",
+    )
+    parser.add_argument(
+        "--reset-cost-critics",
+        action="store_true",
+        help="reinitialize cost critics when the risk-cost definition changed",
+    )
+    parser.add_argument(
+        "--no-restore-optimizers",
+        action="store_true",
+        help="load network state without optimizer moments",
+    )
     parser.add_argument(
         "--reset-agent-state",
         action="store_true",
@@ -39,13 +61,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--resume-replay-warmup-steps",
         type=int,
-        default=10000,
+        default=None,
         help="collect fresh replay samples before updates after any resume",
     )
     parser.add_argument(
         "--resume-critic-warmup-steps",
         type=int,
-        default=10000,
+        default=None,
         help="critic-only updates after replay warmup for a full-state resume",
     )
     parser.add_argument("--start-step", type=int, default=0)
@@ -75,6 +97,84 @@ def git_revision() -> str | None:
         return None
 
 
+def inferred_checkpoint_path(actor_path: str | Path, prefix: str, extension: str) -> Path:
+    actor = Path(actor_path)
+    if actor.name.startswith("actor"):
+        suffix = actor.stem[len("actor") :]
+        return actor.with_name(f"{prefix}{suffix}{extension}")
+    raise ValueError(f"actor checkpoint name must start with 'actor': {actor}")
+
+
+def checkpoint_step(path: str | Path, prefix: str) -> int | None:
+    match = re.fullmatch(rf"{re.escape(prefix)}_step_(\d+)\.\w+", Path(path).name)
+    return int(match.group(1)) if match is not None else None
+
+
+def validate_resume_checkpoint_steps(
+    actor_path: str | Path,
+    state_path: str | Path | None,
+    replay_path: str | Path | None,
+    start_step: int,
+) -> None:
+    actor_step = checkpoint_step(actor_path, "actor")
+    if actor_step is not None and actor_step != start_step:
+        raise ValueError(
+            f"--start-step={start_step} does not match actor checkpoint step {actor_step}"
+        )
+    for label, path, prefix in (
+        ("agent-state", state_path, "agent_state"),
+        ("replay", replay_path, "replay"),
+    ):
+        if path is None:
+            continue
+        persisted_step = checkpoint_step(path, prefix)
+        if persisted_step is not None and persisted_step != start_step:
+            raise ValueError(
+                f"--start-step={start_step} does not match {label} checkpoint step {persisted_step}"
+            )
+
+
+def save_training_checkpoint(
+    agent: SACAgent,
+    replay: ReplayBuffer,
+    env: UR5DynamicObstacleEnv,
+    run_dir: Path,
+    *,
+    suffix: str,
+    step: int,
+    episode: int,
+    save_replay: bool,
+) -> None:
+    training_state = {
+        "step": int(step),
+        "episode": int(episode),
+        "rng_state": capture_rng_state(),
+        "env_rng_state": env.rng.bit_generator.state,
+    }
+    agent.save(run_dir, suffix=suffix, training_state=training_state)
+    if save_replay:
+        replay.save(run_dir / f"replay{suffix}.npz")
+
+
+def reset_training_environment(
+    env: UR5DynamicObstacleEnv,
+    focused_seeds: list[int],
+    focused_fraction: float,
+    default_seed: int | None = None,
+) -> tuple[np.ndarray, dict[str, Any], int | None, str]:
+    if not focused_seeds:
+        observation, info = env.reset(seed=default_seed)
+        return observation, info, default_seed, "default"
+    if np.random.random() < focused_fraction:
+        seed = int(np.random.choice(focused_seeds))
+        source = "focused"
+    else:
+        seed = int(np.random.randint(0, np.iinfo(np.int32).max))
+        source = "random"
+    observation, info = env.reset(seed=seed)
+    return observation, info, seed, source
+
+
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
@@ -85,11 +185,27 @@ def main() -> None:
         raise ValueError("--start-step must be non-negative")
     if args.reset_agent_state and args.resume_actor is None:
         raise ValueError("--reset-agent-state requires --resume-actor")
+    if (args.reset_reward_critics or args.reset_cost_critics or args.no_restore_optimizers) and not args.resume_actor:
+        raise ValueError("critic/optimizer resume options require --resume-actor")
+    if args.reset_agent_state and (args.reset_reward_critics or args.reset_cost_critics):
+        raise ValueError("--reset-agent-state already resets all critics")
+    configured_replay_warmup = int(config["sac"].get("resume_replay_warmup_steps", 10000))
+    configured_critic_warmup = int(config["sac"].get("resume_critic_warmup_steps", 10000))
+    requested_replay_warmup = (
+        configured_replay_warmup
+        if args.resume_replay_warmup_steps is None
+        else args.resume_replay_warmup_steps
+    )
+    requested_critic_warmup = (
+        configured_critic_warmup
+        if args.resume_critic_warmup_steps is None
+        else args.resume_critic_warmup_steps
+    )
     if args.reset_state_warmup_steps < 0:
         raise ValueError("--reset-state-warmup-steps must be non-negative")
-    if args.resume_replay_warmup_steps < 0:
+    if requested_replay_warmup < 0:
         raise ValueError("--resume-replay-warmup-steps must be non-negative")
-    if args.resume_critic_warmup_steps < 0:
+    if requested_critic_warmup < 0:
         raise ValueError("--resume-critic-warmup-steps must be non-negative")
 
     config["device"] = resolve_device(config)
@@ -98,6 +214,10 @@ def main() -> None:
     obs_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     agent = SACAgent(obs_dim, action_dim, config, method=method)
+    resume_load_info: dict[str, Any] = {}
+    resume_training_state: dict[str, Any] = {}
+    resume_rng_restored = False
+    resume_state: str | None = None
     if args.resume_actor is not None:
         if args.reset_agent_state and args.resume_state is not None:
             raise ValueError("--reset-agent-state cannot be combined with --resume-state")
@@ -105,26 +225,72 @@ def main() -> None:
         if resume_state is None and not args.reset_agent_state:
             actor_path = Path(args.resume_actor)
             resume_state = str(actor_path.with_name(actor_path.name.replace("actor", "agent_state", 1)))
+        validate_resume_checkpoint_steps(
+            args.resume_actor,
+            resume_state,
+            args.resume_replay,
+            args.start_step,
+        )
         if args.reset_agent_state:
             agent.load_actor(args.resume_actor)
         else:
-            agent.load(args.resume_actor, resume_state)
-        config["resume"] = {
-            "actor": args.resume_actor,
-            "state": resume_state,
-            "start_step": args.start_step,
-            "agent_state_reset": bool(args.reset_agent_state),
-            "agent_state_warmup_steps": args.reset_state_warmup_steps if args.reset_agent_state else 0,
-            "resume_replay_warmup_steps": args.resume_replay_warmup_steps,
-            "resume_critic_warmup_steps": args.resume_critic_warmup_steps,
-        }
+            resume_load_info = agent.load(
+                args.resume_actor,
+                resume_state,
+                reset_reward_critics=args.reset_reward_critics,
+                reset_cost_critics=args.reset_cost_critics,
+                restore_optimizers=not args.no_restore_optimizers,
+            )
     config["git_revision"] = git_revision()
     replay = ReplayBuffer(
         obs_dim=obs_dim,
         action_dim=action_dim,
         capacity=int(config["sac"]["replay_size"]),
         device=config.get("device", "cpu"),
+        stratified_fraction=float(config["sac"].get("replay_stratified_fraction", 0.0)),
     )
+    resume_replay: Path | None = None
+    if args.resume_actor is not None:
+        if args.resume_replay is not None:
+            resume_replay = Path(args.resume_replay)
+            if not resume_replay.is_file():
+                raise FileNotFoundError(resume_replay)
+        else:
+            candidate = inferred_checkpoint_path(args.resume_actor, "replay", ".npz")
+            if candidate.is_file():
+                resume_replay = candidate
+        if resume_replay is not None:
+            replay.load(resume_replay)
+            replay.stratified_fraction = float(config["sac"].get("replay_stratified_fraction", 0.0))
+
+        training_state = resume_load_info.get("training_state")
+        if isinstance(training_state, dict):
+            resume_training_state = training_state
+            checkpoint_step = int(training_state.get("step", args.start_step))
+            if checkpoint_step != args.start_step:
+                raise ValueError(
+                    f"--start-step={args.start_step} does not match checkpoint training step {checkpoint_step}"
+                )
+            rng_state = training_state.get("rng_state")
+            if isinstance(rng_state, dict):
+                restore_rng_state(rng_state)
+            env_rng_state = training_state.get("env_rng_state")
+            if isinstance(env_rng_state, dict):
+                env.rng.bit_generator.state = env_rng_state
+                resume_rng_restored = True
+        config["resume"] = {
+            "actor": args.resume_actor,
+            "state": resume_state,
+            "replay": str(resume_replay) if resume_replay is not None else None,
+            "start_step": args.start_step,
+            "agent_state_reset": bool(args.reset_agent_state),
+            "reward_critics_reset": not bool(resume_load_info.get("reward_critics_loaded", False)),
+            "cost_critics_reset": not bool(resume_load_info.get("cost_critics_loaded", False)),
+            "optimizers_loaded": bool(resume_load_info.get("optimizers_loaded", False)),
+            "agent_state_warmup_steps": args.reset_state_warmup_steps if args.reset_agent_state else 0,
+            "resume_replay_warmup_steps": requested_replay_warmup,
+            "resume_critic_warmup_steps": requested_critic_warmup,
+        }
 
     run_dir = build_run_dir(config, method, config["train"].get("run_name"))
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -138,6 +304,8 @@ def main() -> None:
     fieldnames = [
         "episode",
         "step",
+        "reset_seed",
+        "reset_source",
         "episode_reward",
         "episode_cost",
         "episode_length",
@@ -171,6 +339,8 @@ def main() -> None:
         "step",
         "total_steps",
         "episode",
+        "reset_seed",
+        "reset_source",
         "episode_length",
         "latest_reward",
         "latest_cost",
@@ -194,6 +364,10 @@ def main() -> None:
         "safety_filter_solve_time_s",
         "lambda",
         "alpha",
+        "loss_actor",
+        "loss_actor_anchor",
+        "loss_reward_q",
+        "loss_cost_q",
         "replay_size",
     ]
     progress_file = open(progress_path, "w", newline="", encoding="utf-8")
@@ -207,15 +381,27 @@ def main() -> None:
     update_after = int(config["sac"]["update_after"])
     update_every = int(config["sac"]["update_every"])
     resume_critic_warmup_steps = (
-        args.reset_state_warmup_steps if args.reset_agent_state else args.resume_critic_warmup_steps
+        args.reset_state_warmup_steps if args.reset_agent_state else requested_critic_warmup
     ) if args.resume_actor is not None else 0
-    resume_replay_warmup_steps = args.resume_replay_warmup_steps if args.resume_actor is not None else 0
+    resume_replay_warmup_steps = requested_replay_warmup if args.resume_actor is not None else 0
     save_interval = int(config["train"]["save_interval"])
+    save_replay = bool(config["train"].get("save_replay", True))
+    save_step_replay = bool(config["train"].get("save_step_replay", False))
     log_interval = int(config["train"]["log_interval"])
     progress_interval = max(1, int(config["train"].get("progress_interval", 100)))
+    focused_manifest = config["train"].get("focused_reset_seed_manifest")
+    focused_seeds = load_seed_manifest(focused_manifest) if focused_manifest else []
+    focused_fraction = float(config["train"].get("focused_reset_fraction", 0.0))
+    if not 0.0 <= focused_fraction <= 1.0:
+        raise ValueError("train.focused_reset_fraction must be in [0, 1]")
 
-    observation, _ = env.reset(seed=int(config["seed"]))
-    episode = 0
+    observation, _, current_reset_seed, current_reset_source = reset_training_environment(
+        env,
+        focused_seeds,
+        focused_fraction,
+        default_seed=None if resume_rng_restored else int(config["seed"]),
+    )
+    episode = int(resume_training_state.get("episode", 0))
     episode_reward = 0.0
     episode_cost = 0.0
     episode_length = 0
@@ -237,6 +423,7 @@ def main() -> None:
     episode_predictive_near_misses = 0
     episode_predictive_h_mins: list[float] = []
     episode_filter_solve_times_s: list[float] = []
+    episode_replay_indices: list[int] = []
     recent_rewards: deque[float] = deque(maxlen=20)
     update_info: dict[str, float] = {"alpha": float(agent.alpha.detach().cpu()), "lambda": agent.lagrange_multiplier}
 
@@ -260,6 +447,15 @@ def main() -> None:
             f"resume critic warmup: steps={resume_critic_warmup_steps} mode=critic_only",
             flush=True,
         )
+    if args.resume_actor is not None:
+        print(
+            "resume state "
+            f"reward_critics_loaded={resume_load_info.get('reward_critics_loaded', False)} "
+            f"cost_critics_loaded={resume_load_info.get('cost_critics_loaded', False)} "
+            f"optimizers_loaded={resume_load_info.get('optimizers_loaded', False)} "
+            f"replay={str(resume_replay) if resume_replay is not None else 'fresh'}",
+            flush=True,
+        )
     progress = trange(args.start_step + 1, total_steps + 1, desc=f"train:{method}")
     for step in progress:
         schedule_step = step - args.start_step if args.resume_actor is not None else step
@@ -272,7 +468,16 @@ def main() -> None:
 
         next_observation, reward, cost, terminated, truncated, info = env.step(action)
         done = terminated or truncated
-        replay.add(observation, action, reward, cost, next_observation, done)
+        replay_index = replay.add(
+            observation,
+            action,
+            reward,
+            cost,
+            next_observation,
+            done=terminated,
+            truncated=truncated,
+        )
+        episode_replay_indices.append(replay_index)
         observation = next_observation
 
         episode_reward += reward
@@ -331,6 +536,8 @@ def main() -> None:
                 "step": step,
                 "total_steps": total_steps,
                 "episode": episode,
+                "reset_seed": current_reset_seed,
+                "reset_source": current_reset_source,
                 "episode_length": episode_length,
                 "latest_reward": reward,
                 "latest_cost": cost,
@@ -358,6 +565,10 @@ def main() -> None:
                 "safety_filter_solve_time_s": info.get("safety_filter_solve_time_s", float("nan")),
                 "lambda": agent.lagrange_multiplier,
                 "alpha": float(agent.alpha.detach().cpu()),
+                "loss_actor": update_info.get("loss/actor", float("nan")),
+                "loss_actor_anchor": update_info.get("loss/actor_anchor", float("nan")),
+                "loss_reward_q": update_info.get("loss/reward_q", float("nan")),
+                "loss_cost_q": update_info.get("loss/cost_q", float("nan")),
                 "replay_size": len(replay),
             }
             progress_writer.writerow(progress_row)
@@ -378,6 +589,7 @@ def main() -> None:
             )
 
         if done:
+            replay.label_episode(episode_replay_indices, success=bool(info["success"]))
             episode += 1
             mean_cost = float(np.mean(episode_costs)) if episode_costs else 0.0
             agent.update_lagrange(mean_cost)
@@ -386,6 +598,8 @@ def main() -> None:
                 {
                     "episode": episode,
                     "step": step,
+                    "reset_seed": current_reset_seed,
+                    "reset_source": current_reset_source,
                     "episode_reward": episode_reward,
                     "episode_cost": episode_cost,
                     "episode_length": episode_length,
@@ -444,7 +658,11 @@ def main() -> None:
                     }
                 )
 
-            observation, _ = env.reset()
+            observation, _, current_reset_seed, current_reset_source = reset_training_environment(
+                env,
+                focused_seeds,
+                focused_fraction,
+            )
             episode_reward = 0.0
             episode_cost = 0.0
             episode_length = 0
@@ -465,11 +683,30 @@ def main() -> None:
             episode_predictive_near_misses = 0
             episode_predictive_h_mins = []
             episode_filter_solve_times_s = []
+            episode_replay_indices = []
 
         if step % save_interval == 0:
-            agent.save(run_dir, suffix=f"_step_{step}")
+            save_training_checkpoint(
+                agent,
+                replay,
+                env,
+                run_dir,
+                suffix=f"_step_{step}",
+                step=step,
+                episode=episode,
+                save_replay=save_replay and save_step_replay,
+            )
 
-    agent.save(run_dir)
+    save_training_checkpoint(
+        agent,
+        replay,
+        env,
+        run_dir,
+        suffix="",
+        step=total_steps,
+        episode=episode,
+        save_replay=save_replay,
+    )
     progress_file.close()
     metrics_file.close()
     env.close()

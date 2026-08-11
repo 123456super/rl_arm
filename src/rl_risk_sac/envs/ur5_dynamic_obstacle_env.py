@@ -1199,11 +1199,23 @@ class UR5DynamicObstacleEnv(gym.Env):
             + float(self.reward_cfg["w_progress"]) * progress
             - float(self.reward_cfg["w_smooth"]) * smooth
         )
+        reward += self._terminal_progress_reward(goal_error_norm, progress)
         if success:
             reward += float(self.reward_cfg["success_bonus"])
         if collision:
             reward -= float(self.reward_cfg["collision_penalty"])
         return float(reward)
+
+    def _terminal_progress_reward(self, goal_error_norm: float, progress: float) -> float:
+        radius = float(self.reward_cfg.get("terminal_goal_radius_m", 0.0))
+        weight = float(self.reward_cfg.get("w_terminal_progress", 0.0))
+        if radius <= 0.0 or weight == 0.0:
+            return 0.0
+        if self.prev_goal_error_norm <= radius or goal_error_norm <= radius:
+            # Signed progress rewards the final approach and penalizes moving
+            # back out of the terminal region using the same potential.
+            return weight * progress
+        return 0.0
 
     def _cost(self, policy_risk: LinkRisk, collision: bool, safety_violation: bool) -> float:
         violation = 1.0 if safety_violation else 0.0

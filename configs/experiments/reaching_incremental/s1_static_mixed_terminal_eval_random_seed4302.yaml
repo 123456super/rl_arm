@@ -1,0 +1,7 @@
+# Final evaluation stays on the original random static-obstacle distribution.
+includes:
+  - s1_static_mixed_terminal_finetune_seed4302.yaml
+
+env:
+  obstacle:
+    scenario: random

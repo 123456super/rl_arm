@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -109,3 +110,31 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("device_selection.memory_weight and compute_weight must be non-negative")
     if memory_weight == 0 and compute_weight == 0:
         raise ValueError("At least one of device_selection.memory_weight or compute_weight must be positive")
+
+    reward = config["reward"]
+    terminal_radius = float(reward.get("terminal_goal_radius_m", 0.0))
+    terminal_weight = float(reward.get("w_terminal_progress", 0.0))
+    if not isfinite(terminal_radius) or terminal_radius < 0.0:
+        raise ValueError("reward.terminal_goal_radius_m must be finite and non-negative")
+    if not isfinite(terminal_weight):
+        raise ValueError("reward.w_terminal_progress must be finite")
+
+    sac = config["sac"]
+    replay_size = int(sac["replay_size"])
+    if replay_size <= 0:
+        raise ValueError("sac.replay_size must be positive")
+    stratified_fraction = float(sac.get("replay_stratified_fraction", 0.0))
+    if not isfinite(stratified_fraction) or not 0.0 <= stratified_fraction <= 1.0:
+        raise ValueError("sac.replay_stratified_fraction must be in [0, 1]")
+    actor_anchor_weight = float(sac.get("actor_anchor_weight", 0.0))
+    if not isfinite(actor_anchor_weight) or actor_anchor_weight < 0.0:
+        raise ValueError("sac.actor_anchor_weight must be finite and non-negative")
+    for key in ("resume_replay_warmup_steps", "resume_critic_warmup_steps"):
+        if int(sac.get(key, 0)) < 0:
+            raise ValueError(f"sac.{key} must be non-negative")
+
+    focused_fraction = float(config["train"].get("focused_reset_fraction", 0.0))
+    if not isfinite(focused_fraction) or not 0.0 <= focused_fraction <= 1.0:
+        raise ValueError("train.focused_reset_fraction must be in [0, 1]")
+    if focused_fraction > 0.0 and not config["train"].get("focused_reset_seed_manifest"):
+        raise ValueError("train.focused_reset_seed_manifest is required when focused_reset_fraction > 0")

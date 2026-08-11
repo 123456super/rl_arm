@@ -46,6 +46,10 @@ reward:
   w_position: 2.0
   # 相邻步目标距离改善奖励权重。
   w_progress: 18.0
+  # Optional shaping for the final approach.  Zero preserves the historical
+  # reward; the static-terminal experiment enables this only inside 0.12 m.
+  terminal_goal_radius_m: 0.12
+  w_terminal_progress: 0.0
   # 实际执行关节速度变化惩罚权重。
   w_smooth: 0.04
   # 成功到达奖励。
@@ -65,10 +69,20 @@ sac:
   cost_ema_rho: 0.05
   batch_size: 256
   replay_size: 300000
+  # Optional success/failure episode balancing in replay sampling. Zero keeps
+  # historical uniform sampling; repaired transfer runs enable this explicitly.
+  replay_stratified_fraction: 0.0
+  # Resume phases are counted from --start-step. Transfer experiments can
+  # override these without repeating long command-line flags.
+  resume_replay_warmup_steps: 10000
+  resume_critic_warmup_steps: 10000
   warmup_steps: 3000
   update_after: 1000
   update_every: 1
   hidden_dims: [256, 256]
+  # Output-space L2 anchor to the actor loaded at resume time. Zero preserves
+  # historical training; transfer runs use a positive value to prevent drift.
+  actor_anchor_weight: 0.0
   # ee_fixed/link_fixed 的固定风险惩罚权重，正式基线应做小范围网格搜索后确定。
   fixed_risk_penalty: 4.0
   initial_alpha: 0.2

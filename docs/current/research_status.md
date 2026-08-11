@@ -1,6 +1,14 @@
 # 当前研究状态
 
-> 更新时间：2026-08-07。本页是项目当前状态的唯一入口。
+> 更新时间：2026-08-11。本页是项目当前状态的唯一入口。
+
+## 文档职责
+
+- 本页只回答当前结论、阻塞和唯一下一步。
+- [实验结果总表](results_summary.md)保存统一数字、数据来源和证据边界，不承载执行优先级。
+- [后续渐进式实验协议](successor_incremental_experiment_protocol.md)保存静态障碍物 S1 的历史归档以及当前 S1-R4 命令和停止条件。
+- [基础 reaching 恢复协议](reaching_recovery_protocol.md)只保存已冻结的无障碍 v2 基线。
+- [P3 冻结后状态](next_experiment_protocol.md)虽保留历史文件名，但只记录 P3 的 `do_not_freeze_p3_or_expand_recovery` 决议，不是当前实验入口。
 
 ## 研究方向
 
@@ -17,6 +25,7 @@
 | 安全过滤器（P2） | strict QP、投影/回退、safe-stop、审计链路 | 可运行但不是硬实时或安全证明 |
 | P3 因子化比较 | B1--B5、3 train seeds、共享 final manifest | 完成诊断，未形成可冻结主方法 |
 | 基础 reaching v1/v2 | 独立无障碍训练、checkpoint 选择、3×200 final 评估 | v2 基础 reaching actor 已冻结；全量 97.0%，固定可达子集 100% |
+| 静态障碍物 S1 | S1--R3、失败归因、时间窗/动作响应诊断、训练恢复修复 | 当前 final 参考 497/600；R3 受恢复混杂；下一步仅运行 R4 |
 | 归档与决策 | 冻结包、recovery 对照、初始可行性审计 | 停止当前 recovery 分支扩张 |
 
 ## 2026-08-03 修正
@@ -72,25 +81,49 @@
 4. **实时性问题**：当前 300 ms 是 simulator-side post-return 检查；缺少可中断求解、外部 watchdog 和端到端延迟预算。
 5. **证据边界问题**：未完成协同训练、OOD 扰动和真机签核，不能宣称泛化、部署或绝对安全。
 
-## 下一步
+## 静态障碍物统一结论
 
-基础 reaching v2 已完成并可冻结为独立无障碍到达基线；严格 B4 仍仅保留为 P3/VAPS 诊断基线。该进展不改变 `do_not_freeze_p3_or_expand_recovery` 决议：不得把 reaching v2 结果写成动态避障、安全、OOD、真机或完整方法 M 结果。任何后继安全方案仍必须遵循独立安全目标与评估协议，不能沿用已拒绝的 recovery 分支。
+### 统一评估口径
 
-静态障碍物 S1 冻结 actor 已完成复核但未通过：pooled success `428/600=71.3%`，其中 `156/172` 个失败为 timeout，另有 4 次 capsule overlap 和 13 次 physical contact。按渐进协议，当前下一步是 S1-R 静态障碍物迁移训练：从三个 v2 selected actor 及其 SAC state 各继续 `200000` steps，仅加入零速度随机静态障碍物和 `fixed_risk_penalty=1.0`，保持安全过滤器、viability、recovery 和 relaxation 全部关闭。训练、选点和 final 评估命令见[后续渐进式实验协议](successor_incremental_experiment_protocol.md)；S1-R 未通过前不运行 S2 动态障碍物。
+- “full final”固定指 `9001--9200`、三个 actor 各 200 回合、一个 `random` 零速度静态障碍物、12 s 上限、`success_tolerance=0.055 m`，并关闭安全过滤器、viability、recovery 和 relaxation。
+- “静态候选子集”固定指有限搜索找到静态候选路径的 161 个 reset，即 pooled 483 个 actor×reset episode。`not_found` 不是数学无解证明，不能据此删除 final reset。
+- validation 固定为 `9301--9340`，只用于选择 checkpoint；没有运行 full final 的阶段不得报告为 final 性能。
+- collision 必须分别报告 `collision_any`、capsule overlap 和 physical contact；不同字段可能重叠，不能直接相加。
 
-S1-R 训练、validation checkpoint 选择和 final 评估均已完成。选中 checkpoint 为：4301 step `240000`、4302 step `480000`、4303 step `320000`。final pooled success 为 `491/600=81.8%`，timeout `105`，capsule overlap `2`，physical contact `4`。相较冻结 S1 的 `428/600=71.3%`、timeout `156`、capsule overlap `4`、physical contact `13`，迁移训练有效改善静态障碍物表现；但 pooled success 仍低于无障碍 S0 的 `97.0%`，且 actor 4301 没有改善（仍 `174/200`）。S1-R 按原门槛通过，但由于静态候选子集仍未达到目标，当前暂停 S2，先进行 S1-R2 静态混合场景迁移训练。
+### 结果总览
 
-S1-R2 actor-only 迁移已完成 validation：4301 选中起点 step `240000`（35/40=87.5%），4302 选中起点 step `480000`（30/40=75.0%，较 S1-R 起点下降 3 回合），4303 选中 step `580000`（33/40=82.5%，较起点增加 1 回合）。pooled validation 为 `98/120=81.7%`，低于 S1-R 起点 `100/120=83.3%`。该结果不能区分 mixed-static 覆盖和 dense reward 的真实效果，因为 actor-only 迁移同时重置了 critic/alpha/replay，并从较大 `start_step` 跳过了原 warmup，造成随机 critic 立即更新已训练 actor。当前不进入 S2；先做 S1-R2.1 匹配 SAC state 的迁移重跑。
+| 阶段 | 状态 | full final success | timeout | collision_any / capsule / physical | 静态候选子集 | 证据边界 |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| S0 无障碍 reaching v2 | 已冻结 | 582/600 = 97.0% | 18 | 0 / 0 / 0 | 不适用 | 只证明无障碍到达 |
+| S1 冻结 actor + 静态障碍物 | 已完成、未通过 | 428/600 = 71.3% | 156 | 16 / 4 / 13 | 未统计 | 静态障碍物显著改变策略表现 |
+| S1-R 第一轮静态迁移 | 已完成、通过原门槛 | 491/600 = 81.8% | 105 | 5 / 2 / 4 | 434/483 = 89.9% | 相对 S1 有效，但远低于 99% |
+| S1-R2 actor-only | validation 诊断 | 未运行 | — | — | — | 随机 critic 立即更新 actor，不能归因场景覆盖 |
+| S1-R2.1 同一步部分状态 warm-start | 当前 final 参考 | 497/600 = 82.8% | 101 | 2 / 2 / 1 | 443/483 = 91.7% | 比 S1-R 多 6 次成功，但跨 seed 不稳定 |
+| S1-R2.2 低学习率短迁移 | 未产生新 actor | 与 R2.1 相同 | 与 R2.1 相同 | 与 R2.1 相同 | 与 R2.1 相同 | 只否定旧恢复链路下的该组低学习率设置 |
+| S1-R3 terminal progress | validation 未通过且受混杂 | 未运行 | — | — | — | 选回全部 R2.1 起点；不能证明 shaping 无效 |
+| S1-R4 修复后迁移 | 已配置、待运行 | 无 | — | — | — | 当前唯一训练步骤 |
 
-S1-R2.1 三个 seed 使用同一步匹配的 actor 与 SAC critic/target/alpha state（旧 checkpoint 不含 optimizer moments，因此优化器仍重新初始化），并在 resumed training 中按本次迁移重新计数：前 `10000` 步收集新 replay、禁止更新，之后再开始 SAC 更新。4301 的 actor 与 S1-R 起点完全相同，因此使用 v2 的匹配 `agent_state_step_240000.pt`；4302/4303 使用 S1-R 对应的 `agent_state_step_480000.pt`/`agent_state_step_320000.pt`。S1-R2.1 仍保持静态 mixed 场景、零速度、`fixed_risk_penalty=2.0`，安全过滤器、动态障碍物、viability、recovery 和 relaxation 全部关闭。
+S1-R2.1 的三个 selected step 为 `520000/480000/620000`，full final 分别为 `168/200`、`164/200`、`165/200`。相对 S1-R 的净增益主要来自 4303；4301 从 `174/200` 降至 `168/200`，4302 选回原 S1-R actor。配对结果包含 35 个失败转成功和 29 个成功转失败，因此只能称为小幅、跨 seed 不稳定的总体提升。
 
-S1-R2.1 已完成 validation 和 full final。validation 选中 step 为 4301=`520000`、4302=`480000`、4303=`620000`，分别为 `38/40=95.0%`、`30/40=75.0%`、`35/40=87.5%`，pooled `103/120=85.8%`。在完整 `9001--9200` 原始 random 静态障碍物 final 上，成功分别为 `168/200=84.0%`、`164/200=82.0%`、`165/200=82.5%`，pooled `497/600=82.8%`；相较 S1-R 的 `491/600=81.8%` 提升 6 个 episode。physical contact 从 `4` 降至 `1`，capsule overlap 保持 `2`，collision_any 从 `5` 降至 `2`。静态候选路径子集从 `434/483=89.9%` 提升到 `443/483=91.7%`，但仍不能宣称 99%。
+### 失败原因
 
-该提升主要由 4303 贡献：`153/200→165/200`，候选子集 `136/161→148/161`；4302 选回完全相同的 S1-R 起点，结果不变；4301 full random 从 `174/200→168/200` 反而下降。配对 episode 为 `35` 个失败转成功、`29` 个成功转失败，说明不是所有 reset 都稳定改善。当前结论是 warm-start 修复有效地消除了 actor-only 的灾难性退化，但 mixed-static 覆盖和 dense reward 尚未形成跨 seed 稳定收益；不进入动态障碍物，下一步只针对 4301/4303 做静态随机分布上的低学习率/短迁移确认，并继续保留完整 final manifest 和所有失败 reset。
+S1-R2.1 的 600 条 final 记录包含 101 个 timeout 和 2 个 `collision_any`。静态候选子集的 40 个失败全部为 timeout、无碰撞；其中 21 个为 near-goal timeout、11 个为 near-goal regression、1 个为 low-motion stall、7 个为 nonconvergent timeout。32/40 曾进入 `0.08 m` 以内，说明主要瓶颈是绕障后的终端收敛或回退，不是动作执行时间不足，也不能全部归为场景无解。
 
-静态 S1-R 的离线有限候选预检查已完成，输出为 `outputs/reaching_incremental/s1_static_obstacle_finetune/static_feasibility_precheck.json`。200 个 reset 中 IK reachable 为 190、无障碍候选路径找到为 189、静态障碍物候选路径找到为 161。与三个 S1-R final CSV 按 reset 对齐后，静态候选子集 pooled success 为 `434/483=89.9%`；其中 49 个失败均为 12 s timeout，且该子集中无 capsule overlap 或 physical contact。由于预检查的 `not_found` 是有限搜索标签而非数学无解证明，且候选子集仍显著低于 99%，后续应优先改进静态到达/脱困训练与动作响应，不应把剩余失败全部剔除为“无解”。
+S1-D1 将固定 36 个候选失败 reset 的时限从 12 s 延长至 24 s，只救回 4302 的 reset `9116` 和 `9200`，其余 38 条原 timeout 仍失败且没有新增碰撞。`fixed_beta=0.50/0.65` 也没有跨 seed 稳定收益。上述诊断不改变 final 口径，不能用延长时间、放宽 success threshold 或删除 reset 提高报告值。
 
-固定动作响应诊断已完成：原始 `fixed_beta=0.35`、`0.50`、`0.65` 的全量 success 分别为 `491/600`、`485/600`、`489/600`；静态候选子集分别为 `434/483`、`428/483`、`432/483`。`beta=0.65` 仅改善 actor 4301，反而降低 4302/4303，不能作为统一修复。当前暂停 S2，优先进行带静态障碍物覆盖增强和 `fixed_risk_penalty=2.0` 的第二轮迁移训练；训练仍保持完整 final manifest，安全过滤器、动态速度、viability、recovery 和 relaxation 全部关闭。
+### 训练状态审计
+
+旧 `agent_state` 只保存同一步 online reward/cost critic、alpha、lambda 和 cost EMA，不包含 target critic、optimizer、replay、训练步数或 RNG。因此 R2.1 统一称为“同一步部分训练状态 warm-start”，不是完整 SAC 恢复；它的 reward 定义未变，所以混杂弱于 R3。R3 在增加 terminal progress 后仍加载旧 reward critic，存在明确的 reward-target 不一致，其 validation 退化只能作为旧恢复链路失效证据。
+
+训练基础设施已于 2026-08-11 修复：checkpoint 保存 online/target critic、全部 optimizer、alpha/lambda/cost EMA、actor reference 和训练 RNG；replay 可压缩保存/恢复；reward 或完整 risk 配置不兼容时自动重置对应 critic；time-limit truncation 保持 Bellman bootstrap；恢复支持 collect-only、critic-only、成功/失败轨迹分层 replay、actor anchor 和 checkpoint step 一致性检查。中途 checkpoint 恢复仍从新 episode 继续，不宣称仿真器逐步状态等价。
+
+### 当前决议
+
+当前唯一待运行训练是 S1-R4。三个 seed 从 R2.1 selected actor 的 step `520000/480000/620000` 各继续 200000 steps；旧 reward critic 自动重置，前 50000 步只收集 replay，随后 50000 步只重建 critic，最后 100000 步更新完整 SAC。训练保持零速度 `random` 静态障碍物：25% episode 抽取固定 36 个候选失败 reset，75% 保持随机覆盖；50% replay batch 配额按成功/失败完整轨迹分层，actor/alpha learning rate 为 `1e-5`，actor anchor 权重为 `10.0`。
+
+R4 是恢复正确性、数据覆盖和稳定性机制的整体确认实验，不是单因素消融。它必须保留完整 final manifest、所有失败 reset、原 success threshold 和碰撞口径；只有三个 seed 都在独立 validation 上不低于起点并且候选失败减少、collision_any 不增加，才运行 full final。R4 未通过前不进入 S2 动态障碍物。命令与停止条件见[后续渐进式实验协议](successor_incremental_experiment_protocol.md)。
+
+基础 reaching v2 已完成并可冻结为独立无障碍到达基线；严格 B4 仍仅保留为 P3/VAPS 诊断基线。该进展不改变 `do_not_freeze_p3_or_expand_recovery` 决议：不得把 reaching v2 或 S1 结果写成动态避障、安全、OOD、真机或完整方法 M 结果。
 
 独立的[基础 reaching 恢复协议](reaching_recovery_protocol.md)已完成 v2 验证并冻结基础 actor；它与 VAPS G3/G4 完全隔离。该协议只证明无障碍 reaching 执行链路恢复，不授权动态避障、安全比较、OOD、真机或任何 recovery/relaxation 分支。
 

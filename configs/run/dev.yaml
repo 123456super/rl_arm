@@ -12,6 +12,10 @@ train:
   log_interval: 10
   # checkpoint 保存间隔，单位为环境 step。
   save_interval: 10000
+  # Final checkpoints persist replay for a complete future resume. Periodic
+  # replay snapshots are opt-in because each file can be large.
+  save_replay: true
+  save_step_replay: false
   # 训练输出根目录。每次训练会自动创建 outputs/runs/日期_模型_方法_seed_steps/，避免覆盖历史结果。
   output_dir: outputs
   # 自定义本次训练目录名。保持 null 时自动使用 日期_模型_方法_seed_steps。

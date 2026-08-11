@@ -43,12 +43,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         device=config.get("device", "cpu"),
     )
 
+    episode_indices: list[int] = []
     for _ in range(int(smoke_cfg["rollout_steps"])):
         action = env.action_space.sample()
         next_observation, reward, cost, terminated, truncated, info = env.step(action)
-        replay.add(observation, action, reward, cost, next_observation, terminated or truncated)
+        index = replay.add(
+            observation,
+            action,
+            reward,
+            cost,
+            next_observation,
+            done=terminated,
+            truncated=truncated,
+        )
+        episode_indices.append(index)
         observation = next_observation
         if terminated or truncated:
+            replay.label_episode(episode_indices, success=bool(info["success"]))
+            episode_indices = []
             observation, _ = env.reset()
 
     safety_filter_cfg = config["env"].get("safety_filter", {})

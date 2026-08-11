@@ -1,0 +1,47 @@
+# S1-R4: repaired static-terminal transfer.
+#
+# The training code automatically rejects reward-incompatible reward critics.
+# Legacy checkpoints do not contain replay/optimizer state, so this first
+# repaired run deliberately rebuilds a large stratified replay before actor
+# updates. Future checkpoints from this run persist complete SAC state.
+includes:
+  - s1_static_mixed_terminal_finetune_base.yaml
+
+sac:
+  actor_lr: 0.00001
+  critic_lr: 0.0001
+  alpha_lr: 0.00001
+  replay_size: 600000
+  replay_stratified_fraction: 0.50
+  resume_replay_warmup_steps: 50000
+  resume_critic_warmup_steps: 50000
+  actor_anchor_weight: 10.0
+  fixed_risk_penalty: 2.0
+
+env:
+  obstacle:
+    enabled: true
+    scenario: random
+    speed_range: [0.0, 0.0]
+
+train:
+  method: link_fixed
+  progress_interval: 500
+  log_interval: 10
+  save_interval: 20000
+  save_replay: true
+  # Keep one complete final replay snapshot. Periodic actor/critic/optimizer
+  # checkpoints remain lightweight enough for checkpoint selection.
+  save_step_replay: false
+  focused_reset_seed_manifest: configs/experiments/reaching_incremental/manifests/s1_static_candidate_failure_union_v1.json
+  focused_reset_fraction: 0.25
+
+checkpoint_selection:
+  episodes: 40
+  metric: success_rate
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_validation.json
+
+eval:
+  method: link_fixed
+  episodes: 200
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json

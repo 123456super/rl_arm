@@ -1,0 +1,7 @@
+# Offline diagnostic only: double the time horizon for the fixed candidate-path
+# failure union.  This does not train or select a checkpoint.
+includes:
+  - s1_static_mixed_stateful_eval_random_seed4301.yaml
+
+env:
+  max_episode_steps: 480
