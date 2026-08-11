@@ -1,2 +1,0 @@
-episodes,mean_reward,success_rate,collision_rate,safety_violation_rate,mean_final_position_error,mean_min_distance,step,checkpoint,validation_csv,selected,selection_metric,validation_seed
-20.0,-94.04439431317242,0.2,0.15,0.06205144915911339,0.27568457685410974,0.11824069297872483,20000,outputs/p3_geometry_fix/b4_seed4102_20k/geometry_fix_seed4102_20k/actor_step_20000.pt,outputs/p3_geometry_fix/b4_seed4102_20k/geometry_fix_seed4102_20k/checkpoint_selection/step_20000_seed_6201_episodes_20.csv,1,mean_reward,6201

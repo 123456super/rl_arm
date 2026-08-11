@@ -1,6 +1,6 @@
 # P3 冻结后状态
 
-> 更新时间：2026-08-11。原 B1--B5 实验协议已执行完成；本页只保留 P3 固定口径和冻结后约束，不是当前实验入口。当前状态与唯一下一步以 [当前研究状态](research_status.md) 为准；静态障碍物 S1-R4 命令见 [后续渐进式实验协议](successor_incremental_experiment_protocol.md)。
+> 更新时间：2026-08-11。原 B1--B5 实验协议已执行完成；本页只保留 P3 固定口径和冻结后约束，不是当前实验入口。当前状态与唯一下一步以 [当前研究状态](research_status.md) 为准；静态障碍物 S1-R4 结果与命令归档见 [后续渐进式实验协议](successor_incremental_experiment_protocol.md)。
 
 ## 冻结结论
 

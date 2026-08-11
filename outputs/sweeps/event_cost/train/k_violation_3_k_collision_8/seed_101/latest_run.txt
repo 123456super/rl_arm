@@ -1,1 +1,0 @@
-outputs/sweeps/event_cost/train/k_violation_3_k_collision_8/seed_101/k_violation_3_k_collision_8_ldrc_fixed_seed101_steps50000

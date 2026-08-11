@@ -1,6 +1,6 @@
 # 后续渐进式实验协议
 
-> 更新时间：2026-08-11。当前唯一待执行步骤为 S1-R4；S0--S1-R3 均为已完成结果或诊断归档，S2 及以后尚未授权。本文把无障碍 reaching v2 作为唯一基础策略，规定后续逐层增加环境和安全机制的顺序。
+> 更新时间：2026-08-11。当前进度为 S1-R4 已完成训练、validation 选点、full final 评估和失败诊断；S2 及以后尚未授权。本文把无障碍 reaching v2 作为唯一基础策略，规定后续逐层增加环境和安全机制的顺序。
 
 ## 1. 总原则
 
@@ -16,7 +16,7 @@
 
 禁止把多个新因素放在同一次实验中。尤其不得在尚未完成冻结 actor 评估前同时加入动态障碍物、predictive risk、strict QP、viability monitor、recovery 或新的训练目标。
 
-S1-R4 是这一规则的显式例外：它用于修复已确认的 checkpoint/replay/timeout 训练正确性问题，并同时验证保守稳定机制，因此只能判断修复后整体方案是否可继续，不能归因各组件贡献。R4 通过后仍需单因素消融。
+S1-R4 是这一规则的显式例外：它用于修复已确认的 checkpoint/replay/timeout 训练正确性问题，并同时验证保守稳定机制，因此只能判断修复后整体方案是否可继续，不能归因各组件贡献。R4 已证明整体方向有效，但未达到 99% 静态避障目标；后续若要声明 focused reset、stratified replay、anchor 或 terminal reward 的贡献，仍需单因素消融。
 
 ## 2. 固定不变的基线
 
@@ -83,7 +83,7 @@ S1-R 只改变训练适应，不加入动态速度、安全过滤器、viability
 
 S1-R 的通过条件：三个 seed 在 final 全量分布上均重新评估；pooled success 必须高于冻结 actor 的 `71.3%`，且任何单个 actor 不得低于其对应冻结基线（`87.0%/53.0%/74.0%`），physical contact 总数不得高于旧 S1 的 `13/600`。任何提升都必须同时报告 capsule overlap、timeout 和最终误差，不能只报告 success。若仍失败，先分析静态场景的任务可行性和失败 reset，不进入 S2。
 
-本轮 S1-R final 已满足上述门槛：pooled `491/600=81.8%`，三个 actor 分别为 `87.0%/82.0%/76.5%`，physical contact `4/600`。按原门槛本可进入 S2；但静态候选子集仍只有 `89.9%`，因此当时的决议是先执行 S1-R2，不启动 S2。S1-R2 及其后续诊断现已完成，当前步骤见 S1-R4。S2 若后续获准，只把 `speed_range` 改为 `[0.05, 0.05]`，继续关闭安全过滤器、viability、recovery 和 relaxation，且仍使用相同的 actor、validation 规则和 final manifest。
+本轮 S1-R final 已满足上述门槛：pooled `491/600=81.8%`，三个 actor 分别为 `87.0%/82.0%/76.5%`，physical contact `4/600`。按原门槛本可进入 S2；但静态候选子集仍只有 `89.9%`，因此当时的决议是先执行 S1-R2，不启动 S2。S1-R2 及其后续诊断、R4 修复后训练现已完成，当前仍停留在静态障碍物 S1 内分析和修复剩余失败。S2 若后续获准，只把 `speed_range` 改为 `[0.05, 0.05]`，继续关闭安全过滤器、viability、recovery 和 relaxation，且仍使用相同的 actor、validation 规则和 final manifest。
 
 ### S1-R 后续诊断：先检查动作响应，再决定是否二次迁移训练
 
@@ -156,7 +156,7 @@ S1-R3 validation 实际结果：4301 选回 `520000`=`38/40`，4302 选回 `4800
 
 训练状态审计随后发现，R3 在 reward 定义改变后继续加载了按旧 reward 训练的 reward critic；旧 checkpoint 同时缺少 target critic、optimizer、replay、训练步数和 RNG。故上述结果保留为旧恢复链路的失效证据，不能独立归因为 terminal progress reward 无效。
 
-### S1-R4：修复后的静态终端迁移（已配置，待运行）
+### S1-R4：修复后的静态终端迁移（已完成，当前进度）
 
 R4 先修复训练正确性，再验证整体方案。新的 checkpoint 格式保存 online/target critic、全部 optimizer、alpha/lambda/cost EMA、actor reference 和训练 RNG；replay 另存为压缩 `.npz`。加载时对 reward 和完整 risk 配置生成签名，不兼容的 critic 自动重置。time-limit truncation 只结束 episode，不再切断 Bellman bootstrap。旧 checkpoint 无法补出缺失的 optimizer/replay，因此首轮 R4 必须重建；新 checkpoint 恢复完整学习状态，但中途 checkpoint 恢复会从新的 episode 继续，不宣称仿真器逐步状态等价。
 
@@ -170,9 +170,24 @@ R4 固定设置如下：
 - replay 中 50% batch 配额按完整成功/失败轨迹分层，其余保持随机采样；
 - 安全过滤器、动态障碍物、viability、recovery、relaxation 和 maximin 全部关闭。
 
-R4 是基础设施、数据覆盖和稳定性机制的整体恢复实验，不是单因素消融。若整体结果通过，后续还需要单独消融 focused reset、stratified replay、anchor 和 terminal reward，才能声明各自贡献。
+R4 是基础设施、数据覆盖和稳定性机制的整体恢复实验，不是单因素消融。实际训练、validation 选点、完整 `9001--9200` final 和失败诊断均已完成；结果显示整体方向有效，但仍不足以进入 S2。后续若要声明 focused reset、stratified replay、anchor 或 terminal reward 的单独贡献，仍需单因素消融。
 
-三个训练命令可以并行运行。先把起点 actor 放入新 run directory，使 validation 选择器可以保留未退化起点：
+R4 validation 选中 4301 step `660000`、4302 step `620000`、4303 step `740000`，validation success 分别为 `36/40=90.0%`、`33/40=82.5%`、`33/40=82.5%`。full final 结果如下：
+
+| actor | selected step | full final success | timeout | collision_any / capsule / physical | mean final error |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 4301 | 660000 | 176/200 = 88.0% | 24 | 0 / 0 / 0 | 0.0714 m |
+| 4302 | 620000 | 173/200 = 86.5% | 27 | 0 / 0 / 0 | 0.0738 m |
+| 4303 | 740000 | 167/200 = 83.5% | 33 | 0 / 0 / 0 | 0.0821 m |
+| pooled | — | 516/600 = 86.0% | 84 | 0 / 0 / 0 | 0.0758 m |
+
+相较 S1-R2.1，R4 full final 净增 19 个成功，collision_any/capsule/physical 从 `2/2/1` 降为 `0/0/0`；静态候选路径子集从 `443/483=91.7%` 提升到 `461/483=95.4%`。因此 R4 是当前静态障碍物的最新 final 参考，但仍不能宣称 99% 静态避障能力。
+
+R4 的剩余失败全部为 timeout：全量失败包含 `nonconvergent_timeout` 42、`near_goal_timeout` 16、`near_goal_regression` 13、`low_motion_stall` 13。静态候选路径找到的 483 条 episode 中仍有 22 条失败，其中 `near_goal_timeout` 9、`near_goal_regression` 9、`nonconvergent_timeout` 4，且没有任何候选 reset 是三 actor 全部失败。另有 16 个 reset 为三 actor 全部 timeout，均属于 `not_found` 或 `not_checked_due_to_ik`。统一解释为：候选子集失败主要是 actor 局部速度场、终端精度和回退控制问题；全量中的三 actor 全失败 reset 应作为目标/场景可行性边界单独保留。
+
+基于 R4 的当前决议：S2 动态障碍物继续暂停；不得删除 reset、放宽 `success_tolerance=0.055 m`、启用 safety filter/recovery 或把候选标签当作筛选条件。下一步应先在静态阶段内针对 R4 的 22 条候选失败修 terminal precision 和 near-goal regression，同时单独审计 16 个三 actor 全 timeout 的非候选 reset。
+
+以下为 R4 已执行训练命令归档。三个训练当时可以并行运行；命令只用于复现本轮，不是当前要运行的步骤：
 
 ```bash
 RUN=outputs/reaching_incremental/s1_static_terminal_repaired_finetune/train/seed_4301/link_fixed_static_terminal_repaired_finetune_seed4301_steps720000
@@ -195,9 +210,9 @@ cp -n outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_
 python scripts/train.py --config configs/experiments/reaching_incremental/s1_static_terminal_repaired_finetune_seed4303.yaml --resume-actor outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4303/link_fixed_static_mixed_stateful_finetune_seed4303_steps620000/actor_step_620000.pt --resume-state outputs/reaching_incremental/s1_static_mixed_stateful_finetune/train/seed_4303/link_fixed_static_mixed_stateful_finetune_seed4303_steps620000/agent_state_step_620000.pt --start-step 620000
 ```
 
-运行开始时三组日志都必须显示 `reward_critics_loaded=False`、`cost_critics_loaded=True`、`optimizers_loaded=False`、`replay=fresh`，随后依次显示 50000 步 collect-only 和 50000 步 critic-only。任一项不符立即停止该 seed。
+运行开始时三组日志要求显示 `reward_critics_loaded=False`、`cost_critics_loaded=True`、`optimizers_loaded=False`、`replay=fresh`，随后依次显示 50000 步 collect-only 和 50000 步 critic-only。该要求作为 R4 训练链路审计条件保留。
 
-训练完成后仍只用 `9301--9340` validation manifest 选点，并把起点 actor 作为候选。只有三个 seed 都不低于各自起点、候选失败 reset 的 near-goal timeout/regression 下降且 validation collision_any 不增加，才运行完整 `9001--9200` final。final 必须保留所有 reset；R4 未通过前不进入 S2。
+训练完成后已只用 `9301--9340` validation manifest 选点，并把起点 actor 作为候选；完整 final 已保留所有 `9001--9200` reset。R4 的 full final 虽有净提升且碰撞为零，但候选子集仍只有 `461/483=95.4%`，未达到进入动态障碍物的可信门槛；因此 R4 之后仍不进入 S2。
 
 ### S2：低速动态障碍物，仍关闭安全过滤器
 
@@ -271,7 +286,7 @@ S6 不是当前默认下一步，不能因为 S4 失败就直接通过训练“�
 
 ## 5. 已执行命令归档：S1-R
 
-本节命令已执行完成，仅用于复现 S1-R，不是当前下一步。当前唯一待执行训练是第 3 节的 S1-R4。
+本节命令已执行完成，仅用于复现 S1-R，不是当前下一步。S1-R4 也已执行完成并在第 3 节归档；当前下一步仍停留在静态障碍物内分析和修复 R4 剩余失败。
 
 S1-R 当时的执行顺序为：
 
@@ -285,7 +300,7 @@ S1-R 当时的执行顺序为：
 
 ### S1-R 历史命令
 
-以下命令仅用于历史复现，假设从仓库根目录执行并使用当前环境中的 `python`。不要用它们代替 S1-R4 命令。
+以下命令仅用于历史复现，假设从仓库根目录执行并使用当前环境中的 `python`。不要用它们代替 R4 结果或后续静态失败修复命令。
 
 终端 1（GPU 1，seed 4301）：
 

@@ -1,4 +1,0 @@
-train_seed,selected_step,checkpoint
-101,100000,outputs/rechecks/link_fixed_penalty1/train/link_fixed/seed_101/link_fixed_seed101_steps100000/actor_step_100000.pt
-202,50000,outputs/rechecks/link_fixed_penalty1/train/link_fixed/seed_202/link_fixed_seed202_steps100000/actor_step_50000.pt
-303,100000,outputs/rechecks/link_fixed_penalty1/train/link_fixed/seed_303/link_fixed_seed303_steps100000/actor_step_100000.pt

@@ -1,1 +1,0 @@
-outputs/p3_geometry_fix/b4_seed4103_20k/geometry_fix_seed4103_20k

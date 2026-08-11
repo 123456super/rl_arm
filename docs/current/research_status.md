@@ -6,7 +6,7 @@
 
 - 本页只回答当前结论、阻塞和唯一下一步。
 - [实验结果总表](results_summary.md)保存统一数字、数据来源和证据边界，不承载执行优先级。
-- [后续渐进式实验协议](successor_incremental_experiment_protocol.md)保存静态障碍物 S1 的历史归档以及当前 S1-R4 命令和停止条件。
+- [后续渐进式实验协议](successor_incremental_experiment_protocol.md)保存静态障碍物 S1 的历史归档、S1-R4 已执行命令与当前 S1 后续停止条件。
 - [基础 reaching 恢复协议](reaching_recovery_protocol.md)只保存已冻结的无障碍 v2 基线。
 - [P3 冻结后状态](next_experiment_protocol.md)虽保留历史文件名，但只记录 P3 的 `do_not_freeze_p3_or_expand_recovery` 决议，不是当前实验入口。
 
@@ -25,7 +25,7 @@
 | 安全过滤器（P2） | strict QP、投影/回退、safe-stop、审计链路 | 可运行但不是硬实时或安全证明 |
 | P3 因子化比较 | B1--B5、3 train seeds、共享 final manifest | 完成诊断，未形成可冻结主方法 |
 | 基础 reaching v1/v2 | 独立无障碍训练、checkpoint 选择、3×200 final 评估 | v2 基础 reaching actor 已冻结；全量 97.0%，固定可达子集 100% |
-| 静态障碍物 S1 | S1--R3、失败归因、时间窗/动作响应诊断、训练恢复修复 | 当前 final 参考 497/600；R3 受恢复混杂；下一步仅运行 R4 |
+| 静态障碍物 S1 | S1--R4、失败归因、时间窗/动作响应诊断、训练恢复修复与 R4 final 评估 | 当前 final 参考 516/600；候选子集 461/483；下一步先修 R4 剩余静态失败，不进入 S2 |
 | 归档与决策 | 冻结包、recovery 对照、初始可行性审计 | 停止当前 recovery 分支扩张 |
 
 ## 2026-08-03 修正
@@ -98,16 +98,18 @@
 | S1 冻结 actor + 静态障碍物 | 已完成、未通过 | 428/600 = 71.3% | 156 | 16 / 4 / 13 | 未统计 | 静态障碍物显著改变策略表现 |
 | S1-R 第一轮静态迁移 | 已完成、通过原门槛 | 491/600 = 81.8% | 105 | 5 / 2 / 4 | 434/483 = 89.9% | 相对 S1 有效，但远低于 99% |
 | S1-R2 actor-only | validation 诊断 | 未运行 | — | — | — | 随机 critic 立即更新 actor，不能归因场景覆盖 |
-| S1-R2.1 同一步部分状态 warm-start | 当前 final 参考 | 497/600 = 82.8% | 101 | 2 / 2 / 1 | 443/483 = 91.7% | 比 S1-R 多 6 次成功，但跨 seed 不稳定 |
+| S1-R2.1 同一步部分状态 warm-start | 旧 final 参考 | 497/600 = 82.8% | 101 | 2 / 2 / 1 | 443/483 = 91.7% | 比 S1-R 多 6 次成功，但跨 seed 不稳定 |
 | S1-R2.2 低学习率短迁移 | 未产生新 actor | 与 R2.1 相同 | 与 R2.1 相同 | 与 R2.1 相同 | 与 R2.1 相同 | 只否定旧恢复链路下的该组低学习率设置 |
 | S1-R3 terminal progress | validation 未通过且受混杂 | 未运行 | — | — | — | 选回全部 R2.1 起点；不能证明 shaping 无效 |
-| S1-R4 修复后迁移 | 已配置、待运行 | 无 | — | — | — | 当前唯一训练步骤 |
+| S1-R4 修复后迁移 | 已完成、当前 final 参考 | 516/600 = 86.0% | 84 | 0 / 0 / 0 | 461/483 = 95.4% | 方向有效但未达 99%；剩余失败集中在策略终端收敛/回退和非候选 reset 边界 |
 
-S1-R2.1 的三个 selected step 为 `520000/480000/620000`，full final 分别为 `168/200`、`164/200`、`165/200`。相对 S1-R 的净增益主要来自 4303；4301 从 `174/200` 降至 `168/200`，4302 选回原 S1-R actor。配对结果包含 35 个失败转成功和 29 个成功转失败，因此只能称为小幅、跨 seed 不稳定的总体提升。
+S1-R4 的三个 selected step 为 `660000/620000/740000`，full final 分别为 `176/200`、`173/200`、`167/200`。相对 S1-R2.1，R4 救回 27 个 episode，同时丢失 8 个原本成功 episode，净增 19 个成功；collision_any/capsule overlap/physical contact 从 `2/2/1` 降到 `0/0/0`。因此当前可称为方向有效的整体修复结果，但仍不能作为 99% 静态避障能力证据，也不能拆成 focused reset、stratified replay、anchor 或 terminal reward 的单因素贡献。
 
 ### 失败原因
 
-S1-R2.1 的 600 条 final 记录包含 101 个 timeout 和 2 个 `collision_any`。静态候选子集的 40 个失败全部为 timeout、无碰撞；其中 21 个为 near-goal timeout、11 个为 near-goal regression、1 个为 low-motion stall、7 个为 nonconvergent timeout。32/40 曾进入 `0.08 m` 以内，说明主要瓶颈是绕障后的终端收敛或回退，不是动作执行时间不足，也不能全部归为场景无解。
+S1-R4 的 600 条 final 记录包含 84 个 timeout 和 0 个 `collision_any`。失败分布为：`nonconvergent_timeout` 42、`near_goal_timeout` 16、`near_goal_regression` 13、`low_motion_stall` 13。静态候选子集的 22 个失败全部为 timeout、无碰撞，其中 `near_goal_timeout` 9、`near_goal_regression` 9、`nonconvergent_timeout` 4；候选路径找到的失败 reset 没有三 actor 全部失败的情况，说明这部分更像 actor 局部速度场、终端精度和回退控制问题，而不是静态场景硬不可解。
+
+R4 失败不是 safety filter 拦截或动作执行太慢造成的：本阶段关闭 safety filter，策略请求速度基本就是执行速度；失败 episode 也没有在满足 `<0.055 m` success threshold 后被 `d_min > d_safe` 条件挡住。当前判断是：候选子集失败主要发生在进入 `0.055--0.08 m` 附近后停滞或回退；全量失败中的三 actor 全部 timeout reset 均属于 `not_found` 或 `not_checked_due_to_ik`，应作为目标/场景可行性边界单独报告。
 
 S1-D1 将固定 36 个候选失败 reset 的时限从 12 s 延长至 24 s，只救回 4302 的 reset `9116` 和 `9200`，其余 38 条原 timeout 仍失败且没有新增碰撞。`fixed_beta=0.50/0.65` 也没有跨 seed 稳定收益。上述诊断不改变 final 口径，不能用延长时间、放宽 success threshold 或删除 reset 提高报告值。
 
@@ -115,13 +117,13 @@ S1-D1 将固定 36 个候选失败 reset 的时限从 12 s 延长至 24 s，只�
 
 旧 `agent_state` 只保存同一步 online reward/cost critic、alpha、lambda 和 cost EMA，不包含 target critic、optimizer、replay、训练步数或 RNG。因此 R2.1 统一称为“同一步部分训练状态 warm-start”，不是完整 SAC 恢复；它的 reward 定义未变，所以混杂弱于 R3。R3 在增加 terminal progress 后仍加载旧 reward critic，存在明确的 reward-target 不一致，其 validation 退化只能作为旧恢复链路失效证据。
 
-训练基础设施已于 2026-08-11 修复：checkpoint 保存 online/target critic、全部 optimizer、alpha/lambda/cost EMA、actor reference 和训练 RNG；replay 可压缩保存/恢复；reward 或完整 risk 配置不兼容时自动重置对应 critic；time-limit truncation 保持 Bellman bootstrap；恢复支持 collect-only、critic-only、成功/失败轨迹分层 replay、actor anchor 和 checkpoint step 一致性检查。中途 checkpoint 恢复仍从新 episode 继续，不宣称仿真器逐步状态等价。
+训练基础设施已于 2026-08-11 修复并在 R4 中完成整体确认：checkpoint 保存 online/target critic、全部 optimizer、alpha/lambda/cost EMA、actor reference 和训练 RNG；replay 可压缩保存/恢复；reward 或完整 risk 配置不兼容时自动重置对应 critic；time-limit truncation 保持 Bellman bootstrap；恢复支持 collect-only、critic-only、成功/失败轨迹分层 replay、actor anchor 和 checkpoint step 一致性检查。中途 checkpoint 恢复仍从新 episode 继续，不宣称仿真器逐步状态等价。R4 仍是整体修复实验，不是单因素消融。
 
 ### 当前决议
 
-当前唯一待运行训练是 S1-R4。三个 seed 从 R2.1 selected actor 的 step `520000/480000/620000` 各继续 200000 steps；旧 reward critic 自动重置，前 50000 步只收集 replay，随后 50000 步只重建 critic，最后 100000 步更新完整 SAC。训练保持零速度 `random` 静态障碍物：25% episode 抽取固定 36 个候选失败 reset，75% 保持随机覆盖；50% replay batch 配额按成功/失败完整轨迹分层，actor/alpha learning rate 为 `1e-5`，actor anchor 权重为 `10.0`。
+当前进度是 S1-R4 已完成训练、validation 选点、full final 评估和失败诊断。R4 使静态候选子集达到 `461/483=95.4%`，但距离“排除无解后 99%”仍不足；且 full final 仍有 84 个 timeout。因此当前决议是不进入 S2 动态障碍物，也不删除 reset、放宽 success threshold 或启用 safety/recovery 分支。
 
-R4 是恢复正确性、数据覆盖和稳定性机制的整体确认实验，不是单因素消融。它必须保留完整 final manifest、所有失败 reset、原 success threshold 和碰撞口径；只有三个 seed 都在独立 validation 上不低于起点并且候选失败减少、collision_any 不增加，才运行 full final。R4 未通过前不进入 S2 动态障碍物。命令与停止条件见[后续渐进式实验协议](successor_incremental_experiment_protocol.md)。
+下一步优先方向是围绕 R4 剩余失败做静态阶段内修复：对候选路径找到但失败的 22 条 episode，重点增强 `0.055--0.08 m` 终端精度、到达保持和回退惩罚；对三 actor 全部 timeout 的 16 个非候选 reset，单独保留为目标/场景可行性边界诊断。新的训练若执行，必须继续使用独立 `9301--9340` validation 选点和完整 `9001--9200` final 复核，不能把 R4 的候选标签用于删样本。
 
 基础 reaching v2 已完成并可冻结为独立无障碍到达基线；严格 B4 仍仅保留为 P3/VAPS 诊断基线。该进展不改变 `do_not_freeze_p3_or_expand_recovery` 决议：不得把 reaching v2 或 S1 结果写成动态避障、安全、OOD、真机或完整方法 M 结果。
 
