@@ -36,6 +36,7 @@ outputs/**/train.log
 outputs/**/select.log
 outputs/**/final_eval.log
 outputs/**/traces*/
+outputs/**/*_trace.csv
 
 # OS/editor files
 .DS_Store
