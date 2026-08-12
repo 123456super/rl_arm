@@ -159,6 +159,17 @@ def test_p3_configs_have_distinct_outputs_and_expected_factor_settings() -> None
     assert all(str(path).startswith("outputs/p3_postfix_dev/") for path in output_dirs)
 
 
+def test_static_terminal_failure_refine_enables_residual_control_only_there() -> None:
+    default = load_config("configs/default.yaml")
+    assert default["env"]["residual_control"]["enabled"] is False
+    for seed in (4301, 4302, 4303):
+        config = load_config(f"configs/experiments/reaching_incremental/s1_static_terminal_failure_refine_seed{seed}.yaml")
+        assert config["env"]["residual_control"]["enabled"] is True
+        assert config["env"]["residual_control"]["residual_scale"] == 0.30
+        assert config["sac"]["actor_anchor_weight"] == 0.0
+        assert "residual" in config["train"]["run_name"]
+
+
 def test_predictive_risk_representation_runs_without_a_safety_filter() -> None:
     config = load_config("configs/experiments/p3/b3_link_predictive.yaml")
     env = UR5DynamicObstacleEnv(config, method="link_fixed")

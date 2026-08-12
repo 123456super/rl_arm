@@ -221,6 +221,15 @@ def main() -> None:
                         "acc_norm": float(np.linalg.norm(info["joint_acc"])),
                         "jerk_norm": float(np.linalg.norm(info["joint_jerk"])),
                         "qdot_requested_norm": float(np.linalg.norm(info.get("qdot_requested", info["qdot_cmd"]))),
+                        "qdot_policy_norm": float(np.linalg.norm(info.get("qdot_policy", info["qdot_cmd"]))),
+                        "residual_control_enabled": int(bool(info.get("residual_control_enabled", False))),
+                        "residual_control_mode": info.get("residual_control_mode", "disabled"),
+                        "residual_control_base_qdot_norm": float(
+                            np.linalg.norm(info.get("residual_control_base_qdot", np.zeros(env.action_space.shape[0])))
+                        ),
+                        "residual_qdot_norm": float(
+                            np.linalg.norm(info.get("residual_qdot", np.zeros(env.action_space.shape[0])))
+                        ),
                         "risk_speed_scale": float(info.get("risk_speed_scale", 1.0)),
                         "risk_speed_h_min_m": float(info.get("risk_speed_h_min_m", float("nan"))),
                         "recovery_active": int(bool(info.get("recovery_active", False))),

@@ -1,0 +1,10 @@
+includes:
+  - s1_static_terminal_failure_refine_base.yaml
+
+seed: 4301
+device: cuda:1
+
+train:
+  total_steps: 780000
+  output_dir: outputs/reaching_incremental/s1_static_terminal_failure_refine/train/seed_4301
+  run_name: link_fixed_static_terminal_residual_refine_seed4301_steps780000

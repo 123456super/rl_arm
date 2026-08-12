@@ -25,18 +25,6 @@ checkpoints/
 *.whl
 !outputs/
 !outputs/**
-outputs/**/*.pt
-outputs/**/*.pth
-outputs/**/*.onnx
-outputs/**/*.npz
-outputs/**/*.prof
-outputs/**/*.pid
-outputs/**/latest_run.txt
-outputs/**/train.log
-outputs/**/select.log
-outputs/**/final_eval.log
-outputs/**/traces*/
-outputs/**/*_trace.csv
 
 # OS/editor files
 .DS_Store

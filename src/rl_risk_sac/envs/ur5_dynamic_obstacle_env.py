@@ -66,6 +66,8 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.observation_cfg = env_cfg.get("observation", {})
         self.visual_cfg = env_cfg.get("visual", {})
         self.execution_cfg = env_cfg.get("execution", {})
+        self.residual_control_cfg = env_cfg.get("residual_control", {})
+        self.residual_control_enabled = bool(self.residual_control_cfg.get("enabled", False))
         self.safety_filter_cfg = env_cfg.get("safety_filter", {})
         self.safety_filter_enabled = bool(self.safety_filter_cfg.get("enabled", False))
         self.obstacle_enabled = bool(self.obstacle_cfg.get("enabled", True))
@@ -182,6 +184,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         self._reset_robot()
         self.goal = self._sample_goal()
         self.obstacle_center, self.obstacle_velocity = self._sample_obstacle()
+        self._apply_reset_jitter(options)
         self.obstacle_id = self._create_obstacle(self.obstacle_center) if self.obstacle_enabled else None
         self.goal_marker_id = self._create_goal_marker(self.goal)
 
@@ -215,6 +218,184 @@ class UR5DynamicObstacleEnv(gym.Env):
         obs, info = self._get_obs_and_info()
         return obs, info
 
+    def _apply_reset_jitter(self, options: dict[str, Any] | None) -> None:
+        if not options:
+            return
+        jitter_cfg = options.get("reset_jitter")
+        if jitter_cfg is None:
+            return
+        if not isinstance(jitter_cfg, dict):
+            raise TypeError("reset_jitter option must be a mapping")
+        rng = np.random.default_rng(jitter_cfg.get("seed"))
+
+        joint_range = float(jitter_cfg.get("joint_noise_range_rad", 0.0))
+        if not np.isfinite(joint_range) or joint_range < 0.0:
+            raise ValueError("reset_jitter.joint_noise_range_rad must be finite and non-negative")
+        if joint_range > 0.0:
+            lower, upper = self._joint_position_limits()
+            q, _ = self._joint_state()
+            q = np.clip(q + rng.uniform(-joint_range, joint_range, size=self.joint_count), lower, upper)
+            for joint_id, joint_value in zip(self.joint_ids, q, strict=True):
+                p.resetJointState(
+                    self.robot_id,
+                    joint_id,
+                    float(joint_value),
+                    targetVelocity=0.0,
+                    physicsClientId=self.physics_client_id,
+                )
+
+        goal_radius = float(jitter_cfg.get("goal_radius_m", 0.0))
+        if not np.isfinite(goal_radius) or goal_radius < 0.0:
+            raise ValueError("reset_jitter.goal_radius_m must be finite and non-negative")
+        if goal_radius > 0.0:
+            self.goal = self._jitter_vector(
+                self.goal,
+                goal_radius,
+                rng,
+                limits=(self.workspace["x"], self.workspace["y"], self.workspace["z"]),
+            ).astype(np.float32)
+
+        obstacle_radius = float(jitter_cfg.get("obstacle_radius_m", 0.0))
+        if not np.isfinite(obstacle_radius) or obstacle_radius < 0.0:
+            raise ValueError("reset_jitter.obstacle_radius_m must be finite and non-negative")
+        if obstacle_radius > 0.0 and self.obstacle_enabled:
+            bounds = self.obstacle_cfg["bounds"]
+            self.obstacle_center = self._jitter_vector(
+                self.obstacle_center,
+                obstacle_radius,
+                rng,
+                limits=(bounds["x"], bounds["y"], bounds["z"]),
+            ).astype(np.float32)
+
+    @staticmethod
+    def _jitter_vector(
+        value: np.ndarray,
+        radius: float,
+        rng: np.random.Generator,
+        *,
+        limits: tuple[list[float], list[float], list[float]],
+    ) -> np.ndarray:
+        jitter = rng.uniform(-radius, radius, size=3)
+        jittered = np.asarray(value, dtype=np.float64) + jitter
+        lower = np.asarray([axis[0] for axis in limits], dtype=np.float64)
+        upper = np.asarray([axis[1] for axis in limits], dtype=np.float64)
+        return np.clip(jittered, lower, upper)
+
+    def _residual_base_command(self, current_risk: LinkRisk) -> tuple[np.ndarray, dict[str, Any]]:
+        """Build a deterministic waypoint/terminal velocity command.
+
+        The planner only chooses a Cartesian intermediate target.  A damped
+        least-squares Jacobian controller then converts that target into joint
+        velocity, leaving the actor responsible for the residual.
+        """
+        ee_position, _ = self._end_effector_state()
+        goal = np.asarray(self.goal, dtype=np.float64)
+        goal_error = goal - np.asarray(ee_position, dtype=np.float64)
+        goal_error_norm = float(np.linalg.norm(goal_error))
+        terminal_radius = float(self.residual_control_cfg.get("terminal_goal_radius_m", 0.12))
+        clearance_margin = float(self.residual_control_cfg.get("clearance_margin_m", 0.03))
+        safe_margin = float(self.risk_config.d_safe) + clearance_margin
+        safe_to_use_terminal = (
+            not self.obstacle_enabled
+            or (np.isfinite(current_risk.d_min) and current_risk.d_min > safe_margin)
+        )
+
+        waypoint, waypoint_active, waypoint_reason = self._planner_waypoint(ee_position, goal)
+        if goal_error_norm <= terminal_radius and safe_to_use_terminal:
+            target = goal
+            mode = "terminal_clf"
+            target_reason = "terminal_clearance_ok"
+        elif waypoint_active:
+            target = waypoint
+            mode = "waypoint"
+            target_reason = waypoint_reason
+        elif not safe_to_use_terminal:
+            target = np.asarray(ee_position, dtype=np.float64)
+            mode = "hold_for_clearance"
+            target_reason = "insufficient_clearance_for_goal_clf"
+        else:
+            target = goal
+            mode = "goal_clf"
+            target_reason = "direct_path_clear"
+
+        target_error = target - np.asarray(ee_position, dtype=np.float64)
+        gain = (
+            float(self.residual_control_cfg.get("terminal_gain", 3.0))
+            if mode == "terminal_clf"
+            else float(self.residual_control_cfg.get("waypoint_gain", 2.0))
+        )
+        damping = float(self.residual_control_cfg.get("damping", 0.05))
+        try:
+            jacobian = self._link_origin_jacobian(self.tool_link_id)
+            regularizer = damping**2
+            base_qdot = jacobian.T @ np.linalg.solve(
+                jacobian @ jacobian.T + regularizer * np.eye(3),
+                gain * target_error,
+            )
+            controller_reason = "active"
+        except (np.linalg.LinAlgError, ValueError, RuntimeError) as error:
+            base_qdot = np.zeros(self.joint_count, dtype=np.float64)
+            controller_reason = f"jacobian_failure:{error}"
+
+        base_speed_scale = float(self.residual_control_cfg.get("base_speed_scale", 1.0))
+        base_qdot = np.clip(
+            base_speed_scale * base_qdot,
+            -self.action_scale,
+            self.action_scale,
+        ).astype(np.float32)
+        return base_qdot, {
+            "residual_control_mode": mode,
+            "residual_control_reason": target_reason,
+            "residual_control_controller": controller_reason,
+            "residual_control_terminal_safe": bool(safe_to_use_terminal),
+            "residual_control_goal_error_norm": goal_error_norm,
+            "residual_control_target": np.asarray(target, dtype=np.float32),
+            "residual_control_waypoint_active": bool(waypoint_active),
+            "residual_control_waypoint": np.asarray(waypoint, dtype=np.float32),
+            "residual_control_base_qdot": base_qdot.copy(),
+        }
+
+    def _planner_waypoint(
+        self,
+        ee_position: np.ndarray,
+        goal: np.ndarray,
+    ) -> tuple[np.ndarray, bool, str]:
+        if not self.obstacle_enabled:
+            return np.asarray(goal, dtype=np.float64), False, "obstacle_disabled"
+
+        path = np.asarray(goal, dtype=np.float64) - np.asarray(ee_position, dtype=np.float64)
+        path_norm_sq = float(np.dot(path, path))
+        if path_norm_sq <= 1.0e-12:
+            return np.asarray(goal, dtype=np.float64), False, "zero_goal_error"
+
+        obstacle = np.asarray(self.obstacle_center, dtype=np.float64)
+        projection = float(np.clip(np.dot(obstacle - ee_position, path) / path_norm_sq, 0.0, 1.0))
+        closest = np.asarray(ee_position, dtype=np.float64) + projection * path
+        offset = closest - obstacle
+        offset_norm = float(np.linalg.norm(offset))
+        obstacle_radius = float(self.obstacle_cfg["radius"])
+        clearance_margin = float(self.residual_control_cfg.get("clearance_margin_m", 0.03))
+        lateral_margin = float(self.residual_control_cfg.get("waypoint_lateral_margin_m", 0.08))
+        influence_radius = obstacle_radius + clearance_margin + lateral_margin
+        if projection <= 0.02 or projection >= 0.98 or offset_norm >= influence_radius:
+            return np.asarray(goal, dtype=np.float64), False, "direct_path_clear"
+
+        if offset_norm <= 1.0e-10:
+            path_direction = path / np.sqrt(path_norm_sq)
+            lateral = np.cross(path_direction, np.asarray([0.0, 0.0, 1.0]))
+            if np.linalg.norm(lateral) <= 1.0e-10:
+                lateral = np.cross(path_direction, np.asarray([0.0, 1.0, 0.0]))
+            offset_direction = lateral / max(float(np.linalg.norm(lateral)), 1.0e-10)
+        else:
+            offset_direction = offset / offset_norm
+
+        waypoint = closest + offset_direction * influence_radius
+        waypoint[2] += float(self.residual_control_cfg.get("waypoint_height_offset_m", 0.0))
+        for axis, name in enumerate(("x", "y", "z")):
+            low, high = (float(value) for value in self.workspace[name])
+            waypoint[axis] = np.clip(waypoint[axis], low, high)
+        return waypoint, True, "direct_path_blocked"
+
     def step(self, action: np.ndarray):
         action = np.asarray(action, dtype=np.float32)
         action = np.clip(action, -1.0, 1.0)
@@ -239,7 +420,38 @@ class UR5DynamicObstacleEnv(gym.Env):
                 phase_started_at = perf_counter()
                 predictive_risk_for_scaling = self._compute_predictive_risk()
                 precomputed_risk_time_s += perf_counter() - phase_started_at
-        qdot_policy = self.action_scale * action
+        residual_base_qdot = np.zeros(self.joint_count, dtype=np.float32)
+        residual_qdot = np.zeros(self.joint_count, dtype=np.float32)
+        residual_info: dict[str, Any] = {
+            "residual_control_enabled": bool(self.residual_control_enabled),
+            "residual_control_mode": "disabled",
+            "residual_control_reason": "disabled",
+            "residual_control_controller": "disabled",
+            "residual_control_terminal_safe": False,
+            "residual_control_goal_error_norm": float(np.linalg.norm(self._goal_error())),
+            "residual_control_target": self.goal.copy(),
+            "residual_control_waypoint_active": False,
+            "residual_control_waypoint": self.goal.copy(),
+            "residual_control_base_qdot": residual_base_qdot.copy(),
+            "residual_qdot": residual_qdot.copy(),
+        }
+        if self.residual_control_enabled:
+            residual_base_qdot, residual_info = self._residual_base_command(current_risk_before_action)
+            residual_scale = float(self.residual_control_cfg.get("residual_scale", 0.35))
+            residual_qdot = residual_scale * self.action_scale * action
+            qdot_policy = np.clip(
+                residual_base_qdot + residual_qdot,
+                -self.action_scale,
+                self.action_scale,
+            ).astype(np.float32)
+            residual_info.update(
+                {
+                    "residual_control_enabled": True,
+                    "residual_qdot": residual_qdot.copy(),
+                }
+            )
+        else:
+            qdot_policy = self.action_scale * action
         if self.method.endswith("adaptive"):
             beta = self._adaptive_beta(pre_risk.risk_global)
         else:
@@ -340,6 +552,7 @@ class UR5DynamicObstacleEnv(gym.Env):
                 "joint_jerk": jerk.copy(),
                 "beta": float(beta),
                 "qdot_requested": qdot_requested.copy(),
+                "qdot_policy": qdot_policy.copy(),
                 "risk_speed_scale": float(risk_speed_scale),
                 "risk_speed_h_min_m": (
                     float(np.min(predictive_risk_for_scaling.safety_functions_m))
@@ -358,6 +571,7 @@ class UR5DynamicObstacleEnv(gym.Env):
                 ),
             }
         )
+        info.update(residual_info)
         if filter_result is not None:
             info.update(
                 self._filter_info(

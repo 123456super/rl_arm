@@ -11,7 +11,7 @@ from rl_risk_sac.algorithms.replay_buffer import Batch, ReplayBuffer
 from rl_risk_sac.algorithms.sac import SACAgent
 from rl_risk_sac.utils.config import load_config
 from rl_risk_sac.utils.seeding import capture_rng_state, restore_rng_state, set_seed
-from scripts.train import validate_resume_checkpoint_steps
+from scripts.train import replay_action_signature, reset_training_environment, validate_resume_checkpoint_steps
 
 
 def _small_config() -> dict:
@@ -64,7 +64,14 @@ def test_replay_stratifies_success_and_failure_episodes() -> None:
 
 
 def test_replay_round_trip_preserves_ring_order_and_labels(tmp_path) -> None:
-    replay = ReplayBuffer(obs_dim=1, action_dim=1, capacity=4, device="cpu", stratified_fraction=0.5)
+    replay = ReplayBuffer(
+        obs_dim=1,
+        action_dim=1,
+        capacity=4,
+        device="cpu",
+        stratified_fraction=0.5,
+        action_signature="full-action",
+    )
     for value in range(5):
         index = replay.add(
             np.array([value], dtype=np.float32),
@@ -79,7 +86,7 @@ def test_replay_round_trip_preserves_ring_order_and_labels(tmp_path) -> None:
     path = tmp_path / "replay.npz"
     replay.save(path)
 
-    restored = ReplayBuffer(obs_dim=1, action_dim=1, capacity=6, device="cpu")
+    restored = ReplayBuffer(obs_dim=1, action_dim=1, capacity=6, device="cpu", action_signature="full-action")
     restored.load(path)
 
     assert len(restored) == 4
@@ -87,6 +94,38 @@ def test_replay_round_trip_preserves_ring_order_and_labels(tmp_path) -> None:
     assert restored.observations[:4, 0].tolist() == [1.0, 2.0, 3.0, 4.0]
     assert restored.truncateds[:4, 0].tolist() == [0.0, 0.0, 0.0, 1.0]
     assert restored.episode_outcomes[:4].tolist() == [0, 1, 0, 1]
+
+
+def test_replay_action_signature_mismatch_is_rejected(tmp_path) -> None:
+    replay = ReplayBuffer(obs_dim=1, action_dim=1, capacity=4, device="cpu", action_signature="full-action")
+    replay.add(np.zeros(1), np.zeros(1), 0.0, 0.0, np.zeros(1), done=False)
+    path = tmp_path / "replay.npz"
+    replay.save(path)
+
+    restored = ReplayBuffer(obs_dim=1, action_dim=1, capacity=4, device="cpu", action_signature="residual")
+    with pytest.raises(ValueError, match="action semantics"):
+        restored.load(path)
+
+
+def test_replay_action_signature_reads_missing_signature_as_legacy(tmp_path) -> None:
+    path = tmp_path / "legacy_replay.npz"
+    np.savez_compressed(
+        path,
+        capacity=np.asarray(1),
+        obs_dim=np.asarray(1),
+        action_dim=np.asarray(1),
+        ptr=np.asarray(0),
+        size=np.asarray(0),
+        stratified_fraction=np.asarray(0.0),
+        observations=np.zeros((0, 1), dtype=np.float32),
+        actions=np.zeros((0, 1), dtype=np.float32),
+        rewards=np.zeros((0, 1), dtype=np.float32),
+        costs=np.zeros((0, 1), dtype=np.float32),
+        next_observations=np.zeros((0, 1), dtype=np.float32),
+        dones=np.zeros((0, 1), dtype=np.float32),
+    )
+
+    assert replay_action_signature(path) == ""
 
 
 def test_agent_checkpoint_restores_targets_optimizers_and_training_state(tmp_path) -> None:
@@ -142,9 +181,40 @@ def test_changed_risk_reinitializes_reward_critics(tmp_path) -> None:
     assert load_info["cost_critics_loaded"] is False
 
 
+def test_residual_control_change_requires_actor_semantics_reset(tmp_path) -> None:
+    source_config = _small_config()
+    source = SACAgent(3, 2, source_config, method="link_fixed")
+    source.save(tmp_path)
+
+    changed_config = copy.deepcopy(source_config)
+    changed_config["env"]["residual_control"]["enabled"] = True
+    restored = SACAgent(3, 2, changed_config, method="link_fixed")
+
+    with pytest.raises(ValueError, match="action semantics"):
+        restored.load(tmp_path / "actor.pt", tmp_path / "agent_state.pt")
+
+
 def test_rng_state_round_trip() -> None:
     set_seed(123)
     state = capture_rng_state()
+    expected = (random.random(), np.random.random(), torch.rand(1))
+    restore_rng_state(state)
+    actual = (random.random(), np.random.random(), torch.rand(1))
+
+    assert actual[0] == expected[0]
+    assert actual[1] == expected[1]
+    assert torch.equal(actual[2], expected[2])
+
+
+def test_rng_state_round_trip_accepts_tensor_subclasses() -> None:
+    set_seed(456)
+    state = capture_rng_state()
+    state["torch"] = torch.as_tensor(state["torch"], device="cpu", dtype=torch.uint8).clone()
+    if "torch_cuda" in state:
+        state["torch_cuda"] = [
+            torch.as_tensor(item, device="cpu", dtype=torch.uint8).clone()
+            for item in state["torch_cuda"]
+        ]
     expected = (random.random(), np.random.random(), torch.rand(1))
     restore_rng_state(state)
     actual = (random.random(), np.random.random(), torch.rand(1))
@@ -168,3 +238,46 @@ def test_legacy_checkpoint_filenames_must_match_start_step() -> None:
             None,
             520000,
         )
+
+
+class _ResetEnv:
+    def __init__(self) -> None:
+        self.config = {
+            "train": {
+                "focused_reset_jitter": {
+                    "enabled": True,
+                    "goal_radius_m": 0.02,
+                }
+            }
+        }
+        self.calls = []
+
+    def reset(self, *, seed=None, options=None):
+        self.calls.append({"seed": seed, "options": options})
+        return np.zeros(1, dtype=np.float32), {}
+
+
+def test_focused_reset_jitter_is_applied_only_to_focused_resets(monkeypatch) -> None:
+    env = _ResetEnv()
+    draws = iter([1234])
+    monkeypatch.setattr(np.random, "random", lambda: 0.0)
+    monkeypatch.setattr(np.random, "choice", lambda values: values[0])
+    monkeypatch.setattr(np.random, "randint", lambda *args, **kwargs: next(draws))
+
+    _, _, seed, source, jitter_seed = reset_training_environment(env, [9001], 1.0)
+
+    assert seed == 9001
+    assert source == "focused"
+    assert jitter_seed == 1234
+    assert env.calls[0]["options"]["reset_jitter"]["seed"] == 1234
+
+    env = _ResetEnv()
+    monkeypatch.setattr(np.random, "random", lambda: 1.0)
+    monkeypatch.setattr(np.random, "randint", lambda *args, **kwargs: 4567)
+
+    _, _, seed, source, jitter_seed = reset_training_environment(env, [9001], 0.0)
+
+    assert seed == 4567
+    assert source == "random"
+    assert jitter_seed is None
+    assert env.calls[0]["options"] is None

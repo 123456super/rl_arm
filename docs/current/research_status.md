@@ -25,7 +25,7 @@
 | 安全过滤器（P2） | strict QP、投影/回退、safe-stop、审计链路 | 可运行但不是硬实时或安全证明 |
 | P3 因子化比较 | B1--B5、3 train seeds、共享 final manifest | 完成诊断，未形成可冻结主方法 |
 | 基础 reaching v1/v2 | 独立无障碍训练、checkpoint 选择、3×200 final 评估 | v2 基础 reaching actor 已冻结；全量 97.0%，固定可达子集 100% |
-| 静态障碍物 S1 | S1--R4、失败归因、时间窗/动作响应诊断、训练恢复修复与 R4 final 评估 | 当前 final 参考 516/600；候选子集 461/483；下一步先修 R4 剩余静态失败，不进入 S2 |
+| 静态障碍物 S1 | S1--R4、失败归因、时间窗/动作响应诊断、训练恢复修复与 R4 final 评估 | 当前 final 参考 516/600；候选子集 461/483；下一步按终端伺服诊断、failure-neighborhood jitter 训练和 waypoint teacher 导出三步走，不进入 S2 |
 | 归档与决策 | 冻结包、recovery 对照、初始可行性审计 | 停止当前 recovery 分支扩张 |
 
 ## 2026-08-03 修正
@@ -123,7 +123,13 @@ S1-D1 将固定 36 个候选失败 reset 的时限从 12 s 延长至 24 s，只�
 
 当前进度是 S1-R4 已完成训练、validation 选点、full final 评估和失败诊断。R4 使静态候选子集达到 `461/483=95.4%`，但距离“排除无解后 99%”仍不足；且 full final 仍有 84 个 timeout。因此当前决议是不进入 S2 动态障碍物，也不删除 reset、放宽 success threshold 或启用 safety/recovery 分支。
 
-下一步优先方向是围绕 R4 剩余失败做静态阶段内修复：对候选路径找到但失败的 22 条 episode，重点增强 `0.055--0.08 m` 终端精度、到达保持和回退惩罚；对三 actor 全部 timeout 的 16 个非候选 reset，单独保留为目标/场景可行性边界诊断。新的训练若执行，必须继续使用独立 `9301--9340` validation 选点和完整 `9001--9200` final 复核，不能把 R4 的候选标签用于删样本。
+下一步按三步走，不再把它笼统描述成“修静态失败”：
+
+1. 先跑终端伺服诊断，确认近目标段的局部速度场和 clearance gate。
+2. 再跑 failure-neighborhood jitter 训练，只修 `0.055--0.08 m` 附近的停滞和回退。
+3. 再从 `outputs/reaching_incremental/s1_static_obstacle_finetune/static_feasibility_precheck.json` 导出 waypoint teacher，作为后续示范数据。
+
+新的训练若执行，必须继续使用独立 `9301--9340` validation 选点和完整 `9001--9200` final 复核，不能把 R4 的候选标签用于删样本。
 
 基础 reaching v2 已完成并可冻结为独立无障碍到达基线；严格 B4 仍仅保留为 P3/VAPS 诊断基线。该进展不改变 `do_not_freeze_p3_or_expand_recovery` 决议：不得把 reaching v2 或 S1 结果写成动态避障、安全、OOD、真机或完整方法 M 结果。
 

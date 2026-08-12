@@ -119,6 +119,37 @@ def validate_config(config: dict[str, Any]) -> None:
     if not isfinite(terminal_weight):
         raise ValueError("reward.w_terminal_progress must be finite")
 
+    residual_control = config["env"].get("residual_control", {})
+    if residual_control is not None:
+        if not isinstance(residual_control, dict):
+            raise TypeError("env.residual_control must be a mapping when provided")
+        for key in (
+            "residual_scale",
+            "base_speed_scale",
+            "terminal_goal_radius_m",
+            "terminal_gain",
+            "waypoint_gain",
+            "damping",
+            "clearance_margin_m",
+            "waypoint_lateral_margin_m",
+            "waypoint_height_offset_m",
+        ):
+            value = float(residual_control.get(key, 0.0))
+            if not isfinite(value):
+                raise ValueError(f"env.residual_control.{key} must be finite")
+        for key in (
+            "residual_scale",
+            "base_speed_scale",
+            "terminal_goal_radius_m",
+            "terminal_gain",
+            "waypoint_gain",
+            "damping",
+            "clearance_margin_m",
+            "waypoint_lateral_margin_m",
+        ):
+            if float(residual_control.get(key, 0.0)) < 0.0:
+                raise ValueError(f"env.residual_control.{key} must be non-negative")
+
     sac = config["sac"]
     replay_size = int(sac["replay_size"])
     if replay_size <= 0:
@@ -138,3 +169,12 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("train.focused_reset_fraction must be in [0, 1]")
     if focused_fraction > 0.0 and not config["train"].get("focused_reset_seed_manifest"):
         raise ValueError("train.focused_reset_seed_manifest is required when focused_reset_fraction > 0")
+
+    focused_jitter = config["train"].get("focused_reset_jitter", {})
+    if focused_jitter is not None:
+        if not isinstance(focused_jitter, dict):
+            raise TypeError("train.focused_reset_jitter must be a mapping when provided")
+        for key in ("joint_noise_range_rad", "goal_radius_m", "obstacle_radius_m"):
+            value = float(focused_jitter.get(key, 0.0))
+            if not isfinite(value) or value < 0.0:
+                raise ValueError(f"train.focused_reset_jitter.{key} must be finite and non-negative")

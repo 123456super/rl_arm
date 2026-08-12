@@ -51,7 +51,7 @@
 | 4303 | 148/200 | 45 | 7 | 2 | 6 |
 | pooled | 428/600 | 156 | 16 | 4 | 13 |
 
-S1-R 已按该诊断完成，后续结果见下文。当前进度已经推进到 S1-R4 final 分析完成；S2 动态障碍物仍暂停。命令归档和停止规则见[后续渐进式实验协议](successor_incremental_experiment_protocol.md)。
+S1-R 已按该诊断完成，后续结果见下文。当前进度已经推进到 S1-R4 final 分析完成；S2 动态障碍物仍暂停。当前下一步按三步走：终端伺服诊断、failure-neighborhood jitter 训练和静态 waypoint teacher 导出。命令归档和停止规则见[后续渐进式实验协议](successor_incremental_experiment_protocol.md)。
 
 ### S1-R 静态障碍物迁移训练结果
 
@@ -162,7 +162,7 @@ R4 已完成训练、checkpoint selection、完整 final 评估和失败诊断�
 
 R4 当前失败共 84 条，全部为 timeout 且无碰撞：`nonconvergent_timeout` 42、`near_goal_timeout` 16、`near_goal_regression` 13、`low_motion_stall` 13。静态候选路径找到的 483 条 episode 中仍有 22 条失败，全部无碰撞，其中 `near_goal_timeout` 9、`near_goal_regression` 9、`nonconvergent_timeout` 4；候选路径找到的失败 reset 没有三 actor 全部失败的情况，说明这部分更像策略局部速度场和终端收敛问题，而不是场景硬不可解。另有 16 个 reset 为三 actor 全部 timeout，均属于 `not_found` 或 `not_checked_due_to_ik`，应作为目标/场景可行性边界与策略问题分开报告。
 
-当前基于 R4 的统一判断是：静态障碍物失败已经从碰撞问题收敛为 actor 自身在局部观测下的速度场问题。由于评估关闭 safety filter，失败不是过滤器拦截或执行器没有跟随命令；候选子集的主要瓶颈是进入 `0.055--0.08 m` 附近后停滞或回退，非候选 reset 的主要瓶颈是目标更远/更高、障碍物更贴近目标或有限 IK/候选路径未找到。下一步不进入 S2，优先针对 R4 剩余候选失败做终端精度和回退控制修复，并单独保留三 actor 全失败的非候选 reset 作为可行性边界诊断。
+当前基于 R4 的统一判断是：静态障碍物失败已经从碰撞问题收敛为 actor 自身在局部观测下的速度场问题。由于评估关闭 safety filter，失败不是过滤器拦截或执行器没有跟随命令；候选子集的主要瓶颈是进入 `0.055--0.08 m` 附近后停滞或回退，非候选 reset 的主要瓶颈是目标更远/更高、障碍物更贴近目标或有限 IK/候选路径未找到。当前不进入 S2，下一步按三步走：终端伺服诊断、failure-neighborhood jitter 训练和静态 waypoint teacher 导出。
 
 数据源：`outputs/reaching_incremental/s1_static_terminal_repaired_finetune/eval/seed_430{1,2,3}_final.csv`、`outputs/reaching_incremental/s1_static_terminal_repaired_finetune/diagnostics/report.json`、`actor_episode_diagnostics.csv` 和 `reset_diagnostics.csv`。
 

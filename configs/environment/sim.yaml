@@ -43,6 +43,21 @@ env:
     # PyBullet 速度控制的关节最大驱动力，单位 N*m。过小可能跟不上速度命令，过大可能使仿真过硬。
     joint_motor_force: 90.0
 
+  # Optional residual controller.  Disabled keeps historical action semantics:
+  # actor output is the full joint-velocity command.  When enabled, actor output
+  # is a bounded residual added to a deterministic waypoint/terminal CLF command.
+  residual_control:
+    enabled: false
+    residual_scale: 0.35
+    base_speed_scale: 1.0
+    terminal_goal_radius_m: 0.12
+    terminal_gain: 3.0
+    waypoint_gain: 2.0
+    damping: 0.05
+    clearance_margin_m: 0.03
+    waypoint_lateral_margin_m: 0.08
+    waypoint_height_offset_m: 0.0
+
   # P2 安全过滤器。默认关闭以冻结阶段一结果；新研究实验必须显式设为 true。
   safety_filter:
     enabled: false

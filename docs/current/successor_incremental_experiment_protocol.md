@@ -1,6 +1,6 @@
 # 后续渐进式实验协议
 
-> 更新时间：2026-08-11。当前进度为 S1-R4 已完成训练、validation 选点、full final 评估和失败诊断；S2 及以后尚未授权。本文把无障碍 reaching v2 作为唯一基础策略，规定后续逐层增加环境和安全机制的顺序。
+> 更新时间：2026-08-12。当前进度为 S1-R4 已完成训练、validation 选点、full final 评估和失败诊断；S2 及以后尚未授权。本文把无障碍 reaching v2 作为唯一基础策略，规定后续逐层增加环境和安全机制的顺序。
 
 ## 1. 总原则
 
@@ -17,6 +17,12 @@
 禁止把多个新因素放在同一次实验中。尤其不得在尚未完成冻结 actor 评估前同时加入动态障碍物、predictive risk、strict QP、viability monitor、recovery 或新的训练目标。
 
 S1-R4 是这一规则的显式例外：它用于修复已确认的 checkpoint/replay/timeout 训练正确性问题，并同时验证保守稳定机制，因此只能判断修复后整体方案是否可继续，不能归因各组件贡献。R4 已证明整体方向有效，但未达到 99% 静态避障目标；后续若要声明 focused reset、stratified replay、anchor 或 terminal reward 的贡献，仍需单因素消融。
+
+现在按三步继续：
+
+1. 先做终端伺服诊断，确认终端段的局部速度场和 clearance gate。
+2. 再做失败邻域 jitter 训练，只修近目标停滞和回退。
+3. 最后导出静态 waypoint teacher，只给后续蒸馏/模仿用。
 
 ## 2. 固定不变的基线
 
@@ -185,7 +191,71 @@ R4 validation 选中 4301 step `660000`、4302 step `620000`、4303 step `740000
 
 R4 的剩余失败全部为 timeout：全量失败包含 `nonconvergent_timeout` 42、`near_goal_timeout` 16、`near_goal_regression` 13、`low_motion_stall` 13。静态候选路径找到的 483 条 episode 中仍有 22 条失败，其中 `near_goal_timeout` 9、`near_goal_regression` 9、`nonconvergent_timeout` 4，且没有任何候选 reset 是三 actor 全部失败。另有 16 个 reset 为三 actor 全部 timeout，均属于 `not_found` 或 `not_checked_due_to_ik`。统一解释为：候选子集失败主要是 actor 局部速度场、终端精度和回退控制问题；全量中的三 actor 全失败 reset 应作为目标/场景可行性边界单独保留。
 
-基于 R4 的当前决议：S2 动态障碍物继续暂停；不得删除 reset、放宽 `success_tolerance=0.055 m`、启用 safety filter/recovery 或把候选标签当作筛选条件。下一步应先在静态阶段内针对 R4 的 22 条候选失败修 terminal precision 和 near-goal regression，同时单独审计 16 个三 actor 全 timeout 的非候选 reset。
+基于 R4 的当前决议：S2 动态障碍物继续暂停；不得删除 reset、放宽 `success_tolerance=0.055 m`、启用 safety filter/recovery 或把候选标签当作筛选条件。当前下一步不再只是泛泛的“修静态失败”，而是按三步走：
+
+1. 先跑终端伺服诊断，确认近目标段的执行几何是否可收敛。
+2. 再跑 failure-neighborhood jitter 训练，专门压 `0.055--0.08 m` 附近的停滞和回退。
+3. 再从 `static_feasibility_precheck.json` 导出 waypoint teacher，作为后续示范数据。
+
+这三步都只是在静态阶段内收口，不改变 final 口径，也不授权 S2。
+
+### 当前三步命令
+
+#### 1. 终端伺服诊断
+
+```bash
+python scripts/evaluate_terminal_servo.py \
+  --config configs/experiments/reaching_incremental/s1_static_terminal_failure_refine_seed4301.yaml \
+  --checkpoint outputs/reaching_incremental/s1_static_terminal_repaired_finetune/train/seed_4301/link_fixed_static_terminal_repaired_finetune_seed4301_steps720000/actor_step_660000.pt \
+  --seed-manifest configs/experiments/reaching_incremental/manifests/s1_r4_static_candidate_failure_union_v1.json \
+  --episodes 21 \
+  --output outputs/reaching_incremental/s1_static_terminal_failure_refine/diagnostics_terminal_servo/seed_4301.csv \
+  --trace-output outputs/reaching_incremental/s1_static_terminal_failure_refine/diagnostics_terminal_servo/seed_4301_traces
+python scripts/evaluate_terminal_servo.py \
+  --config configs/experiments/reaching_incremental/s1_static_terminal_failure_refine_seed4302.yaml \
+  --checkpoint outputs/reaching_incremental/s1_static_terminal_repaired_finetune/train/seed_4302/link_fixed_static_terminal_repaired_finetune_seed4302_steps680000/actor_step_620000.pt \
+  --seed-manifest configs/experiments/reaching_incremental/manifests/s1_r4_static_candidate_failure_union_v1.json \
+  --episodes 21 \
+  --output outputs/reaching_incremental/s1_static_terminal_failure_refine/diagnostics_terminal_servo/seed_4302.csv \
+  --trace-output outputs/reaching_incremental/s1_static_terminal_failure_refine/diagnostics_terminal_servo/seed_4302_traces
+python scripts/evaluate_terminal_servo.py \
+  --config configs/experiments/reaching_incremental/s1_static_terminal_failure_refine_seed4303.yaml \
+  --checkpoint outputs/reaching_incremental/s1_static_terminal_repaired_finetune/train/seed_4303/link_fixed_static_terminal_repaired_finetune_seed4303_steps820000/actor_step_740000.pt \
+  --seed-manifest configs/experiments/reaching_incremental/manifests/s1_r4_static_candidate_failure_union_v1.json \
+  --episodes 21 \
+  --output outputs/reaching_incremental/s1_static_terminal_failure_refine/diagnostics_terminal_servo/seed_4303.csv \
+  --trace-output outputs/reaching_incremental/s1_static_terminal_failure_refine/diagnostics_terminal_servo/seed_4303_traces
+```
+
+#### 2. failure-neighborhood jitter 训练
+
+```bash
+python scripts/train.py \
+  --config configs/experiments/reaching_incremental/s1_static_terminal_failure_refine_seed4301.yaml \
+  --resume-actor outputs/reaching_incremental/s1_static_terminal_repaired_finetune/train/seed_4301/link_fixed_static_terminal_repaired_finetune_seed4301_steps720000/actor_step_660000.pt \
+  --reset-agent-state \
+  --start-step 660000
+python scripts/train.py \
+  --config configs/experiments/reaching_incremental/s1_static_terminal_failure_refine_seed4302.yaml \
+  --resume-actor outputs/reaching_incremental/s1_static_terminal_repaired_finetune/train/seed_4302/link_fixed_static_terminal_repaired_finetune_seed4302_steps680000/actor_step_620000.pt \
+  --reset-agent-state \
+  --start-step 620000
+python scripts/train.py \
+  --config configs/experiments/reaching_incremental/s1_static_terminal_failure_refine_seed4303.yaml \
+  --resume-actor outputs/reaching_incremental/s1_static_terminal_repaired_finetune/train/seed_4303/link_fixed_static_terminal_repaired_finetune_seed4303_steps820000/actor_step_740000.pt \
+  --reset-agent-state \
+  --start-step 740000
+```
+
+#### 3. 静态 waypoint teacher 导出
+
+```bash
+python scripts/export_static_waypoint_teacher.py \
+  --feasibility outputs/reaching_incremental/s1_static_obstacle_finetune/static_feasibility_precheck.json \
+  --output-json outputs/reaching_incremental/s1_static_terminal_failure_refine/teacher/static_waypoint_teacher_summary.json \
+  --output-jsonl outputs/reaching_incremental/s1_static_terminal_failure_refine/teacher/static_waypoint_teacher.jsonl \
+  --dt 0.05
+```
 
 以下为 R4 已执行训练命令归档。三个训练当时可以并行运行；命令只用于复现本轮，不是当前要运行的步骤：
 
@@ -215,6 +285,8 @@ python scripts/train.py --config configs/experiments/reaching_incremental/s1_sta
 训练完成后已只用 `9301--9340` validation manifest 选点，并把起点 actor 作为候选；完整 final 已保留所有 `9001--9200` reset。R4 的 full final 虽有净提升且碰撞为零，但候选子集仍只有 `461/483=95.4%`，未达到进入动态障碍物的可信门槛；因此 R4 之后仍不进入 S2。
 
 ### S2：低速动态障碍物，仍关闭安全过滤器
+
+**当前状态**：暂停。
 
 **唯一新增因素**：在 S1 设置上把障碍物速度改为固定 `0.05 m/s`，其余不变。
 

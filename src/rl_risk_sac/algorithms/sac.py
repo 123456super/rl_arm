@@ -19,12 +19,41 @@ def _config_signature(payload: dict[str, Any]) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+def residual_control_signature(config: dict[str, Any]) -> dict[str, Any]:
+    residual_cfg = config.get("env", {}).get("residual_control", {}) or {}
+    enabled = bool(residual_cfg.get("enabled", False))
+    if not enabled:
+        return {"enabled": False}
+    keys = (
+        "residual_scale",
+        "base_speed_scale",
+        "terminal_goal_radius_m",
+        "terminal_gain",
+        "waypoint_gain",
+        "damping",
+        "clearance_margin_m",
+        "waypoint_lateral_margin_m",
+        "waypoint_height_offset_m",
+    )
+    return {"enabled": True, **{key: residual_cfg.get(key) for key in keys}}
+
+
+def actor_signature(config: dict[str, Any], method: str) -> str:
+    return _config_signature(
+        {
+            "method": method,
+            "residual_control": residual_control_signature(config),
+        }
+    )
+
+
 def reward_signature(config: dict[str, Any], method: str) -> str:
     return _config_signature(
         {
             "method": method,
             "reward": config["reward"],
             "fixed_risk_penalty": config["sac"].get("fixed_risk_penalty", 0.0),
+            "residual_control": residual_control_signature(config),
             # ``link_fixed`` subtracts fixed_risk_penalty * cost, and the
             # cost/risk values depend on the complete risk configuration.
             # Include all of it so a changed distance/velocity model cannot
@@ -39,6 +68,7 @@ def cost_signature(config: dict[str, Any], method: str) -> str:
         {
             "method": method,
             "risk": config["risk"],
+            "residual_control": residual_control_signature(config),
         }
     )
 
@@ -68,6 +98,7 @@ class SACAgent:
         self.actor_anchor_weight = float(sac_cfg.get("actor_anchor_weight", 0.0))
         if self.actor_anchor_weight < 0.0:
             raise ValueError("sac.actor_anchor_weight must be non-negative")
+        self.actor_signature = actor_signature(config, method)
         self.reward_signature = reward_signature(config, method)
         self.cost_signature = cost_signature(config, method)
         self.last_load_info: dict[str, Any] = {}
@@ -285,6 +316,7 @@ class SACAgent:
                 "lagrange_multiplier": self.lagrange_multiplier,
                 "cost_ema": self.cost_ema,
                 "method": self.method,
+                "actor_signature": self.actor_signature,
                 "reward_signature": self.reward_signature,
                 "cost_signature": self.cost_signature,
                 "actor_reference": (
@@ -316,21 +348,39 @@ class SACAgent:
 
         state_path = Path(state_path)
         state = torch.load(state_path, map_location=self.device, weights_only=False)
+        checkpoint_actor_signature = state.get("actor_signature")
         checkpoint_reward_signature = state.get("reward_signature")
         checkpoint_cost_signature = state.get("cost_signature")
-        if checkpoint_reward_signature is None or checkpoint_cost_signature is None:
-            source_config = state_path.parent / "config.json"
-            if source_config.is_file():
-                with source_config.open(encoding="utf-8") as file:
-                    source = json.load(file)
-                checkpoint_method = str(state.get("method", self.method))
+        source_config = state_path.parent / "config.json"
+        checkpoint_method = str(state.get("method", self.method))
+        if source_config.is_file() and (
+            checkpoint_actor_signature is None
+            or checkpoint_reward_signature is None
+            or checkpoint_cost_signature is None
+        ):
+            with source_config.open(encoding="utf-8") as file:
+                source = json.load(file)
+                checkpoint_actor_signature = checkpoint_actor_signature or actor_signature(
+                    source, checkpoint_method
+                )
                 checkpoint_reward_signature = checkpoint_reward_signature or reward_signature(
                     source, checkpoint_method
                 )
                 checkpoint_cost_signature = checkpoint_cost_signature or cost_signature(source, checkpoint_method)
+        if checkpoint_actor_signature is None:
+            checkpoint_actor_signature = actor_signature(
+                {"env": {"residual_control": {"enabled": False}}},
+                checkpoint_method,
+            )
 
+        actor_compatible = checkpoint_actor_signature == self.actor_signature
         reward_compatible = checkpoint_reward_signature == self.reward_signature
         cost_compatible = checkpoint_cost_signature == self.cost_signature
+        if not actor_compatible:
+            raise ValueError(
+                "actor checkpoint action semantics do not match this config; "
+                "use --reset-agent-state to transfer only the actor weights"
+            )
         load_reward = not reset_reward_critics and reward_compatible
         load_cost = not reset_cost_critics and cost_compatible
         if load_reward:
@@ -384,6 +434,7 @@ class SACAgent:
         self.last_load_info = {
             "reward_critics_loaded": load_reward,
             "cost_critics_loaded": load_cost,
+            "actor_signature_match": actor_compatible,
             "reward_signature_match": reward_compatible,
             "cost_signature_match": cost_compatible,
             "optimizers_loaded": optimizers_loaded,

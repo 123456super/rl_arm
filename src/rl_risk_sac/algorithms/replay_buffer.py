@@ -25,6 +25,7 @@ class ReplayBuffer:
         capacity: int,
         device: str,
         stratified_fraction: float = 0.0,
+        action_signature: str | None = None,
     ) -> None:
         self.capacity = int(capacity)
         if self.capacity <= 0:
@@ -35,6 +36,7 @@ class ReplayBuffer:
         self.stratified_fraction = float(stratified_fraction)
         if not 0.0 <= self.stratified_fraction <= 1.0:
             raise ValueError("stratified_fraction must be in [0, 1]")
+        self.action_signature = action_signature
         self.observations = np.zeros((capacity, obs_dim), dtype=np.float32)
         self.actions = np.zeros((capacity, action_dim), dtype=np.float32)
         self.rewards = np.zeros((capacity, 1), dtype=np.float32)
@@ -49,6 +51,15 @@ class ReplayBuffer:
         self.episode_outcomes = np.full(capacity, -1, dtype=np.int8)
         self.ptr = 0
         self.size = 0
+
+    @staticmethod
+    def metadata_string(value: object) -> str:
+        array = np.asarray(value)
+        if array.shape == ():
+            return str(array.item())
+        if array.size == 1:
+            return str(array.reshape(-1)[0])
+        return str(value)
 
     def add(
         self,
@@ -137,6 +148,7 @@ class ReplayBuffer:
             "ptr": self.ptr,
             "size": self.size,
             "stratified_fraction": self.stratified_fraction,
+            "action_signature": "" if self.action_signature is None else self.action_signature,
             "observations": self.observations[:stored].copy(),
             "actions": self.actions[:stored].copy(),
             "rewards": self.rewards[:stored].copy(),
@@ -152,6 +164,10 @@ class ReplayBuffer:
         source_size = int(state["size"])
         if int(state["obs_dim"]) != self.obs_dim or int(state["action_dim"]) != self.action_dim:
             raise ValueError("ReplayBuffer dimensions do not match the checkpoint")
+        checkpoint_action_signature = self.metadata_string(state.get("action_signature", ""))
+        if self.action_signature is not None and checkpoint_action_signature:
+            if checkpoint_action_signature != self.action_signature:
+                raise ValueError("ReplayBuffer action semantics do not match the current config")
         if source_size > self.capacity:
             raise ValueError(
                 f"Replay checkpoint contains {source_size} transitions but capacity is only {self.capacity}"
@@ -186,6 +202,7 @@ class ReplayBuffer:
         self.size = source_size
         self.ptr = target_ptr
         self.stratified_fraction = float(state.get("stratified_fraction", self.stratified_fraction))
+        self.action_signature = checkpoint_action_signature or self.action_signature
 
     def save(self, path: str | Path) -> None:
         """Persist replay data without requiring torch pickle deserialization."""

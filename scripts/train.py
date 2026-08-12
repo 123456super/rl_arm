@@ -134,6 +134,13 @@ def validate_resume_checkpoint_steps(
             )
 
 
+def replay_action_signature(path: str | Path) -> str:
+    with np.load(path, allow_pickle=False) as payload:
+        if "action_signature" not in payload.files:
+            return ""
+        return ReplayBuffer.metadata_string(payload["action_signature"])
+
+
 def save_training_checkpoint(
     agent: SACAgent,
     replay: ReplayBuffer,
@@ -161,18 +168,24 @@ def reset_training_environment(
     focused_seeds: list[int],
     focused_fraction: float,
     default_seed: int | None = None,
-) -> tuple[np.ndarray, dict[str, Any], int | None, str]:
+) -> tuple[np.ndarray, dict[str, Any], int | None, str, int | None]:
     if not focused_seeds:
         observation, info = env.reset(seed=default_seed)
-        return observation, info, default_seed, "default"
+        return observation, info, default_seed, "default", None
     if np.random.random() < focused_fraction:
         seed = int(np.random.choice(focused_seeds))
         source = "focused"
     else:
         seed = int(np.random.randint(0, np.iinfo(np.int32).max))
         source = "random"
-    observation, info = env.reset(seed=seed)
-    return observation, info, seed, source
+    jitter_cfg = env.config["train"].get("focused_reset_jitter", {})
+    jitter_seed = None
+    options = None
+    if source == "focused" and bool(jitter_cfg.get("enabled", False)):
+        jitter_seed = int(np.random.randint(0, np.iinfo(np.int32).max))
+        options = {"reset_jitter": {**jitter_cfg, "seed": jitter_seed}}
+    observation, info = env.reset(seed=seed, options=options)
+    return observation, info, seed, source, jitter_seed
 
 
 def main() -> None:
@@ -248,6 +261,7 @@ def main() -> None:
         capacity=int(config["sac"]["replay_size"]),
         device=config.get("device", "cpu"),
         stratified_fraction=float(config["sac"].get("replay_stratified_fraction", 0.0)),
+        action_signature=agent.actor_signature,
     )
     resume_replay: Path | None = None
     if args.resume_actor is not None:
@@ -260,6 +274,12 @@ def main() -> None:
             if candidate.is_file():
                 resume_replay = candidate
         if resume_replay is not None:
+            checkpoint_replay_signature = replay_action_signature(resume_replay)
+            if not checkpoint_replay_signature and bool(config["env"].get("residual_control", {}).get("enabled", False)):
+                raise ValueError(
+                    "legacy replay checkpoint has no action semantics signature; "
+                    "do not reuse full-action replay for residual-control training"
+                )
             replay.load(resume_replay)
             replay.stratified_fraction = float(config["sac"].get("replay_stratified_fraction", 0.0))
 
@@ -306,6 +326,7 @@ def main() -> None:
         "step",
         "reset_seed",
         "reset_source",
+        "reset_jitter_seed",
         "episode_reward",
         "episode_cost",
         "episode_length",
@@ -327,6 +348,9 @@ def main() -> None:
         "predictive_near_miss_rate",
         "min_predictive_h_m",
         "mean_safety_filter_solve_time_s",
+        "residual_control_enabled",
+        "residual_control_base_qdot_norm",
+        "residual_qdot_norm",
         "lambda",
         "alpha",
     ]
@@ -341,6 +365,7 @@ def main() -> None:
         "episode",
         "reset_seed",
         "reset_source",
+        "reset_jitter_seed",
         "episode_length",
         "latest_reward",
         "latest_cost",
@@ -362,6 +387,10 @@ def main() -> None:
         "predictive_max_link_speed_bound_mps",
         "predictive_link_velocity_norms_mps",
         "safety_filter_solve_time_s",
+        "residual_control_enabled",
+        "residual_control_mode",
+        "residual_control_base_qdot_norm",
+        "residual_qdot_norm",
         "lambda",
         "alpha",
         "loss_actor",
@@ -395,7 +424,7 @@ def main() -> None:
     if not 0.0 <= focused_fraction <= 1.0:
         raise ValueError("train.focused_reset_fraction must be in [0, 1]")
 
-    observation, _, current_reset_seed, current_reset_source = reset_training_environment(
+    observation, _, current_reset_seed, current_reset_source, current_reset_jitter_seed = reset_training_environment(
         env,
         focused_seeds,
         focused_fraction,
@@ -538,6 +567,7 @@ def main() -> None:
                 "episode": episode,
                 "reset_seed": current_reset_seed,
                 "reset_source": current_reset_source,
+                "reset_jitter_seed": current_reset_jitter_seed,
                 "episode_length": episode_length,
                 "latest_reward": reward,
                 "latest_cost": cost,
@@ -563,6 +593,12 @@ def main() -> None:
                 ),
                 "predictive_link_velocity_norms_mps": info.get("predictive_link_velocity_norms_mps", ""),
                 "safety_filter_solve_time_s": info.get("safety_filter_solve_time_s", float("nan")),
+                "residual_control_enabled": bool(info.get("residual_control_enabled", False)),
+                "residual_control_mode": info.get("residual_control_mode", "disabled"),
+                "residual_control_base_qdot_norm": float(
+                    np.linalg.norm(info.get("residual_control_base_qdot", np.zeros(action_dim)))
+                ),
+                "residual_qdot_norm": float(np.linalg.norm(info.get("residual_qdot", np.zeros(action_dim)))),
                 "lambda": agent.lagrange_multiplier,
                 "alpha": float(agent.alpha.detach().cpu()),
                 "loss_actor": update_info.get("loss/actor", float("nan")),
@@ -600,6 +636,7 @@ def main() -> None:
                     "step": step,
                     "reset_seed": current_reset_seed,
                     "reset_source": current_reset_source,
+                    "reset_jitter_seed": current_reset_jitter_seed,
                     "episode_reward": episode_reward,
                     "episode_cost": episode_cost,
                     "episode_length": episode_length,
@@ -641,6 +678,11 @@ def main() -> None:
                     "mean_safety_filter_solve_time_s": (
                         float(np.mean(episode_filter_solve_times_s)) if episode_filter_solve_times_s else float("nan")
                     ),
+                    "residual_control_enabled": bool(info.get("residual_control_enabled", False)),
+                    "residual_control_base_qdot_norm": float(
+                        np.linalg.norm(info.get("residual_control_base_qdot", np.zeros(action_dim)))
+                    ),
+                    "residual_qdot_norm": float(np.linalg.norm(info.get("residual_qdot", np.zeros(action_dim)))),
                     "lambda": agent.lagrange_multiplier,
                     "alpha": float(agent.alpha.detach().cpu()),
                 }
@@ -658,7 +700,7 @@ def main() -> None:
                     }
                 )
 
-            observation, _, current_reset_seed, current_reset_source = reset_training_environment(
+            observation, _, current_reset_seed, current_reset_source, current_reset_jitter_seed = reset_training_environment(
                 env,
                 focused_seeds,
                 focused_fraction,
