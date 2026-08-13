@@ -34,7 +34,6 @@ env:
     scenario: random
     speed_range: [0.0, 0.0]
   residual_control:
-    enabled: true
     residual_scale: 0.30
     base_speed_scale: 1.0
     terminal_goal_radius_m: 0.12

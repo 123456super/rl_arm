@@ -69,6 +69,7 @@ def validate_config(config: dict[str, Any]) -> None:
         ("env", "obstacle", "bounds"),
         ("env", "obstacle", "random"),
         ("env", "obstacle", "scenarios"),
+        ("env", "residual_control"),
         ("env", "goal", "fixed"),
         ("env", "goal", "position"),
         ("risk", "weights"),
@@ -119,40 +120,39 @@ def validate_config(config: dict[str, Any]) -> None:
     if not isfinite(terminal_weight):
         raise ValueError("reward.w_terminal_progress must be finite")
 
-    residual_control = config["env"].get("residual_control", {})
-    if residual_control is not None:
-        if not isinstance(residual_control, dict):
-            raise TypeError("env.residual_control must be a mapping when provided")
-        for key in (
-            "residual_scale",
-            "base_speed_scale",
-            "terminal_goal_radius_m",
-            "terminal_gain",
-            "waypoint_gain",
-            "damping",
-            "clearance_margin_m",
-            "waypoint_lateral_margin_m",
-            "waypoint_height_offset_m",
-            "link_avoidance_activation_margin_m",
-            "link_avoidance_max_speed_mps",
-        ):
-            value = float(residual_control.get(key, 0.0))
-            if not isfinite(value):
-                raise ValueError(f"env.residual_control.{key} must be finite")
-        for key in (
-            "residual_scale",
-            "base_speed_scale",
-            "terminal_goal_radius_m",
-            "terminal_gain",
-            "waypoint_gain",
-            "damping",
-            "clearance_margin_m",
-            "waypoint_lateral_margin_m",
-            "link_avoidance_activation_margin_m",
-            "link_avoidance_max_speed_mps",
-        ):
-            if float(residual_control.get(key, 0.0)) < 0.0:
-                raise ValueError(f"env.residual_control.{key} must be non-negative")
+    residual_control = config["env"]["residual_control"]
+    if not isinstance(residual_control, dict):
+        raise TypeError("env.residual_control must be a mapping")
+    for key in (
+        "residual_scale",
+        "base_speed_scale",
+        "terminal_goal_radius_m",
+        "terminal_gain",
+        "waypoint_gain",
+        "damping",
+        "clearance_margin_m",
+        "waypoint_lateral_margin_m",
+        "waypoint_height_offset_m",
+        "link_avoidance_activation_margin_m",
+        "link_avoidance_max_speed_mps",
+    ):
+        value = float(residual_control.get(key, 0.0))
+        if not isfinite(value):
+            raise ValueError(f"env.residual_control.{key} must be finite")
+    for key in (
+        "residual_scale",
+        "base_speed_scale",
+        "terminal_goal_radius_m",
+        "terminal_gain",
+        "waypoint_gain",
+        "damping",
+        "clearance_margin_m",
+        "waypoint_lateral_margin_m",
+        "link_avoidance_activation_margin_m",
+        "link_avoidance_max_speed_mps",
+    ):
+        if float(residual_control.get(key, 0.0)) < 0.0:
+            raise ValueError(f"env.residual_control.{key} must be non-negative")
 
     sac = config["sac"]
     replay_size = int(sac["replay_size"])

@@ -53,11 +53,6 @@ def parse_args() -> argparse.Namespace:
         help="load only the actor checkpoint and reinitialize SAC critics/alpha state",
     )
     parser.add_argument(
-        "--allow-action-semantics-transfer",
-        action="store_true",
-        help="explicitly allow --reset-agent-state to load an actor trained with different action semantics",
-    )
-    parser.add_argument(
         "--reset-state-warmup-steps",
         type=int,
         default=10000,
@@ -203,8 +198,6 @@ def main() -> None:
         raise ValueError("--start-step must be non-negative")
     if args.reset_agent_state and args.resume_actor is None:
         raise ValueError("--reset-agent-state requires --resume-actor")
-    if args.allow_action_semantics_transfer and not args.reset_agent_state:
-        raise ValueError("--allow-action-semantics-transfer requires --reset-agent-state")
     if (args.reset_reward_critics or args.reset_cost_critics or args.no_restore_optimizers) and not args.resume_actor:
         raise ValueError("critic/optimizer resume options require --resume-actor")
     if args.reset_agent_state and (args.reset_reward_critics or args.reset_cost_critics):
@@ -252,10 +245,7 @@ def main() -> None:
             args.start_step,
         )
         if args.reset_agent_state:
-            agent.load_actor(
-                args.resume_actor,
-                allow_action_semantics_transfer=args.allow_action_semantics_transfer,
-            )
+            agent.load_actor(args.resume_actor)
         else:
             resume_load_info = agent.load(
                 args.resume_actor,
@@ -285,7 +275,7 @@ def main() -> None:
                 resume_replay = candidate
         if resume_replay is not None:
             checkpoint_replay_signature = replay_action_signature(resume_replay)
-            if not checkpoint_replay_signature and bool(config["env"].get("residual_control", {}).get("enabled", False)):
+            if not checkpoint_replay_signature:
                 raise ValueError(
                     "legacy replay checkpoint has no action semantics signature; "
                     "do not reuse full-action replay for residual-control training"
@@ -314,7 +304,6 @@ def main() -> None:
             "replay": str(resume_replay) if resume_replay is not None else None,
             "start_step": args.start_step,
             "agent_state_reset": bool(args.reset_agent_state),
-            "action_semantics_transfer_allowed": bool(args.allow_action_semantics_transfer),
             "reward_critics_reset": not bool(resume_load_info.get("reward_critics_loaded", False)),
             "cost_critics_reset": not bool(resume_load_info.get("cost_critics_loaded", False)),
             "optimizers_loaded": bool(resume_load_info.get("optimizers_loaded", False)),

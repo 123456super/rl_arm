@@ -116,8 +116,6 @@ def main() -> None:
     args = parse_args()
     config = load_config(args.config)
     config = copy.deepcopy(config)
-    if "residual_control" in config["env"]:
-        config["env"]["residual_control"]["enabled"] = False
     eval_cfg = config.get("eval", {})
     method = str(eval_cfg.get("method", config.get("train", {}).get("method", "link_fixed")))
     checkpoint = args.checkpoint or eval_cfg.get("checkpoint")

@@ -21,9 +21,6 @@ def _config_signature(payload: dict[str, Any]) -> str:
 
 def residual_control_signature(config: dict[str, Any]) -> dict[str, Any]:
     residual_cfg = config.get("env", {}).get("residual_control", {}) or {}
-    enabled = bool(residual_cfg.get("enabled", False))
-    if not enabled:
-        return {"enabled": False}
     keys = (
         "residual_scale",
         "base_speed_scale",
@@ -37,11 +34,8 @@ def residual_control_signature(config: dict[str, Any]) -> dict[str, Any]:
         "link_avoidance_enabled",
         "link_avoidance_activation_margin_m",
         "link_avoidance_max_speed_mps",
-        "observation_enabled",
     )
-    signature = {"enabled": True, **{key: residual_cfg.get(key) for key in keys}}
-    signature["observation_enabled"] = bool(residual_cfg.get("observation_enabled", True))
-    return signature
+    return {"chain": "residual_actor", **{key: residual_cfg.get(key) for key in keys}}
 
 
 def actor_signature(config: dict[str, Any], method: str) -> str:
@@ -378,10 +372,7 @@ class SACAgent:
             checkpoint_cost_signature,
         )
         if checkpoint_actor_signature is None:
-            checkpoint_actor_signature = actor_signature(
-                {"env": {"residual_control": {"enabled": False}}},
-                checkpoint_method,
-            )
+            raise ValueError("agent-state checkpoint is missing actor action semantics")
 
         actor_compatible = checkpoint_actor_signature == self.actor_signature
         reward_compatible = checkpoint_reward_signature == self.reward_signature
@@ -389,7 +380,7 @@ class SACAgent:
         if not actor_compatible:
             raise ValueError(
                 "actor checkpoint action semantics do not match this config; "
-                "use --reset-agent-state with --allow-action-semantics-transfer to transfer only the actor weights"
+                "train or load a checkpoint from the residual-actor chain"
             )
         self.load_actor(actor_path, validate_signature=False)
         load_reward = not reset_reward_critics and reward_compatible
@@ -463,41 +454,18 @@ class SACAgent:
         actor_path: str | Path,
         *,
         validate_signature: bool = True,
-        allow_action_semantics_transfer: bool = False,
     ) -> None:
         if validate_signature:
             checkpoint_actor_signature = self._infer_actor_checkpoint_signature(actor_path)
             if checkpoint_actor_signature is not None and checkpoint_actor_signature != self.actor_signature:
-                if not allow_action_semantics_transfer:
-                    raise ValueError(
-                        "actor checkpoint action semantics do not match this config; "
-                        "load the matching config/checkpoint, start a new residual-control actor, "
-                        "or explicitly allow actor-only action-semantics transfer"
-                    )
+                raise ValueError(
+                    "actor checkpoint action semantics do not match this config; "
+                    "train or load a checkpoint from the residual-actor chain"
+                )
         state = torch.load(actor_path, map_location=self.device, weights_only=True)
-        if allow_action_semantics_transfer:
-            state = self._adapt_actor_input_state(state)
         self.actor.load_state_dict(state)
         if self.actor_anchor_weight > 0.0:
             self.set_actor_reference()
-
-    def _adapt_actor_input_state(self, state: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        target = self.actor.state_dict()
-        adapted = dict(state)
-        source_weight = adapted.get("backbone.0.weight")
-        target_weight = target.get("backbone.0.weight")
-        if source_weight is None or target_weight is None:
-            return adapted
-        if source_weight.shape == target_weight.shape:
-            return adapted
-        same_outputs = source_weight.shape[0] == target_weight.shape[0]
-        source_input_fits = source_weight.shape[1] < target_weight.shape[1]
-        if same_outputs and source_input_fits:
-            expanded = target_weight.detach().clone()
-            expanded.zero_()
-            expanded[:, : source_weight.shape[1]] = source_weight
-            adapted["backbone.0.weight"] = expanded
-        return adapted
 
     def _infer_actor_checkpoint_signature(self, actor_path: str | Path) -> str | None:
         actor_path = Path(actor_path)

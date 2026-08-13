@@ -175,7 +175,6 @@ def test_terminal_servo_norm_means_do_not_require_trace_rows() -> None:
 def test_residual_control_zero_action_uses_base_command() -> None:
     config = load_config("configs/default.yaml")
     config["device"] = "cpu"
-    config["env"]["residual_control"]["enabled"] = True
     config["env"]["residual_control"]["residual_scale"] = 0.25
     config["env"]["obstacle"]["enabled"] = False
     config["env"]["max_episode_steps"] = 2
@@ -195,14 +194,12 @@ def test_residual_control_zero_action_uses_base_command() -> None:
 def test_residual_control_observation_exposes_base_command() -> None:
     config = load_config("configs/default.yaml")
     config["device"] = "cpu"
-    config["env"]["residual_control"]["enabled"] = True
     config["env"]["obstacle"]["enabled"] = False
     env = UR5DynamicObstacleEnv(config, method="link_fixed")
     try:
         observation, _ = env.reset(seed=123)
         residual_features = observation[-env.residual_observation_dim :]
 
-        assert env.residual_observation_enabled is True
         assert residual_features.shape == (env.residual_observation_dim,)
         np.testing.assert_allclose(
             residual_features[: env.joint_count],
@@ -217,7 +214,6 @@ def test_residual_control_observation_exposes_base_command() -> None:
 def test_residual_control_holds_direct_goal_clf_without_clearance() -> None:
     config = load_config("configs/default.yaml")
     config["device"] = "cpu"
-    config["env"]["residual_control"]["enabled"] = True
     env = UR5DynamicObstacleEnv(config, method="link_fixed")
     try:
         env.reset(seed=123)
@@ -241,7 +237,6 @@ def test_residual_control_holds_direct_goal_clf_without_clearance() -> None:
 def test_residual_control_waypoint_activates_for_blocked_direct_path() -> None:
     config = load_config("configs/default.yaml")
     config["device"] = "cpu"
-    config["env"]["residual_control"]["enabled"] = True
     env = UR5DynamicObstacleEnv(config, method="link_fixed")
     try:
         env.reset(seed=123)
@@ -259,7 +254,6 @@ def test_residual_control_waypoint_activates_for_blocked_direct_path() -> None:
 def test_residual_control_link_avoidance_is_inactive_when_clearance_is_ok() -> None:
     config = load_config("configs/default.yaml")
     config["device"] = "cpu"
-    config["env"]["residual_control"]["enabled"] = True
     env = UR5DynamicObstacleEnv(config, method="link_fixed")
     try:
         env.reset(seed=123)

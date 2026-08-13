@@ -67,7 +67,6 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.visual_cfg = env_cfg.get("visual", {})
         self.execution_cfg = env_cfg.get("execution", {})
         self.residual_control_cfg = env_cfg.get("residual_control", {})
-        self.residual_control_enabled = bool(self.residual_control_cfg.get("enabled", False))
         self.safety_filter_cfg = env_cfg.get("safety_filter", {})
         self.safety_filter_enabled = bool(self.safety_filter_cfg.get("enabled", False))
         self.obstacle_enabled = bool(self.obstacle_cfg.get("enabled", True))
@@ -160,15 +159,10 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.safe_stop_infeasible_first_h_m = float("nan")
         self.safe_stop_infeasible_last_h_m = float("nan")
 
-        self.residual_observation_enabled = bool(
-            self.residual_control_enabled
-            and self.residual_control_cfg.get("observation_enabled", True)
-        )
         self.residual_mode_names = ("disabled", "goal_clf", "terminal_clf", "waypoint", "hold_for_clearance")
         self.residual_observation_dim = self.joint_count * 3 + len(self.residual_mode_names)
         obs_dim = self.joint_count * 3 + self.capsule_model.count * 7 + 7
-        if self.residual_observation_enabled:
-            obs_dim += self.residual_observation_dim
+        obs_dim += self.residual_observation_dim
         obs_bound = float(self.observation_cfg["space_bound"])
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.joint_count,), dtype=np.float32)
         self.observation_space = spaces.Box(low=-obs_bound, high=obs_bound, shape=(obs_dim,), dtype=np.float32)
@@ -506,47 +500,21 @@ class UR5DynamicObstacleEnv(gym.Env):
                 phase_started_at = perf_counter()
                 predictive_risk_for_scaling = self._compute_predictive_risk()
                 precomputed_risk_time_s += perf_counter() - phase_started_at
-        residual_base_qdot = np.zeros(self.joint_count, dtype=np.float32)
-        residual_qdot = np.zeros(self.joint_count, dtype=np.float32)
-        self.last_residual_observation = np.zeros(self.residual_observation_dim, dtype=np.float32)
-        residual_info: dict[str, Any] = {
-            "residual_control_enabled": bool(self.residual_control_enabled),
-            "residual_control_mode": "disabled",
-            "residual_control_reason": "disabled",
-            "residual_control_controller": "disabled",
-            "residual_control_terminal_safe": False,
-            "residual_control_goal_error_norm": float(np.linalg.norm(self._goal_error())),
-            "residual_control_target": self.goal.copy(),
-            "residual_control_waypoint_active": False,
-            "residual_control_waypoint": self.goal.copy(),
-            "residual_control_target_qdot": residual_base_qdot.copy(),
-            "residual_control_link_avoidance_active": False,
-            "residual_control_link_avoidance_reason": "disabled",
-            "residual_control_link_avoidance_qdot": residual_base_qdot.copy(),
-            "residual_control_link_avoidance_closest_link": -1,
-            "residual_control_link_avoidance_d_min": float("nan"),
-            "residual_control_link_avoidance_weight": 0.0,
-            "residual_control_base_qdot": residual_base_qdot.copy(),
-            "residual_qdot": residual_qdot.copy(),
-        }
-        if self.residual_control_enabled:
-            residual_base_qdot, residual_info = self._residual_base_command(current_risk_before_action)
-            residual_scale = float(self.residual_control_cfg.get("residual_scale", 0.35))
-            residual_qdot = residual_scale * self.action_scale * action
-            qdot_policy = np.clip(
-                residual_base_qdot + residual_qdot,
-                -self.action_scale,
-                self.action_scale,
-            ).astype(np.float32)
-            residual_info.update(
-                {
-                    "residual_control_enabled": True,
-                    "residual_qdot": residual_qdot.copy(),
-                }
-            )
-            self.last_residual_observation = self._residual_observation_features(residual_info)
-        else:
-            qdot_policy = self.action_scale * action
+        residual_base_qdot, residual_info = self._residual_base_command(current_risk_before_action)
+        residual_scale = float(self.residual_control_cfg.get("residual_scale", 0.35))
+        residual_qdot = residual_scale * self.action_scale * action
+        qdot_policy = np.clip(
+            residual_base_qdot + residual_qdot,
+            -self.action_scale,
+            self.action_scale,
+        ).astype(np.float32)
+        residual_info.update(
+            {
+                "residual_control_enabled": True,
+                "residual_qdot": residual_qdot.copy(),
+            }
+        )
+        self.last_residual_observation = self._residual_observation_features(residual_info)
         if self.method.endswith("adaptive"):
             beta = self._adaptive_beta(pre_risk.risk_global)
         else:
@@ -778,31 +746,27 @@ class UR5DynamicObstacleEnv(gym.Env):
         policy_risk = self._compute_policy_risk(current_risk)
         self.last_risk = current_risk
         self.last_policy_risk = policy_risk
-        if self.residual_observation_enabled:
-            _, residual_info = self._residual_base_command(current_risk)
-            self.last_residual_observation = self._residual_observation_features(residual_info)
-        else:
-            self.last_residual_observation = np.zeros(self.residual_observation_dim, dtype=np.float32)
+        _, residual_info = self._residual_base_command(current_risk)
+        self.last_residual_observation = self._residual_observation_features(residual_info)
 
         observation_parts = [
-                q / np.pi,
-                q_dot / max(self.action_scale, 1e-6),
-                goal_error,
-                goal_velocity_error,
-                np.clip(
-                    policy_risk.distances,
-                    float(self.observation_cfg["distance_clip"][0]),
-                    float(self.observation_cfg["distance_clip"][1]),
-                ),
-                policy_risk.directions.reshape(-1),
-                np.clip(policy_risk.approach_velocities / max(self.risk_config.v_max, 1e-6), 0.0, 1.0),
-                policy_risk.ttc / max(self.risk_config.ttc_max, 1e-6),
-                policy_risk.risks,
-                self.prev_qdot_cmd / max(self.action_scale, 1e-6),
-                np.array([self.beta], dtype=np.float32),
+            q / np.pi,
+            q_dot / max(self.action_scale, 1e-6),
+            goal_error,
+            goal_velocity_error,
+            np.clip(
+                policy_risk.distances,
+                float(self.observation_cfg["distance_clip"][0]),
+                float(self.observation_cfg["distance_clip"][1]),
+            ),
+            policy_risk.directions.reshape(-1),
+            np.clip(policy_risk.approach_velocities / max(self.risk_config.v_max, 1e-6), 0.0, 1.0),
+            policy_risk.ttc / max(self.risk_config.ttc_max, 1e-6),
+            policy_risk.risks,
+            self.prev_qdot_cmd / max(self.action_scale, 1e-6),
+            np.array([self.beta], dtype=np.float32),
         ]
-        if self.residual_observation_enabled:
-            observation_parts.append(self.last_residual_observation)
+        observation_parts.append(self.last_residual_observation)
         obs = np.concatenate(observation_parts).astype(np.float32)
         if obs.shape != self.observation_space.shape:
             raise RuntimeError(f"Observation shape {obs.shape} does not match {self.observation_space.shape}")
