@@ -34,8 +34,14 @@ def residual_control_signature(config: dict[str, Any]) -> dict[str, Any]:
         "clearance_margin_m",
         "waypoint_lateral_margin_m",
         "waypoint_height_offset_m",
+        "link_avoidance_enabled",
+        "link_avoidance_activation_margin_m",
+        "link_avoidance_max_speed_mps",
+        "observation_enabled",
     )
-    return {"enabled": True, **{key: residual_cfg.get(key) for key in keys}}
+    signature = {"enabled": True, **{key: residual_cfg.get(key) for key in keys}}
+    signature["observation_enabled"] = bool(residual_cfg.get("observation_enabled", True))
+    return signature
 
 
 def actor_signature(config: dict[str, Any], method: str) -> str:
@@ -71,6 +77,14 @@ def cost_signature(config: dict[str, Any], method: str) -> str:
             "residual_control": residual_control_signature(config),
         }
     )
+
+
+def inferred_state_path(actor_path: str | Path) -> Path:
+    actor = Path(actor_path)
+    if actor.name.startswith("actor"):
+        suffix = actor.stem[len("actor") :]
+        return actor.with_name(f"agent_state{suffix}{actor.suffix}")
+    raise ValueError(f"actor checkpoint name must start with 'actor': {actor}")
 
 
 def _reset_parameters(module: torch.nn.Module) -> None:
@@ -336,8 +350,8 @@ class SACAgent:
         reset_cost_critics: bool = False,
         restore_optimizers: bool = True,
     ) -> dict[str, Any]:
-        self.load_actor(actor_path)
         if state_path is None:
+            self.load_actor(actor_path, validate_signature=True)
             self.last_load_info = {
                 "reward_critics_loaded": False,
                 "cost_critics_loaded": False,
@@ -351,22 +365,18 @@ class SACAgent:
         checkpoint_actor_signature = state.get("actor_signature")
         checkpoint_reward_signature = state.get("reward_signature")
         checkpoint_cost_signature = state.get("cost_signature")
-        source_config = state_path.parent / "config.json"
         checkpoint_method = str(state.get("method", self.method))
-        if source_config.is_file() and (
-            checkpoint_actor_signature is None
-            or checkpoint_reward_signature is None
-            or checkpoint_cost_signature is None
-        ):
-            with source_config.open(encoding="utf-8") as file:
-                source = json.load(file)
-                checkpoint_actor_signature = checkpoint_actor_signature or actor_signature(
-                    source, checkpoint_method
-                )
-                checkpoint_reward_signature = checkpoint_reward_signature or reward_signature(
-                    source, checkpoint_method
-                )
-                checkpoint_cost_signature = checkpoint_cost_signature or cost_signature(source, checkpoint_method)
+        (
+            checkpoint_actor_signature,
+            checkpoint_reward_signature,
+            checkpoint_cost_signature,
+        ) = self._fill_checkpoint_signatures_from_config(
+            state_path.parent / "config.json",
+            checkpoint_method,
+            checkpoint_actor_signature,
+            checkpoint_reward_signature,
+            checkpoint_cost_signature,
+        )
         if checkpoint_actor_signature is None:
             checkpoint_actor_signature = actor_signature(
                 {"env": {"residual_control": {"enabled": False}}},
@@ -379,8 +389,9 @@ class SACAgent:
         if not actor_compatible:
             raise ValueError(
                 "actor checkpoint action semantics do not match this config; "
-                "use --reset-agent-state to transfer only the actor weights"
+                "use --reset-agent-state with --allow-action-semantics-transfer to transfer only the actor weights"
             )
+        self.load_actor(actor_path, validate_signature=False)
         load_reward = not reset_reward_critics and reward_compatible
         load_cost = not reset_cost_critics and cost_compatible
         if load_reward:
@@ -447,8 +458,88 @@ class SACAgent:
         for param_group in optimizer.param_groups:
             param_group["lr"] = learning_rate
 
-    def load_actor(self, actor_path: str | Path) -> None:
+    def load_actor(
+        self,
+        actor_path: str | Path,
+        *,
+        validate_signature: bool = True,
+        allow_action_semantics_transfer: bool = False,
+    ) -> None:
+        if validate_signature:
+            checkpoint_actor_signature = self._infer_actor_checkpoint_signature(actor_path)
+            if checkpoint_actor_signature is not None and checkpoint_actor_signature != self.actor_signature:
+                if not allow_action_semantics_transfer:
+                    raise ValueError(
+                        "actor checkpoint action semantics do not match this config; "
+                        "load the matching config/checkpoint, start a new residual-control actor, "
+                        "or explicitly allow actor-only action-semantics transfer"
+                    )
         state = torch.load(actor_path, map_location=self.device, weights_only=True)
+        if allow_action_semantics_transfer:
+            state = self._adapt_actor_input_state(state)
         self.actor.load_state_dict(state)
         if self.actor_anchor_weight > 0.0:
             self.set_actor_reference()
+
+    def _adapt_actor_input_state(self, state: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        target = self.actor.state_dict()
+        adapted = dict(state)
+        source_weight = adapted.get("backbone.0.weight")
+        target_weight = target.get("backbone.0.weight")
+        if source_weight is None or target_weight is None:
+            return adapted
+        if source_weight.shape == target_weight.shape:
+            return adapted
+        same_outputs = source_weight.shape[0] == target_weight.shape[0]
+        source_input_fits = source_weight.shape[1] < target_weight.shape[1]
+        if same_outputs and source_input_fits:
+            expanded = target_weight.detach().clone()
+            expanded.zero_()
+            expanded[:, : source_weight.shape[1]] = source_weight
+            adapted["backbone.0.weight"] = expanded
+        return adapted
+
+    def _infer_actor_checkpoint_signature(self, actor_path: str | Path) -> str | None:
+        actor_path = Path(actor_path)
+        state_path = inferred_state_path(actor_path)
+        if state_path.is_file():
+            state = torch.load(state_path, map_location=self.device, weights_only=False)
+            checkpoint_actor_signature = state.get("actor_signature")
+            checkpoint_method = str(state.get("method", self.method))
+            checkpoint_actor_signature, _, _ = self._fill_checkpoint_signatures_from_config(
+                state_path.parent / "config.json",
+                checkpoint_method,
+                checkpoint_actor_signature,
+                None,
+                None,
+            )
+            if checkpoint_actor_signature is not None:
+                return str(checkpoint_actor_signature)
+
+        source_config = actor_path.parent / "config.json"
+        if source_config.is_file():
+            with source_config.open(encoding="utf-8") as file:
+                source = json.load(file)
+            checkpoint_method = str(source.get("train", {}).get("method", self.method))
+            return actor_signature(source, checkpoint_method)
+        return None
+
+    @staticmethod
+    def _fill_checkpoint_signatures_from_config(
+        source_config: Path,
+        checkpoint_method: str,
+        checkpoint_actor_signature: object,
+        checkpoint_reward_signature: object,
+        checkpoint_cost_signature: object,
+    ) -> tuple[object, object, object]:
+        if source_config.is_file() and (
+            checkpoint_actor_signature is None
+            or checkpoint_reward_signature is None
+            or checkpoint_cost_signature is None
+        ):
+            with source_config.open(encoding="utf-8") as file:
+                source = json.load(file)
+            checkpoint_actor_signature = checkpoint_actor_signature or actor_signature(source, checkpoint_method)
+            checkpoint_reward_signature = checkpoint_reward_signature or reward_signature(source, checkpoint_method)
+            checkpoint_cost_signature = checkpoint_cost_signature or cost_signature(source, checkpoint_method)
+        return checkpoint_actor_signature, checkpoint_reward_signature, checkpoint_cost_signature

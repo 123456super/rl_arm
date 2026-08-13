@@ -44,6 +44,9 @@ env:
     clearance_margin_m: 0.03
     waypoint_lateral_margin_m: 0.08
     waypoint_height_offset_m: 0.0
+    link_avoidance_enabled: true
+    link_avoidance_activation_margin_m: 0.08
+    link_avoidance_max_speed_mps: 0.20
   safety_filter:
     enabled: false
     viability_monitor_enabled: false

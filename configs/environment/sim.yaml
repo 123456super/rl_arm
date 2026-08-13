@@ -57,6 +57,9 @@ env:
     clearance_margin_m: 0.03
     waypoint_lateral_margin_m: 0.08
     waypoint_height_offset_m: 0.0
+    link_avoidance_enabled: true
+    link_avoidance_activation_margin_m: 0.08
+    link_avoidance_max_speed_mps: 0.20
 
   # P2 安全过滤器。默认关闭以冻结阶段一结果；新研究实验必须显式设为 true。
   safety_filter:

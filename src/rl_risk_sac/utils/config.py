@@ -133,6 +133,8 @@ def validate_config(config: dict[str, Any]) -> None:
             "clearance_margin_m",
             "waypoint_lateral_margin_m",
             "waypoint_height_offset_m",
+            "link_avoidance_activation_margin_m",
+            "link_avoidance_max_speed_mps",
         ):
             value = float(residual_control.get(key, 0.0))
             if not isfinite(value):
@@ -146,6 +148,8 @@ def validate_config(config: dict[str, Any]) -> None:
             "damping",
             "clearance_margin_m",
             "waypoint_lateral_margin_m",
+            "link_avoidance_activation_margin_m",
+            "link_avoidance_max_speed_mps",
         ):
             if float(residual_control.get(key, 0.0)) < 0.0:
                 raise ValueError(f"env.residual_control.{key} must be non-negative")

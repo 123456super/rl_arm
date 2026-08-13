@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import random
 
 import numpy as np
@@ -192,6 +193,67 @@ def test_residual_control_change_requires_actor_semantics_reset(tmp_path) -> Non
 
     with pytest.raises(ValueError, match="action semantics"):
         restored.load(tmp_path / "actor.pt", tmp_path / "agent_state.pt")
+
+
+def test_actor_only_load_rejects_config_action_semantics_mismatch(tmp_path) -> None:
+    source_config = _small_config()
+    source = SACAgent(3, 2, source_config, method="link_fixed")
+    source.save(tmp_path)
+    (tmp_path / "agent_state.pt").unlink()
+    (tmp_path / "config.json").write_text(json.dumps(source_config), encoding="utf-8")
+
+    changed_config = copy.deepcopy(source_config)
+    changed_config["env"]["residual_control"]["enabled"] = True
+    restored = SACAgent(3, 2, changed_config, method="link_fixed")
+
+    with pytest.raises(ValueError, match="action semantics"):
+        restored.load_actor(tmp_path / "actor.pt")
+
+
+def test_agent_load_without_state_rejects_actor_action_semantics_mismatch(tmp_path) -> None:
+    source_config = _small_config()
+    source = SACAgent(3, 2, source_config, method="link_fixed")
+    source.save(tmp_path)
+
+    changed_config = copy.deepcopy(source_config)
+    changed_config["env"]["residual_control"]["enabled"] = True
+    restored = SACAgent(3, 2, changed_config, method="link_fixed")
+
+    with pytest.raises(ValueError, match="action semantics"):
+        restored.load(tmp_path / "actor.pt", state_path=None)
+
+
+def test_actor_only_load_rejects_agent_state_action_semantics_mismatch(tmp_path) -> None:
+    source_config = _small_config()
+    source = SACAgent(3, 2, source_config, method="link_fixed")
+    source.save(tmp_path, suffix="_step_10")
+
+    changed_config = copy.deepcopy(source_config)
+    changed_config["env"]["residual_control"]["enabled"] = True
+    restored = SACAgent(3, 2, changed_config, method="link_fixed")
+
+    with pytest.raises(ValueError, match="action semantics"):
+        restored.load_actor(tmp_path / "actor_step_10.pt")
+
+
+def test_actor_only_action_semantics_transfer_expands_added_observation_inputs(tmp_path) -> None:
+    source_config = _small_config()
+    source = SACAgent(3, 2, source_config, method="link_fixed")
+    source.save(tmp_path)
+
+    changed_config = copy.deepcopy(source_config)
+    changed_config["env"]["residual_control"]["enabled"] = True
+    restored = SACAgent(5, 2, changed_config, method="link_fixed")
+
+    restored.load_actor(
+        tmp_path / "actor.pt",
+        allow_action_semantics_transfer=True,
+    )
+
+    source_weight = source.actor.state_dict()["backbone.0.weight"]
+    restored_weight = restored.actor.state_dict()["backbone.0.weight"]
+    torch.testing.assert_close(restored_weight[:, : source_weight.shape[1]], source_weight)
+    assert torch.count_nonzero(restored_weight[:, source_weight.shape[1] :]) == 0
 
 
 def test_rng_state_round_trip() -> None:

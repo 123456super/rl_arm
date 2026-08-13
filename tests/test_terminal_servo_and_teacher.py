@@ -192,6 +192,28 @@ def test_residual_control_zero_action_uses_base_command() -> None:
         env.close()
 
 
+def test_residual_control_observation_exposes_base_command() -> None:
+    config = load_config("configs/default.yaml")
+    config["device"] = "cpu"
+    config["env"]["residual_control"]["enabled"] = True
+    config["env"]["obstacle"]["enabled"] = False
+    env = UR5DynamicObstacleEnv(config, method="link_fixed")
+    try:
+        observation, _ = env.reset(seed=123)
+        residual_features = observation[-env.residual_observation_dim :]
+
+        assert env.residual_observation_enabled is True
+        assert residual_features.shape == (env.residual_observation_dim,)
+        np.testing.assert_allclose(
+            residual_features[: env.joint_count],
+            env.last_residual_observation[: env.joint_count],
+        )
+        assert np.linalg.norm(residual_features[: env.joint_count]) > 0.0
+        assert np.isclose(residual_features[-len(env.residual_mode_names) :].sum(), 1.0)
+    finally:
+        env.close()
+
+
 def test_residual_control_holds_direct_goal_clf_without_clearance() -> None:
     config = load_config("configs/default.yaml")
     config["device"] = "cpu"
@@ -209,7 +231,9 @@ def test_residual_control_holds_direct_goal_clf_without_clearance() -> None:
 
         assert info["residual_control_mode"] == "hold_for_clearance"
         assert info["residual_control_reason"] == "insufficient_clearance_for_goal_clf"
-        assert np.allclose(base_qdot, 0.0)
+        assert np.allclose(info["residual_control_target_qdot"], 0.0)
+        assert info["residual_control_link_avoidance_active"] is True
+        np.testing.assert_allclose(base_qdot, info["residual_control_link_avoidance_qdot"])
     finally:
         env.close()
 
@@ -228,5 +252,29 @@ def test_residual_control_waypoint_activates_for_blocked_direct_path() -> None:
         assert info["residual_control_mode"] == "waypoint"
         assert info["residual_control_waypoint_active"] is True
         assert info["residual_control_reason"] == "direct_path_blocked"
+    finally:
+        env.close()
+
+
+def test_residual_control_link_avoidance_is_inactive_when_clearance_is_ok() -> None:
+    config = load_config("configs/default.yaml")
+    config["device"] = "cpu"
+    config["env"]["residual_control"]["enabled"] = True
+    env = UR5DynamicObstacleEnv(config, method="link_fixed")
+    try:
+        env.reset(seed=123)
+        current_risk = env._compute_risk()
+        current_risk.d_min = (
+            env.risk_config.d_safe
+            + config["env"]["residual_control"]["clearance_margin_m"]
+            + config["env"]["residual_control"]["link_avoidance_activation_margin_m"]
+            + 0.01
+        )
+
+        qdot, info = env._link_avoidance_command(current_risk)
+
+        assert info["residual_control_link_avoidance_active"] is False
+        assert info["residual_control_link_avoidance_reason"] == "clearance_ok"
+        assert np.allclose(qdot, 0.0)
     finally:
         env.close()
