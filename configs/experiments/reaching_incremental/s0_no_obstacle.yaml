@@ -6,6 +6,8 @@ includes:
 env:
   obstacle:
     enabled: false
+  residual_control:
+    enabled: false
   safety_filter:
     enabled: false
     viability_monitor_enabled: false

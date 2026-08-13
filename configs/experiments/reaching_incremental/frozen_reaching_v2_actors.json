@@ -1,0 +1,29 @@
+{
+  "protocol": "reaching_recovery_v2_frozen_actors",
+  "final_manifest": "configs/experiments/reaching_recovery/manifests/v1_final.json",
+  "validation_manifest": "configs/experiments/reaching_recovery/manifests/v1_validation.json",
+  "success_tolerance_m": 0.055,
+  "actors": [
+    {
+      "seed": 4301,
+      "selected_step": 240000,
+      "config": "configs/experiments/reaching_recovery/v2_seed4301.yaml",
+      "actor": "outputs/reaching_recovery_v2/train/seed_4301/link_fixed_no_obstacle_speed100_seed4301_steps300000/actor_step_240000.pt",
+      "agent_state": "outputs/reaching_recovery_v2/train/seed_4301/link_fixed_no_obstacle_speed100_seed4301_steps300000/agent_state_step_240000.pt"
+    },
+    {
+      "seed": 4302,
+      "selected_step": 280000,
+      "config": "configs/experiments/reaching_recovery/v2_seed4302.yaml",
+      "actor": "outputs/reaching_recovery_v2/train/seed_4302/link_fixed_no_obstacle_speed100_seed4302_steps300000/actor_step_280000.pt",
+      "agent_state": "outputs/reaching_recovery_v2/train/seed_4302/link_fixed_no_obstacle_speed100_seed4302_steps300000/agent_state_step_280000.pt"
+    },
+    {
+      "seed": 4303,
+      "selected_step": 220000,
+      "config": "configs/experiments/reaching_recovery/v2_seed4303.yaml",
+      "actor": "outputs/reaching_recovery_v2/train/seed_4303/link_fixed_no_obstacle_speed100_seed4303_steps300000/actor_step_220000.pt",
+      "agent_state": "outputs/reaching_recovery_v2/train/seed_4303/link_fixed_no_obstacle_speed100_seed4303_steps300000/agent_state_step_220000.pt"
+    }
+  ]
+}

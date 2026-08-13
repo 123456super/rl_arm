@@ -20,7 +20,9 @@ def _config_signature(payload: dict[str, Any]) -> str:
 
 
 def residual_control_signature(config: dict[str, Any]) -> dict[str, Any]:
-    residual_cfg = config.get("env", {}).get("residual_control", {}) or {}
+    residual_cfg = config.get("env", {}).get("residual_control")
+    if not residual_cfg or not bool(residual_cfg.get("enabled", True)):
+        return {"chain": "direct_actor"}
     keys = (
         "residual_scale",
         "base_speed_scale",
