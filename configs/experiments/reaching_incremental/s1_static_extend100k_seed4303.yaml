@@ -1,0 +1,7 @@
+includes:
+  - s1_static_finetune_seed4303.yaml
+
+train:
+  total_steps: 520000
+  output_dir: outputs/reaching_incremental/s1_static_obstacle_finetune_r1_extend100k/train/seed_4303
+  run_name: link_fixed_static_obstacle_extend100k_seed4303_steps520000

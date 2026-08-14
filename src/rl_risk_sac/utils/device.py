@@ -1,8 +1,78 @@
 from __future__ import annotations
 
+import subprocess
 from typing import Any
 
 import torch
+
+
+def _query_nvidia_smi(candidate_ids: list[int]) -> list[dict[str, Any]] | None:
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,name,memory.free,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+    by_id: dict[int, dict[str, Any]] = {}
+    for line in result.stdout.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) != 4:
+            continue
+        try:
+            device_id = int(parts[0])
+            free_mib = float(parts[2])
+            total_mib = float(parts[3])
+        except ValueError:
+            continue
+        if device_id not in candidate_ids:
+            continue
+        free_gb = free_mib / 1024.0
+        total_gb = total_mib / 1024.0
+        by_id[device_id] = {
+            "id": device_id,
+            "name": parts[1],
+            "free_gb": free_gb,
+            "free_ratio": free_gb / max(total_gb, 1e-6),
+            # nvidia-smi does not expose a portable SM-count query here; keep
+            # compute neutral so memory still drives the auto-selection.
+            "compute_score": 1.0,
+            "score": 0.0,
+            "source": "nvidia-smi",
+        }
+
+    if any(device_id not in by_id for device_id in candidate_ids):
+        return None
+    return [by_id[device_id] for device_id in candidate_ids]
+
+
+def _query_torch_cuda(candidate_ids: list[int]) -> list[dict[str, Any]]:
+    summaries = []
+    for device_id in candidate_ids:
+        free_bytes, total_bytes = torch.cuda.mem_get_info(device_id)
+        props = torch.cuda.get_device_properties(device_id)
+        free_gb = free_bytes / 1024**3
+        free_ratio = free_bytes / max(total_bytes, 1)
+        compute_score = props.multi_processor_count * (props.major + props.minor / 10.0)
+        summaries.append(
+            {
+                "id": device_id,
+                "name": props.name,
+                "free_gb": free_gb,
+                "free_ratio": free_ratio,
+                "compute_score": compute_score,
+                "score": 0.0,
+                "source": "torch",
+            }
+        )
+    return summaries
 
 
 def resolve_device(config: dict[str, Any]) -> str:
@@ -40,23 +110,9 @@ def resolve_device(config: dict[str, Any]) -> str:
     memory_weight = float(selection_cfg.get("memory_weight", 0.7))
     compute_weight = float(selection_cfg.get("compute_weight", 0.3))
 
-    summaries = []
-    for device_id in candidate_ids:
-        free_bytes, total_bytes = torch.cuda.mem_get_info(device_id)
-        props = torch.cuda.get_device_properties(device_id)
-        free_gb = free_bytes / 1024**3
-        free_ratio = free_bytes / max(total_bytes, 1)
-        compute_score = props.multi_processor_count * (props.major + props.minor / 10.0)
-        summaries.append(
-            {
-                "id": device_id,
-                "name": props.name,
-                "free_gb": free_gb,
-                "free_ratio": free_ratio,
-                "compute_score": compute_score,
-                "score": 0.0,
-            }
-        )
+    summaries = _query_nvidia_smi(candidate_ids)
+    if summaries is None:
+        summaries = _query_torch_cuda(candidate_ids)
 
     max_compute_score = max(item["compute_score"] for item in summaries)
     best: tuple[float, int] | None = None
@@ -83,7 +139,8 @@ def resolve_device(config: dict[str, Any]) -> str:
             print(
                 f"{marker} cuda:{item['id']} {item['name']} "
                 f"free={item['free_gb']:.2f}GB free_ratio={item['free_ratio']:.3f} "
-                f"compute_ratio={item['compute_ratio']:.3f} score={item['score']:.3f}"
+                f"compute_ratio={item['compute_ratio']:.3f} score={item['score']:.3f} "
+                f"source={item['source']}"
             )
         print(f"selected device: cuda:{selected}")
     return f"cuda:{selected}"

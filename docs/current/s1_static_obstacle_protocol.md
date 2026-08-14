@@ -1,6 +1,7 @@
-# S1 静态障碍物协议
+# S1 静态障碍物协议与结果
 
-> 更新时间：2026-08-13。状态：待重跑；本协议用于重建 S1 可复现实验链路。
+> 更新时间：2026-08-14。状态：已重建基础链路；当前瓶颈为 timeout 和
+> terminal convergence。R1 继续训练未提升 full final success。
 
 ## 目标
 
@@ -39,6 +40,11 @@ outputs/reaching_incremental/
     summary.json
     episodes_joined.csv
   s1_static_obstacle_finetune/
+    train/seed_430{1,2,3}/...
+    eval/seed_430{1,2,3}_final.csv
+    summary.json
+    episodes_joined.csv
+  s1_static_obstacle_finetune_r1_extend100k/
     train/seed_430{1,2,3}/...
     eval/seed_430{1,2,3}_final.csv
     summary.json
@@ -91,6 +97,59 @@ bash scripts/run_s1_static_chain.sh eval-finetune
 该命令读取每个 seed 的 `selected_checkpoint.csv`，在完整 final
 manifest 上复核，并汇总为 `summary.json` 和 `episodes_joined.csv`。
 
+### 5. R1 继续训练诊断
+
+S1 fine-tune 后曾从各自 selected checkpoint 继续训练 `+100000`
+environment steps：
+
+| seed | start step | total step | config |
+| ---: | ---: | ---: | --- |
+| 4301 | 440000 | 540000 | `configs/experiments/reaching_incremental/s1_static_extend100k_seed4301.yaml` |
+| 4302 | 480000 | 580000 | `configs/experiments/reaching_incremental/s1_static_extend100k_seed4302.yaml` |
+| 4303 | 420000 | 520000 | `configs/experiments/reaching_incremental/s1_static_extend100k_seed4303.yaml` |
+
+R1 结果与 S1 fine-tune final 完全持平，因此 R1 只作为诊断产物，不作为
+新的有效提升。
+
+## 实际结果
+
+### 冻结 actor 静态评估
+
+| train seed | success | timeout | collision_any |
+| ---: | ---: | ---: | ---: |
+| 4301 | `174/200=87.0%` | `22/200=11.0%` | `4/200=2.0%` |
+| 4302 | `106/200=53.0%` | `89/200=44.5%` | `5/200=2.5%` |
+| 4303 | `148/200=74.0%` | `45/200=22.5%` | `7/200=3.5%` |
+| pooled | `428/600=71.33%` | `156/600=26.0%` | `16/600=2.67%` |
+
+结论：冻结 S0 actor 在静态障碍物下明显退化，失败以 timeout 为主，
+同时存在少量碰撞。
+
+### S1 fine-tune final
+
+| train seed | selected step | validation success | final success | timeout | collision_any |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 4301 | 440000 | `36/40=90.0%` | `175/200=87.5%` | `25/200=12.5%` | `0/200=0%` |
+| 4302 | 480000 | `35/40=87.5%` | `164/200=82.0%` | `36/200=18.0%` | `0/200=0%` |
+| 4303 | 420000 | `35/40=87.5%` | `162/200=81.0%` | `38/200=19.0%` | `0/200=0%` |
+| pooled | - | - | `501/600=83.5%` | `99/600=16.5%` | `0/600=0%` |
+
+S1 fine-tune 将 pooled success 从 `71.33%` 提升到 `83.5%`，并将
+`collision_any` 从 `16/600` 降到 `0/600`。但 remaining failures 全部
+为 timeout，说明主要瓶颈转为终端收敛。
+
+### R1 extend +100k final
+
+| train seed | selected step | validation success | final success | timeout | collision_any |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 4301 | 460000 | `36/40=90.0%` | `175/200=87.5%` | `25/200=12.5%` | `0/200=0%` |
+| 4302 | 500000 | `35/40=87.5%` | `164/200=82.0%` | `36/200=18.0%` | `0/200=0%` |
+| 4303 | 440000 | `35/40=87.5%` | `162/200=81.0%` | `38/200=19.0%` | `0/200=0%` |
+| pooled | - | - | `501/600=83.5%` | `99/600=16.5%` | `0/600=0%` |
+
+R1 selection 均选择续训后的第一个 checkpoint，full final 与 S1
+fine-tune 持平；继续简单加步数不再是优先方向。
+
 ## 报告口径
 
 必须同时报告：
@@ -105,3 +164,14 @@ manifest 上复核，并汇总为 `summary.json` 和 `episodes_joined.csv`。
 不得删除 reset、放宽 success threshold、延长 final episode 时限，或把
 validation 数字写成 final 数字。若后续引入静态可行候选子集，该子集只
 能作为解释性标签，不能替代 full final。
+
+## 当前问题与后续方向
+
+- 当前 S1 尚不能作为进入 S2 的稳定基础，原因是 full final success 仍
+  只有 `83.5%`。
+- 剩余失败全部为 timeout；碰撞已清零，因此后续应优化 terminal
+  convergence，而不是牺牲安全边界。
+- 不建议继续盲目增加训练步数；R1 extend +100k 已显示收益为零。
+- 下一步应使用独立 hard-case curriculum 或奖励/终端收敛改造。若使用
+  `9001--9200` final 失败样本参与诊断或调参，最终结论需要新的 blind
+  final manifest。

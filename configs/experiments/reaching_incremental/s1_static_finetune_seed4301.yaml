@@ -2,7 +2,9 @@ includes:
   - s1_static_obstacle_finetune_base.yaml
 
 seed: 4301
-device: cuda:1
+device: cuda:auto
+device_selection:
+  min_free_memory_gb: 6.0
 
 train:
   total_steps: 440000
