@@ -67,8 +67,10 @@ def _validate_config(config: dict[str, Any]) -> dict[str, Any]:
     for value, expected, name in fixed_values:
         if not np.isclose(float(value), expected, rtol=0.0, atol=1.0e-10):
             raise ValueError(f"{name} must be {expected}")
-    if env_cfg["obstacle"]["speed_range"] != [0.05, 0.05]:
-        raise ValueError("precheck requires fixed obstacle speed 0.05 m/s")
+    required_speed = float(precheck.get("required_obstacle_speed_mps", 0.05))
+    expected_speed_range = [required_speed, required_speed]
+    if env_cfg["obstacle"]["speed_range"] != expected_speed_range:
+        raise ValueError(f"precheck requires fixed obstacle speed {required_speed} m/s")
     if not bool(env_cfg["obstacle"]["enabled"]):
         raise ValueError("precheck requires the dynamic obstacle to remain enabled")
     if int(precheck["ik_attempts"]) <= 0 or float(precheck["ik_position_tolerance_m"]) <= 0.0:

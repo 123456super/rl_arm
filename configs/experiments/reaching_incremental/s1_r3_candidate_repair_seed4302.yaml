@@ -1,0 +1,8 @@
+includes:
+  - s1_r3_candidate_repair_base.yaml
+seed: 4302
+device: cuda:4
+train:
+  total_steps: 650000
+  output_dir: outputs/reaching_incremental/s1_r3_candidate_repair/train/seed_4302
+  run_name: link_fixed_s1_r3_candidate_repair_seed4302_steps650000

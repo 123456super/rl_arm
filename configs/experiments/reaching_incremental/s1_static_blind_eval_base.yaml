@@ -1,0 +1,7 @@
+# Blind final evaluation only. Never use this manifest for training/selection.
+includes:
+  - s1_static_candidate_terminal_refine_base.yaml
+eval:
+  method: link_fixed
+  episodes: 200
+  seed_manifest: configs/experiments/reaching_incremental/manifests/s1_blind_final_v1.json

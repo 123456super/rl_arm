@@ -1,0 +1,63 @@
+# S1-R2: targeted repair for candidate-path-found static failures.
+#
+# This keeps the original S1 action semantics: static random obstacle,
+# residual controller disabled, safety/recovery/relaxation disabled. The only
+# task changes are terminal progress shaping and a focused-reset curriculum for
+# the 39 reset seeds that produced 45 candidate-path-found timeout episodes.
+includes:
+  - s1_static_obstacle_finetune_base.yaml
+
+reward:
+  terminal_goal_radius_m: 0.12
+  w_terminal_progress: 30.0
+
+sac:
+  actor_lr: 0.00001
+  critic_lr: 0.0001
+  alpha_lr: 0.00001
+  replay_size: 600000
+  replay_stratified_fraction: 0.50
+  resume_replay_warmup_steps: 20000
+  resume_critic_warmup_steps: 20000
+  actor_anchor_weight: 2.0
+  fixed_risk_penalty: 1.0
+
+env:
+  obstacle:
+    enabled: true
+    scenario: random
+    speed_range: [0.0, 0.0]
+  residual_control:
+    enabled: false
+  safety_filter:
+    enabled: false
+    viability_monitor_enabled: false
+    diagnostic_logging: false
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+
+train:
+  method: link_fixed
+  progress_interval: 500
+  log_interval: 10
+  save_interval: 10000
+  save_replay: true
+  save_step_replay: false
+  focused_reset_seed_manifest: configs/experiments/reaching_incremental/manifests/s1_candidate_path_failure_resets_v1.json
+  focused_reset_fraction: 0.30
+  focused_reset_jitter:
+    enabled: true
+    joint_noise_range_rad: 0.02
+    goal_radius_m: 0.02
+    obstacle_radius_m: 0.03
+
+checkpoint_selection:
+  episodes: 40
+  metric: success_rate
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_validation.json
+
+eval:
+  method: link_fixed
+  episodes: 200
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json

@@ -1,0 +1,32 @@
+# S1 static-obstacle feasibility labels. Offline-only diagnostic; no actor,
+# training, safety filter, recovery, or runtime controller modification.
+includes:
+  - s1_static_obstacle.yaml
+
+device: cpu
+
+env:
+  obstacle:
+    enabled: true
+    scenario: random
+    speed_range: [0.0, 0.0]
+  safety_filter:
+    enabled: false
+    geometry_margin_m: 0.03
+    tracking_error_bound_m: 0.01
+    control_delay_s: 0.05
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+
+precheck:
+  protocol: vaps_task_feasibility_precheck_v1
+  required_obstacle_speed_mps: 0.0
+  ik_attempts: 32
+  ik_position_tolerance_m: 0.005
+  path_dt_s: 0.05
+  path_max_duration_s: 12.0
+  path_joint_tolerance_rad: 1.0e-7
+  path_workspace_tolerance_m: 1.0e-6
+  path_clearance_tolerance_m: 1.0e-6
+  self_collision_distance_m: 0.0

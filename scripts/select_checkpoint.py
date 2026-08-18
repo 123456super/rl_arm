@@ -117,6 +117,8 @@ def main() -> None:
         raise ValueError(f"Unsupported selection metric: {metric}")
 
     run_dir = Path(args.run_dir)
+    if not run_dir.is_dir():
+        raise FileNotFoundError(f"Run directory does not exist: {run_dir}")
     checkpoints = actor_checkpoints(run_dir)
     if not checkpoints:
         raise FileNotFoundError(f"No actor_step_*.pt checkpoints found in {run_dir}")

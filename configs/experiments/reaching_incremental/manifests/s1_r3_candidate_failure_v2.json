@@ -1,0 +1,33 @@
+{
+  "manifest_version": 1,
+  "protocol": "s1_r3_candidate_failure_v2",
+  "role": "focused_training_resets",
+  "source": "outputs/reaching_incremental/s1_static_terminal_refine_diagnostics/actor_episode_diagnostics.csv",
+  "selection_rule": "candidate_path_found failures",
+  "not_for_checkpoint_selection": true,
+  "not_a_final_evaluation_manifest": true,
+  "seeds": [
+    9007,
+    9015,
+    9023,
+    9024,
+    9029,
+    9031,
+    9051,
+    9055,
+    9059,
+    9072,
+    9096,
+    9107,
+    9114,
+    9118,
+    9122,
+    9125,
+    9140,
+    9150,
+    9151,
+    9164,
+    9165,
+    9167
+  ]
+}

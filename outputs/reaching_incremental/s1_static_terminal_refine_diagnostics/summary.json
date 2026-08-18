@@ -1,0 +1,315 @@
+{
+  "protocol": "s1_static_obstacle_failure_diagnostics_v1",
+  "offline_diagnostic_only": true,
+  "feasibility": "outputs/reaching_incremental/s1_static_terminal_refine_diagnostics/feasibility/static_zero_speed_v1_final.json",
+  "eval_train_seeds": [
+    4301,
+    4302,
+    4303
+  ],
+  "episodes_per_train_seed": 200,
+  "candidate_search_is_not_completeness_proof": true,
+  "parameters": {
+    "success_tolerance_m": 0.055,
+    "near_goal_threshold_m": 0.08,
+    "tail_steps": 60,
+    "stall_qdot_threshold_radps": 0.2,
+    "stall_progress_threshold_m": 0.01
+  },
+  "pooled_summary": {
+    "episodes": 600,
+    "successes": 521,
+    "success_rate": 0.8683333333333333,
+    "timeouts": 79,
+    "collisions": 0,
+    "failure_mode_counts": {
+      "low_motion_stall": 17,
+      "near_goal_regression": 17,
+      "near_goal_timeout": 13,
+      "nonconvergent_timeout": 32,
+      "success": 521
+    },
+    "mean_initial_goal_error_m": 0.380682936993738,
+    "mean_best_goal_error_m": 0.056371917640790345,
+    "mean_final_goal_error_m": 0.06991290012064079,
+    "median_final_goal_error_m": 0.05056082271039486,
+    "mean_initial_to_best_progress_m": 0.32431101935294765,
+    "mean_regression_after_best_m": 0.013540982479850451,
+    "mean_tail_goal_progress_m": 0.2673535307589918,
+    "mean_tail_qdot_norm_radps": 1.2200863026199231,
+    "mean_tail_risk": 0.12361769284348612,
+    "mean_min_distance_m": 0.35106373788323253,
+    "mean_obstacle_goal_distance_m": 0.6490597989270801
+  },
+  "per_train_seed": {
+    "4301": {
+      "episodes": 200,
+      "successes": 181,
+      "success_rate": 0.905,
+      "timeouts": 19,
+      "collisions": 0,
+      "failure_mode_counts": {
+        "low_motion_stall": 7,
+        "near_goal_regression": 3,
+        "near_goal_timeout": 4,
+        "nonconvergent_timeout": 5,
+        "success": 181
+      },
+      "mean_initial_goal_error_m": 0.380462331417948,
+      "mean_best_goal_error_m": 0.05371699390932918,
+      "mean_final_goal_error_m": 0.06117020593956113,
+      "median_final_goal_error_m": 0.04955308884382248,
+      "mean_initial_to_best_progress_m": 0.32674533750861884,
+      "mean_regression_after_best_m": 0.007453212030231953,
+      "mean_tail_goal_progress_m": 0.28616682879626754,
+      "mean_tail_qdot_norm_radps": 1.2253847085389682,
+      "mean_tail_risk": 0.13221582166246357,
+      "mean_min_distance_m": 0.34931181896477936,
+      "mean_obstacle_goal_distance_m": 0.6490597989270799
+    },
+    "4302": {
+      "episodes": 200,
+      "successes": 164,
+      "success_rate": 0.82,
+      "timeouts": 36,
+      "collisions": 0,
+      "failure_mode_counts": {
+        "low_motion_stall": 5,
+        "near_goal_regression": 8,
+        "near_goal_timeout": 7,
+        "nonconvergent_timeout": 16,
+        "success": 164
+      },
+      "mean_initial_goal_error_m": 0.381114100869745,
+      "mean_best_goal_error_m": 0.06018445815891028,
+      "mean_final_goal_error_m": 0.07749114099889994,
+      "median_final_goal_error_m": 0.051368407905101776,
+      "mean_initial_to_best_progress_m": 0.32092964271083474,
+      "mean_regression_after_best_m": 0.01730668283998966,
+      "mean_tail_goal_progress_m": 0.2479826176725328,
+      "mean_tail_qdot_norm_radps": 1.1474147323918173,
+      "mean_tail_risk": 0.11229880609143461,
+      "mean_min_distance_m": 0.35206763446796685,
+      "mean_obstacle_goal_distance_m": 0.6490597989270799
+    },
+    "4303": {
+      "episodes": 200,
+      "successes": 176,
+      "success_rate": 0.88,
+      "timeouts": 24,
+      "collisions": 0,
+      "failure_mode_counts": {
+        "low_motion_stall": 5,
+        "near_goal_regression": 6,
+        "near_goal_timeout": 2,
+        "nonconvergent_timeout": 11,
+        "success": 176
+      },
+      "mean_initial_goal_error_m": 0.380472378693521,
+      "mean_best_goal_error_m": 0.05521430085413158,
+      "mean_final_goal_error_m": 0.07107735342346132,
+      "median_final_goal_error_m": 0.050642186775803566,
+      "mean_initial_to_best_progress_m": 0.3252580778393894,
+      "mean_regression_after_best_m": 0.01586305256932974,
+      "mean_tail_goal_progress_m": 0.2679111458081752,
+      "mean_tail_qdot_norm_radps": 1.2874594669289836,
+      "mean_tail_risk": 0.12633845077656022,
+      "mean_min_distance_m": 0.3518117602169514,
+      "mean_obstacle_goal_distance_m": 0.6490597989270799
+    }
+  },
+  "by_static_candidate_path_status": {
+    "candidate_path_found": {
+      "episodes": 525,
+      "successes": 502,
+      "success_rate": 0.9561904761904761,
+      "timeouts": 23,
+      "collisions": 0,
+      "failure_mode_counts": {
+        "low_motion_stall": 2,
+        "near_goal_regression": 8,
+        "near_goal_timeout": 9,
+        "nonconvergent_timeout": 4,
+        "success": 502
+      },
+      "mean_initial_goal_error_m": 0.36062381657816117,
+      "mean_best_goal_error_m": 0.04890547844270865,
+      "mean_final_goal_error_m": 0.05211079393469152,
+      "median_final_goal_error_m": 0.04947551339864731,
+      "mean_initial_to_best_progress_m": 0.3117183381354525,
+      "mean_regression_after_best_m": 0.0032053154919828688,
+      "mean_tail_goal_progress_m": 0.2914187264265049,
+      "mean_tail_qdot_norm_radps": 1.293578306248886,
+      "mean_tail_risk": 0.11453649288861792,
+      "mean_min_distance_m": 0.36594779314029785,
+      "mean_obstacle_goal_distance_m": 0.6731559709951129
+    },
+    "not_checked_due_to_ik": {
+      "episodes": 30,
+      "successes": 6,
+      "success_rate": 0.2,
+      "timeouts": 24,
+      "collisions": 0,
+      "failure_mode_counts": {
+        "low_motion_stall": 9,
+        "near_goal_regression": 1,
+        "near_goal_timeout": 2,
+        "nonconvergent_timeout": 12,
+        "success": 6
+      },
+      "mean_initial_goal_error_m": 0.5696049193541209,
+      "mean_best_goal_error_m": 0.11059319091339906,
+      "mean_final_goal_error_m": 0.18990993909537793,
+      "median_final_goal_error_m": 0.17954496294260025,
+      "mean_initial_to_best_progress_m": 0.45901172844072186,
+      "mean_regression_after_best_m": 0.07931674818197886,
+      "mean_tail_goal_progress_m": 0.05954580468436082,
+      "mean_tail_qdot_norm_radps": 0.5786183488044678,
+      "mean_tail_risk": 0.11320104360365793,
+      "mean_min_distance_m": 0.32614195769031845,
+      "mean_obstacle_goal_distance_m": 0.7484579709919438
+    },
+    "not_found": {
+      "episodes": 45,
+      "successes": 13,
+      "success_rate": 0.28888888888888886,
+      "timeouts": 32,
+      "collisions": 0,
+      "failure_mode_counts": {
+        "low_motion_stall": 6,
+        "near_goal_regression": 8,
+        "near_goal_timeout": 2,
+        "nonconvergent_timeout": 16,
+        "success": 13
+      },
+      "mean_initial_goal_error_m": 0.4887580202685462,
+      "mean_best_goal_error_m": 0.10733285943667094,
+      "mean_final_goal_error_m": 0.19760611297355757,
+      "median_final_goal_error_m": 0.19982999563217163,
+      "mean_initial_to_best_progress_m": 0.3814251608318753,
+      "mean_regression_after_best_m": 0.09027325353688664,
+      "mean_tail_goal_progress_m": 0.12513139868776005,
+      "mean_tail_qdot_norm_radps": 0.7903248961589946,
+      "mean_tail_risk": 0.2365094584768342,
+      "mean_min_distance_m": 0.1940309466794133,
+      "mean_obstacle_goal_distance_m": 0.30167234342345267
+    }
+  },
+  "by_failure_mode": {
+    "low_motion_stall": {
+      "episodes": 17,
+      "successes": 0,
+      "success_rate": 0.0,
+      "timeouts": 17,
+      "collisions": 0,
+      "failure_mode_counts": {
+        "low_motion_stall": 17
+      },
+      "mean_initial_goal_error_m": 0.5916976402787602,
+      "mean_best_goal_error_m": 0.1404208391904831,
+      "mean_final_goal_error_m": 0.18811579399249134,
+      "median_final_goal_error_m": 0.1420448273420334,
+      "mean_initial_to_best_progress_m": 0.45127680108827706,
+      "mean_regression_after_best_m": 0.047694954802008235,
+      "mean_tail_goal_progress_m": 0.0001031335662393009,
+      "mean_tail_qdot_norm_radps": 0.054681026839527615,
+      "mean_tail_risk": 0.13486737420636358,
+      "mean_min_distance_m": 0.27903875708580017,
+      "mean_obstacle_goal_distance_m": 0.47116384005599554
+    },
+    "near_goal_regression": {
+      "episodes": 17,
+      "successes": 0,
+      "success_rate": 0.0,
+      "timeouts": 17,
+      "collisions": 0,
+      "failure_mode_counts": {
+        "near_goal_regression": 17
+      },
+      "mean_initial_goal_error_m": 0.4182371093946345,
+      "mean_best_goal_error_m": 0.06622339149608332,
+      "mean_final_goal_error_m": 0.21042372987550848,
+      "median_final_goal_error_m": 0.19495254755020142,
+      "mean_initial_to_best_progress_m": 0.3520137178985512,
+      "mean_regression_after_best_m": 0.14420033837942517,
+      "mean_tail_goal_progress_m": -0.036432880250846636,
+      "mean_tail_qdot_norm_radps": 0.585022730489864,
+      "mean_tail_risk": 0.18563900576977463,
+      "mean_min_distance_m": 0.24753258207484202,
+      "mean_obstacle_goal_distance_m": 0.49968940884754526
+    },
+    "near_goal_timeout": {
+      "episodes": 13,
+      "successes": 0,
+      "success_rate": 0.0,
+      "timeouts": 13,
+      "collisions": 0,
+      "failure_mode_counts": {
+        "near_goal_timeout": 13
+      },
+      "mean_initial_goal_error_m": 0.3262722148345067,
+      "mean_best_goal_error_m": 0.06599926891235205,
+      "mean_final_goal_error_m": 0.09684291281379186,
+      "median_final_goal_error_m": 0.10302873700857162,
+      "mean_initial_to_best_progress_m": 0.26027294592215466,
+      "mean_regression_after_best_m": 0.030843643901439812,
+      "mean_tail_goal_progress_m": -0.0018490601617556352,
+      "mean_tail_qdot_norm_radps": 0.25799386226213894,
+      "mean_tail_risk": 0.14600727833473148,
+      "mean_min_distance_m": 0.3034153930269755,
+      "mean_obstacle_goal_distance_m": 0.5165344093850742
+    },
+    "nonconvergent_timeout": {
+      "episodes": 32,
+      "successes": 0,
+      "success_rate": 0.0,
+      "timeouts": 32,
+      "collisions": 0,
+      "failure_mode_counts": {
+        "nonconvergent_timeout": 32
+      },
+      "mean_initial_goal_error_m": 0.5403888113796711,
+      "mean_best_goal_error_m": 0.1382995604071766,
+      "mean_final_goal_error_m": 0.27771837706677616,
+      "median_final_goal_error_m": 0.2536862939596176,
+      "mean_initial_to_best_progress_m": 0.4020892509724945,
+      "mean_regression_after_best_m": 0.13941881665959954,
+      "mean_tail_goal_progress_m": -0.02026934432797134,
+      "mean_tail_qdot_norm_radps": 0.6658565580146387,
+      "mean_tail_risk": 0.14789115623959032,
+      "mean_min_distance_m": 0.2503561268094927,
+      "mean_obstacle_goal_distance_m": 0.490925676388352
+    },
+    "success": {
+      "episodes": 521,
+      "successes": 521,
+      "success_rate": 1.0,
+      "timeouts": 0,
+      "collisions": 0,
+      "failure_mode_counts": {
+        "success": 521
+      },
+      "mean_initial_goal_error_m": 0.3641207115063283,
+      "mean_best_goal_error_m": 0.0480357432512713,
+      "mean_final_goal_error_m": 0.0480357432512713,
+      "median_final_goal_error_m": 0.049379318952560425,
+      "mean_initial_to_best_progress_m": 0.316084968255057,
+      "mean_regression_after_best_m": 0.0,
+      "mean_tail_goal_progress_m": 0.31036925326224823,
+      "mean_tail_qdot_norm_radps": 1.336881934033547,
+      "mean_tail_risk": 0.11917734285696532,
+      "mean_min_distance_m": 0.36416647561795423,
+      "mean_obstacle_goal_distance_m": 0.6727577834135404
+    }
+  },
+  "reset_consistency_counts": {
+    "all_success": 156,
+    "all_timeout": 14,
+    "mixed_success_timeout": 30
+  },
+  "reset_consistency_candidate_path_found": {
+    "all_success": 153,
+    "all_timeout": 0,
+    "mixed_success_timeout": 22
+  }
+}

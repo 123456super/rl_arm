@@ -1,0 +1,33 @@
+{
+  "manifest_version": 1,
+  "protocol": "s1_r4_hard_case_failure_v1",
+  "role": "focused_training_resets",
+  "source": "outputs/reaching_incremental/s1_static_terminal_refine_diagnostics/actor_episode_diagnostics.csv",
+  "selection_rule": "not_found/not_checked_due_to_ik failures",
+  "not_for_checkpoint_selection": true,
+  "not_a_final_evaluation_manifest": true,
+  "seeds": [
+    9006,
+    9021,
+    9022,
+    9027,
+    9033,
+    9060,
+    9062,
+    9065,
+    9093,
+    9095,
+    9098,
+    9102,
+    9108,
+    9110,
+    9112,
+    9120,
+    9136,
+    9138,
+    9142,
+    9143,
+    9175,
+    9192
+  ]
+}

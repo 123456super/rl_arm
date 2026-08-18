@@ -1,0 +1,8 @@
+includes:
+  - s1_r4_hard_case_repair_base.yaml
+seed: 4301
+device: cuda:1
+train:
+  total_steps: 840000
+  output_dir: outputs/reaching_incremental/s1_r4_hard_case_repair/train/seed_4301
+  run_name: link_fixed_s1_r4_hard_case_repair_seed4301_steps840000
