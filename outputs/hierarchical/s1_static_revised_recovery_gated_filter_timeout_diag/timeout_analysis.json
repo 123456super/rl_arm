@@ -1,0 +1,66 @@
+{
+  "seeds": [
+    9093,
+    9143
+  ],
+  "episodes": [
+    {
+      "seed": 9093,
+      "episode": 0,
+      "trace_available": true,
+      "failure_mode": "FILTER_STOP_TIMEOUT",
+      "success": 0,
+      "final_position_error_m": 0.08960697054862976,
+      "hold_steps": 14,
+      "servo_steps": 181,
+      "recovery_steps": 17,
+      "recovery_rate": 0.07083333333333333,
+      "mean_predictive_h_m": null,
+      "mean_filter_intervention_norm": 0.330643630639394,
+      "mean_executed_toward_goal_mps": 0.011700426536289542,
+      "mean_filter_velocity_loss_mps": 0.30431216487039936,
+      "goal_velocity_audit_status_counts": {},
+      "goal_velocity_audit_steps": 0,
+      "mean_max_feasible_goal_velocity_mps": null,
+      "min_max_feasible_goal_velocity_mps": null,
+      "mean_projected_goal_velocity_mps": null,
+      "mean_goal_velocity_feasibility_gap_mps": null,
+      "positive_max_feasible_goal_velocity_rate": null,
+      "safe_stop_steps": 0,
+      "filter_status_counts": {
+        "filtered": 203,
+        "passthrough": 37
+      },
+      "trace_path": "outputs/hierarchical/s1_static_revised_recovery_gated_filter_timeout_diag/traces/episode_0000.csv"
+    },
+    {
+      "seed": 9143,
+      "episode": 1,
+      "trace_available": true,
+      "failure_mode": "FILTER_STOP_TIMEOUT",
+      "success": 0,
+      "final_position_error_m": 0.0644218698143959,
+      "hold_steps": 5,
+      "servo_steps": 211,
+      "recovery_steps": 7,
+      "recovery_rate": 0.029166666666666667,
+      "mean_predictive_h_m": null,
+      "mean_filter_intervention_norm": 0.2021215399170348,
+      "mean_executed_toward_goal_mps": 0.012404163118042322,
+      "mean_filter_velocity_loss_mps": 0.15199736946162423,
+      "goal_velocity_audit_status_counts": {},
+      "goal_velocity_audit_steps": 0,
+      "mean_max_feasible_goal_velocity_mps": null,
+      "min_max_feasible_goal_velocity_mps": null,
+      "mean_projected_goal_velocity_mps": null,
+      "mean_goal_velocity_feasibility_gap_mps": null,
+      "positive_max_feasible_goal_velocity_rate": null,
+      "safe_stop_steps": 0,
+      "filter_status_counts": {
+        "filtered": 235,
+        "passthrough": 5
+      },
+      "trace_path": "outputs/hierarchical/s1_static_revised_recovery_gated_filter_timeout_diag/traces/episode_0001.csv"
+    }
+  ]
+}

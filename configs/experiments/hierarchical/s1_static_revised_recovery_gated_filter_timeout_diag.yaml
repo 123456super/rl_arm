@@ -1,0 +1,21 @@
+# Diagnostic-only configuration for the two remaining recovery-gated
+# FILTER_STOP_TIMEOUT hard cases.  No controller or safety parameter is
+# changed; diagnostic_logging only exposes per-link/filter state in traces.
+includes:
+  - s1_static_revised_recovery_gated.yaml
+
+architecture_version: hierarchical_s1_revised_recovery_gated_filter_timeout_diag_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_recovery_gated_filter_timeout_diag_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_v1
+  safety_filter:
+    diagnostic_logging: true
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_recovery_gated_filter_timeout_diag
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_filter_timeout_cases.json
+  nominal_only: true

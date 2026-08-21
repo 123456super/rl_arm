@@ -1,0 +1,57 @@
+{
+  "episodes": 23,
+  "fallback_attempted_episodes": 11,
+  "raw_goal_reachable_episodes": 17,
+  "raw_goal_unreachable_episodes": 6,
+  "workspace_self_collision_free_goal_reachable_episodes": 17,
+  "accepted_obstacle_valid_goal_episodes": 12,
+  "obstacle_blocked_goal_reachable_episodes": 5,
+  "goal_reachable_but_obstacle_blocked_episodes": 5,
+  "mean_min_goal_error_m": 0.030354701625353964,
+  "total_rejections": {
+    "duplicate": 0,
+    "goal_error": 5954,
+    "joint_limit": 0,
+    "obstacle_clearance": 4731,
+    "obstacle_contact": 1412,
+    "self_collision": 0,
+    "short_solution": 0,
+    "solver_error": 0,
+    "workspace": 62
+  },
+  "rejections_by_failure_mode": {
+    "FILTER_STOP_TIMEOUT": {
+      "duplicate": 0,
+      "goal_error": 0,
+      "joint_limit": 0,
+      "obstacle_clearance": 1262,
+      "obstacle_contact": 0,
+      "self_collision": 0,
+      "short_solution": 0,
+      "solver_error": 0,
+      "workspace": 0
+    },
+    "IK_NOT_FOUND": {
+      "duplicate": 0,
+      "goal_error": 5954,
+      "joint_limit": 0,
+      "obstacle_clearance": 2708,
+      "obstacle_contact": 1400,
+      "self_collision": 0,
+      "short_solution": 0,
+      "solver_error": 0,
+      "workspace": 2
+    },
+    "SUCCESS": {
+      "duplicate": 0,
+      "goal_error": 0,
+      "joint_limit": 0,
+      "obstacle_clearance": 761,
+      "obstacle_contact": 12,
+      "self_collision": 0,
+      "short_solution": 0,
+      "solver_error": 0,
+      "workspace": 60
+    }
+  }
+}

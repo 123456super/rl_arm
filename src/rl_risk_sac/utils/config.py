@@ -206,12 +206,37 @@ def validate_config(config: dict[str, Any]) -> None:
     probability = float(planner.get("goal_sample_probability", 0.0))
     if not 0.0 <= probability <= 1.0:
         raise ValueError("hierarchical planner goal_sample_probability must be in [0, 1]")
-    if str(planner.get("candidate_selection", "first_success")) not in {"first_success", "clearance_then_length", "length_then_clearance"}:
+    if str(planner.get("candidate_selection", "first_success")) not in {
+        "first_success",
+        "clearance_then_length",
+        "length_then_clearance",
+        "predictive_clearance_then_length",
+    }:
         raise ValueError("hierarchical planner candidate_selection is invalid")
-    for key in ("boundary_start_tolerance_m", "dls_max_iterations", "dls_damping", "dls_step_size", "dls_goal_tolerance_m"):
+    for key in (
+        "boundary_start_tolerance_m",
+        "dls_max_iterations",
+        "dls_damping",
+        "dls_step_size",
+        "dls_goal_tolerance_m",
+        "ik_fallback_attempts",
+        "ik_fallback_dls_seeds",
+        "predictive_candidate_limit",
+        "ik_target_shell_attempts",
+        "ik_target_shell_radius_m",
+    ):
         value = float(planner.get(key, 0.0))
         if not isfinite(value) or value < 0.0:
             raise ValueError(f"env.hierarchical_control.planner.{key} must be finite and non-negative")
+    if int(planner.get("predictive_candidate_limit", 1)) <= 0:
+        raise ValueError("hierarchical planner predictive_candidate_limit must be positive")
+    if int(planner.get("ik_target_shell_attempts", 0)) < 0:
+        raise ValueError("hierarchical planner ik_target_shell_attempts must be non-negative")
+    shell_radius = float(planner.get("ik_target_shell_radius_m", 0.0))
+    if shell_radius > float(planner.get("ik_goal_tolerance_m", 0.0)):
+        raise ValueError("hierarchical planner ik_target_shell_radius_m must not exceed ik_goal_tolerance_m")
+    if "ik_target_shell_enabled" in planner and not isinstance(planner["ik_target_shell_enabled"], bool):
+        raise TypeError("hierarchical planner ik_target_shell_enabled must be boolean")
     for key in (
         "waypoint_gain", "waypoint_tolerance_rad", "servo_trigger_m", "servo_gain", "servo_damping",
         "servo_velocity_damping", "servo_near_goal_radius_m", "servo_near_goal_gain_scale",

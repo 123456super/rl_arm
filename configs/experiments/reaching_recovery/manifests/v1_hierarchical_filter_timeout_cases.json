@@ -1,0 +1,4 @@
+{
+  "description": "S1 recovery-gated filter-timeout diagnostic cases only.",
+  "seeds": [9093, 9143]
+}

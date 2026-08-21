@@ -1,0 +1,27 @@
+# Targeted S1 improvement: high-budget IK is used only after the normal IK
+# budget fails; successful paths are ranked by predictive filter feasibility.
+# Task definition, geometry, safety margins, state machine and success rule
+# remain inherited from the recovery-gated nominal candidate.
+includes:
+  - s1_static_revised_recovery_gated.yaml
+
+architecture_version: hierarchical_s1_revised_ik_predictive_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_ik_predictive_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_v1
+    planner:
+      # Keep the normal path fast. These fallback attempts are activated only
+      # when the normal budget yields no valid IK candidate in an episode.
+      ik_fallback_attempts: 256
+      ik_fallback_dls_seeds: 4
+      candidate_selection: predictive_clearance_then_length
+      predictive_candidate_limit: 8
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_predictive
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json
+  nominal_only: true

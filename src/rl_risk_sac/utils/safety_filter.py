@@ -59,6 +59,21 @@ class SafetyFilterConfig:
     use_qp_solver: bool = False
     qp_time_limit_s: float | None = None
     infeasibility_diagnostics_enabled: bool = False
+    goal_velocity_priority_enabled: bool = False
+    goal_velocity_priority_solver: str = "linprog"
+    goal_velocity_priority_weight: float = 1.0
+    goal_velocity_intervention_weight: float = 1.0
+    goal_velocity_objective_scale: float = 1.0
+    # Optional second-stage lexicographic objective.  The first LP maximizes
+    # the TCP velocity in the current goal direction.  When enabled, a second
+    # LP keeps that value within a small certified tolerance and selects the
+    # command closest to the requested and previous commands.  This preserves
+    # all strict safety constraints while avoiding cycle-to-cycle sign flips
+    # between equally useful goal-directed solutions.
+    goal_velocity_temporal_consistency_enabled: bool = False
+    goal_velocity_near_optimal_tolerance_mps: float = 0.0
+    goal_velocity_continuity_requested_weight: float = 0.25
+    goal_velocity_continuity_previous_weight: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -90,6 +105,10 @@ class SafetyFilterInput:
     recovery_target_mask: np.ndarray | None = None
     maximize_min_clearance_recovery: bool = False
     workspace_constraints: LinearVelocityConstraints | None = None
+    # Optional TCP goal-direction objective, expressed as a joint-space row
+    # (m/s per rad/s). It is only used when the config explicitly enables the
+    # goal-velocity-priority candidate.
+    goal_velocity_objective: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -110,6 +129,9 @@ class SafetyFilterResult:
     fallback_stage: str = ""
     infeasible_constraint_categories: tuple[str, ...] = ()
     infeasibility_diagnostic_status: str = ""
+    goal_velocity_primary_mps: float = float("nan")
+    goal_velocity_secondary_used: bool = False
+    goal_velocity_secondary_status: str = ""
 
     @property
     def requires_safe_stop(self) -> bool:
@@ -135,6 +157,68 @@ class ViabilityAssessment:
     strict_feasible: bool
     solver_status: str
     model_assumptions_valid: bool
+
+
+def maximize_linear_velocity(
+    filter_input: SafetyFilterInput,
+    config: SafetyFilterConfig,
+    objective_joint_velocity: np.ndarray,
+) -> tuple[float, np.ndarray | None, str]:
+    """Maximize a read-only linear velocity objective under filter constraints.
+
+    The objective is expressed in joint velocity coordinates (for example,
+    ``goal_direction @ J_tcp``).  This function rebuilds the exact same box,
+    workspace and predictive-barrier constraints used by
+    :func:`filter_joint_velocity`; it never changes the command selected by
+    the filter.  It is intended for offline/diagnostic logging only.
+
+    Returns ``(maximum, optimizer_command, status)``.  ``maximum`` is NaN and
+    the command is ``None`` if the diagnostic solver cannot certify a result.
+    """
+
+    objective = np.asarray(objective_joint_velocity, dtype=np.float64)
+    if objective.ndim != 1:
+        return float("nan"), None, "invalid_objective"
+    try:
+        lower, upper, _, rows, bounds, _, _, _ = _build_constraints(filter_input, config)
+    except (ValueError, TypeError):
+        return float("nan"), None, "invalid_constraints"
+    if objective.size != lower.size or not np.isfinite(objective).all():
+        return float("nan"), None, "invalid_objective"
+
+    # scipy is a declared runtime dependency.  linprog handles the exact
+    # linear objective and the same finite joint box as the safety filter.
+    try:
+        from scipy.optimize import linprog
+    except ImportError:
+        return float("nan"), None, "scipy_unavailable"
+    try:
+        result = linprog(
+            c=-objective,
+            A_ub=-rows,
+            b_ub=-bounds,
+            bounds=list(zip(lower.tolist(), upper.tolist(), strict=True)),
+            method="highs",
+        )
+    except (ValueError, RuntimeError):
+        return float("nan"), None, "solver_error"
+    status = str(result.message).lower()
+    if not bool(result.success) or result.x is None:
+        return float("nan"), None, f"{result.status}:{status}"
+    command = np.asarray(result.x, dtype=np.float64)
+    if command.shape != objective.shape or not np.isfinite(command).all():
+        return float("nan"), None, "invalid_solution"
+    # Explicitly verify all inequalities using the same tolerances used by
+    # the filter.  This prevents an approximate diagnostic result from being
+    # reported as a feasible target velocity.
+    max_violation = max(
+        float(np.max(bounds - rows @ command, initial=0.0)),
+        float(np.max(lower - command, initial=0.0)),
+        float(np.max(command - upper, initial=0.0)),
+    )
+    if max_violation > config.projection_failure_tolerance:
+        return float("nan"), None, "inaccurate_solution"
+    return float(np.dot(objective, command)), command, "optimal"
 
 
 def assess_strict_viability(
@@ -265,9 +349,76 @@ def filter_joint_velocity(
             max_constraint_category=labels[index],
         )
 
+    goal_objective = None
+    if (
+        config.goal_velocity_priority_enabled
+        and filter_input.goal_velocity_objective is not None
+        and config.goal_velocity_priority_solver == "linprog"
+    ):
+        goal_objective = _vector(
+            filter_input.goal_velocity_objective,
+            "goal_velocity_objective",
+            requested.size,
+        )
+        # The priority objective is a linear TCP velocity.  Solve it directly
+        # with HiGHS instead of sending a nearly-linear, badly scaled QP to
+        # OSQP.  This keeps every hard constraint identical and removes the
+        # maximum-iterations fallback that otherwise silently returns the old
+        # minimum-intervention projection.
+        goal_command, goal_status, goal_primary, goal_secondary_used = _linprog_goal_projection(
+            lower,
+            upper,
+            rows,
+            bounds,
+            goal_objective,
+            config,
+            requested=requested,
+            previous=filter_input.previous_command_radps,
+        )
+        if goal_command is not None:
+            violations = bounds - rows @ goal_command
+            max_violation = float(max(0.0, np.max(violations, initial=0.0)))
+            active_count, active_categories, max_category = _constraint_diagnostics(
+                goal_command, lower, upper, violations, labels, lower_labels, upper_labels, config
+            )
+            intervention = float(np.linalg.norm(goal_command - requested))
+            status = (
+                SafetyFilterStatus.FILTERED
+                if intervention > config.constraint_tolerance
+                else SafetyFilterStatus.PASSTHROUGH
+            )
+            return SafetyFilterResult(
+                command_joint_velocity_radps=goal_command,
+                status=status,
+                reason="linprog goal-velocity priority optimal",
+                intervention_norm_radps=intervention,
+                active_constraint_count=active_count,
+                max_constraint_violation=max_violation,
+                constraint_count=len(bounds),
+                active_constraint_categories=active_categories,
+                max_constraint_category=max_category,
+                projection_iterations=0,
+                qp_solver_used=False,
+                qp_solver_status=goal_status,
+                fallback_stage="goal_velocity_linprog",
+                goal_velocity_primary_mps=goal_primary,
+                goal_velocity_secondary_used=goal_secondary_used,
+                goal_velocity_secondary_status=(
+                    "continuity_tiebreak" if goal_secondary_used else "disabled"
+                ),
+            )
+
     qp_status = "disabled"
     if config.use_qp_solver:
-        qp_command, qp_status = _osqp_projection(requested, lower, upper, rows, bounds, config)
+        qp_command, qp_status = _osqp_projection(
+            requested,
+            lower,
+            upper,
+            rows,
+            bounds,
+            config,
+            goal_objective=goal_objective,
+        )
         if qp_command is not None:
             violations = bounds - rows @ qp_command
             max_violation = float(max(0.0, np.max(violations, initial=0.0)))
@@ -283,7 +434,11 @@ def filter_joint_velocity(
             return SafetyFilterResult(
                 command_joint_velocity_radps=qp_command,
                 status=status,
-                reason="osqp optimal",
+                reason=(
+                    "osqp goal-velocity priority optimal"
+                    if goal_objective is not None
+                    else "osqp optimal"
+                ),
                 intervention_norm_radps=intervention,
                 active_constraint_count=active_count,
                 max_constraint_violation=max_violation,
@@ -458,6 +613,108 @@ def filter_joint_velocity(
         projection_iterations=iterations_used,
         qp_solver_status=qp_status,
     )
+
+
+def _linprog_goal_projection(
+    lower: np.ndarray,
+    upper: np.ndarray,
+    rows: np.ndarray,
+    bounds: np.ndarray,
+    objective: np.ndarray,
+    config: SafetyFilterConfig,
+    *,
+    requested: np.ndarray,
+    previous: np.ndarray,
+) -> tuple[np.ndarray | None, str, float, bool]:
+    """Maximize a TCP goal-direction velocity over the strict feasible set."""
+    try:
+        from scipy.optimize import linprog
+    except ImportError:
+        return None, "scipy_unavailable", float("nan"), False
+    try:
+        result = linprog(
+            c=-np.asarray(objective, dtype=np.float64),
+            A_ub=-np.asarray(rows, dtype=np.float64),
+            b_ub=-np.asarray(bounds, dtype=np.float64),
+            bounds=list(zip(lower.tolist(), upper.tolist(), strict=True)),
+            method="highs",
+        )
+    except (ValueError, RuntimeError) as error:
+        return None, f"solver_error:{error}", float("nan"), False
+    status = str(result.message).lower()
+    if not bool(result.success) or result.x is None:
+        return None, f"{result.status}:{status}", float("nan"), False
+    primary_command = np.asarray(result.x, dtype=np.float64)
+    if primary_command.shape != objective.shape or not np.isfinite(primary_command).all():
+        return None, "invalid_solution", float("nan"), False
+    primary_value = float(np.dot(objective, primary_command))
+
+    # Optional lexicographic tie-break.  Keep the primary TCP velocity within
+    # a certified near-optimal band, then minimize L1 distance to the current
+    # request and previous output. This makes the selected command temporally
+    # consistent without changing any strict safety row or bound.
+    tolerance = float(config.goal_velocity_near_optimal_tolerance_mps)
+    use_secondary = bool(config.goal_velocity_temporal_consistency_enabled) and tolerance > 0.0
+    requested = np.asarray(requested, dtype=np.float64)
+    previous = np.asarray(previous, dtype=np.float64)
+    if use_secondary and requested.shape == objective.shape and previous.shape == objective.shape:
+        n = objective.size
+        eye = np.eye(n, dtype=np.float64)
+        zeros = np.zeros((n, n), dtype=np.float64)
+        strict_rows = np.hstack((-rows, zeros, zeros))
+        q_req_pos = np.hstack((eye, -eye, zeros))
+        q_req_neg = np.hstack((-eye, -eye, zeros))
+        q_prev_pos = np.hstack((eye, zeros, -eye))
+        q_prev_neg = np.hstack((-eye, zeros, -eye))
+        near_optimal = np.hstack((-objective.reshape(1, -1), np.zeros((1, 2 * n))))
+        A_ub = np.vstack((strict_rows, q_req_pos, q_req_neg, q_prev_pos, q_prev_neg, near_optimal))
+        b_ub = np.concatenate(
+            (
+                -bounds,
+                requested,
+                -requested,
+                previous,
+                -previous,
+                np.asarray([-(primary_value - tolerance)], dtype=np.float64),
+            )
+        )
+        c = np.concatenate(
+            (
+                np.zeros(n, dtype=np.float64),
+                np.full(n, float(config.goal_velocity_continuity_requested_weight)),
+                np.full(n, float(config.goal_velocity_continuity_previous_weight)),
+            )
+        )
+        try:
+            secondary = linprog(
+                c=c,
+                A_ub=A_ub,
+                b_ub=b_ub,
+                bounds=list(zip(lower.tolist(), upper.tolist(), strict=True)) + [(0.0, None)] * (2 * n),
+                method="highs",
+            )
+        except (ValueError, RuntimeError):
+            secondary = None
+        if secondary is not None and bool(secondary.success) and secondary.x is not None:
+            command = np.asarray(secondary.x[:n], dtype=np.float64)
+            if command.shape == objective.shape and np.isfinite(command).all():
+                max_violation = max(
+                    float(np.max(bounds - rows @ command, initial=0.0)),
+                    float(np.max(lower - command, initial=0.0)),
+                    float(np.max(command - upper, initial=0.0)),
+                )
+                if max_violation <= config.projection_failure_tolerance:
+                    return command, "optimal; continuity_tiebreak", primary_value, True
+
+    command = primary_command
+    max_violation = max(
+        float(np.max(bounds - rows @ command, initial=0.0)),
+        float(np.max(lower - command, initial=0.0)),
+        float(np.max(command - upper, initial=0.0)),
+    )
+    if max_violation > config.projection_failure_tolerance:
+        return None, "inaccurate_solution", primary_value, False
+    return command, "optimal", primary_value, False
 
 
 def _constraint_diagnostics(
@@ -648,8 +905,9 @@ def _osqp_projection(
     rows: np.ndarray,
     bounds: np.ndarray,
     config: SafetyFilterConfig,
+    goal_objective: np.ndarray | None = None,
 ) -> tuple[np.ndarray | None, str]:
-    """Solve the exact box-constrained projection when OSQP is installed."""
+    """Solve the strict QP, optionally prioritizing TCP goal velocity."""
     try:
         import osqp
         from scipy import sparse
@@ -663,9 +921,29 @@ def _osqp_projection(
     setup_kwargs = {}
     if config.qp_time_limit_s is not None:
         setup_kwargs["time_limit"] = config.qp_time_limit_s
+    if goal_objective is None:
+        p_matrix = sparse.eye(requested.size, format="csc")
+        q_vector = -requested
+    else:
+        objective = _vector(goal_objective, "goal_velocity_objective", requested.size)
+        intervention_weight = float(config.goal_velocity_intervention_weight)
+        p_matrix = sparse.diags(
+            np.full(
+                requested.size,
+                2.0 * intervention_weight * float(config.goal_velocity_objective_scale),
+            ),
+            format="csc",
+        )
+        q_vector = (
+            -float(config.goal_velocity_objective_scale)
+            * (
+                float(config.goal_velocity_priority_weight) * objective
+                + 2.0 * intervention_weight * requested
+            )
+        )
     problem.setup(
-        P=sparse.eye(requested.size, format="csc"),
-        q=-requested,
+        P=p_matrix,
+        q=q_vector,
         A=matrix,
         l=lower_bound,
         u=upper_bound,
@@ -900,6 +1178,22 @@ def _build_constraints(
         not np.isfinite(config.qp_time_limit_s) or config.qp_time_limit_s <= 0.0
     ):
         raise ValueError("qp_time_limit_s must be finite and positive when set")
+    if (
+        config.goal_velocity_priority_solver not in {"linprog", "osqp"}
+        or not np.isfinite(config.goal_velocity_priority_weight)
+        or config.goal_velocity_priority_weight < 0.0
+        or not np.isfinite(config.goal_velocity_intervention_weight)
+        or config.goal_velocity_intervention_weight <= 0.0
+        or not np.isfinite(config.goal_velocity_objective_scale)
+        or config.goal_velocity_objective_scale <= 0.0
+        or not np.isfinite(config.goal_velocity_near_optimal_tolerance_mps)
+        or config.goal_velocity_near_optimal_tolerance_mps < 0.0
+        or not np.isfinite(config.goal_velocity_continuity_requested_weight)
+        or config.goal_velocity_continuity_requested_weight < 0.0
+        or not np.isfinite(config.goal_velocity_continuity_previous_weight)
+        or config.goal_velocity_continuity_previous_weight < 0.0
+    ):
+        raise ValueError("goal velocity objective weights must be finite and valid")
 
     dt = config.control_dt_s
     lower_candidates = np.vstack(

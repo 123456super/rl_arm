@@ -1,0 +1,83 @@
+{
+  "protocol": "hierarchical_s1_revised_ik_shell_v1",
+  "seed_manifest": "configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json",
+  "episodes": 23,
+  "main": {
+    "full_success": {
+      "count": 10,
+      "total": 23,
+      "rate": 0.43478260869565216
+    },
+    "plan_conditioned_success": {
+      "count": 10,
+      "total": 13,
+      "rate": 0.7692307692307693
+    },
+    "ik_found": {
+      "count": 13,
+      "total": 23,
+      "rate": 0.5652173913043478
+    },
+    "plan_found": {
+      "count": 13,
+      "total": 23,
+      "rate": 0.5652173913043478
+    },
+    "timeouts": {
+      "count": 3,
+      "total": 23,
+      "rate": 0.13043478260869565
+    },
+    "collision_any": {
+      "count": 0,
+      "total": 23,
+      "rate": 0.0
+    },
+    "mean_final_position_error_m": 0.3214735903817674,
+    "mean_success_completion_time_s": 4.315
+  },
+  "mechanism": {
+    "direct_path": {
+      "count": 12,
+      "total": 13,
+      "rate": 0.9230769230769231
+    },
+    "rrt_path": {
+      "count": 1,
+      "total": 13,
+      "rate": 0.07692307692307693
+    },
+    "mean_initial_plan_iterations": 0.043478260869565216,
+    "mean_initial_planning_time_s": 1.1791486674008649,
+    "mean_total_planning_time_s": 4.4194975792298745,
+    "mean_replans_per_episode": 1.3478260869565217,
+    "state_step_rates": {
+      "TRACK": 0.10444388651770023,
+      "AVOID_HOLD": 0.025106703489831784,
+      "REPLAN": 0.0,
+      "SERVO": 0.21566658297765504,
+      "PLAN_FAILED": 0.6547828270148129
+    },
+    "filter_intervention_step_rate": 0.36781320612603563,
+    "filter_safe_stop_step_rate": 0.0,
+    "filter_recovery_relaxed_step_rate": 0.0,
+    "mean_nominal_qdot_norm": 0.16143233726091522,
+    "mean_residual_qdot_norm": 0.0,
+    "mean_episode_min_predictive_h_m": 0.1206637351963126
+  },
+  "failure_mode_counts": {
+    "SUCCESS": 10,
+    "IK_NOT_FOUND": 10,
+    "PLAN_NOT_FOUND": 0,
+    "TRACK_TIMEOUT": 0,
+    "SERVO_TIMEOUT": 0,
+    "FILTER_STOP_TIMEOUT": 3,
+    "COLLISION_TERMINATION": 0
+  },
+  "gate": {
+    "plan_conditioned_success_threshold": 0.95,
+    "plan_conditioned_success_pass": false,
+    "recommended_full_success_threshold": 0.9,
+    "recommended_full_success_pass": false
+  }
+}

@@ -1,0 +1,18 @@
+# Full 23-reset hard-case evaluation of the strict goal-velocity-priority
+# candidate. This output is separate from the two-seed timeout diagnostic.
+includes:
+  - s1_static_revised_recovery_gated_goal_velocity_priority_diag.yaml
+
+architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_priority_hard_cases_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_priority_hard_cases_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_goal_velocity_priority_diag_v1
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_priority_hard_cases_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json
+  nominal_only: true

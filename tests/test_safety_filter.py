@@ -20,6 +20,7 @@ from rl_risk_sac.utils.safety_filter import (
     _dykstra_projection,
     assess_strict_viability,
     filter_joint_velocity,
+    maximize_linear_velocity,
 )
 from rl_risk_sac.robots.ur5_capsules import CapsuleState
 
@@ -105,6 +106,48 @@ def test_filter_projects_policy_command_onto_predictive_safety_constraint() -> N
     assert result.intervention_norm_radps == pytest.approx(1.0)
 
 
+def test_goal_velocity_priority_keeps_hard_constraints_and_selects_forward_command() -> None:
+    result = filter_joint_velocity(
+        replace(
+            filter_input(risk_with_safety_function(-0.1), requested=-0.8),
+            goal_velocity_objective=np.asarray([1.0]),
+        ),
+        replace(
+            config(),
+            use_qp_solver=True,
+            goal_velocity_priority_enabled=True,
+            goal_velocity_priority_weight=1.0,
+            goal_velocity_intervention_weight=1.0,
+        ),
+    )
+
+    assert result.status is SafetyFilterStatus.FILTERED
+    assert result.reason == "linprog goal-velocity priority optimal"
+    np.testing.assert_allclose(result.command_joint_velocity_radps, [1.0], atol=3e-6)
+
+
+def test_goal_velocity_temporal_tiebreak_stays_near_previous_command() -> None:
+    result = filter_joint_velocity(
+        replace(
+            filter_input(risk_with_safety_function(-0.1), requested=-0.8),
+            previous_command_radps=np.asarray([0.2]),
+            goal_velocity_objective=np.asarray([1.0]),
+        ),
+        replace(
+            config(),
+            goal_velocity_priority_enabled=True,
+            goal_velocity_temporal_consistency_enabled=True,
+            goal_velocity_near_optimal_tolerance_mps=0.2,
+            goal_velocity_continuity_previous_weight=1.0,
+            goal_velocity_continuity_requested_weight=0.25,
+        ),
+    )
+
+    assert result.goal_velocity_secondary_used is True
+    assert result.qp_solver_status == "optimal; continuity_tiebreak"
+    np.testing.assert_allclose(result.command_joint_velocity_radps, [0.8], atol=3e-6)
+
+
 def test_preemptive_margin_enforces_an_earlier_predictive_constraint() -> None:
     preemptive_config = replace(config(), preemptive_margin_m=0.05)
 
@@ -143,6 +186,26 @@ def test_filter_enforces_workspace_and_command_continuity_constraints() -> None:
 
     assert result.status is SafetyFilterStatus.FILTERED
     np.testing.assert_allclose(result.command_joint_velocity_radps, [0.15], atol=1e-12)
+
+
+def test_maximize_linear_velocity_uses_the_same_strict_constraints() -> None:
+    risk = risk_with_safety_function(-0.1)
+    input_data = filter_input(risk, requested=-0.8, jacobian=1.0)
+    maximum, command, status = maximize_linear_velocity(input_data, config(), np.asarray([1.0]))
+
+    assert status == "optimal"
+    assert maximum == pytest.approx(1.0)
+    np.testing.assert_allclose(command, [1.0], atol=1e-9)
+
+
+def test_maximize_linear_velocity_reports_infeasible_constraints() -> None:
+    risk = risk_with_safety_function(-1.0)
+    input_data = filter_input(risk, requested=0.0, jacobian=0.0)
+    maximum, command, status = maximize_linear_velocity(input_data, config(), np.asarray([1.0]))
+
+    assert np.isnan(maximum)
+    assert command is None
+    assert status.startswith("2:") or status in {"solver_error", "inaccurate_solution"}
 
 
 def test_filter_enforces_next_step_joint_position_limit() -> None:

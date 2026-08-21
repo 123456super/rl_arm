@@ -1,0 +1,26 @@
+# Paired diagnostic for the single regression seed 9027.  The strict safety
+# set, d_safe, horizon, state machine and success rule are inherited unchanged.
+# Only the goal-velocity candidate gets a certified continuity tie-break.
+includes:
+  - s1_static_revised_recovery_gated_goal_velocity_priority_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_9027_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_9027_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_goal_velocity_priority_hard_cases_v1
+  safety_filter:
+    goal_velocity_temporal_consistency_enabled: true
+    # Keep the first-stage TCP velocity within 0.02 m/s of its certified LP
+    # optimum, then minimize distance to the requested and previous commands.
+    goal_velocity_near_optimal_tolerance_mps: 0.02
+    goal_velocity_continuity_requested_weight: 0.25
+    goal_velocity_continuity_previous_weight: 1.0
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_9027_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_temporal_consistency_9027.json
+  nominal_only: true

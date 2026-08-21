@@ -1,0 +1,68 @@
+{
+  "seeds": [
+    9093,
+    9143
+  ],
+  "episodes": [
+    {
+      "seed": 9093,
+      "episode": 0,
+      "trace_available": true,
+      "failure_mode": "SUCCESS",
+      "success": 1,
+      "final_position_error_m": 0.05429946631193161,
+      "hold_steps": 2,
+      "servo_steps": 16,
+      "recovery_steps": 2,
+      "recovery_rate": 0.06451612903225806,
+      "mean_predictive_h_m": 0.05570936193018459,
+      "mean_filter_intervention_norm": 1.1681445747217236,
+      "mean_executed_toward_goal_mps": 0.15038633846248484,
+      "mean_filter_velocity_loss_mps": 0.05078808186519512,
+      "goal_velocity_audit_status_counts": {
+        "optimal": 31
+      },
+      "goal_velocity_audit_steps": 31,
+      "mean_max_feasible_goal_velocity_mps": 0.2838365623624999,
+      "min_max_feasible_goal_velocity_mps": 0.034372140326965346,
+      "mean_projected_goal_velocity_mps": 0.2838365602225237,
+      "mean_goal_velocity_feasibility_gap_mps": 2.139976133797017e-09,
+      "positive_max_feasible_goal_velocity_rate": 1.0,
+      "safe_stop_steps": 0,
+      "filter_status_counts": {
+        "filtered": 31
+      },
+      "trace_path": "outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_priority_diag/traces/shard_0/episode_0000.csv"
+    },
+    {
+      "seed": 9143,
+      "episode": 1,
+      "trace_available": true,
+      "failure_mode": "SUCCESS",
+      "success": 1,
+      "final_position_error_m": 0.05401434749364853,
+      "hold_steps": 2,
+      "servo_steps": 48,
+      "recovery_steps": 4,
+      "recovery_rate": 0.06896551724137931,
+      "mean_predictive_h_m": 0.013184855352924267,
+      "mean_filter_intervention_norm": 0.9526655217517279,
+      "mean_executed_toward_goal_mps": 0.10751967361361463,
+      "mean_filter_velocity_loss_mps": 0.10311812176944746,
+      "goal_velocity_audit_status_counts": {
+        "optimal": 58
+      },
+      "goal_velocity_audit_steps": 58,
+      "mean_max_feasible_goal_velocity_mps": 0.13964288304450911,
+      "min_max_feasible_goal_velocity_mps": -0.06792041270288683,
+      "mean_projected_goal_velocity_mps": 0.1396428810681633,
+      "mean_goal_velocity_feasibility_gap_mps": 1.976345791492243e-09,
+      "positive_max_feasible_goal_velocity_rate": 0.7931034482758621,
+      "safe_stop_steps": 0,
+      "filter_status_counts": {
+        "filtered": 58
+      },
+      "trace_path": "outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_priority_diag/traces/shard_1/episode_0001.csv"
+    }
+  ]
+}

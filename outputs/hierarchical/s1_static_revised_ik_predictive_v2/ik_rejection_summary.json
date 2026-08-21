@@ -1,0 +1,50 @@
+{
+  "episodes": 23,
+  "fallback_attempted_episodes": 11,
+  "total_rejections": {
+    "duplicate": 0,
+    "goal_error": 5760,
+    "joint_limit": 0,
+    "obstacle_clearance": 4624,
+    "obstacle_contact": 1374,
+    "self_collision": 0,
+    "short_solution": 0,
+    "solver_error": 0,
+    "workspace": 60
+  },
+  "rejections_by_failure_mode": {
+    "FILTER_STOP_TIMEOUT": {
+      "duplicate": 0,
+      "goal_error": 0,
+      "joint_limit": 0,
+      "obstacle_clearance": 233,
+      "obstacle_contact": 0,
+      "self_collision": 0,
+      "short_solution": 0,
+      "solver_error": 0,
+      "workspace": 0
+    },
+    "IK_NOT_FOUND": {
+      "duplicate": 0,
+      "goal_error": 5760,
+      "joint_limit": 0,
+      "obstacle_clearance": 3630,
+      "obstacle_contact": 1362,
+      "self_collision": 0,
+      "short_solution": 0,
+      "solver_error": 0,
+      "workspace": 0
+    },
+    "SUCCESS": {
+      "duplicate": 0,
+      "goal_error": 0,
+      "joint_limit": 0,
+      "obstacle_clearance": 761,
+      "obstacle_contact": 12,
+      "self_collision": 0,
+      "short_solution": 0,
+      "solver_error": 0,
+      "workspace": 60
+    }
+  }
+}

@@ -1,0 +1,23 @@
+# Target-shell IK diagnostic: after exact-target IK fails, query a bounded
+# shell inside the existing success tolerance. The final candidate is still
+# checked against the original goal and d_safe; no safety margin is relaxed.
+includes:
+  - s1_static_revised_ik_predictive_v2.yaml
+
+architecture_version: hierarchical_s1_revised_ik_shell_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_ik_shell_v1
+    parent_architecture: hierarchical_s1_revised_ik_predictive_v2
+    planner:
+      ik_target_shell_enabled: true
+      ik_target_shell_attempts: 32
+      ik_target_shell_radius_m: 0.04
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_shell_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json
+  nominal_only: true

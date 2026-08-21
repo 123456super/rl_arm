@@ -1,0 +1,19 @@
+# IK/predictive v2: keep the v1 experiment settings while adding explicit
+# rejection-reason diagnostics.  This is a hard-case diagnostic configuration;
+# it does not change task geometry, safety margins, horizon, or success rule.
+includes:
+  - s1_static_revised_ik_predictive.yaml
+
+architecture_version: hierarchical_s1_revised_ik_predictive_v2
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_ik_predictive_v2
+    parent_architecture: hierarchical_s1_revised_ik_predictive_v1
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_predictive_v2
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json
+  nominal_only: true

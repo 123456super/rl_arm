@@ -155,6 +155,8 @@ def main() -> None:
         filter_predictive_risk_times_s = []
         filter_jacobian_workspace_times_s = []
         filter_projection_times_s = []
+        filter_command_alignments = []
+        filter_command_sign_changes = 0
         recovery_steps = 0
         recovery_triggered = False
         recovery_success = False
@@ -232,6 +234,14 @@ def main() -> None:
             filter_qp_used += int(bool(info.get("safety_filter_qp_solver_used", False)))
             filter_qp_timeouts += int("time limit" in str(info.get("safety_filter_qp_solver_status", "")).lower())
             filter_compute_budget_stops += int(filter_status == "safe_stop_compute_budget")
+            command_alignment = float(
+                info.get("safety_filter_command_alignment_previous", float("nan"))
+            )
+            if np.isfinite(command_alignment):
+                filter_command_alignments.append(command_alignment)
+            filter_command_sign_changes += int(
+                bool(info.get("safety_filter_command_sign_change", False))
+            )
             if np.isfinite(intervention_norm):
                 filter_intervention_norms.append(intervention_norm)
             if np.isfinite(predictive_h_min):
@@ -332,6 +342,17 @@ def main() -> None:
                         "hierarchical_selected_path_min_clearance_m": info.get("hierarchical_selected_path_min_clearance_m", float("nan")),
                         "hierarchical_ik_candidate_errors_m": ";".join(str(value) for value in info.get("hierarchical_ik_candidate_errors_m", ())),
                         "hierarchical_ik_candidate_clearances_m": ";".join(str(value) for value in info.get("hierarchical_ik_candidate_clearances_m", ())),
+                        "hierarchical_ik_attempts_used": info.get("hierarchical_ik_attempts_used", 0),
+                        "hierarchical_ik_fallback_used": int(bool(info.get("hierarchical_ik_fallback_used", False))),
+                        "hierarchical_ik_fallback_attempted": int(bool(info.get("hierarchical_ik_fallback_attempted", False))),
+                        "hierarchical_ik_target_shell_attempted": int(bool(info.get("hierarchical_ik_target_shell_attempted", False))),
+                        "hierarchical_ik_target_shell_candidate_count": info.get("hierarchical_ik_target_shell_candidate_count", 0),
+                        "hierarchical_ik_rejection_counts": str(info.get("hierarchical_ik_rejection_counts", {})),
+                        "hierarchical_ik_min_goal_error_m": info.get("hierarchical_ik_min_goal_error_m", float("nan")),
+                        "hierarchical_ik_goal_reachable_count": info.get("hierarchical_ik_goal_reachable_count", 0),
+                        "hierarchical_ik_obstacle_free_goal_reachable_count": info.get("hierarchical_ik_obstacle_free_goal_reachable_count", 0),
+                        "hierarchical_selected_path_predictive_h_m": info.get("hierarchical_selected_path_predictive_h_m", float("nan")),
+                        "hierarchical_selected_path_filter_intervention": info.get("hierarchical_selected_path_filter_intervention", float("nan")),
                         "hierarchical_filter_intervention_ratio": info.get("hierarchical_filter_intervention_ratio", 0.0),
                         "hierarchical_filter_status": info.get("hierarchical_filter_status", "not_enabled"),
                         "hierarchical_servo_stall_steps": info.get("hierarchical_servo_stall_steps", 0),
@@ -382,6 +403,21 @@ def main() -> None:
                         "safety_filter_fallback_used": int(info.get("safety_filter_fallback_used", False)),
                         "safety_filter_qp_solver_used": int(info.get("safety_filter_qp_solver_used", False)),
                         "safety_filter_qp_solver_status": info.get("safety_filter_qp_solver_status", ""),
+                        "safety_filter_goal_velocity_primary_mps": info.get(
+                            "safety_filter_goal_velocity_primary_mps", float("nan")
+                        ),
+                        "safety_filter_goal_velocity_secondary_used": int(
+                            bool(info.get("safety_filter_goal_velocity_secondary_used", False))
+                        ),
+                        "safety_filter_goal_velocity_secondary_status": info.get(
+                            "safety_filter_goal_velocity_secondary_status", ""
+                        ),
+                        "safety_filter_command_alignment_previous": info.get(
+                            "safety_filter_command_alignment_previous", float("nan")
+                        ),
+                        "safety_filter_command_sign_change": int(
+                            bool(info.get("safety_filter_command_sign_change", False))
+                        ),
                         "safety_filter_fallback_stage": info.get("safety_filter_fallback_stage", ""),
                         "safety_filter_max_constraint_violation": info.get(
                             "safety_filter_max_constraint_violation", float("nan")
@@ -404,6 +440,18 @@ def main() -> None:
                         "safety_drift_by_link_mps": info.get("safety_drift_by_link_mps", ""),
                         "safety_constraint_residual_by_link_mps": info.get(
                             "safety_constraint_residual_by_link_mps", ""
+                        ),
+                        "safety_filter_goal_velocity_audit_status": info.get(
+                            "safety_filter_goal_velocity_audit_status", ""
+                        ),
+                        "safety_filter_max_feasible_goal_velocity_mps": info.get(
+                            "safety_filter_max_feasible_goal_velocity_mps", float("nan")
+                        ),
+                        "safety_filter_projected_goal_velocity_mps": info.get(
+                            "safety_filter_projected_goal_velocity_mps", float("nan")
+                        ),
+                        "safety_filter_goal_velocity_feasibility_gap_mps": info.get(
+                            "safety_filter_goal_velocity_feasibility_gap_mps", float("nan")
                         ),
                         "filter_obstacle_position_m": info.get("filter_obstacle_position_m", ""),
                         "filter_obstacle_velocity_mps": info.get("filter_obstacle_velocity_mps", ""),
@@ -505,6 +553,12 @@ def main() -> None:
                     float(np.mean(filter_solve_times_s)) if filter_solve_times_s else float("nan")
                 ),
                 "max_safety_filter_solve_time_s": max(filter_solve_times_s, default=float("nan")),
+                "mean_safety_filter_command_alignment_previous": (
+                    float(np.mean(filter_command_alignments)) if filter_command_alignments else float("nan")
+                ),
+                "safety_filter_command_sign_change_rate": (
+                    filter_command_sign_changes / max(step + 1, 1) if safety_filter_enabled else float("nan")
+                ),
                 "mean_safety_filter_predictive_risk_time_s": (
                     float(np.mean(filter_predictive_risk_times_s)) if filter_predictive_risk_times_s else float("nan")
                 ),
@@ -549,6 +603,17 @@ def main() -> None:
                 "hierarchical_selected_path_min_clearance_m": info.get("hierarchical_selected_path_min_clearance_m", float("nan")),
                 "hierarchical_ik_candidate_errors_m": ";".join(str(value) for value in info.get("hierarchical_ik_candidate_errors_m", ())),
                 "hierarchical_ik_candidate_clearances_m": ";".join(str(value) for value in info.get("hierarchical_ik_candidate_clearances_m", ())),
+                "hierarchical_ik_attempts_used": info.get("hierarchical_ik_attempts_used", 0),
+                "hierarchical_ik_fallback_used": int(bool(info.get("hierarchical_ik_fallback_used", False))),
+                "hierarchical_ik_fallback_attempted": int(bool(info.get("hierarchical_ik_fallback_attempted", False))),
+                "hierarchical_ik_target_shell_attempted": int(bool(info.get("hierarchical_ik_target_shell_attempted", False))),
+                "hierarchical_ik_target_shell_candidate_count": info.get("hierarchical_ik_target_shell_candidate_count", 0),
+                "hierarchical_ik_rejection_counts": str(info.get("hierarchical_ik_rejection_counts", {})),
+                "hierarchical_ik_min_goal_error_m": info.get("hierarchical_ik_min_goal_error_m", float("nan")),
+                "hierarchical_ik_goal_reachable_count": info.get("hierarchical_ik_goal_reachable_count", 0),
+                "hierarchical_ik_obstacle_free_goal_reachable_count": info.get("hierarchical_ik_obstacle_free_goal_reachable_count", 0),
+                "hierarchical_selected_path_predictive_h_m": info.get("hierarchical_selected_path_predictive_h_m", float("nan")),
+                "hierarchical_selected_path_filter_intervention": info.get("hierarchical_selected_path_filter_intervention", float("nan")),
                 "hierarchical_filter_intervention_ratio": info.get("hierarchical_filter_intervention_ratio", 0.0),
                 "hierarchical_filter_status": info.get("hierarchical_filter_status", "not_enabled"),
                 "hierarchical_servo_stall_steps": info.get("hierarchical_servo_stall_steps", 0),
@@ -621,6 +686,12 @@ def main() -> None:
         "mean_min_predictive_h_m": mean_finite(rows, "min_predictive_h_m"),
         "mean_safety_filter_solve_time_s": mean_finite(rows, "mean_safety_filter_solve_time_s"),
         "max_safety_filter_solve_time_s": max_finite(rows, "max_safety_filter_solve_time_s"),
+        "mean_safety_filter_command_alignment_previous": mean_finite(
+            rows, "mean_safety_filter_command_alignment_previous"
+        ),
+        "mean_safety_filter_command_sign_change_rate": mean_finite(
+            rows, "safety_filter_command_sign_change_rate"
+        ),
         "mean_safety_filter_predictive_risk_time_s": mean_finite(rows, "mean_safety_filter_predictive_risk_time_s"),
         "mean_safety_filter_jacobian_workspace_time_s": mean_finite(rows, "mean_safety_filter_jacobian_workspace_time_s"),
         "mean_safety_filter_projection_time_s": mean_finite(rows, "mean_safety_filter_projection_time_s"),

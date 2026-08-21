@@ -1,0 +1,19 @@
+# Diagnostic-only follow-up to ik_predictive_v2.  It does not change the
+# controller behavior; it records whether raw IK reaches the target and
+# whether the same candidate is valid when obstacle checks are removed.
+includes:
+  - s1_static_revised_ik_predictive_v2.yaml
+
+architecture_version: hierarchical_s1_revised_ik_feasibility_audit_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_ik_feasibility_audit_v1
+    parent_architecture: hierarchical_s1_revised_ik_predictive_v2
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_feasibility_audit_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json
+  nominal_only: true

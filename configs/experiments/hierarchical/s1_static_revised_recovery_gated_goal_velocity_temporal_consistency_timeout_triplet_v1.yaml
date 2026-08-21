@@ -1,0 +1,18 @@
+# Three-seed paired diagnostic after the 9027-only smoke.  The strict safety
+# set and all task/state-machine rules remain inherited unchanged.
+includes:
+  - s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_9027_v1.yaml
+
+architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_timeout_triplet_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_timeout_triplet_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_9027_v1
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_timeout_triplet_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_temporal_consistency_timeout_triplet.json
+  nominal_only: true

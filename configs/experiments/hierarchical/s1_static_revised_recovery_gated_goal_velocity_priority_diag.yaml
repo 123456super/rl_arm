@@ -1,0 +1,25 @@
+# Strict-filter objective ablation for the two timeout seeds.  All safety
+# rows, bounds, recovery/state-machine semantics and success rules are inherited
+# unchanged; only the feasible-set QP objective is changed.
+includes:
+  - s1_static_revised_recovery_gated_filter_timeout_diag.yaml
+
+architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_priority_diag_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_priority_diag_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_filter_timeout_diag_v1
+  safety_filter:
+    goal_velocity_priority_enabled: true
+    goal_velocity_priority_solver: linprog
+    goal_velocity_priority_weight: 1.0
+    goal_velocity_intervention_weight: 1.0e-4
+    goal_velocity_objective_scale: 10000.0
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_priority_diag
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_filter_timeout_cases.json
+  nominal_only: true
