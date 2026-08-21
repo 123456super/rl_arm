@@ -4,6 +4,7 @@
 # residual controller disabled, safety/recovery/relaxation disabled. The only
 # task changes are terminal progress shaping and a focused-reset curriculum for
 # the 39 reset seeds that produced 45 candidate-path-found timeout episodes.
+# Static-obstacle repair preset for candidate-path-found focused runs.
 includes:
   - s1_static_obstacle_finetune_base.yaml
 

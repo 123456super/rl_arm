@@ -1,0 +1,9 @@
+# S1-R independent training seed 4301.
+includes:
+  - s1_static.yaml
+
+seed: 4301
+
+train:
+  output_dir: outputs/hierarchical/s1_static/seed_4301
+  run_name: hierarchical_residual_seed4301_steps300000

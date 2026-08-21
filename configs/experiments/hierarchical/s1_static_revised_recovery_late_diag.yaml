@@ -1,0 +1,23 @@
+# Diagnostic ablation: retain active recovery but trigger it only at the
+# strict-filter boundary/very short TTC. This separates early recovery
+# takeover from genuine safety infeasibility.
+includes:
+  - s1_static_revised.yaml
+
+architecture_version: hierarchical_s1_revised_recovery_late_diag_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_recovery_late_diag_v1
+    parent_architecture: hierarchical_s1_revised_v2
+  safety_filter:
+    recovery_enter_margin_m: 0.0
+    recovery_ttc_threshold_s: 0.05
+    recovery_exit_margin_m: 0.02
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_recovery_late_diag
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json
+  nominal_only: true

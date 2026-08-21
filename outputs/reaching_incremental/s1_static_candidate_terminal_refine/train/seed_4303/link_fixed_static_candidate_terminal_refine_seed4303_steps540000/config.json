@@ -414,7 +414,7 @@
     "batch_size": 8
   },
   "seed": 4303,
-  "device": "cuda:3",
+  "device": "cuda:4",
   "device_selection": {
     "fallback_to_cpu": true,
     "candidate_ids": null,
@@ -428,17 +428,17 @@
     "metric": "success_rate",
     "seed_manifest": "configs/experiments/reaching_recovery/manifests/v1_validation.json"
   },
-  "git_revision": "7e795d7c6ece8c088dab4322bdf07f7c78ecd0fe",
+  "git_revision": "ab73e567035c194cc2a61563419aadf2e90aad5a",
   "resume": {
     "actor": "outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4303/link_fixed_static_obstacle_finetune_seed4303_steps420000/actor_step_420000.pt",
-    "state": "outputs/reaching_incremental/s1_static_obstacle_finetune/train/seed_4303/link_fixed_static_obstacle_finetune_seed4303_steps420000/agent_state_step_420000.pt",
+    "state": null,
     "replay": null,
     "start_step": 420000,
-    "agent_state_reset": false,
+    "agent_state_reset": true,
     "reward_critics_reset": true,
-    "cost_critics_reset": false,
+    "cost_critics_reset": true,
     "optimizers_loaded": false,
-    "agent_state_warmup_steps": 0,
+    "agent_state_warmup_steps": 20000,
     "resume_replay_warmup_steps": 20000,
     "resume_critic_warmup_steps": 20000
   }

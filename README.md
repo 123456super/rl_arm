@@ -1,8 +1,8 @@
 # Link-Level Dynamic Risk SAC
 
-本项目是 UR5 在单动态球形障碍物场景下的连杆级预测风险、安全过滤与安全强化学习仿真原型。阶段一主比较已经冻结为预研究基线；当前 P3 正在按统一速度单位和碰撞事件口径重新建立实验基线，尚无新方法最终结论。
+本项目是 UR5 在单静态/动态球形障碍物下的分层 Residual 安全强化学习仿真原型。当前冻结架构为“多初值 IK + RRT-Connect → 轨迹跟踪/terminal DLS servo → 风险调节 Residual SAC → 连杆级预测安全过滤”。旧 direct-SAC 结果保留为历史对照；新架构已接入代码，但尚无正式多 seed final 结论。
 
-项目现状、结果可信度和后续协议统一从 [文档入口](docs/README.md) 阅读。旧论文结论、论文材料和部署预检保留为阶段一历史材料。
+项目现状、结果可信度和后续协议统一从 [文档入口](docs/README.md) 阅读。架构调整前的文档、配置与结果证据见 [legacy direct-SAC 归档](docs/archive/legacy_direct_sac/README.md)。
 
 ## 环境
 
@@ -54,7 +54,7 @@ conda run -n rl python scripts/smoke_test.py
 
 ## 训练
 
-详细训练流程见 [历史训练参考](docs/reference/training_guide.md)；当前状态、结果边界和下一步决策以 [文档入口](docs/README.md) 为准。
+当前训练与评估规则见 [分层控制实验协议](docs/current/hierarchical_control_protocol.md)；结果边界和下一步决策以 [文档入口](docs/README.md) 为准。
 
 训练命令固定为读取 YAML 配置，方法、步数、seed、输出目录都在配置文件里改：
 
@@ -74,6 +74,16 @@ conda run -n rl python scripts/train.py --config configs/experiments/ur5e_short_
 ```bash
 python scripts/evaluate.py --checkpoint outputs/runs/某次训练目录/actor.pt --episodes 20
 ```
+
+先评估不含学习修正的规划/跟踪基座，无需 checkpoint：
+
+```bash
+conda run -n rl python scripts/evaluate.py \
+  --config configs/experiments/hierarchical/s1_static.yaml \
+  --nominal-only --episodes 20 --output outputs/hierarchical/s1_nominal.csv
+```
+
+新架构训练使用 `configs/experiments/hierarchical/s1_static.yaml`、`s2_dynamic.yaml`、`s3_robust_dynamic.yaml`。旧 checkpoint/replay 的动作语义不同，代码会拒绝混用。
 
 如需导出典型 episode 曲线数据：
 
@@ -129,5 +139,6 @@ conda run -n rl python scripts/train.py --config configs/experiments/ur5_short_t
 - `link_fixed`: SAC-LinkDynamicRisk-FixedPenalty-FixedSmooth；当 `sac.fixed_risk_penalty: 1.0` 时，论文中记为 `link_fixed_penalty1`
 - `ldrc_fixed`: LDRC-SAC-LinkDynamicRisk-FixedSmooth
 - `ldrc_adaptive`: LDRC-SAC-LinkDynamicRisk-AdaptiveSmooth（历史失败消融，不是部署候选）
+- `hierarchical_residual`: 冻结论文架构下的 risk-conditioned Residual SAC；必须与 `env.hierarchical_control.enabled=true` 配套
 
 当前代码定位为论文仿真实验原型。真实 UR5/RGB-D 部署需要接入实际机器人控制接口、相机标定和障碍物检测模块后再使用。

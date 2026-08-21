@@ -62,13 +62,25 @@ train_seed() {
   local seed="$1"
   case "${seed}" in
     4301)
-      "${PYTHON_CMD[@]}" scripts/train.py --config "${CONFIG_4301}" --resume-actor "${S1_ACTOR_4301}" --resume-state "${S1_STATE_4301}" --start-step 440000 --no-restore-optimizers
+      if [[ -f "${S1_STATE_4301}" ]]; then
+        "${PYTHON_CMD[@]}" scripts/train.py --config "${CONFIG_4301}" --resume-actor "${S1_ACTOR_4301}" --resume-state "${S1_STATE_4301}" --start-step 440000 --no-restore-optimizers
+      else
+        "${PYTHON_CMD[@]}" scripts/train.py --config "${CONFIG_4301}" --resume-actor "${S1_ACTOR_4301}" --reset-agent-state --reset-state-warmup-steps 20000 --start-step 440000
+      fi
       ;;
     4302)
-      "${PYTHON_CMD[@]}" scripts/train.py --config "${CONFIG_4302}" --resume-actor "${S1_ACTOR_4302}" --resume-state "${S1_STATE_4302}" --start-step 480000 --no-restore-optimizers
+      if [[ -f "${S1_STATE_4302}" ]]; then
+        "${PYTHON_CMD[@]}" scripts/train.py --config "${CONFIG_4302}" --resume-actor "${S1_ACTOR_4302}" --resume-state "${S1_STATE_4302}" --start-step 480000 --no-restore-optimizers
+      else
+        "${PYTHON_CMD[@]}" scripts/train.py --config "${CONFIG_4302}" --resume-actor "${S1_ACTOR_4302}" --reset-agent-state --reset-state-warmup-steps 20000 --start-step 480000
+      fi
       ;;
     4303)
-      "${PYTHON_CMD[@]}" scripts/train.py --config "${CONFIG_4303}" --resume-actor "${S1_ACTOR_4303}" --resume-state "${S1_STATE_4303}" --start-step 420000 --no-restore-optimizers
+      if [[ -f "${S1_STATE_4303}" ]]; then
+        "${PYTHON_CMD[@]}" scripts/train.py --config "${CONFIG_4303}" --resume-actor "${S1_ACTOR_4303}" --resume-state "${S1_STATE_4303}" --start-step 420000 --no-restore-optimizers
+      else
+        "${PYTHON_CMD[@]}" scripts/train.py --config "${CONFIG_4303}" --resume-actor "${S1_ACTOR_4303}" --reset-agent-state --reset-state-warmup-steps 20000 --start-step 420000
+      fi
       ;;
     *) echo "unknown seed: ${seed}" >&2; exit 2 ;;
   esac

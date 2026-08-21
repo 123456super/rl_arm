@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+# 十分丰富
 from dataclasses import replace
 from itertools import product
 from pathlib import Path
@@ -19,6 +19,7 @@ from rl_risk_sac.utils.predictive_risk import (
     PredictiveRiskConfig,
     compute_predictive_link_risk,
 )
+from rl_risk_sac.utils.motion_planning import RRTConnectConfig, RRTConnectPlanner
 from rl_risk_sac.utils.risk import LinkRisk, RiskConfig, closest_point_on_segment, compute_link_risk
 from rl_risk_sac.utils.safety_filter import (
     LinearVelocityConstraints,
@@ -31,8 +32,9 @@ from rl_risk_sac.utils.safety_filter import (
 )
 
 
-METHODS = {"ee_fixed", "link_fixed", "ldrc_fixed", "ldrc_adaptive"}
+METHODS = {"ee_fixed", "link_fixed", "ldrc_fixed", "ldrc_adaptive", "hierarchical_residual"}
 RISK_REPRESENTATIONS = {"current", "predictive", "robust_predictive"}
+HIERARCHICAL_STATES = ("TRACK", "AVOID_HOLD", "REPLAN", "SERVO", "PLAN_FAILED")
 
 
 class UR5DynamicObstacleEnv(gym.Env):
@@ -68,6 +70,40 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.execution_cfg = env_cfg.get("execution", {})
         self.residual_control_cfg = env_cfg.get("residual_control", {})
         self.residual_control_enabled = bool(self.residual_control_cfg.get("enabled", True))
+        self.hierarchical_cfg = env_cfg.get("hierarchical_control", {})
+        self.hierarchical_enabled = bool(self.hierarchical_cfg.get("enabled", False))
+        self.hierarchical_planner_cfg = self.hierarchical_cfg.get("planner", {})
+        self.hierarchical_tracker_cfg = self.hierarchical_cfg.get("tracker", {})
+        self.hierarchical_residual_cfg = self.hierarchical_cfg.get("residual", {})
+        self.hierarchical_state = "TRACK"
+        self.hierarchical_path: list[np.ndarray] = []
+        self.hierarchical_waypoint_index = 0
+        self.hierarchical_plan_reason = "disabled"
+        self.hierarchical_plan_iterations = 0
+        self.hierarchical_planning_time_s = 0.0
+        self.hierarchical_planning_time_total_s = 0.0
+        self.hierarchical_ik_candidate_count = 0
+        self.hierarchical_plan_count = 0
+        self.hierarchical_replan_count = 0
+        self.hierarchical_last_plan_step = 0
+        self.hierarchical_hold_steps = 0
+        self.hierarchical_consecutive_hold_steps = 0
+        configured_joint_count = len(self.robot_cfg["joint_names"])
+        self.hierarchical_last_nominal_qdot = np.zeros(configured_joint_count, dtype=np.float32)
+        self.hierarchical_last_residual_budget = 1.0
+        self.hierarchical_last_progress = 0.0
+        self.hierarchical_last_waypoint_error = np.zeros(configured_joint_count, dtype=np.float32)
+        self.hierarchical_selected_candidate_index = -1
+        self.hierarchical_selected_path_length_rad = float("nan")
+        self.hierarchical_selected_path_min_clearance_m = float("nan")
+        self.hierarchical_ik_candidate_errors_m: list[float] = []
+        self.hierarchical_ik_candidate_clearances_m: list[float] = []
+        self._hierarchical_planning_start_q: np.ndarray | None = None
+        self.hierarchical_last_filter_intervention_ratio = 0.0
+        self.hierarchical_last_filter_status = "not_enabled"
+        self.hierarchical_last_filtered_qdot = np.zeros(configured_joint_count, dtype=np.float32)
+        self.hierarchical_servo_stall_steps = 0
+        self.hierarchical_servo_stall_replans = 0
         self.safety_filter_cfg = env_cfg.get("safety_filter", {})
         self.safety_filter_enabled = bool(self.safety_filter_cfg.get("enabled", False))
         self.obstacle_enabled = bool(self.obstacle_cfg.get("enabled", True))
@@ -165,6 +201,10 @@ class UR5DynamicObstacleEnv(gym.Env):
         obs_dim = self.joint_count * 3 + self.capsule_model.count * 7 + 7
         if self.residual_control_enabled:
             obs_dim += self.residual_observation_dim
+        self.hierarchical_state_names = HIERARCHICAL_STATES
+        self.hierarchical_observation_dim = self.joint_count * 2 + 1 + 1 + len(HIERARCHICAL_STATES)
+        if self.hierarchical_enabled:
+            obs_dim += self.hierarchical_observation_dim
         obs_bound = float(self.observation_cfg["space_bound"])
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.joint_count,), dtype=np.float32)
         self.observation_space = spaces.Box(low=-obs_bound, high=obs_bound, shape=(obs_dim,), dtype=np.float32)
@@ -182,6 +222,7 @@ class UR5DynamicObstacleEnv(gym.Env):
             str(self.robot_urdf),
             basePosition=self.robot_cfg["base_position"],
             useFixedBase=True,
+            flags=(p.URDF_USE_SELF_COLLISION_EXCLUDE_PARENT if self.hierarchical_enabled else 0),
             physicsClientId=self.physics_client_id,
         )
         self._resolve_robot_references()
@@ -213,6 +254,36 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.safe_stop_infeasible_last_step = None
         self.safe_stop_infeasible_first_h_m = float("nan")
         self.safe_stop_infeasible_last_h_m = float("nan")
+        self.hierarchical_state = "TRACK"
+        self.hierarchical_path = []
+        self.hierarchical_waypoint_index = 0
+        self.hierarchical_plan_reason = "disabled"
+        self.hierarchical_plan_iterations = 0
+        self.hierarchical_planning_time_s = 0.0
+        self.hierarchical_planning_time_total_s = 0.0
+        self.hierarchical_ik_candidate_count = 0
+        self.hierarchical_plan_count = 0
+        self.hierarchical_replan_count = 0
+        self.hierarchical_last_plan_step = 0
+        self.hierarchical_hold_steps = 0
+        self.hierarchical_consecutive_hold_steps = 0
+        self.hierarchical_last_nominal_qdot = np.zeros(self.joint_count, dtype=np.float32)
+        self.hierarchical_last_residual_budget = 1.0
+        self.hierarchical_last_progress = 0.0
+        self.hierarchical_last_waypoint_error = np.zeros(self.joint_count, dtype=np.float32)
+        self.hierarchical_selected_candidate_index = -1
+        self.hierarchical_selected_path_length_rad = float("nan")
+        self.hierarchical_selected_path_min_clearance_m = float("nan")
+        self.hierarchical_ik_candidate_errors_m = []
+        self.hierarchical_ik_candidate_clearances_m = []
+        self._hierarchical_planning_start_q = None
+        self.hierarchical_last_filter_intervention_ratio = 0.0
+        self.hierarchical_last_filter_status = "not_enabled"
+        self.hierarchical_last_filtered_qdot = np.zeros(self.joint_count, dtype=np.float32)
+        self.hierarchical_servo_stall_steps = 0
+        self.hierarchical_servo_stall_replans = 0
+        if self.hierarchical_enabled:
+            self._initialize_hierarchical_plan()
         if self.safety_filter_enabled:
             initial_predictive_risk = self._compute_predictive_risk()
             if initial_predictive_risk.usable:
@@ -222,6 +293,427 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.prev_goal_error_norm = float(np.linalg.norm(self._goal_error()))
         obs, info = self._get_obs_and_info()
         return obs, info
+
+    def _initialize_hierarchical_plan(self) -> None:
+        planning_started_at = perf_counter()
+        self.hierarchical_plan_count += 1
+        self.hierarchical_selected_candidate_index = -1
+        self.hierarchical_selected_path_length_rad = float("nan")
+        self.hierarchical_selected_path_min_clearance_m = float("nan")
+        q, _ = self._joint_state()
+        self._hierarchical_planning_start_q = np.asarray(q, dtype=np.float64).copy()
+        lower, upper = self._joint_position_limits()
+        ik_candidates = self._ik_goal_candidates(q, lower, upper)
+        self.hierarchical_ik_candidate_count = len(ik_candidates)
+        if not ik_candidates:
+            self.hierarchical_state = "PLAN_FAILED"
+            self.hierarchical_path = []
+            self.hierarchical_plan_reason = "ik_not_found"
+            self.hierarchical_planning_time_s = perf_counter() - planning_started_at
+            self.hierarchical_planning_time_total_s += self.hierarchical_planning_time_s
+            self._hierarchical_planning_start_q = None
+            return
+
+        planner_cfg = RRTConnectConfig(
+            step_size_rad=float(self.hierarchical_planner_cfg.get("step_size_rad", 0.25)),
+            edge_resolution_rad=float(self.hierarchical_planner_cfg.get("edge_resolution_rad", 0.06)),
+            max_iterations=int(self.hierarchical_planner_cfg.get("max_iterations", 1200)),
+            goal_sample_probability=float(self.hierarchical_planner_cfg.get("goal_sample_probability", 0.10)),
+        )
+        successful_plans: list[tuple[int, Any, float, float]] = []
+        best_result = None
+        for candidate_index, candidate in enumerate(ik_candidates):
+            planner = RRTConnectPlanner(
+                lower,
+                upper,
+                self._planning_state_is_valid,
+                config=planner_cfg,
+                edge_is_valid=self._planning_edge_is_valid,
+                rng=self.rng,
+            )
+            result = planner.plan(q, candidate)
+            if result.success:
+                path_length, min_clearance = self._planning_path_metrics(result.path)
+                successful_plans.append((candidate_index, result, path_length, min_clearance))
+                if str(self.hierarchical_planner_cfg.get("candidate_selection", "first_success")) == "first_success":
+                    break
+            if best_result is None or result.iterations < best_result.iterations:
+                best_result = result
+        if successful_plans:
+            selection = str(self.hierarchical_planner_cfg.get("candidate_selection", "clearance_then_length"))
+            if selection == "length_then_clearance":
+                successful_plans.sort(key=lambda item: (item[2], -item[3], item[0]))
+            else:
+                successful_plans.sort(key=lambda item: (-item[3], item[2], item[0]))
+            candidate_index, best_result, path_length, min_clearance = successful_plans[0]
+            self.hierarchical_selected_candidate_index = candidate_index
+            self.hierarchical_selected_path_length_rad = path_length
+            self.hierarchical_selected_path_min_clearance_m = min_clearance
+        if not successful_plans:
+            self.hierarchical_state = "PLAN_FAILED"
+            self.hierarchical_path = []
+            self.hierarchical_plan_reason = "not_found"
+            self.hierarchical_plan_iterations = int(best_result.iterations if best_result else 0)
+            self.hierarchical_planning_time_s = perf_counter() - planning_started_at
+            self.hierarchical_planning_time_total_s += self.hierarchical_planning_time_s
+            self._hierarchical_planning_start_q = None
+            return
+        self.hierarchical_path = [np.asarray(point, dtype=np.float32) for point in best_result.path]
+        self.hierarchical_waypoint_index = 1 if len(self.hierarchical_path) > 1 else 0
+        self.hierarchical_state = "TRACK"
+        self.hierarchical_plan_reason = best_result.reason
+        self.hierarchical_plan_iterations = int(best_result.iterations)
+        self.hierarchical_planning_time_s = perf_counter() - planning_started_at
+        self.hierarchical_planning_time_total_s += self.hierarchical_planning_time_s
+        self._hierarchical_planning_start_q = None
+
+    def _planning_path_metrics(self, path: tuple[np.ndarray, ...] | list[np.ndarray]) -> tuple[float, float]:
+        """Return joint-space path length and minimum capsule clearance.
+
+        This diagnostic evaluation restores the live simulator state after every
+        path, so selecting a safer candidate cannot perturb the episode.
+        """
+        if len(path) < 2:
+            return 0.0, float("inf")
+        length = float(sum(np.linalg.norm(np.asarray(end) - np.asarray(start)) for start, end in zip(path[:-1], path[1:])))
+        saved_q, saved_qdot = self._joint_state()
+        clearances: list[float] = []
+        try:
+            for point in path:
+                for joint_id, value in zip(self.joint_ids, point, strict=True):
+                    p.resetJointState(self.robot_id, joint_id, float(value), targetVelocity=0.0, physicsClientId=self.physics_client_id)
+                p.performCollisionDetection(physicsClientId=self.physics_client_id)
+                clearances.append(float(self._compute_risk().d_min))
+        finally:
+            for joint_id, value, velocity in zip(self.joint_ids, saved_q, saved_qdot, strict=True):
+                p.resetJointState(self.robot_id, joint_id, float(value), targetVelocity=float(velocity), physicsClientId=self.physics_client_id)
+        return length, min(clearances, default=float("inf"))
+
+    def _ik_goal_candidates(self, current_q: np.ndarray, lower: np.ndarray, upper: np.ndarray) -> list[np.ndarray]:
+        position = np.asarray(self.goal, dtype=np.float64)
+        attempts = max(1, int(self.hierarchical_planner_cfg.get("ik_attempts", 16)))
+        candidates: list[np.ndarray] = []
+        rest_poses = [np.asarray(current_q, dtype=np.float64)]
+        default_pose = np.asarray(self.robot_cfg["reset"]["default_joint_positions"], dtype=np.float64)
+        if bool(self.hierarchical_planner_cfg.get("use_structured_rest_poses", False)):
+            midpoint = 0.5 * (lower + upper)
+            structured = [default_pose, midpoint, np.clip(0.5 * (current_q + midpoint), lower, upper)]
+            structured.extend([np.clip(default_pose + sign * 0.35 * (upper - lower), lower, upper) for sign in (-1.0, 1.0)])
+            rest_poses.extend(structured)
+        else:
+            rest_poses.append(default_pose)
+        random_count = max(0, attempts - len(rest_poses))
+        if random_count:
+            rest_poses.extend(self.rng.uniform(lower, upper, size=(random_count, self.joint_count)))
+        goal_tolerance = float(self.hierarchical_planner_cfg.get("ik_goal_tolerance_m", 0.02))
+        self.hierarchical_ik_candidate_errors_m = []
+        self.hierarchical_ik_candidate_clearances_m = []
+        for rest in rest_poses[:attempts]:
+            try:
+                solution = p.calculateInverseKinematics(
+                    self.robot_id,
+                    self.tool_link_id,
+                    position.tolist(),
+                    lowerLimits=lower.tolist(),
+                    upperLimits=upper.tolist(),
+                    jointRanges=(upper - lower).tolist(),
+                    restPoses=np.asarray(rest, dtype=np.float64).tolist(),
+                    maxNumIterations=int(self.hierarchical_planner_cfg.get("ik_max_iterations", 100)),
+                    residualThreshold=float(self.hierarchical_planner_cfg.get("ik_residual_threshold", 1.0e-4)),
+                    physicsClientId=self.physics_client_id,
+                )
+            except (TypeError, ValueError, p.error):
+                continue
+            solution = np.asarray(solution, dtype=np.float64)
+            if solution.size <= max(self.control_jacobian_columns):
+                continue
+            candidate = solution[self.control_jacobian_columns]
+            candidate = np.clip(candidate, lower, upper)
+            if any(np.linalg.norm(candidate - previous) < 1.0e-3 for previous in candidates):
+                continue
+            error = self._planning_goal_error(candidate)
+            if self._planning_state_is_valid(candidate) and error <= goal_tolerance:
+                candidates.append(candidate)
+                self.hierarchical_ik_candidate_errors_m.append(error)
+                self.hierarchical_ik_candidate_clearances_m.append(float(self._planning_clearance(candidate)))
+        if bool(self.hierarchical_planner_cfg.get("use_dls_fallback", False)):
+            dls_candidate = self._dls_position_ik(current_q, lower, upper)
+            if dls_candidate is not None and not any(np.linalg.norm(dls_candidate - previous) < 1.0e-3 for previous in candidates):
+                error = self._planning_goal_error(dls_candidate)
+                if self._planning_state_is_valid(dls_candidate) and error <= goal_tolerance:
+                    candidates.append(dls_candidate)
+                    self.hierarchical_ik_candidate_errors_m.append(error)
+                    self.hierarchical_ik_candidate_clearances_m.append(float(self._planning_clearance(dls_candidate)))
+        return candidates
+
+    def _planning_clearance(self, q: np.ndarray) -> float:
+        saved_q, saved_qdot = self._joint_state()
+        try:
+            for joint_id, value in zip(self.joint_ids, q, strict=True):
+                p.resetJointState(self.robot_id, joint_id, float(value), targetVelocity=0.0, physicsClientId=self.physics_client_id)
+            p.performCollisionDetection(physicsClientId=self.physics_client_id)
+            return float(self._compute_risk().d_min)
+        finally:
+            for joint_id, value, velocity in zip(self.joint_ids, saved_q, saved_qdot, strict=True):
+                p.resetJointState(self.robot_id, joint_id, float(value), targetVelocity=float(velocity), physicsClientId=self.physics_client_id)
+
+    def _dls_position_ik(self, seed: np.ndarray, lower: np.ndarray, upper: np.ndarray) -> np.ndarray | None:
+        """Small position-only damped-least-squares fallback for difficult IK seeds."""
+        q = np.clip(np.asarray(seed, dtype=np.float64).copy(), lower, upper)
+        iterations = int(self.hierarchical_planner_cfg.get("dls_max_iterations", 240))
+        damping = float(self.hierarchical_planner_cfg.get("dls_damping", 0.08))
+        step = float(self.hierarchical_planner_cfg.get("dls_step_size", 0.7))
+        saved_q, saved_qdot = self._joint_state()
+        try:
+            for _ in range(max(1, iterations)):
+                for joint_id, value in zip(self.joint_ids, q, strict=True):
+                    p.resetJointState(self.robot_id, joint_id, float(value), targetVelocity=0.0, physicsClientId=self.physics_client_id)
+                error = np.asarray(self.goal, dtype=np.float64) - np.asarray(self._end_effector_state()[0], dtype=np.float64)
+                if np.linalg.norm(error) <= float(self.hierarchical_planner_cfg.get("dls_goal_tolerance_m", 0.01)):
+                    return q.copy()
+                jacobian = self._link_origin_jacobian(self.tool_link_id)
+                update = jacobian.T @ np.linalg.solve(jacobian @ jacobian.T + damping**2 * np.eye(3), error)
+                q = np.clip(q + step * update, lower, upper)
+            return q if self._planning_goal_error(q) <= float(self.hierarchical_planner_cfg.get("dls_goal_tolerance_m", 0.01)) else None
+        finally:
+            for joint_id, value, velocity in zip(self.joint_ids, saved_q, saved_qdot, strict=True):
+                p.resetJointState(self.robot_id, joint_id, float(value), targetVelocity=float(velocity), physicsClientId=self.physics_client_id)
+
+    def _planning_goal_error(self, q: np.ndarray) -> float:
+        saved_q, saved_qdot = self._joint_state()
+        try:
+            for joint_id, value in zip(self.joint_ids, q, strict=True):
+                p.resetJointState(self.robot_id, joint_id, float(value), targetVelocity=0.0, physicsClientId=self.physics_client_id)
+            ee_position, _ = self._end_effector_state()
+            return float(np.linalg.norm(np.asarray(self.goal, dtype=np.float64) - ee_position))
+        finally:
+            for joint_id, value, velocity in zip(self.joint_ids, saved_q, saved_qdot, strict=True):
+                p.resetJointState(self.robot_id, joint_id, float(value), targetVelocity=float(velocity), physicsClientId=self.physics_client_id)
+
+    def _planning_state_is_valid(self, q: np.ndarray) -> bool:
+        q = np.asarray(q, dtype=np.float64)
+        lower, upper = self._joint_position_limits()
+        if q.shape != lower.shape or not np.isfinite(q).all() or np.any(q < lower) or np.any(q > upper):
+            return False
+        saved_q, saved_qdot = self._joint_state()
+        try:
+            for joint_id, value in zip(self.joint_ids, q, strict=True):
+                p.resetJointState(self.robot_id, joint_id, float(value), targetVelocity=0.0, physicsClientId=self.physics_client_id)
+            ee_position, _ = self._end_effector_state()
+            boundary_tolerance = float(self.hierarchical_planner_cfg.get("boundary_start_tolerance_m", 0.0))
+            is_planning_start = self._hierarchical_planning_start_q is not None and np.linalg.norm(q - self._hierarchical_planning_start_q) <= 1.0e-8
+            if any(
+                not (float(limits[0]) - (boundary_tolerance if is_planning_start else 0.0) <= float(ee_position[index]) <= float(limits[1]) + (boundary_tolerance if is_planning_start else 0.0))
+                for index, limits in enumerate((self.workspace["x"], self.workspace["y"], self.workspace["z"]))
+            ):
+                return False
+            p.performCollisionDetection(physicsClientId=self.physics_client_id)
+            if self.obstacle_enabled:
+                clearance = float(self.hierarchical_planner_cfg.get("clearance_m", self.risk_config.d_safe))
+                if self._compute_risk().d_min < clearance:
+                    return False
+                if self.obstacle_id is not None and p.getContactPoints(
+                    bodyA=self.robot_id, bodyB=self.obstacle_id, physicsClientId=self.physics_client_id
+                ):
+                    return False
+            self_collision = p.getContactPoints(bodyA=self.robot_id, bodyB=self.robot_id, physicsClientId=self.physics_client_id)
+            return not bool(self_collision)
+        finally:
+            for joint_id, value, velocity in zip(self.joint_ids, saved_q, saved_qdot, strict=True):
+                p.resetJointState(self.robot_id, joint_id, float(value), targetVelocity=float(velocity), physicsClientId=self.physics_client_id)
+
+    def _planning_edge_is_valid(self, start: np.ndarray, end: np.ndarray) -> bool:
+        start = np.asarray(start, dtype=np.float64)
+        end = np.asarray(end, dtype=np.float64)
+        resolution = float(self.hierarchical_planner_cfg.get("edge_resolution_rad", 0.06))
+        segments = max(1, int(np.ceil(np.max(np.abs(end - start), initial=0.0) / resolution)))
+        return all(
+            self._planning_state_is_valid(start + fraction * (end - start))
+            for fraction in np.linspace(0.0, 1.0, segments + 1)[1:]
+        )
+
+    def _hierarchical_nominal_command(
+        self,
+        current_risk: LinkRisk,
+        *,
+        update_state: bool = True,
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        q, _ = self._joint_state()
+        retry_interval = int(self.hierarchical_cfg.get("plan_retry_interval_steps", 20))
+        if (
+            update_state
+            and self.hierarchical_state == "PLAN_FAILED"
+            and self.step_count - self.hierarchical_last_plan_step >= retry_interval
+        ):
+            self._initialize_hierarchical_plan()
+            self.hierarchical_last_plan_step = self.step_count
+        if update_state and self.hierarchical_state == "REPLAN":
+            self.hierarchical_replan_count += 1
+            self.hierarchical_consecutive_hold_steps = 0
+            self._initialize_hierarchical_plan()
+            self.hierarchical_last_plan_step = self.step_count
+        predictive_h = float("inf")
+        if self.obstacle_enabled and self.safety_filter_enabled:
+            predictive = self._compute_predictive_risk()
+            if predictive.usable:
+                predictive_h = float(np.min(predictive.safety_functions_m))
+        hold_margin = float(self.hierarchical_cfg.get("hold_margin_m", 0.04))
+        release_margin = float(self.hierarchical_cfg.get("release_margin_m", 0.08))
+        if update_state:
+            if self.hierarchical_state in {"TRACK", "SERVO"} and predictive_h <= hold_margin:
+                self.hierarchical_state = "AVOID_HOLD"
+                self.hierarchical_consecutive_hold_steps = 0
+            if self.hierarchical_state == "AVOID_HOLD":
+                self.hierarchical_hold_steps += 1
+                self.hierarchical_consecutive_hold_steps += 1
+                replan_after = int(self.hierarchical_cfg.get("replan_after_hold_steps", 8))
+                if predictive_h >= release_margin or self.hierarchical_consecutive_hold_steps >= replan_after:
+                    self.hierarchical_state = "REPLAN"
+        if not self.hierarchical_path:
+            self.hierarchical_last_nominal_qdot = np.zeros(self.joint_count, dtype=np.float32)
+            self.hierarchical_last_waypoint_error = np.zeros(self.joint_count, dtype=np.float32)
+            self.hierarchical_last_progress = 0.0
+            self.hierarchical_last_residual_budget = 0.0
+            return np.zeros(self.joint_count, dtype=np.float32), self._hierarchical_info(current_risk, predictive_h)
+        index = min(self.hierarchical_waypoint_index, len(self.hierarchical_path) - 1)
+        waypoint = self.hierarchical_path[index]
+        waypoint_error = waypoint - q
+        tolerance = float(self.hierarchical_tracker_cfg.get("waypoint_tolerance_rad", 0.08))
+        while update_state and index < len(self.hierarchical_path) - 1 and np.linalg.norm(waypoint_error) <= tolerance:
+            index += 1
+            waypoint = self.hierarchical_path[index]
+            waypoint_error = waypoint - q
+        if update_state:
+            self.hierarchical_waypoint_index = index
+        if update_state and index == len(self.hierarchical_path) - 1 and np.linalg.norm(self._goal_error()) <= float(self.hierarchical_tracker_cfg.get("servo_trigger_m", 0.10)):
+            self.hierarchical_state = "SERVO"
+        if update_state and self.hierarchical_state == "SERVO":
+            goal_error_norm = float(np.linalg.norm(self._goal_error()))
+            improvement = float(self.prev_goal_error_norm - goal_error_norm)
+            improvement_threshold = float(self.hierarchical_tracker_cfg.get("servo_stall_improvement_m", 0.002))
+            if improvement <= improvement_threshold:
+                self.hierarchical_servo_stall_steps += 1
+            else:
+                self.hierarchical_servo_stall_steps = 0
+            stall_steps = int(self.hierarchical_tracker_cfg.get("servo_stall_steps", 20))
+            filter_threshold = float(self.hierarchical_tracker_cfg.get("servo_stall_filter_ratio", 0.20))
+            replan_limit = int(self.hierarchical_tracker_cfg.get("servo_stall_replan_limit", 2))
+            if (
+                self.hierarchical_servo_stall_steps >= stall_steps
+                and self.hierarchical_last_filter_intervention_ratio >= filter_threshold
+                and self.hierarchical_servo_stall_replans < replan_limit
+            ):
+                self.hierarchical_state = "REPLAN"
+        if update_state and self.hierarchical_state == "REPLAN":
+            self.hierarchical_replan_count += 1
+            if self.hierarchical_servo_stall_steps > 0:
+                self.hierarchical_servo_stall_replans += 1
+            self.hierarchical_servo_stall_steps = 0
+            self.hierarchical_consecutive_hold_steps = 0
+            self._initialize_hierarchical_plan()
+            self.hierarchical_last_plan_step = self.step_count
+        if self.hierarchical_state in {"AVOID_HOLD", "REPLAN", "PLAN_FAILED"}:
+            nominal = np.zeros(self.joint_count, dtype=np.float32)
+        elif self.hierarchical_state == "SERVO":
+            gain = float(self.hierarchical_tracker_cfg.get("servo_gain", 2.5))
+            damping = float(self.hierarchical_tracker_cfg.get("servo_damping", 0.05))
+            goal_error = self._goal_error().astype(np.float64)
+            ee_velocity = np.asarray(self._end_effector_state()[1], dtype=np.float64)
+            velocity_damping = float(self.hierarchical_tracker_cfg.get("servo_velocity_damping", 0.0))
+            target_velocity = gain * goal_error - velocity_damping * ee_velocity
+            near_goal_radius = float(self.hierarchical_tracker_cfg.get("servo_near_goal_radius_m", 0.08))
+            if np.linalg.norm(goal_error) <= near_goal_radius:
+                gain *= float(self.hierarchical_tracker_cfg.get("servo_near_goal_gain_scale", 0.65))
+                target_velocity = gain * goal_error - velocity_damping * ee_velocity
+            jacobian = self._link_origin_jacobian(self.tool_link_id)
+            if bool(self.hierarchical_tracker_cfg.get("adaptive_damping", False)):
+                damping_near = float(self.hierarchical_tracker_cfg.get("servo_damping_near", max(damping * 0.35, 1.0e-3)))
+                damping_far = float(self.hierarchical_tracker_cfg.get("servo_damping_far", max(damping * 2.0, damping)))
+                error_scale = float(self.hierarchical_tracker_cfg.get("adaptive_damping_error_m", 0.10))
+                blend = float(np.clip(np.linalg.norm(goal_error) / max(error_scale, 1.0e-6), 0.0, 1.0))
+                damping = damping_near + blend * (damping_far - damping_near)
+            nominal = jacobian.T @ np.linalg.solve(jacobian @ jacobian.T + damping**2 * np.eye(3), target_velocity)
+            if bool(self.hierarchical_tracker_cfg.get("nullspace_limit_avoidance", False)):
+                lower, upper = self._joint_position_limits()
+                midpoint = 0.5 * (lower + upper)
+                half_range = np.maximum(0.5 * (upper - lower), 1.0e-3)
+                null_gain = float(self.hierarchical_tracker_cfg.get("nullspace_gain", 0.08))
+                null_velocity = null_gain * (midpoint - q.astype(np.float64)) / half_range
+                projector = np.eye(self.joint_count) - np.linalg.pinv(jacobian) @ jacobian
+                nominal = nominal + projector @ null_velocity
+            if bool(self.hierarchical_tracker_cfg.get("filter_aware_servo", False)):
+                intervention = float(np.clip(self.hierarchical_last_filter_intervention_ratio, 0.0, 1.0))
+                threshold = float(self.hierarchical_tracker_cfg.get("filter_intervention_threshold", 0.15))
+                gain_floor = float(self.hierarchical_tracker_cfg.get("filter_aware_gain_floor", 0.35))
+                blend_strength = float(self.hierarchical_tracker_cfg.get("filter_aware_blend_strength", 0.75))
+                if intervention > threshold:
+                    excess = (intervention - threshold) / max(1.0 - threshold, 1.0e-6)
+                    scale = 1.0 - excess * (1.0 - gain_floor)
+                    nominal *= float(np.clip(scale, gain_floor, 1.0))
+                    previous = self.hierarchical_last_filtered_qdot.astype(np.float64)
+                    if np.linalg.norm(previous) > 1.0e-8 and np.linalg.norm(nominal) > 1.0e-8:
+                        alignment = float(np.dot(previous, nominal) / (np.linalg.norm(previous) * np.linalg.norm(nominal)))
+                        if alignment >= float(self.hierarchical_tracker_cfg.get("filter_aware_min_alignment", 0.0)):
+                            blend = float(np.clip(blend_strength * excess, 0.0, 0.85))
+                            nominal = (1.0 - blend) * nominal + blend * previous
+        else:
+            gain = float(self.hierarchical_tracker_cfg.get("waypoint_gain", 1.8))
+            if bool(self.hierarchical_tracker_cfg.get("clearance_aware_gain", False)) and np.isfinite(predictive_h):
+                low = float(self.hierarchical_tracker_cfg.get("clearance_gain_low_m", 0.04))
+                high = float(self.hierarchical_tracker_cfg.get("clearance_gain_high_m", 0.16))
+                gain *= float(np.clip((predictive_h - low) / max(high - low, 1.0e-6), 0.35, 1.0))
+            nominal = gain * waypoint_error
+        nominal = np.clip(nominal, -self.action_scale, self.action_scale).astype(np.float32)
+        self.hierarchical_last_nominal_qdot = nominal.copy()
+        self.hierarchical_last_waypoint_error = waypoint_error.astype(np.float32)
+        self.hierarchical_last_progress = float(index / max(len(self.hierarchical_path) - 1, 1))
+        budget = self._hierarchical_residual_budget(predictive_h)
+        if self.hierarchical_state in {"AVOID_HOLD", "REPLAN", "PLAN_FAILED"}:
+            budget = 0.0
+        self.hierarchical_last_residual_budget = budget
+        return nominal, self._hierarchical_info(current_risk, predictive_h)
+
+    def _hierarchical_residual_budget(self, predictive_h: float) -> float:
+        if not np.isfinite(predictive_h):
+            return 1.0
+        start = float(self.hierarchical_residual_cfg.get("risk_start_m", 0.20))
+        stop = float(self.hierarchical_residual_cfg.get("risk_stop_m", 0.04))
+        return float(np.clip((predictive_h - stop) / max(start - stop, 1.0e-6), 0.0, 1.0))
+
+    def _hierarchical_info(self, current_risk: LinkRisk, predictive_h: float) -> dict[str, Any]:
+        return {
+            "hierarchical_control_enabled": True,
+            "hierarchical_state": self.hierarchical_state,
+            "hierarchical_plan_reason": self.hierarchical_plan_reason,
+            "hierarchical_plan_iterations": self.hierarchical_plan_iterations,
+            "hierarchical_planning_time_s": self.hierarchical_planning_time_s,
+            "hierarchical_planning_time_total_s": self.hierarchical_planning_time_total_s,
+            "hierarchical_ik_candidate_count": self.hierarchical_ik_candidate_count,
+            "hierarchical_ik_found": self.hierarchical_ik_candidate_count > 0,
+            "hierarchical_plan_found": bool(self.hierarchical_path),
+            "hierarchical_direct_path": self.hierarchical_plan_reason == "direct_path",
+            "hierarchical_plan_count": self.hierarchical_plan_count,
+            "hierarchical_replan_count": self.hierarchical_replan_count,
+            "hierarchical_hold_steps": self.hierarchical_hold_steps,
+            "hierarchical_consecutive_hold_steps": self.hierarchical_consecutive_hold_steps,
+            "hierarchical_waypoint_index": self.hierarchical_waypoint_index,
+            "hierarchical_waypoint_count": len(self.hierarchical_path),
+            "hierarchical_path_progress": self.hierarchical_last_progress,
+            "hierarchical_nominal_qdot": self.hierarchical_last_nominal_qdot.copy(),
+            "hierarchical_residual_budget": self.hierarchical_last_residual_budget,
+            "hierarchical_waypoint_error": self.hierarchical_last_waypoint_error.copy(),
+            "hierarchical_predictive_h_min_m": predictive_h,
+            "hierarchical_current_d_min_m": float(current_risk.d_min),
+            "hierarchical_selected_candidate_index": self.hierarchical_selected_candidate_index,
+            "hierarchical_selected_path_length_rad": self.hierarchical_selected_path_length_rad,
+            "hierarchical_selected_path_min_clearance_m": self.hierarchical_selected_path_min_clearance_m,
+            "hierarchical_ik_candidate_errors_m": tuple(self.hierarchical_ik_candidate_errors_m),
+            "hierarchical_ik_candidate_clearances_m": tuple(self.hierarchical_ik_candidate_clearances_m),
+            "hierarchical_filter_intervention_ratio": self.hierarchical_last_filter_intervention_ratio,
+            "hierarchical_filter_status": self.hierarchical_last_filter_status,
+            "hierarchical_servo_stall_steps": self.hierarchical_servo_stall_steps,
+            "hierarchical_servo_stall_replans": self.hierarchical_servo_stall_replans,
+        }
 
     def _apply_reset_jitter(self, options: dict[str, Any] | None) -> None:
         if not options:
@@ -502,7 +994,20 @@ class UR5DynamicObstacleEnv(gym.Env):
                 phase_started_at = perf_counter()
                 predictive_risk_for_scaling = self._compute_predictive_risk()
                 precomputed_risk_time_s += perf_counter() - phase_started_at
-        if self.residual_control_enabled:
+        if self.hierarchical_enabled:
+            hierarchical_nominal, hierarchical_info = self._hierarchical_nominal_command(current_risk_before_action)
+            residual_scale = float(self.hierarchical_residual_cfg.get("residual_scale", 0.25))
+            residual_budget = float(hierarchical_info["hierarchical_residual_budget"])
+            residual_qdot = residual_budget * residual_scale * self.action_scale * action
+            qdot_policy = np.clip(
+                hierarchical_nominal + residual_qdot,
+                -self.action_scale,
+                self.action_scale,
+            ).astype(np.float32)
+            residual_info = self._disabled_residual_info()
+            residual_info.update({"residual_qdot": residual_qdot.copy(), **hierarchical_info})
+            self.last_residual_observation = np.zeros(self.residual_observation_dim, dtype=np.float32)
+        elif self.residual_control_enabled:
             residual_base_qdot, residual_info = self._residual_base_command(current_risk_before_action)
             residual_scale = float(self.residual_control_cfg.get("residual_scale", 0.35))
             residual_qdot = residual_scale * self.action_scale * action
@@ -522,21 +1027,50 @@ class UR5DynamicObstacleEnv(gym.Env):
             residual_info = self._disabled_residual_info()
             qdot_policy = self.action_scale * action
             self.last_residual_observation = np.zeros(self.residual_observation_dim, dtype=np.float32)
-        if self.method.endswith("adaptive"):
+        if self.hierarchical_enabled:
+            beta = float(self.hierarchical_cfg.get("command_smoothing_beta", 1.0))
+        elif self.method.endswith("adaptive"):
             beta = self._adaptive_beta(pre_risk.risk_global)
         else:
             beta = self.fixed_beta
         qdot_cmd = beta * qdot_policy + (1.0 - beta) * self.prev_qdot_cmd
+        nominal_ee_velocity = np.zeros(3, dtype=np.float64)
+        nominal_toward_goal = 0.0
+        if self.hierarchical_enabled:
+            nominal_ee_velocity = self._link_origin_jacobian(self.tool_link_id) @ np.asarray(
+                hierarchical_nominal, dtype=np.float64
+            )
+            nominal_goal_norm = float(np.linalg.norm(self._goal_error()))
+            if nominal_goal_norm > 1.0e-9:
+                nominal_toward_goal = float(
+                    np.dot(nominal_ee_velocity, np.asarray(self._goal_error(), dtype=np.float64) / nominal_goal_norm)
+                )
         if predictive_risk_for_scaling is not None:
             qdot_cmd *= risk_speed_scale
+        recovery_in_servo_enabled = bool(
+            self.safety_filter_cfg.get("recovery_in_servo_enabled", True)
+        )
+        recovery_allowed = not (
+            self.hierarchical_enabled
+            and self.hierarchical_state == "SERVO"
+            and not recovery_in_servo_enabled
+        )
         if bool(self.safety_filter_cfg.get("recovery_mode_enabled", False)):
-            self._update_recovery_state(predictive_risk_for_scaling, qdot_cmd)
+            if recovery_allowed:
+                self._update_recovery_state(predictive_risk_for_scaling, qdot_cmd)
+            else:
+                # A gated SERVO must also use the strict filter path: do not
+                # leave the previous AVOID_HOLD relaxation active in the
+                # filter merely because the state changed this cycle.
+                self.recovery_active = False
         recovery_command = None
-        if self.recovery_active and predictive_risk_for_scaling is not None:
+        if self.recovery_active and predictive_risk_for_scaling is not None and recovery_allowed:
             recovery_command = self._recovery_command(predictive_risk_for_scaling)
             qdot_cmd = recovery_command
         qdot_cmd = np.clip(qdot_cmd, -self.action_scale, self.action_scale).astype(np.float32)
         qdot_requested = qdot_cmd.copy()
+        goal_error_before = self._goal_error().astype(np.float64)
+        goal_error_before_norm = float(np.linalg.norm(goal_error_before))
         filter_result = None
         predictive_risk = None
         filter_solve_time_s = None
@@ -556,8 +1090,34 @@ class UR5DynamicObstacleEnv(gym.Env):
                 )
         if filter_result is not None:
             qdot_cmd = filter_result.command_joint_velocity_radps.astype(np.float32)
+            requested_norm = float(np.linalg.norm(qdot_requested))
+            self.hierarchical_last_filter_intervention_ratio = float(
+                np.clip(filter_result.intervention_norm_radps / max(requested_norm, 1.0e-6), 0.0, 1.0)
+            )
+            self.hierarchical_last_filter_status = str(filter_result.status.value)
+            self.hierarchical_last_filtered_qdot = qdot_cmd.copy()
             if bool(self.safety_filter_cfg.get("diagnostic_logging", False)):
                 filter_link_diagnostics = self._filter_link_diagnostics(predictive_risk, qdot_cmd)
+        else:
+            self.hierarchical_last_filter_intervention_ratio = 0.0
+            self.hierarchical_last_filter_status = "not_enabled"
+            self.hierarchical_last_filtered_qdot = qdot_cmd.copy()
+
+        # Task-space diagnostics are read-only: they quantify whether the
+        # safety-filtered command still points toward the goal.  They do not
+        # alter the command or the safety constraints.
+        ee_jacobian = self._link_origin_jacobian(self.tool_link_id)
+        requested_ee_velocity = ee_jacobian @ np.asarray(qdot_requested, dtype=np.float64)
+        executed_ee_velocity = ee_jacobian @ np.asarray(qdot_cmd, dtype=np.float64)
+        if goal_error_before_norm > 1.0e-9:
+            goal_direction = goal_error_before / goal_error_before_norm
+            requested_toward_goal = float(np.dot(requested_ee_velocity, goal_direction))
+            executed_toward_goal = float(np.dot(executed_ee_velocity, goal_direction))
+        else:
+            requested_toward_goal = 0.0
+            executed_toward_goal = 0.0
+        requested_ee_speed = float(np.linalg.norm(requested_ee_velocity))
+        executed_ee_speed = float(np.linalg.norm(executed_ee_velocity))
 
         for _ in range(self.sim_substeps):
             self._move_obstacle(self.time_step)
@@ -597,7 +1157,7 @@ class UR5DynamicObstacleEnv(gym.Env):
 
         reward = self._reward(qdot_cmd, success, termination_collision)
         cost = self._cost(policy_risk, termination_collision, bool(info["safety_violation"]))
-        if self.method in {"ee_fixed", "link_fixed"}:
+        if self.method in {"ee_fixed", "link_fixed", "hierarchical_residual"}:
             reward -= float(self.config["sac"]["fixed_risk_penalty"]) * cost
 
         joint_acc = (qdot_cmd - self.prev_qdot_cmd) / self.control_dt
@@ -623,6 +1183,21 @@ class UR5DynamicObstacleEnv(gym.Env):
                 "beta": float(beta),
                 "qdot_requested": qdot_requested.copy(),
                 "qdot_policy": qdot_policy.copy(),
+                "task_space_goal_error_before_m": goal_error_before_norm,
+                "task_space_goal_error_after_m": float(info["goal_error_norm"]),
+                "task_space_goal_error_delta_m": goal_error_before_norm - float(info["goal_error_norm"]),
+                "task_space_requested_velocity_mps": requested_ee_velocity.copy(),
+                "task_space_executed_velocity_mps": executed_ee_velocity.copy(),
+                "task_space_requested_speed_mps": requested_ee_speed,
+                "task_space_executed_speed_mps": executed_ee_speed,
+                "task_space_requested_toward_goal_mps": requested_toward_goal,
+                "task_space_executed_toward_goal_mps": executed_toward_goal,
+                "task_space_filter_velocity_loss_mps": requested_toward_goal - executed_toward_goal,
+                "task_space_nominal_velocity_mps": nominal_ee_velocity.copy(),
+                "task_space_nominal_toward_goal_mps": nominal_toward_goal,
+                "task_space_recovery_active_for_command": bool(recovery_command is not None),
+                "hierarchical_filter_intervention_ratio": self.hierarchical_last_filter_intervention_ratio,
+                "hierarchical_filter_status": self.hierarchical_last_filter_status,
                 "risk_speed_scale": float(risk_speed_scale),
                 "risk_speed_h_min_m": (
                     float(np.min(predictive_risk_for_scaling.safety_functions_m))
@@ -753,6 +1328,21 @@ class UR5DynamicObstacleEnv(gym.Env):
         policy_risk = self._compute_policy_risk(current_risk)
         self.last_risk = current_risk
         self.last_policy_risk = policy_risk
+        hierarchical_info: dict[str, Any] = {}
+        hierarchical_features = np.zeros(self.hierarchical_observation_dim, dtype=np.float32)
+        if self.hierarchical_enabled:
+            _, hierarchical_info = self._hierarchical_nominal_command(current_risk, update_state=False)
+            hierarchical_features = np.concatenate(
+                [
+                    self.hierarchical_last_nominal_qdot / max(self.action_scale, 1.0e-6),
+                    self.hierarchical_last_waypoint_error / max(self.action_scale, 1.0e-6),
+                    np.asarray([self.hierarchical_last_progress, self.hierarchical_last_residual_budget], dtype=np.float32),
+                    np.asarray(
+                        [1.0 if state == self.hierarchical_state else 0.0 for state in self.hierarchical_state_names],
+                        dtype=np.float32,
+                    ),
+                ]
+            ).astype(np.float32)
         if self.residual_control_enabled:
             _, residual_info = self._residual_base_command(current_risk)
             self.last_residual_observation = self._residual_observation_features(residual_info)
@@ -779,6 +1369,8 @@ class UR5DynamicObstacleEnv(gym.Env):
         ]
         if self.residual_control_enabled:
             observation_parts.append(self.last_residual_observation)
+        if self.hierarchical_enabled:
+            observation_parts.append(hierarchical_features.astype(np.float32))
         obs = np.concatenate(observation_parts).astype(np.float32)
         if obs.shape != self.observation_space.shape:
             raise RuntimeError(f"Observation shape {obs.shape} does not match {self.observation_space.shape}")
@@ -802,6 +1394,7 @@ class UR5DynamicObstacleEnv(gym.Env):
             "recovery_initial_h_min_m": float(self.recovery_initial_h_min_m),
         }
         info.update(residual_info)
+        info.update(hierarchical_info)
         return obs, info
 
     def _disabled_residual_info(self) -> dict[str, Any]:

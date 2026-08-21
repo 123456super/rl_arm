@@ -1,0 +1,8 @@
+{
+  "description": "Known S1 hierarchical baseline hard cases for revised-v2 diagnostics; not a final evaluation manifest.",
+  "seeds": [
+    9006, 9021, 9060, 9065, 9095, 9098, 9102, 9108,
+    9110, 9120, 9137, 9138, 9142, 9175, 9192,
+    9027, 9033, 9062, 9093, 9107, 9112, 9136, 9143
+  ]
+}

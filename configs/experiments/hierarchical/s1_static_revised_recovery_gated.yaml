@@ -1,0 +1,20 @@
+# Formal revised nominal candidate: recovery remains available in AVOID_HOLD,
+# but cannot replace terminal SERVO's goal-directed DLS command.
+includes:
+  - s1_static_revised.yaml
+
+architecture_version: hierarchical_s1_revised_recovery_gated_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_recovery_gated_v1
+    parent_architecture: hierarchical_s1_revised_v2
+  safety_filter:
+    recovery_in_servo_enabled: false
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_recovery_gated
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json
+  nominal_only: true

@@ -1,0 +1,23 @@
+# Diagnostic ablation: keep the strict predictive safety filter, but disable
+# active clearance recovery. Task definition, geometry, horizon and success
+# criterion remain inherited from the revised nominal configuration.
+includes:
+  - s1_static_revised.yaml
+
+architecture_version: hierarchical_s1_revised_filter_only_diag_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_filter_only_diag_v1
+    parent_architecture: hierarchical_s1_revised_v2
+  safety_filter:
+    recovery_mode_enabled: false
+    recovery_allow_constraint_relaxation: false
+    recovery_maximize_min_clearance: false
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_filter_only_diag
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json
+  nominal_only: true

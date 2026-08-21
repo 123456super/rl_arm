@@ -1,0 +1,30 @@
+# Tracker/filter-aware continuation of frozen hierarchical_s1_revised_v2.
+# Task definition, IK/planner, safety geometry and success criteria are unchanged.
+includes:
+  - s1_static_revised.yaml
+
+architecture_version: hierarchical_s1_revised_tracker_v3
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_tracker_v3
+    parent_architecture: hierarchical_s1_revised_v2
+    tracker:
+      filter_aware_servo: true
+      filter_intervention_threshold: 0.15
+      filter_aware_gain_floor: 0.35
+      filter_aware_blend_strength: 0.75
+      filter_aware_min_alignment: 0.0
+      servo_velocity_damping: 0.35
+      servo_near_goal_radius_m: 0.08
+      servo_near_goal_gain_scale: 0.65
+      servo_stall_improvement_m: 0.002
+      servo_stall_filter_ratio: 0.20
+      servo_stall_steps: 20
+      servo_stall_replan_limit: 2
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_tracker_v3
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json

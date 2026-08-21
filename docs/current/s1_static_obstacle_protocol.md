@@ -1,293 +1,285 @@
-# S1 静态障碍物协议与结果
+# S1 静态障碍物实验协议
 
-> 更新时间：2026-08-18。状态：已完成基础链路重建、candidate terminal
-> refine、R3/R4 分层 repair 与 blind final 闭环；当前瓶颈仍是 timeout
-> 和 terminal convergence，但 candidate terminal refine 仍是已完成方案
-> 里最好的 full final 结果（`86.83%`）。
+> 更新时间：2026-08-20。状态：原 S1 final 已冻结；recovery-gated nominal 已完成并通过 gate；Residual 训练按当前决策暂缓。本文只规定 S1 场景和执行细节；动作语义、状态机、安全出口、通用指标与版本规则继承[分层控制通用实验协议](hierarchical_control_protocol.md)。
 
-## 目标
+## 1. 目标与固定条件
 
-在已冻结的 S0/v2 无障碍 reaching actor 上加入单个静态随机障碍物，
-回答两个问题：
+S1 验证最终论文架构的静态基座，并把失败归因到 IK、plan、tracking、servo、filter 或 Residual 中的具体模块。旧 direct-SAC 只作为外部历史对照，来源见[架构转向证据](../archive/legacy_direct_sac/evidence/architecture_transition_evidence.md)。
 
-1. 冻结 reaching actor 在静态障碍物下退化到什么程度？
-2. 仅做静态障碍物 fine-tune 后，是否能恢复绕障与终端收敛能力？
+- UR5、20 Hz、12 s horizon、`0.055 m` success tolerance、固定 final manifest 和 capsule 定义不变。
+- 单个静态球障碍：`scenario=random`、`speed_range=[0,0]`。
+- canonical 配置：`configs/experiments/hierarchical/s1_static.yaml`。
+- `env.hierarchical_control.enabled=true`，legacy `env.residual_control.enabled=false`。
+- `risk.representation=robust_predictive`，静态障碍速度为零也不关闭预测链。
+- actor/replay 必须具有 hierarchical signature；checkpoint selection 只使用 validation manifest。
+- frozen S1-R pooled result 为 `529/600=88.17%` full success、`529/555=95.32%` plan-conditioned、`0/600` collision。该结果和 `outputs/hierarchical/s1_static/` 下所有 CSV/summary 永不覆盖。
+- revised v2 配置为 `configs/experiments/hierarchical/s1_static_revised.yaml`，输出根目录为 `outputs/hierarchical/s1_static_revised/`。
+- revised v2 nominal final 已完成：`178/200=89.0%` full、`178/189=94.18%` plan-conditioned、`0/200` collision。IK found 和 plan found 均为 `189/200=94.5%`，但 gate 未通过。
+- 下一诊断版本为独立的 `configs/experiments/hierarchical/s1_static_revised_tracker_v3.yaml`，只在 revised v2 tracker 上增加 filter-aware terminal servo：TCP 速度阻尼、近目标增益 taper、上一周期过滤干预比例反馈；不改变 IK/planner、任务定义或 safety 约束。v3 输出不得写入 v2 目录。
+- v3 hard-case 为 `3/23=13.04%`，v4（有限 terminal-stall replan）仍为 `3/23=13.04%`；v4 增加规划开销但没有新增成功，因此 v4 不进入 200-reset final。下一实验固定 IK/planner，转向记录 filter 前后 task-space 速度与误差单调性。
+- terminal diagnostics v2 已完成：`nominal_toward_goal_rate=1.0`、`nominal_mean_toward_goal_mps=0.430`，但 `recovery_command_rate=0.4766`，整体 `executed_toward_goal=0.0554 m/s`，说明主要瓶颈是主动 recovery 接管而非 terminal DLS 方向。下一步只做两个 hard-case 归因对照：`s1_static_revised_filter_only_diag.yaml`（关闭主动 recovery，严格 filter 保留）与 `s1_static_revised_recovery_late_diag.yaml`（recovery 延后到边界/短 TTC）。
+- hard-case 配对显示 filter-only 为 `8/23`，较 v2 `3/23` 新增 5 个成功且无回归；late-recovery 为 `5/23`。正式候选配置 `s1_static_revised_recovery_gated.yaml` 只允许 `AVOID_HOLD` 使用 recovery，`SERVO` 禁止 recovery 覆盖 nominal DLS；该配置必须先完成同一 `v1_final.json` 的 200-reset nominal gate，之后才能考虑 Residual 训练。
+- recovery-gated hard-case 为 `10/23=43.48%`，plan-conditioned `10/12=83.33%`，相对 v2 新增 7 个成功且无回归、无碰撞；只剩 `IK_NOT_FOUND=11` 与 `FILTER_STOP_TIMEOUT=2`，且 safety-filter safe-stop 为 `0`。该候选随后已完成 200-reset nominal-only。
+- recovery-gated 200-reset nominal 已完成：full success `187/200=93.5%`、plan-conditioned `187/189=98.94%`、IK/plan found `189/200=94.5%`、timeout `2/200=1.0%`、collision `0/200`；两个 gate 均通过。该结果是 zero-residual nominal，不是 Residual final。
 
-本协议仍不是动态避障、安全过滤器或真机协议。
-
-## 固定条件
-
-- 机器人、随机目标、初始关节状态、20 Hz 控制、12 s episode 上限和
-  `0.055 m` success tolerance 沿用 S0/v2。
-- 障碍物启用，`scenario=random`，`speed_range=[0.0, 0.0]`。
-- 关闭 safety filter、viability monitor、diagnostic logging、
-  recovery、constraint relaxation 和 maximin clearance 分支。
-- 方法固定为 `link_fixed`。
-- validation manifest 固定为
-  `configs/experiments/reaching_recovery/manifests/v1_validation.json`
-  (`9301--9340`)。
-- final manifest 固定为
-  `configs/experiments/reaching_recovery/manifests/v1_final.json`
-  (`9001--9200`)。
-
-## 产物目录
-
-```text
-outputs/reaching_incremental/
-  s1_static_obstacle/
-    eval/
-      seed_4301_final.csv
-      seed_4302_final.csv
-      seed_4303_final.csv
-    summary.json
-    episodes_joined.csv
-  s1_static_obstacle_finetune/
-    train/seed_430{1,2,3}/...
-    eval/seed_430{1,2,3}_final.csv
-    summary.json
-    episodes_joined.csv
-  s1_static_obstacle_finetune_r1_extend100k/
-    train/seed_430{1,2,3}/...
-    eval/seed_430{1,2,3}_final.csv
-    summary.json
-    episodes_joined.csv
-  s1_static_candidate_terminal_refine/
-    eval/seed_430{1,2,3}_final.csv
-    summary.json
-    episodes_joined.csv
-  s1_r3_candidate_repair/
-    train/seed_430{1,2,3}/...
-    eval_blind/seed_430{1,2,3}_blind_final.csv
-    eval_blind/summary.json
-    eval_blind/episodes_joined.csv
-  s1_r4_hard_case_repair/
-    train/seed_430{1,2,3}/...
-    eval_blind/seed_430{1,2,3}_blind_final.csv
-    eval_blind/summary.json
-    eval_blind/episodes_joined.csv
-```
-
-## 执行顺序
-
-### 1. 冻结 actor 静态评估
+诊断 trace 汇总命令：
 
 ```bash
-bash scripts/run_s1_static_chain.sh eval-frozen
+python scripts/analyze_terminal_diagnostics.py \
+  --evaluation outputs/hierarchical/s1_static_revised/terminal_diag_hard_cases.csv \
+  --trace-dir outputs/hierarchical/s1_static_revised/terminal_diag_traces \
+  --output outputs/hierarchical/s1_static_revised/terminal_diagnostics.json
 ```
 
-该命令只评估 S0/v2 冻结 actor，不训练、不选 checkpoint。输出写入
-`outputs/reaching_incremental/s1_static_obstacle/`。
+该诊断还区分纯 nominal servo 与 recovery escape：`nominal_toward_goal_rate`、`recovery_command_rate` 和 `nominal_mean_toward_goal_mps`。因此不能把 recovery 为了避障而产生的非目标方向速度误判为 tracker 方向错误。
 
-### 2. 静态障碍物 fine-tune
+## 2. 实验矩阵与顺序
 
-如果冻结 actor 静态评估未通过，再运行：
+| 编号 | 方法 | 主要目的 |
+| --- | --- | --- |
+| S1-N0 | planner + tracker，无 terminal servo | 量化 terminal servo 的必要性 |
+| S1-N | planner + tracker + servo，zero residual | 验证确定性 nominal 基座 |
+| S1-R | 完整 hierarchical Residual | 与 S1-N 成对验证学习增益 |
+| S1-A1 | S1-R，固定 residual budget | 消融 risk-conditioned budget |
+| S1-A2 | S1-R，current risk | 消融 robust predictive risk |
+| Legacy | direct-SAC 历史最好 | 仅作架构调整前外部对照 |
+
+执行顺序固定为：
+
+1. 先对 revised v2 已知失败 reset 做 hard-case diagnostic，不训练 actor。
+2. 完成 recovery-gated 固定 200-reset nominal-only final，保存 CSV、summary 和 traces。
+3. recovery-gated plan-conditioned success 为 `98.94%`，已达到 `95%`；但本轮决定暂缓训练 4401/4402/4403，先完成 paired comparison 和版本冻结。
+4. 若后续获准训练，每个 seed 只从 recovery-gated 新 signature 随机初始化，按 validation manifest 选点，再用同一 final manifest 评估。
+5. 完成 old/revised/gated nominal 的 pooled、逐 seed 和逐 reset paired comparison 后，才决定是否采用 recovery-gated 作为新的 S1 nominal 基座。
+6. 所有方法使用相同任务定义、manifest、horizon、capsule 和最终安全出口。
+
+S1-N 建议同时达到 full success `>=90%`。未过门时按失败类别定位确定性基座，不用 Residual 补偿实现缺陷。
+
+## 3. S1 失败归因
+
+每个 episode 只能先归到一个互斥主类，再附加安全事件：
+
+1. `IK_NOT_FOUND`：搜索预算内无合法 IK 候选；
+2. `PLAN_NOT_FOUND`：存在合法候选，但规划预算内无路径；
+3. `TRACK_TIMEOUT`：已有路径，但未进入 servo；
+4. `SERVO_TIMEOUT`：进入 servo 后仍未成功；
+5. `FILTER_STOP_TIMEOUT`：safe-stop/hold 主导时限；
+6. `COLLISION_TERMINATION`；
+7. `SUCCESS`。
+
+`IK_NOT_FOUND` 和 `PLAN_NOT_FOUND` 不得写成“不可达”，除非另有完备性或高预算审计。
+
+## 4. 报告要求
+
+S1-N 首先报告：IK/plan found、direct/RRT path、full 与 plan-conditioned success、final error、timeout、completion time、planning time/iterations、waypoint/path progress、碰撞、filter 事件和状态占比。
+
+主结果表：
+
+| method | full success | plan-conditioned success | IK found | plan found | timeout | collision_any | mean final error | mean time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+
+机制表：
+
+| method | direct path | RRT path | plan iterations | TRACK% | HOLD% | REPLAN/ep | SERVO% | filter intervention | residual norm |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+
+成功必须同时满足目标误差和 `d_min>d_safe`。pooled 结果之外保留各训练 seed，所有比例给出分子/分母。
+
+## 5. 运行方式
+
+以下命令省略 `conda run -n rl`，请在已激活 `rl` 环境的终端执行。hard-case 诊断需要先把失败 seed 列表作为 manifest；正式 nominal 支持按 manifest shard 并行。
+
+hard-case diagnostic（不训练、不覆盖 final）：
 
 ```bash
-bash scripts/run_s1_static_chain.sh finetune
+python scripts/evaluate.py \
+  --config configs/experiments/hierarchical/s1_static_revised.yaml \
+  --nominal-only --episodes 23 \
+  --seed-manifest configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json \
+  --output outputs/hierarchical/s1_static_revised/hard_cases.csv \
+  --trace-output outputs/hierarchical/s1_static_revised/hard_case_traces
 ```
 
-训练从对应 S0/v2 actor 和 agent state 恢复：
-
-| seed | start step | config |
-| ---: | ---: | --- |
-| 4301 | 240000 | `configs/experiments/reaching_incremental/s1_static_finetune_seed4301.yaml` |
-| 4302 | 280000 | `configs/experiments/reaching_incremental/s1_static_finetune_seed4302.yaml` |
-| 4303 | 220000 | `configs/experiments/reaching_incremental/s1_static_finetune_seed4303.yaml` |
-
-### 3. checkpoint 选择
+revised v2 nominal（四终端并行示例）：
 
 ```bash
-bash scripts/run_s1_static_chain.sh select-finetune
+python scripts/evaluate.py \
+  --config configs/experiments/hierarchical/s1_static_revised.yaml \
+  --nominal-only --episodes 200 \
+  --seed-manifest configs/experiments/reaching_recovery/manifests/v1_final.json \
+  --manifest-shard-index 0 --manifest-shard-count 4 \
+  --output outputs/hierarchical/s1_static_revised/nominal_final_shard_0.csv \
+  --trace-output outputs/hierarchical/s1_static_revised/nominal_traces/shard_0
 ```
 
-选择规则固定为 validation success rate；同分时按脚本的 physical
-contact、capsule overlap、safety violation、final error 和 step
-规则打破平局。
-
-### 4. final 复核
+tracker v3 hard-case diagnostic（先运行，不训练）：
 
 ```bash
-bash scripts/run_s1_static_chain.sh eval-finetune
+python scripts/evaluate.py \
+  --config configs/experiments/hierarchical/s1_static_revised_tracker_v3.yaml \
+  --nominal-only \
+  --episodes 23 \
+  --seed-manifest configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json \
+  --output outputs/hierarchical/s1_static_revised_tracker_v3/hard_cases.csv \
+  --trace-output outputs/hierarchical/s1_static_revised_tracker_v3/hard_case_traces
 ```
 
-该命令读取每个 seed 的 `selected_checkpoint.csv`，在完整 final
-manifest 上复核，并汇总为 `summary.json` 和 `episodes_joined.csv`。
+terminal recovery 归因对照（两个终端并行，均为 23 个 hard-case reset）：
 
-### 5. R1 继续训练诊断
+终端 A：关闭主动 recovery，只保留严格 predictive safety filter。
 
-S1 fine-tune 后曾从各自 selected checkpoint 继续训练 `+100000`
-environment steps：
+```bash
+export PYTHONPATH=src
+python scripts/evaluate.py \
+  --config configs/experiments/hierarchical/s1_static_revised_filter_only_diag.yaml \
+  --nominal-only --episodes 23 \
+  --seed-manifest configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json \
+  --output outputs/hierarchical/s1_static_revised_filter_only_diag/hard_cases.csv \
+  --trace-output outputs/hierarchical/s1_static_revised_filter_only_diag/traces
+```
 
-| seed | start step | total step | config |
-| ---: | ---: | ---: | --- |
-| 4301 | 440000 | 540000 | `configs/experiments/reaching_incremental/s1_static_extend100k_seed4301.yaml` |
-| 4302 | 480000 | 580000 | `configs/experiments/reaching_incremental/s1_static_extend100k_seed4302.yaml` |
-| 4303 | 420000 | 520000 | `configs/experiments/reaching_incremental/s1_static_extend100k_seed4303.yaml` |
+终端 B：保留 recovery，但将触发推迟到 `h<=0` 或 TTC `<=0.05s`。
 
-R1 结果与 S1 fine-tune final 完全持平，因此 R1 只作为诊断产物，不作为
-新的有效提升。
+```bash
+export PYTHONPATH=src
+python scripts/evaluate.py \
+  --config configs/experiments/hierarchical/s1_static_revised_recovery_late_diag.yaml \
+  --nominal-only --episodes 23 \
+  --seed-manifest configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json \
+  --output outputs/hierarchical/s1_static_revised_recovery_late_diag/hard_cases.csv \
+  --trace-output outputs/hierarchical/s1_static_revised_recovery_late_diag/traces
+```
 
-### 6. candidate terminal refine
+两个评估结束后，可在两个终端并行汇总 task-space 诊断：
 
-针对 `static_candidate_path_status=candidate_path_found` 的样本做 focused
-terminal shaping 与 curriculum 修复，不改变 success threshold、不延长
-episode 上限，结果如下：
+```bash
+export PYTHONPATH=src
+python scripts/analyze_terminal_diagnostics.py \
+  --evaluation outputs/hierarchical/s1_static_revised_filter_only_diag/hard_cases.csv \
+  --trace-dir outputs/hierarchical/s1_static_revised_filter_only_diag/traces \
+  --output outputs/hierarchical/s1_static_revised_filter_only_diag/terminal_diagnostics.json
+```
 
-| train seed | final success | timeout | collision_any | mean final error |
-| ---: | ---: | ---: | ---: | ---: |
-| 4301 | `181/200=90.5%` | `19/200=9.5%` | `0/200=0%` | `0.0612 m` |
-| 4302 | `164/200=82.0%` | `36/200=18.0%` | `0/200=0%` | `0.0775 m` |
-| 4303 | `176/200=88.0%` | `24/200=12.0%` | `0/200=0%` | `0.0711 m` |
-| pooled | - | `521/600=86.83%` | `79/600=13.17%` | `0.0699 m` |
+```bash
+export PYTHONPATH=src
+python scripts/analyze_terminal_diagnostics.py \
+  --evaluation outputs/hierarchical/s1_static_revised_recovery_late_diag/hard_cases.csv \
+  --trace-dir outputs/hierarchical/s1_static_revised_recovery_late_diag/traces \
+  --output outputs/hierarchical/s1_static_revised_recovery_late_diag/terminal_diagnostics.json
+```
 
-这一步确实压掉了一部分终端不收敛问题，但 4302 仍是短板，
-说明当前问题不是单纯“再训练久一点”就能自动解决。
+正式候选 recovery-gated 复核（先跑 hard-case）：
 
-### 7. R3 candidate repair
+```bash
+export PYTHONPATH=src
+python scripts/evaluate.py \
+  --config configs/experiments/hierarchical/s1_static_revised_recovery_gated.yaml \
+  --nominal-only --episodes 23 \
+  --seed-manifest configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json \
+  --output outputs/hierarchical/s1_static_revised_recovery_gated/hard_cases.csv \
+  --trace-output outputs/hierarchical/s1_static_revised_recovery_gated/traces
+```
 
-R3 从 candidate terminal refine 的 selected checkpoint 继续训练，只针对
-`static_candidate_path_status=candidate_path_found` 的残余失败做 repair。
-训练仍使用固定 validation manifest 选点，但最终结论不再写回原始 final
-manifest，而是进入 blind final manifest `9401--9600` 做 held-out 复核。
+只有 hard-case 成功数不低于 filter-only 且 collision 仍为 0，才运行完整 200-reset nominal：
 
-selected checkpoint 如下：
+```bash
+export PYTHONPATH=src
+python scripts/evaluate.py \
+  --config configs/experiments/hierarchical/s1_static_revised_recovery_gated.yaml \
+  --nominal-only --episodes 200 \
+  --seed-manifest configs/experiments/reaching_recovery/manifests/v1_final.json \
+  --output outputs/hierarchical/s1_static_revised_recovery_gated/nominal_final.csv \
+  --trace-output outputs/hierarchical/s1_static_revised_recovery_gated/nominal_traces
+```
 
-| train seed | selected step | validation success | mean final error |
-| ---: | ---: | ---: | ---: |
-| 4301 | 530000 | `37/40=92.5%` | `0.0529 m` |
-| 4302 | 500000 | `35/40=87.5%` | `0.0651 m` |
-| 4303 | 550000 | `37/40=92.5%` | `0.0591 m` |
+建议将上述 200 episodes 拆成四个终端并行（每个终端使用不同 shard，输出文件名必须唯一）：
 
-### 8. R4 hard-case repair
+```bash
+export PYTHONPATH=src
+python scripts/evaluate.py \
+  --config configs/experiments/hierarchical/s1_static_revised_recovery_gated.yaml \
+  --nominal-only --episodes 200 \
+  --seed-manifest configs/experiments/reaching_recovery/manifests/v1_final.json \
+  --manifest-shard-index 0 --manifest-shard-count 4 \
+  --output outputs/hierarchical/s1_static_revised_recovery_gated/nominal_final_shard_0.csv \
+  --trace-output outputs/hierarchical/s1_static_revised_recovery_gated/nominal_traces/shard_0
+```
 
-R4 将 `not_found` / `not_checked_due_to_ik` 的 hard cases 单独建桶，与
-candidate-path terminal repair 分开处理。训练仍沿用 R3 的大部分设置，但
-focused reset manifest 切换为 hard-case 桶。
+其余三个终端把 shard index 改为 `1`、`2`、`3`，并同步修改输出 CSV 与 trace 子目录。四个 shard 完成后合并：
 
-selected checkpoint 如下：
+```bash
+export PYTHONPATH=src
+python scripts/merge_hierarchical_evaluations.py \
+  --input outputs/hierarchical/s1_static_revised_recovery_gated/nominal_final_shard_0.csv \
+  --input outputs/hierarchical/s1_static_revised_recovery_gated/nominal_final_shard_1.csv \
+  --input outputs/hierarchical/s1_static_revised_recovery_gated/nominal_final_shard_2.csv \
+  --input outputs/hierarchical/s1_static_revised_recovery_gated/nominal_final_shard_3.csv \
+  --seed-manifest configs/experiments/reaching_recovery/manifests/v1_final.json \
+  --output outputs/hierarchical/s1_static_revised_recovery_gated/nominal_final.csv \
+  --summary-output outputs/hierarchical/s1_static_revised_recovery_gated/nominal_final_summary.json \
+  --architecture-version hierarchical_s1_revised_recovery_gated_v1
+```
 
-| train seed | selected step | validation success | mean final error |
-| ---: | ---: | ---: | ---: |
-| 4301 | 540000 | `37/40=92.5%` | `0.0529 m` |
-| 4302 | 510000 | `35/40=87.5%` | `0.0651 m` |
-| 4303 | 560000 | `37/40=92.5%` | `0.0591 m` |
+如果 v3 仍在 SERVO 中长期无进展，使用 v4 的 bounded terminal-stall replan 诊断：
 
-注意：R4-4301 在首次续训时用 `batch_size=256` 触发 CUDA OOM，因此后续
-base config 改为 `batch_size=128` 并重跑；4302/4303 已先前完成，仍保留
-`256`。因此当前 R4 三个 seed 不是严格同配置实验，这一点必须在定版结论里
-显式保留。
+```bash
+python scripts/evaluate.py \
+  --config configs/experiments/hierarchical/s1_static_revised_tracker_v4.yaml \
+  --nominal-only \
+  --episodes 23 \
+  --seed-manifest configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json \
+  --output outputs/hierarchical/s1_static_revised_tracker_v4/hard_cases.csv \
+  --trace-output outputs/hierarchical/s1_static_revised_tracker_v4/hard_case_traces
+```
 
-## 实际结果
+其余终端将 shard index 改为 `1`、`2`、`3`，最后合并：
 
-### 冻结 actor 静态评估
+```bash
+python scripts/merge_hierarchical_evaluations.py \
+  --input outputs/hierarchical/s1_static_revised/nominal_final_shard_0.csv \
+  --input outputs/hierarchical/s1_static_revised/nominal_final_shard_1.csv \
+  --input outputs/hierarchical/s1_static_revised/nominal_final_shard_2.csv \
+  --input outputs/hierarchical/s1_static_revised/nominal_final_shard_3.csv \
+  --seed-manifest configs/experiments/reaching_recovery/manifests/v1_final.json \
+  --output outputs/hierarchical/s1_static_revised/nominal_final.csv \
+  --summary-output outputs/hierarchical/s1_static_revised/nominal_final_summary.json \
+  --architecture-version hierarchical_s1_revised_v2
+```
 
-| train seed | success | timeout | collision_any |
-| ---: | ---: | ---: | ---: |
-| 4301 | `174/200=87.0%` | `22/200=11.0%` | `4/200=2.0%` |
-| 4302 | `106/200=53.0%` | `89/200=44.5%` | `5/200=2.5%` |
-| 4303 | `148/200=74.0%` | `45/200=22.5%` | `7/200=3.5%` |
-| pooled | `428/600=71.33%` | `156/600=26.0%` | `16/600=2.67%` |
+训练 revised Residual（仅 nominal 门槛通过后；三个终端分别使用 seed-specific config）：
 
-结论：冻结 S0 actor 在静态障碍物下明显退化，失败以 timeout 为主，
-同时存在少量碰撞。
+```bash
+python scripts/train.py \
+  --config configs/experiments/hierarchical/s1_static_revised_seed4401.yaml
+```
 
-### S1 fine-tune final
+评估训练 actor：
 
-| train seed | selected step | validation success | final success | timeout | collision_any |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 4301 | 440000 | `36/40=90.0%` | `175/200=87.5%` | `25/200=12.5%` | `0/200=0%` |
-| 4302 | 480000 | `35/40=87.5%` | `164/200=82.0%` | `36/200=18.0%` | `0/200=0%` |
-| 4303 | 420000 | `35/40=87.5%` | `162/200=81.0%` | `38/200=19.0%` | `0/200=0%` |
-| pooled | - | - | `501/600=83.5%` | `99/600=16.5%` | `0/600=0%` |
+```bash
+python scripts/evaluate.py \
+  --config configs/experiments/hierarchical/s1_static_revised_seed4401.yaml \
+  --checkpoint outputs/hierarchical/s1_static_revised/<run>/actor.pt \
+  --episodes 200 \
+  --seed-manifest configs/experiments/reaching_recovery/manifests/v1_final.json
+```
 
-S1 fine-tune 将 pooled success 从 `71.33%` 提升到 `83.5%`，并将
-`collision_any` 从 `16/600` 降到 `0/600`。但 remaining failures 全部
-为 timeout，说明主要瓶颈转为终端收敛。
+旧/新 nominal 或旧/新 S1-R 完成后，逐 reset paired 对比：
 
-### R1 extend +100k final
+```bash
+python scripts/compare_hierarchical_evaluations.py \
+  --old outputs/hierarchical/s1_static/nominal_final.csv \
+  --new outputs/hierarchical/s1_static_revised/nominal_final.csv \
+  --output outputs/hierarchical/s1_static_revised/nominal_paired_comparison.json
+```
 
-| train seed | selected step | validation success | final success | timeout | collision_any |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 4301 | 460000 | `36/40=90.0%` | `175/200=87.5%` | `25/200=12.5%` | `0/200=0%` |
-| 4302 | 500000 | `35/40=87.5%` | `164/200=82.0%` | `36/200=18.0%` | `0/200=0%` |
-| 4303 | 440000 | `35/40=87.5%` | `162/200=81.0%` | `38/200=19.0%` | `0/200=0%` |
-| pooled | - | - | `501/600=83.5%` | `99/600=16.5%` | `0/600=0%` |
+以上连续 seed 仅展示接口。正式运行必须使用冻结 manifest，不得以连续 seed 代替。
 
-R1 selection 均选择续训后的第一个 checkpoint，full final 与 S1
-fine-tune 持平；继续简单加步数不再是优先方向。
+## 6. 进入 S2 的条件
 
-### candidate terminal refine final
+- S1-N plan-conditioned success `>=95%`；
+- full success `>=90%`，或未达到部分已有稳定的 IK/plan failure 归因；
+- 物理接触保持低，safety filter 位于唯一命令出口；
+- S1-R 已完成至少 3 个训练 seed，并与 S1-N 完成成对消融；
+- planning、状态、nominal/residual/filter 指标能由评估 CSV 复现。
 
-| train seed | success | timeout | collision_any |
-| ---: | ---: | ---: | ---: |
-| 4301 | `181/200=90.5%` | `19/200=9.5%` | `0/200=0%` |
-| 4302 | `164/200=82.0%` | `36/200=18.0%` | `0/200=0%` |
-| 4303 | `176/200=88.0%` | `24/200=12.0%` | `0/200=0%` |
-| pooled | `521/600=86.83%` | `79/600=13.17%` | `0/600=0%` |
-
-诊断结果显示，残余失败主要分成两类：一类是
-`candidate_path_found` 上的 near-goal regression / nonconvergent
-timeout，另一类是 `not_found` / `not_checked_due_to_ik` 的 hard cases。
-前者通过 focused terminal 修复被明显压缩，但后者仍占了相当一部分，
-因此 success 不能继续靠单一 curriculum 盲升。
-
-### blind final：R3 candidate repair
-
-blind final manifest 固定为
-`configs/experiments/reaching_incremental/manifests/s1_blind_final_v1.json`
-（`9401--9600`），从而避免继续把原始 final 失败样本用于结论本身。
-
-| train seed | selected step | blind success | timeout | collision_any |
-| ---: | ---: | ---: | ---: | ---: |
-| 4301 | 530000 | `178/200=89.0%` | `22/200=11.0%` | `0/200=0%` |
-| 4302 | 500000 | `161/200=80.5%` | `39/200=19.5%` | `0/200=0%` |
-| 4303 | 550000 | `166/200=83.0%` | `34/200=17.0%` | `0/200=0%` |
-| pooled | - | `505/600=84.17%` | `95/600=15.83%` | `0/600=0%` |
-
-### blind final：R4 hard-case repair
-
-| train seed | selected step | blind success | timeout | collision_any |
-| ---: | ---: | ---: | ---: | ---: |
-| 4301 | 540000 | `178/200=89.0%` | `22/200=11.0%` | `0/200=0%` |
-| 4302 | 510000 | `161/200=80.5%` | `39/200=19.5%` | `0/200=0%` |
-| 4303 | 560000 | `166/200=83.0%` | `34/200=17.0%` | `0/200=0%` |
-| pooled | - | `505/600=84.17%` | `95/600=15.83%` | `0/600=0%` |
-
-这里最关键的观察不是 “两个 summary 一样”，而是三个 seed 的 blind final
-CSV 逐文件完全一致。也就是说，R3 与 R4 在 blind held-out 上不是“接近”，
-而是 episode 级结果完全相同。因此当前证据只能支持 “R3≈R4”，不能支持
-“R4 hard-case repair 带来了额外泛化收益”。
-
-## 报告口径
-
-必须同时报告：
-
-- full final success：三 seed 各 200 episode，pooled 600 episode。
-- timeout 数量：`success=0` 且无碰撞终止的 episode。
-- `collision_any`、`collision_capsule_overlap`、`collision_pybullet_contact`
-  和 `termination_collision`。
-- 平均、P95 和最大 final position error。
-- 平均成功 completion time。
-
-不得删除 reset、放宽 success threshold、延长 final episode 时限，或把
-validation 数字写成 final 数字。若后续引入静态可行候选子集，该子集只
-能作为解释性标签，不能替代 full final。
-
-## 当前问题与后续方向
-
-- 当前最好 full final 结果仍是 `candidate terminal refine` 的
-  `521/600=86.83%`；R3/R4 blind final 只有 `505/600=84.17%`，因此这轮
-  repair 不能写成“已经超越 candidate terminal refine 的新最佳方案”。
-- candidate terminal refine 已证明 terminal shaping 有效，但 residual
-  failure 仍分成 `candidate_path_found` 的近目标回退/不收敛，以及
-  `not_found` / `not_checked_due_to_ik` 的 hard cases，两类问题不能混成
-  一个桶。
-- blind held-out 上 R3 与 R4 完全等价，说明当前 hard-case curriculum
-  还没有转化为额外泛化收益；后续更应先解释为什么 selected checkpoint
-  不同但行为结果完全一致。
-- 4302 仍是持续短板 seed；如果继续做 S1，优先级应放在 4302 与 blind
-  timeout failure cluster 的定向分析，而不是继续统一加训练步数。
-- 碰撞仍保持为零，因此后续应继续优化 terminal convergence 和 hard
-  case reachability，而不是放宽安全边界。
-- 若要把 R4 作为正式对比证据，需要先统一三组 seed 的配置，再重做 blind
-  final；当前 mixed-batch 结果更适合作为“方向无额外收益”的诊断结论。
+进入 S2 后不得修改观测排列、actor action semantics 或状态机名称；否则视为新架构版本，已有 checkpoint 和 replay 均不兼容。

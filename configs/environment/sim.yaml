@@ -46,6 +46,9 @@ env:
   # Residual controller. Actor output is always a bounded residual added to a
   # deterministic waypoint/terminal CLF command.
   residual_control:
+    # Legacy Cartesian residual baseline. Historical experiment configs may
+    # enable it, but canonical thesis experiments use hierarchical_control.
+    enabled: true
     residual_scale: 0.35
     base_speed_scale: 1.0
     terminal_goal_radius_m: 0.12
@@ -58,6 +61,37 @@ env:
     link_avoidance_enabled: true
     link_avoidance_activation_margin_m: 0.08
     link_avoidance_max_speed_mps: 0.20
+
+  # Frozen thesis control architecture. Kept opt-in here so archived direct-SAC
+  # configs preserve their original action semantics; canonical hierarchical
+  # S1/S2/S3 configs explicitly enable it and disable residual_control above.
+  hierarchical_control:
+    enabled: false
+    hold_margin_m: 0.04
+    release_margin_m: 0.08
+    replan_after_hold_steps: 8
+    plan_retry_interval_steps: 20
+    command_smoothing_beta: 1.0
+    planner:
+      ik_attempts: 16
+      ik_max_iterations: 120
+      ik_residual_threshold: 1.0e-4
+      ik_goal_tolerance_m: 0.02
+      clearance_m: 0.12
+      step_size_rad: 0.25
+      edge_resolution_rad: 0.06
+      max_iterations: 1200
+      goal_sample_probability: 0.10
+    tracker:
+      waypoint_gain: 1.8
+      waypoint_tolerance_rad: 0.08
+      servo_trigger_m: 0.10
+      servo_gain: 2.5
+      servo_damping: 0.05
+    residual:
+      residual_scale: 0.25
+      risk_start_m: 0.20
+      risk_stop_m: 0.04
 
   # P2 安全过滤器。默认关闭以冻结阶段一结果；新研究实验必须显式设为 true。
   safety_filter:

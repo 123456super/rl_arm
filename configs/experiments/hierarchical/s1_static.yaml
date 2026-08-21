@@ -1,0 +1,63 @@
+# Canonical S1 for the frozen thesis architecture: static obstacle, nominal
+# planner/tracker plus risk-conditioned Residual SAC and predictive safety exit.
+includes:
+  - ../../default.yaml
+
+seed: 4301
+
+risk:
+  representation: robust_predictive
+
+env:
+  max_episode_steps: 240
+  fixed_beta: 1.0
+  obstacle:
+    enabled: true
+    scenario: random
+    speed_range: [0.0, 0.0]
+  residual_control:
+    enabled: false
+  hierarchical_control:
+    enabled: true
+    architecture_version: hierarchical_s1_nominal_final_v1
+    parent_architecture: null
+  safety_filter:
+    enabled: true
+    use_qp_solver: true
+    qp_time_limit_s: 0.02
+    risk_speed_scaling_enabled: false
+    # AVOID_HOLD is an active maximum-clearance escape, not a passive wait:
+    # nominal/residual are suspended and the predictive QP separates endangered
+    # links while preserving joint/workspace hard constraints.
+    recovery_mode_enabled: true
+    recovery_enter_margin_m: 0.04
+    recovery_exit_margin_m: 0.08
+    recovery_ttc_threshold_s: 0.25
+    recovery_speed_radps: 0.35
+    recovery_allow_constraint_relaxation: true
+    recovery_maximize_min_clearance: true
+    viability_monitor_enabled: true
+
+train:
+  method: hierarchical_residual
+  total_steps: 300000
+  output_dir: outputs/hierarchical/s1_static
+
+# Checkpoint selection and final evaluation use disjoint, frozen reset sets.
+# The final set is shared with the historical S0/S1 baselines so the nominal
+# gate and later Residual actors can be compared episode by episode.
+checkpoint_selection:
+  episodes: 40
+  metric: success_rate
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_validation.json
+
+eval:
+  method: hierarchical_residual
+  checkpoint: null
+  episodes: 200
+  seed: 5201
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json
+  nominal_only: false
+
+smoke:
+  method: hierarchical_residual

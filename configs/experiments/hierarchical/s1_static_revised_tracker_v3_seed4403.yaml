@@ -1,0 +1,5 @@
+includes:
+  - s1_static_revised_tracker_v3.yaml
+seed: 4403
+train:
+  run_name: revised_tracker_v3_seed4403

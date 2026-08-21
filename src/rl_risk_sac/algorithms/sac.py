@@ -40,39 +40,68 @@ def residual_control_signature(config: dict[str, Any]) -> dict[str, Any]:
     return {"chain": "residual_actor", **{key: residual_cfg.get(key) for key in keys}}
 
 
+def hierarchical_control_signature(config: dict[str, Any]) -> dict[str, Any]:
+    hierarchical_cfg = config.get("env", {}).get("hierarchical_control")
+    if not hierarchical_cfg or not bool(hierarchical_cfg.get("enabled", False)):
+        return {"chain": "disabled"}
+    return {
+        "chain": str(hierarchical_cfg.get("architecture_version", "ik_rrt_track_servo_residual_filter_v1")),
+        "state_order": ["TRACK", "AVOID_HOLD", "REPLAN", "SERVO", "PLAN_FAILED"],
+        "observation_features": [
+            "nominal_qdot",
+            "next_waypoint_joint_error",
+            "path_progress",
+            "residual_budget",
+            "state_one_hot",
+        ],
+        "config": hierarchical_cfg,
+        "risk_representation": config.get("risk", {}).get("representation", "current"),
+        "action_scale": config.get("env", {}).get("action_scale"),
+        "safety_filter": config.get("env", {}).get("safety_filter", {}),
+        "robot_joint_names": config.get("robot", {}).get("joint_names", []),
+        "robot_capsules": config.get("robot", {}).get("capsules", []),
+    }
+
+
 def actor_signature(config: dict[str, Any], method: str) -> str:
-    return _config_signature(
-        {
-            "method": method,
-            "residual_control": residual_control_signature(config),
-        }
-    )
+    payload = {
+        "method": method,
+        "residual_control": residual_control_signature(config),
+    }
+    hierarchical = hierarchical_control_signature(config)
+    if hierarchical["chain"] != "disabled":
+        payload["hierarchical_control"] = hierarchical
+    return _config_signature(payload)
 
 
 def reward_signature(config: dict[str, Any], method: str) -> str:
-    return _config_signature(
-        {
-            "method": method,
-            "reward": config["reward"],
-            "fixed_risk_penalty": config["sac"].get("fixed_risk_penalty", 0.0),
-            "residual_control": residual_control_signature(config),
+    payload = {
+        "method": method,
+        "reward": config["reward"],
+        "fixed_risk_penalty": config["sac"].get("fixed_risk_penalty", 0.0),
+        "residual_control": residual_control_signature(config),
             # ``link_fixed`` subtracts fixed_risk_penalty * cost, and the
             # cost/risk values depend on the complete risk configuration.
             # Include all of it so a changed distance/velocity model cannot
             # silently reuse a critic trained for a different reward target.
-            "risk": config["risk"],
-        }
-    )
+        "risk": config["risk"],
+    }
+    hierarchical = hierarchical_control_signature(config)
+    if hierarchical["chain"] != "disabled":
+        payload["hierarchical_control"] = hierarchical
+    return _config_signature(payload)
 
 
 def cost_signature(config: dict[str, Any], method: str) -> str:
-    return _config_signature(
-        {
-            "method": method,
-            "risk": config["risk"],
-            "residual_control": residual_control_signature(config),
-        }
-    )
+    payload = {
+        "method": method,
+        "risk": config["risk"],
+        "residual_control": residual_control_signature(config),
+    }
+    hierarchical = hierarchical_control_signature(config)
+    if hierarchical["chain"] != "disabled":
+        payload["hierarchical_control"] = hierarchical
+    return _config_signature(payload)
 
 
 def inferred_state_path(actor_path: str | Path) -> Path:
@@ -382,7 +411,7 @@ class SACAgent:
         if not actor_compatible:
             raise ValueError(
                 "actor checkpoint action semantics do not match this config; "
-                "train or load a checkpoint from the residual-actor chain"
+                "train or load a checkpoint from the same control architecture"
             )
         self.load_actor(actor_path, validate_signature=False)
         load_reward = not reset_reward_critics and reward_compatible
@@ -462,7 +491,7 @@ class SACAgent:
             if checkpoint_actor_signature is not None and checkpoint_actor_signature != self.actor_signature:
                 raise ValueError(
                     "actor checkpoint action semantics do not match this config; "
-                    "train or load a checkpoint from the residual-actor chain"
+                    "train or load a checkpoint from the same control architecture"
                 )
         state = torch.load(actor_path, map_location=self.device, weights_only=True)
         self.actor.load_state_dict(state)

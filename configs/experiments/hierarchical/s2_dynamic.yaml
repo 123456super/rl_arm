@@ -1,0 +1,20 @@
+# Canonical S2: identical control stack to S1; only obstacle motion and the
+# dynamic predictive-risk distribution change.
+includes:
+  - s1_static.yaml
+
+seed: 4401
+
+env:
+  obstacle:
+    enabled: true
+    scenario: random
+    speed_range: [0.12, 0.38]
+
+train:
+  total_steps: 400000
+  output_dir: outputs/hierarchical/s2_dynamic
+
+eval:
+  seed: 5301
+

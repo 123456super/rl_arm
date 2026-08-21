@@ -70,6 +70,7 @@ def validate_config(config: dict[str, Any]) -> None:
         ("env", "obstacle", "random"),
         ("env", "obstacle", "scenarios"),
         ("env", "residual_control"),
+        ("env", "hierarchical_control"),
         ("env", "goal", "fixed"),
         ("env", "goal", "position"),
         ("risk", "weights"),
@@ -153,6 +154,95 @@ def validate_config(config: dict[str, Any]) -> None:
     ):
         if float(residual_control.get(key, 0.0)) < 0.0:
             raise ValueError(f"env.residual_control.{key} must be non-negative")
+
+    hierarchical = config["env"]["hierarchical_control"]
+    if not isinstance(hierarchical, dict):
+        raise TypeError("env.hierarchical_control must be a mapping")
+    if bool(hierarchical.get("enabled", False)):
+        if bool(residual_control.get("enabled", True)):
+            raise ValueError("env.hierarchical_control and legacy env.residual_control cannot both be enabled")
+        safety_filter = config["env"].get("safety_filter", {})
+        if not bool(safety_filter.get("enabled", False)):
+            raise ValueError("env.hierarchical_control requires env.safety_filter.enabled=true")
+        for section_name in ("train", "eval", "smoke"):
+            method = config.get(section_name, {}).get("method")
+            if method != "hierarchical_residual":
+                raise ValueError(
+                    f"{section_name}.method must be hierarchical_residual when hierarchical control is enabled"
+                )
+    for key in ("hold_margin_m", "release_margin_m"):
+        value = float(hierarchical.get(key, 0.0))
+        if not isfinite(value) or value < 0.0:
+            raise ValueError(f"env.hierarchical_control.{key} must be finite and non-negative")
+    if float(hierarchical.get("release_margin_m", 0.0)) <= float(hierarchical.get("hold_margin_m", 0.0)):
+        raise ValueError("env.hierarchical_control.release_margin_m must exceed hold_margin_m")
+    for key in ("replan_after_hold_steps", "plan_retry_interval_steps"):
+        if int(hierarchical.get(key, 0)) <= 0:
+            raise ValueError(f"env.hierarchical_control.{key} must be positive")
+    planner = hierarchical.get("planner", {})
+    tracker = hierarchical.get("tracker", {})
+    hierarchical_residual = hierarchical.get("residual", {})
+    if not all(isinstance(section, dict) for section in (planner, tracker, hierarchical_residual)):
+        raise TypeError("hierarchical planner, tracker and residual sections must be mappings")
+    architecture_version = hierarchical.get("architecture_version")
+    if architecture_version is not None and not isinstance(architecture_version, str):
+        raise TypeError("env.hierarchical_control.architecture_version must be a string")
+    for key in ("ik_attempts", "ik_max_iterations", "max_iterations"):
+        if int(planner.get(key, 0)) <= 0:
+            raise ValueError(f"env.hierarchical_control.planner.{key} must be positive")
+    for key in (
+        "ik_residual_threshold",
+        "ik_goal_tolerance_m",
+        "clearance_m",
+        "step_size_rad",
+        "edge_resolution_rad",
+        "goal_sample_probability",
+    ):
+        value = float(planner.get(key, 0.0))
+        if not isfinite(value) or value < 0.0:
+            raise ValueError(f"env.hierarchical_control.planner.{key} must be finite and non-negative")
+    if float(planner.get("step_size_rad", 0.0)) <= 0.0 or float(planner.get("edge_resolution_rad", 0.0)) <= 0.0:
+        raise ValueError("hierarchical planner step and edge resolutions must be positive")
+    probability = float(planner.get("goal_sample_probability", 0.0))
+    if not 0.0 <= probability <= 1.0:
+        raise ValueError("hierarchical planner goal_sample_probability must be in [0, 1]")
+    if str(planner.get("candidate_selection", "first_success")) not in {"first_success", "clearance_then_length", "length_then_clearance"}:
+        raise ValueError("hierarchical planner candidate_selection is invalid")
+    for key in ("boundary_start_tolerance_m", "dls_max_iterations", "dls_damping", "dls_step_size", "dls_goal_tolerance_m"):
+        value = float(planner.get(key, 0.0))
+        if not isfinite(value) or value < 0.0:
+            raise ValueError(f"env.hierarchical_control.planner.{key} must be finite and non-negative")
+    for key in (
+        "waypoint_gain", "waypoint_tolerance_rad", "servo_trigger_m", "servo_gain", "servo_damping",
+        "servo_velocity_damping", "servo_near_goal_radius_m", "servo_near_goal_gain_scale",
+        "filter_intervention_threshold", "filter_aware_gain_floor", "filter_aware_blend_strength",
+        "filter_aware_min_alignment",
+        "servo_stall_improvement_m", "servo_stall_filter_ratio",
+    ):
+        value = float(tracker.get(key, 0.0))
+        if not isfinite(value) or value < 0.0:
+            raise ValueError(f"env.hierarchical_control.tracker.{key} must be finite and non-negative")
+    for key in ("servo_damping_near", "servo_damping_far", "adaptive_damping_error_m", "nullspace_gain", "clearance_gain_low_m", "clearance_gain_high_m"):
+        value = float(tracker.get(key, 0.0))
+        if not isfinite(value) or value < 0.0:
+            raise ValueError(f"env.hierarchical_control.tracker.{key} must be finite and non-negative")
+    for key in ("adaptive_damping", "nullspace_limit_avoidance", "clearance_aware_gain", "filter_aware_servo"):
+        if key in tracker and not isinstance(tracker[key], bool):
+            raise TypeError(f"env.hierarchical_control.tracker.{key} must be boolean")
+    if float(tracker.get("filter_aware_gain_floor", 0.35)) > 1.0 or float(tracker.get("servo_near_goal_gain_scale", 0.65)) > 1.0:
+        raise ValueError("tracker gain scales must be at most 1")
+    if float(tracker.get("filter_aware_min_alignment", 0.0)) < -1.0 or float(tracker.get("filter_aware_min_alignment", 0.0)) > 1.0:
+        raise ValueError("tracker filter_aware_min_alignment must be in [-1, 1]")
+    for key in ("servo_stall_steps", "servo_stall_replan_limit"):
+        if int(tracker.get(key, 0)) < 0:
+            raise ValueError(f"env.hierarchical_control.tracker.{key} must be non-negative")
+    risk_start = float(hierarchical_residual.get("risk_start_m", 0.0))
+    risk_stop = float(hierarchical_residual.get("risk_stop_m", 0.0))
+    residual_scale = float(hierarchical_residual.get("residual_scale", 0.0))
+    if not all(isfinite(value) and value >= 0.0 for value in (risk_start, risk_stop, residual_scale)):
+        raise ValueError("hierarchical residual values must be finite and non-negative")
+    if risk_start <= risk_stop:
+        raise ValueError("hierarchical residual risk_start_m must exceed risk_stop_m")
 
     sac = config["sac"]
     replay_size = int(sac["replay_size"])

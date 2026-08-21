@@ -1,0 +1,21 @@
+# Canonical S3: architecture-preserving robustness study. Perception/delay
+# margins are strengthened without replacing planner, tracker, residual actor,
+# state machine or safety filter.
+includes:
+  - s2_dynamic.yaml
+
+seed: 4501
+
+env:
+  safety_filter:
+    control_delay_s: 0.075
+    max_observation_age_s: 0.12
+    geometry_margin_m: 0.005
+    tracking_error_bound_m: 0.015
+
+train:
+  total_steps: 400000
+  output_dir: outputs/hierarchical/s3_robust_dynamic
+
+eval:
+  seed: 5401

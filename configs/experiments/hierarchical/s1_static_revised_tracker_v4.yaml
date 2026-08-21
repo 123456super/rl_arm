@@ -1,0 +1,16 @@
+# v4 adds bounded replan-on-terminal-stall to tracker v3.
+includes:
+  - s1_static_revised_tracker_v3.yaml
+
+architecture_version: hierarchical_s1_revised_tracker_v4
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_tracker_v4
+    parent_architecture: hierarchical_s1_revised_tracker_v3
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_tracker_v4
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json

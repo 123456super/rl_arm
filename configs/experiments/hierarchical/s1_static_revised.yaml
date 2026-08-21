@@ -1,0 +1,45 @@
+# S1 revised architecture.  The task, safety geometry, success tolerance,
+# horizon and final manifest are inherited unchanged from canonical S1.
+includes:
+  - s1_static.yaml
+
+architecture_version: hierarchical_s1_revised_v2
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_v2
+    parent_architecture: hierarchical_s1_nominal_final_v1
+    planner:
+      ik_attempts: 64
+      ik_max_iterations: 240
+      ik_goal_tolerance_m: 0.055
+      max_iterations: 2400
+      candidate_selection: clearance_then_length
+      boundary_start_tolerance_m: 0.01
+      use_structured_rest_poses: true
+      use_dls_fallback: true
+      dls_max_iterations: 240
+      dls_damping: 0.08
+      dls_step_size: 0.7
+      dls_goal_tolerance_m: 0.01
+    tracker:
+      waypoint_gain: 2.0
+      servo_trigger_m: 0.18
+      servo_gain: 3.5
+      servo_damping: 0.05
+      adaptive_damping: true
+      servo_damping_near: 0.02
+      servo_damping_far: 0.10
+      adaptive_damping_error_m: 0.10
+      nullspace_limit_avoidance: true
+      nullspace_gain: 0.08
+      clearance_aware_gain: true
+      clearance_gain_low_m: 0.04
+      clearance_gain_high_m: 0.16
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json
+  nominal_only: false

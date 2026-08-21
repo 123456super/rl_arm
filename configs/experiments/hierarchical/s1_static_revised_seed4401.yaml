@@ -1,0 +1,5 @@
+includes:
+  - s1_static_revised.yaml
+seed: 4401
+train:
+  run_name: revised_v2_seed4401

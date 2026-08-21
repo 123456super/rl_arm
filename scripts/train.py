@@ -345,12 +345,22 @@ def main() -> None:
         "safety_filter_safe_stop_rate",
         "safety_filter_infeasible_rate",
         "safety_filter_projection_failure_rate",
+        "safety_filter_recovery_relaxed_rate",
         "predictive_near_miss_rate",
         "min_predictive_h_m",
         "mean_safety_filter_solve_time_s",
         "residual_control_enabled",
         "residual_control_base_qdot_norm",
         "residual_qdot_norm",
+        "hierarchical_final_state",
+        "hierarchical_plan_reason",
+        "hierarchical_planning_time_s",
+        "hierarchical_ik_found",
+        "hierarchical_plan_found",
+        "hierarchical_plan_count",
+        "hierarchical_replan_count",
+        "hierarchical_hold_steps",
+        "hierarchical_final_path_progress",
         "lambda",
         "alpha",
     ]
@@ -391,6 +401,17 @@ def main() -> None:
         "residual_control_mode",
         "residual_control_base_qdot_norm",
         "residual_qdot_norm",
+        "hierarchical_state",
+        "hierarchical_plan_reason",
+        "hierarchical_planning_time_s",
+        "hierarchical_ik_found",
+        "hierarchical_plan_found",
+        "hierarchical_plan_count",
+        "hierarchical_replan_count",
+        "hierarchical_hold_steps",
+        "hierarchical_path_progress",
+        "hierarchical_residual_budget",
+        "hierarchical_nominal_qdot_norm",
         "lambda",
         "alpha",
         "loss_actor",
@@ -449,6 +470,7 @@ def main() -> None:
     episode_filter_safe_stops = 0
     episode_filter_infeasible = 0
     episode_filter_projection_failures = 0
+    episode_filter_recovery_relaxed = 0
     episode_predictive_near_misses = 0
     episode_predictive_h_mins: list[float] = []
     episode_filter_solve_times_s: list[float] = []
@@ -531,6 +553,7 @@ def main() -> None:
             episode_filter_safe_stops += int(bool(info.get("safety_filter_safe_stop", False)))
             episode_filter_infeasible += int(filter_status == "safe_stop_infeasible")
             episode_filter_projection_failures += int(filter_status == "safe_stop_projection_failed")
+            episode_filter_recovery_relaxed += int(filter_status == "recovery_relaxed")
             if np.isfinite(intervention_norm):
                 episode_filter_intervention_norms.append(intervention_norm)
             if np.isfinite(predictive_h_min):
@@ -599,6 +622,19 @@ def main() -> None:
                     np.linalg.norm(info.get("residual_control_base_qdot", np.zeros(action_dim)))
                 ),
                 "residual_qdot_norm": float(np.linalg.norm(info.get("residual_qdot", np.zeros(action_dim)))),
+                "hierarchical_state": info.get("hierarchical_state", "disabled"),
+                "hierarchical_plan_reason": info.get("hierarchical_plan_reason", ""),
+                "hierarchical_planning_time_s": info.get("hierarchical_planning_time_s", float("nan")),
+                "hierarchical_ik_found": bool(info.get("hierarchical_ik_found", False)),
+                "hierarchical_plan_found": bool(info.get("hierarchical_plan_found", False)),
+                "hierarchical_plan_count": info.get("hierarchical_plan_count", 0),
+                "hierarchical_replan_count": info.get("hierarchical_replan_count", 0),
+                "hierarchical_hold_steps": info.get("hierarchical_hold_steps", 0),
+                "hierarchical_path_progress": info.get("hierarchical_path_progress", 0.0),
+                "hierarchical_residual_budget": info.get("hierarchical_residual_budget", 0.0),
+                "hierarchical_nominal_qdot_norm": float(
+                    np.linalg.norm(info.get("hierarchical_nominal_qdot", np.zeros(action_dim)))
+                ),
                 "lambda": agent.lagrange_multiplier,
                 "alpha": float(agent.alpha.detach().cpu()),
                 "loss_actor": update_info.get("loss/actor", float("nan")),
@@ -669,6 +705,11 @@ def main() -> None:
                         if safety_filter_enabled
                         else float("nan")
                     ),
+                    "safety_filter_recovery_relaxed_rate": (
+                        episode_filter_recovery_relaxed / max(episode_length, 1)
+                        if safety_filter_enabled
+                        else float("nan")
+                    ),
                     "predictive_near_miss_rate": (
                         episode_predictive_near_misses / max(episode_length, 1) if safety_filter_enabled else float("nan")
                     ),
@@ -683,6 +724,15 @@ def main() -> None:
                         np.linalg.norm(info.get("residual_control_base_qdot", np.zeros(action_dim)))
                     ),
                     "residual_qdot_norm": float(np.linalg.norm(info.get("residual_qdot", np.zeros(action_dim)))),
+                    "hierarchical_final_state": info.get("hierarchical_state", "disabled"),
+                    "hierarchical_plan_reason": info.get("hierarchical_plan_reason", ""),
+                    "hierarchical_planning_time_s": info.get("hierarchical_planning_time_s", float("nan")),
+                    "hierarchical_ik_found": bool(info.get("hierarchical_ik_found", False)),
+                    "hierarchical_plan_found": bool(info.get("hierarchical_plan_found", False)),
+                    "hierarchical_plan_count": info.get("hierarchical_plan_count", 0),
+                    "hierarchical_replan_count": info.get("hierarchical_replan_count", 0),
+                    "hierarchical_hold_steps": info.get("hierarchical_hold_steps", 0),
+                    "hierarchical_final_path_progress": info.get("hierarchical_path_progress", 0.0),
                     "lambda": agent.lagrange_multiplier,
                     "alpha": float(agent.alpha.detach().cpu()),
                 }
@@ -722,6 +772,7 @@ def main() -> None:
             episode_filter_safe_stops = 0
             episode_filter_infeasible = 0
             episode_filter_projection_failures = 0
+            episode_filter_recovery_relaxed = 0
             episode_predictive_near_misses = 0
             episode_predictive_h_mins = []
             episode_filter_solve_times_s = []
