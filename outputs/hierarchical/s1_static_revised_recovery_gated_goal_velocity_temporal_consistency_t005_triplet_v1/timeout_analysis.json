@@ -1,0 +1,105 @@
+{
+  "seeds": [
+    9027,
+    9093,
+    9143
+  ],
+  "episodes": [
+    {
+      "seed": 9093,
+      "episode": 0,
+      "trace_available": true,
+      "failure_mode": "SUCCESS",
+      "success": 1,
+      "final_position_error_m": 0.05312513932585716,
+      "hold_steps": 1,
+      "servo_steps": 27,
+      "recovery_steps": 2,
+      "recovery_rate": 0.045454545454545456,
+      "mean_predictive_h_m": 0.04354968299748693,
+      "mean_filter_intervention_norm": 1.0745756929544132,
+      "mean_executed_toward_goal_mps": 0.14030495536495557,
+      "mean_filter_velocity_loss_mps": 0.10979342267006184,
+      "goal_velocity_audit_status_counts": {
+        "optimal": 44
+      },
+      "goal_velocity_audit_steps": 44,
+      "mean_max_feasible_goal_velocity_mps": 0.23422155530993896,
+      "min_max_feasible_goal_velocity_mps": -0.05340844088409131,
+      "mean_projected_goal_velocity_mps": 0.229229282157096,
+      "mean_goal_velocity_feasibility_gap_mps": 0.0049922731528430015,
+      "mean_command_alignment_previous": 0.95041723549366,
+      "command_sign_change_steps": 0,
+      "positive_max_feasible_goal_velocity_rate": 0.9318181818181818,
+      "safe_stop_steps": 0,
+      "filter_status_counts": {
+        "filtered": 44
+      },
+      "trace_path": "outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_triplet_v1/traces/shard_0/episode_0000.csv"
+    },
+    {
+      "seed": 9143,
+      "episode": 1,
+      "trace_available": true,
+      "failure_mode": "SUCCESS",
+      "success": 1,
+      "final_position_error_m": 0.053377293050289154,
+      "hold_steps": 3,
+      "servo_steps": 46,
+      "recovery_steps": 5,
+      "recovery_rate": 0.08928571428571429,
+      "mean_predictive_h_m": 0.011227283516940498,
+      "mean_filter_intervention_norm": 0.7902753577240403,
+      "mean_executed_toward_goal_mps": 0.10121656069764819,
+      "mean_filter_velocity_loss_mps": 0.10734259137464926,
+      "goal_velocity_audit_status_counts": {
+        "optimal": 56
+      },
+      "goal_velocity_audit_steps": 56,
+      "mean_max_feasible_goal_velocity_mps": 0.14221055312076014,
+      "min_max_feasible_goal_velocity_mps": -0.08424613183204357,
+      "mean_projected_goal_velocity_mps": 0.1372105522193239,
+      "mean_goal_velocity_feasibility_gap_mps": 0.005000000901436257,
+      "mean_command_alignment_previous": 0.8301480048810065,
+      "command_sign_change_steps": 0,
+      "positive_max_feasible_goal_velocity_rate": 0.875,
+      "safe_stop_steps": 0,
+      "filter_status_counts": {
+        "filtered": 56
+      },
+      "trace_path": "outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_triplet_v1/traces/shard_1/episode_0001.csv"
+    },
+    {
+      "seed": 9027,
+      "episode": 2,
+      "trace_available": true,
+      "failure_mode": "SUCCESS",
+      "success": 1,
+      "final_position_error_m": 0.05494837462902069,
+      "hold_steps": 3,
+      "servo_steps": 36,
+      "recovery_steps": 4,
+      "recovery_rate": 0.08,
+      "mean_predictive_h_m": 0.028168698983402792,
+      "mean_filter_intervention_norm": 1.0370557737246417,
+      "mean_executed_toward_goal_mps": 0.07856091009855468,
+      "mean_filter_velocity_loss_mps": 0.10496007632756692,
+      "goal_velocity_audit_status_counts": {
+        "optimal": 50
+      },
+      "goal_velocity_audit_steps": 50,
+      "mean_max_feasible_goal_velocity_mps": 0.15883191473220923,
+      "min_max_feasible_goal_velocity_mps": -0.020880530489875558,
+      "mean_projected_goal_velocity_mps": 0.15409761148794585,
+      "mean_goal_velocity_feasibility_gap_mps": 0.004734303244263362,
+      "mean_command_alignment_previous": 0.9571624600887298,
+      "command_sign_change_steps": 0,
+      "positive_max_feasible_goal_velocity_rate": 0.94,
+      "safe_stop_steps": 0,
+      "filter_status_counts": {
+        "filtered": 50
+      },
+      "trace_path": "outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_triplet_v1/traces/shard_2/episode_0002.csv"
+    }
+  ]
+}

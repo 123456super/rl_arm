@@ -1,0 +1,4 @@
+{
+  "description": "Targeted expanded goal-region IK cases: four obstacle-blocked raw-IK resets, two raw-unreachable resets, and terminal timeout reset 9006.",
+  "seeds": [9006, 9098, 9120, 9102, 9108, 9110, 9192]
+}

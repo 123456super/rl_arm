@@ -1,0 +1,46 @@
+{
+  "old": "outputs/hierarchical/s1_static_revised_recovery_gated/hard_cases.csv",
+  "new": "outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_triplet_v1/hard_cases.csv",
+  "episodes": 3,
+  "old_success": 1,
+  "new_success": 3,
+  "success_delta": 2,
+  "transitions": {
+    "old_success_new_success": 1,
+    "old_success_new_failure": 0,
+    "old_failure_new_success": 2,
+    "old_failure_new_failure": 0
+  },
+  "rows": [
+    {
+      "seed": 9027,
+      "episode_old": 15,
+      "episode_new": 2,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9093,
+      "episode_old": 18,
+      "episode_new": 0,
+      "old_success": 0,
+      "new_success": 1,
+      "transition": "old_failure_new_success",
+      "old_failure_mode": "FILTER_STOP_TIMEOUT",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9143,
+      "episode_old": 22,
+      "episode_new": 1,
+      "old_success": 0,
+      "new_success": 1,
+      "transition": "old_failure_new_success",
+      "old_failure_mode": "FILTER_STOP_TIMEOUT",
+      "new_failure_mode": "SUCCESS"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+# Targeted smoke: among valid goal-region terminals, prefer maximum path
+# clearance while retaining the original 0.055 m success ball.
+includes:
+  - s1_static_revised_ik_goal_region_t005_retain_terminal_9006_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_clearance_terminal_9006_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_clearance_terminal_9006_v1
+    parent_architecture: hierarchical_s1_static_revised_ik_goal_region_t005_retain_terminal_9006_v1
+    planner:
+      goal_region_candidate_selection: clearance_then_length
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_clearance_terminal_9006_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_obstacle_aware_9006.json
+  nominal_only: true

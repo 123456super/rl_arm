@@ -1,0 +1,23 @@
+# Combined smoke: target-shell IK with the validated t005 temporal-consistent
+# strict filter. Shell candidates remain inside the existing success tolerance
+# and are still checked against d_safe and collision rules.
+includes:
+  - s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_revised_ik_shell_t005_9006_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_ik_shell_t005_9006_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1
+    planner:
+      ik_target_shell_enabled: true
+      ik_target_shell_attempts: 32
+      ik_target_shell_radius_m: 0.04
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_shell_t005_9006_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_obstacle_aware_9006.json
+  nominal_only: true

@@ -60,10 +60,20 @@ class SafetyFilterConfig:
     qp_time_limit_s: float | None = None
     infeasibility_diagnostics_enabled: bool = False
     goal_velocity_priority_enabled: bool = False
+    # When enabled, do not solve the goal-velocity LP for a zero requested
+    # command (e.g. PLAN_FAILED with no executable path). The strict safety
+    # projection still runs; this only avoids optimizing a task direction
+    # when the controller has no motion request.
+    goal_velocity_priority_require_nonzero_request: bool = False
     goal_velocity_priority_solver: str = "linprog"
     goal_velocity_priority_weight: float = 1.0
     goal_velocity_intervention_weight: float = 1.0
     goal_velocity_objective_scale: float = 1.0
+    # Goal-region terminals are already obstacle-checked, but may still stall
+    # in SERVO when the legacy minimum-intervention objective projects away
+    # from the task goal.  Keep this opt-in so the established behavior stays
+    # unchanged unless a targeted experiment enables it.
+    goal_velocity_priority_for_goal_region: bool = False
     # Optional second-stage lexicographic objective.  The first LP maximizes
     # the TCP velocity in the current goal direction.  When enabled, a second
     # LP keeps that value within a small certified tolerance and selects the
@@ -354,6 +364,10 @@ def filter_joint_velocity(
         config.goal_velocity_priority_enabled
         and filter_input.goal_velocity_objective is not None
         and config.goal_velocity_priority_solver == "linprog"
+        and (
+            not config.goal_velocity_priority_require_nonzero_request
+            or float(np.linalg.norm(requested)) > 1.0e-9
+        )
     ):
         goal_objective = _vector(
             filter_input.goal_velocity_objective,
@@ -660,12 +674,17 @@ def _linprog_goal_projection(
     if use_secondary and requested.shape == objective.shape and previous.shape == objective.shape:
         n = objective.size
         eye = np.eye(n, dtype=np.float64)
-        zeros = np.zeros((n, n), dtype=np.float64)
+        # The strict safety rows have one row per constraint (not one row per
+        # joint).  Auxiliary L1 columns therefore need a zero block with the
+        # same row count as ``rows``; using (n, n) here makes hstack fail as
+        # soon as the filter has more constraints than joints.
+        zeros = np.zeros((rows.shape[0], n), dtype=np.float64)
+        zero_variables = np.zeros((n, n), dtype=np.float64)
         strict_rows = np.hstack((-rows, zeros, zeros))
-        q_req_pos = np.hstack((eye, -eye, zeros))
-        q_req_neg = np.hstack((-eye, -eye, zeros))
-        q_prev_pos = np.hstack((eye, zeros, -eye))
-        q_prev_neg = np.hstack((-eye, zeros, -eye))
+        q_req_pos = np.hstack((eye, -eye, zero_variables))
+        q_req_neg = np.hstack((-eye, -eye, zero_variables))
+        q_prev_pos = np.hstack((eye, zero_variables, -eye))
+        q_prev_neg = np.hstack((-eye, zero_variables, -eye))
         near_optimal = np.hstack((-objective.reshape(1, -1), np.zeros((1, 2 * n))))
         A_ub = np.vstack((strict_rows, q_req_pos, q_req_neg, q_prev_pos, q_prev_neg, near_optimal))
         b_ub = np.concatenate(
@@ -1192,6 +1211,7 @@ def _build_constraints(
         or config.goal_velocity_continuity_requested_weight < 0.0
         or not np.isfinite(config.goal_velocity_continuity_previous_weight)
         or config.goal_velocity_continuity_previous_weight < 0.0
+        or not isinstance(config.goal_velocity_priority_for_goal_region, bool)
     ):
         raise ValueError("goal velocity objective weights must be finite and valid")
 

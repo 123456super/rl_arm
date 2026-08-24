@@ -1,0 +1,28 @@
+# Smoke test for obstacle-aware redundant IK around the exact target.
+# Only raw IK solutions that already meet the existing goal tolerance are
+# re-solved with nullspace-biased rest poses; strict clearance/contact checks
+# and all task/safety definitions remain inherited unchanged.
+includes:
+  - s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_revised_ik_obstacle_aware_nullspace_9006_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_ik_obstacle_aware_nullspace_9006_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1
+    planner:
+      ik_obstacle_aware_nullspace_enabled: true
+      ik_obstacle_aware_nullspace_attempts: 96
+      ik_obstacle_aware_nullspace_step_rad: 0.08
+      ik_obstacle_aware_nullspace_iterations: 80
+      ik_obstacle_aware_nullspace_gradient_gain: 1.0
+      ik_obstacle_aware_nullspace_finite_difference_rad: 0.015
+      ik_obstacle_aware_nullspace_damping: 0.08
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_obstacle_aware_nullspace_9006_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_obstacle_aware_9006.json
+  nominal_only: true

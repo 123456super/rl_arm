@@ -1,0 +1,19 @@
+# 200-reset nominal gate for the temporally consistent strict goal-velocity
+# filter.  Run only after the hard-case gate passes.  This is zero-residual
+# nominal evaluation and does not modify the frozen recovery-gated output.
+includes:
+  - s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_nominal_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_nominal_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_hard_cases_v1
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_nominal_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json
+  nominal_only: true

@@ -1,0 +1,21 @@
+# Smoke variant: retain the safe goal-region terminal but command zero during
+# AVOID_HOLD; recovery is disabled for this terminal so no relaxed motion can
+# pull the robot away from the validated path.
+includes:
+  - s1_static_revised_ik_goal_region_t005_retain_terminal_9006_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_hold_terminal_9006_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_hold_terminal_9006_v1
+    parent_architecture: hierarchical_s1_static_revised_ik_goal_region_t005_retain_terminal_9006_v1
+    tracker:
+      goal_region_hold_waypoint_gain: 0.0
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_hold_terminal_9006_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_obstacle_aware_9006.json
+  nominal_only: true

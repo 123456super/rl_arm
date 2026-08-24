@@ -1,0 +1,18 @@
+# 200-reset nominal gate for the obstacle-aware goal-region IK candidate.
+# Run only after its 23-reset hard-case paired gate passes.
+includes:
+  - s1_static_revised_ik_goal_region_t005_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_revised_ik_goal_region_t005_nominal_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_ik_goal_region_t005_nominal_v1
+    parent_architecture: hierarchical_s1_revised_ik_goal_region_t005_hard_cases_v1
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_nominal_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json
+  nominal_only: true

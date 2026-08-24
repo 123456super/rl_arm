@@ -1,0 +1,27 @@
+# Obstacle-aware goal-region IK diagnostic on top of the validated t005
+# controller. Exact-target IK remains first; the bounded goal-region fallback
+# is used only when exact-target candidates are absent. All original goal,
+# d_safe, collision, state-machine, filter and success rules remain unchanged.
+includes:
+  - s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_revised_ik_goal_region_t005_hard_cases_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_ik_goal_region_t005_hard_cases_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1
+    planner:
+      # Search a deterministic, obstacle-oriented Fibonacci set of target
+      # points only after exact-target IK and exact-target fallbacks fail.
+      ik_goal_region_enabled: true
+      ik_goal_region_attempts: 96
+      ik_goal_region_radius_m: 0.045
+      goal_region_candidate_selection: goal_error_then_clearance
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_hard_cases_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json
+  nominal_only: true

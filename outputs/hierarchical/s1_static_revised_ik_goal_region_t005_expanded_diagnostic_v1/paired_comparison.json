@@ -1,0 +1,86 @@
+{
+  "old": "outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1/hard_cases.csv",
+  "new": "outputs/hierarchical/s1_static_revised_ik_goal_region_t005_expanded_diagnostic_v1/hard_cases.csv",
+  "episodes": 7,
+  "old_success": 0,
+  "new_success": 0,
+  "success_delta": 0,
+  "transitions": {
+    "old_success_new_success": 0,
+    "old_success_new_failure": 0,
+    "old_failure_new_success": 0,
+    "old_failure_new_failure": 7
+  },
+  "rows": [
+    {
+      "seed": 9006,
+      "episode_old": 0,
+      "episode_new": 0,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "FILTER_STOP_TIMEOUT"
+    },
+    {
+      "seed": 9098,
+      "episode_old": 5,
+      "episode_new": 1,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9102,
+      "episode_old": 6,
+      "episode_new": 3,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9108,
+      "episode_old": 7,
+      "episode_new": 4,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9110,
+      "episode_old": 8,
+      "episode_new": 5,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "FILTER_STOP_TIMEOUT"
+    },
+    {
+      "seed": 9120,
+      "episode_old": 9,
+      "episode_new": 2,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9192,
+      "episode_old": 14,
+      "episode_new": 6,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+# Corrected targeted smoke: use the expanded 384-sample goal-region search
+# and apply the t005 goal-velocity objective to the resulting terminal only.
+# All strict safety rows, d_safe, success tolerance, horizon, state machine
+# and collision rules remain unchanged.
+includes:
+  - s1_static_revised_ik_goal_region_t005_expanded_diagnostic_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_expanded_terminal_priority_smoke_v2
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_expanded_terminal_priority_smoke_v2
+    parent_architecture: hierarchical_s1_static_revised_ik_goal_region_t005_expanded_diagnostic_v1
+  safety_filter:
+    goal_velocity_priority_for_goal_region: true
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_expanded_terminal_priority_smoke_v2
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_goal_region_terminal_priority_cases.json
+  nominal_only: true

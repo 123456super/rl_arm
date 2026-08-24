@@ -1,0 +1,39 @@
+{
+  "seeds": [
+    9027
+  ],
+  "episodes": [
+    {
+      "seed": 9027,
+      "episode": 0,
+      "trace_available": true,
+      "failure_mode": "SUCCESS",
+      "success": 1,
+      "final_position_error_m": 0.05467776209115982,
+      "hold_steps": 2,
+      "servo_steps": 187,
+      "recovery_steps": 4,
+      "recovery_rate": 0.01990049751243781,
+      "mean_predictive_h_m": 0.007181138932543534,
+      "mean_filter_intervention_norm": 0.7919581345667327,
+      "mean_executed_toward_goal_mps": 0.02676339828802806,
+      "mean_filter_velocity_loss_mps": 0.11697195986370137,
+      "goal_velocity_audit_status_counts": {
+        "optimal": 201
+      },
+      "goal_velocity_audit_steps": 201,
+      "mean_max_feasible_goal_velocity_mps": 0.0661644277328304,
+      "min_max_feasible_goal_velocity_mps": -0.016625927045939935,
+      "mean_projected_goal_velocity_mps": 0.04742472576187373,
+      "mean_goal_velocity_feasibility_gap_mps": 0.01873970197095667,
+      "mean_command_alignment_previous": 0.9605388069034215,
+      "command_sign_change_steps": 0,
+      "positive_max_feasible_goal_velocity_rate": 0.9552238805970149,
+      "safe_stop_steps": 0,
+      "filter_status_counts": {
+        "filtered": 201
+      },
+      "trace_path": "outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_9027_v1/traces/episode_0000.csv"
+    }
+  ]
+}

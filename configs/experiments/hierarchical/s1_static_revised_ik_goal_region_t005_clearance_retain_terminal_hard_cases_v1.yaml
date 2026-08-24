@@ -1,0 +1,22 @@
+# 23-reset hard-case gate for obstacle-aware goal-region IK with retained
+# terminal reuse.  Geometric clearance/length selection is used explicitly;
+# predictive ranking is intentionally disabled because it regresses seed 9143.
+includes:
+  - s1_static_revised_ik_goal_region_t005_retain_terminal_9006_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_clearance_retain_terminal_hard_cases_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_clearance_retain_terminal_hard_cases_v1
+    parent_architecture: hierarchical_s1_static_revised_ik_goal_region_t005_retain_terminal_9006_v1
+    planner:
+      candidate_selection: clearance_then_length
+      goal_region_candidate_selection: clearance_then_length
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_clearance_retain_terminal_hard_cases_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json
+  nominal_only: true

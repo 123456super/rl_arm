@@ -1,0 +1,12 @@
+# Single-seed recheck of the actual predictive goal-region candidate.
+includes:
+  - s1_static_revised_ik_goal_region_t005_predictive_retain_terminal_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_predictive_9143_recheck_v1
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_predictive_9143_recheck_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_obstacle_aware_9143.json
+  nominal_only: true

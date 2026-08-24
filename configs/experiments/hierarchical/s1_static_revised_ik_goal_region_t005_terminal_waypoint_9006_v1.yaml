@@ -1,0 +1,23 @@
+# Targeted smoke for goal-region candidate 9006.  The goal-region IK point
+# is already inside the original success ball; keep tracking its strictly
+# collision-free joint waypoint until the original goal error is near the
+# success threshold instead of switching to the original-goal servo at 0.18m.
+# No goal, d_safe, collision, horizon or filter rule is changed.
+includes:
+  - s1_static_revised_ik_goal_region_t005_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_terminal_waypoint_9006_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_terminal_waypoint_9006_v1
+    parent_architecture: hierarchical_s1_revised_ik_goal_region_t005_hard_cases_v1
+    tracker:
+      servo_trigger_m: 0.055
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_terminal_waypoint_9006_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_obstacle_aware_9006.json
+  nominal_only: true

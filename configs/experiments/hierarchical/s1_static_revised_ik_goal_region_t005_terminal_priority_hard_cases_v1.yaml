@@ -1,0 +1,19 @@
+# Full hard-case expansion after the targeted goal-region terminal-priority
+# smoke passes. Only goal-region terminal filter objective selection changes;
+# all strict safety rows and task definitions remain inherited.
+includes:
+  - s1_static_revised_ik_goal_region_t005_terminal_priority_smoke_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_terminal_priority_hard_cases_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_terminal_priority_hard_cases_v1
+    parent_architecture: hierarchical_s1_static_revised_ik_goal_region_t005_terminal_priority_smoke_v1
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_terminal_priority_hard_cases_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json
+  nominal_only: true

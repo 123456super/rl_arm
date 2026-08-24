@@ -1,0 +1,29 @@
+# Targeted smoke for the only newly planned goal-region case (9006).
+# Keeps the validated t005 strict filter and goal-region IK unchanged, while
+# adding the previously implemented filter-aware terminal damping/continuity
+# to reduce near-goal oscillation. This is diagnostic-only until 9006 passes.
+includes:
+  - s1_static_revised_ik_goal_region_t005_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_revised_ik_goal_region_t005_servo_damped_9006_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_ik_goal_region_t005_servo_damped_9006_v1
+    parent_architecture: hierarchical_s1_revised_ik_goal_region_t005_hard_cases_v1
+    tracker:
+      filter_aware_servo: true
+      filter_intervention_threshold: 0.15
+      filter_aware_gain_floor: 0.35
+      filter_aware_blend_strength: 0.75
+      filter_aware_min_alignment: 0.0
+      servo_velocity_damping: 0.35
+      servo_near_goal_radius_m: 0.08
+      servo_near_goal_gain_scale: 0.65
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_servo_damped_9006_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_obstacle_aware_9006.json
+  nominal_only: true

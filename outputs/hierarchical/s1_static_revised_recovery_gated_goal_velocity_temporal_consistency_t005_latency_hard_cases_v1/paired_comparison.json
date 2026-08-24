@@ -1,0 +1,246 @@
+{
+  "old": "outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1/hard_cases.csv",
+  "new": "outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_latency_hard_cases_v1/hard_cases.csv",
+  "episodes": 23,
+  "old_success": 12,
+  "new_success": 12,
+  "success_delta": 0,
+  "transitions": {
+    "old_success_new_success": 12,
+    "old_success_new_failure": 0,
+    "old_failure_new_success": 0,
+    "old_failure_new_failure": 11
+  },
+  "rows": [
+    {
+      "seed": 9006,
+      "episode_old": 0,
+      "episode_new": 0,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9021,
+      "episode_old": 1,
+      "episode_new": 1,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9027,
+      "episode_old": 15,
+      "episode_new": 15,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9033,
+      "episode_old": 16,
+      "episode_new": 16,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9060,
+      "episode_old": 2,
+      "episode_new": 2,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9062,
+      "episode_old": 17,
+      "episode_new": 17,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9065,
+      "episode_old": 3,
+      "episode_new": 3,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9093,
+      "episode_old": 18,
+      "episode_new": 18,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9095,
+      "episode_old": 4,
+      "episode_new": 4,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9098,
+      "episode_old": 5,
+      "episode_new": 5,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9102,
+      "episode_old": 6,
+      "episode_new": 6,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9107,
+      "episode_old": 19,
+      "episode_new": 19,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9108,
+      "episode_old": 7,
+      "episode_new": 7,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9110,
+      "episode_old": 8,
+      "episode_new": 8,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9112,
+      "episode_old": 20,
+      "episode_new": 20,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9120,
+      "episode_old": 9,
+      "episode_new": 9,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9136,
+      "episode_old": 21,
+      "episode_new": 21,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9137,
+      "episode_old": 10,
+      "episode_new": 10,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9138,
+      "episode_old": 11,
+      "episode_new": 11,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9142,
+      "episode_old": 12,
+      "episode_new": 12,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    },
+    {
+      "seed": 9143,
+      "episode_old": 22,
+      "episode_new": 22,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9175,
+      "episode_old": 13,
+      "episode_new": 13,
+      "old_success": 1,
+      "new_success": 1,
+      "transition": "old_success_new_success",
+      "old_failure_mode": "SUCCESS",
+      "new_failure_mode": "SUCCESS"
+    },
+    {
+      "seed": 9192,
+      "episode_old": 14,
+      "episode_new": 14,
+      "old_success": 0,
+      "new_success": 0,
+      "transition": "old_failure_new_failure",
+      "old_failure_mode": "IK_NOT_FOUND",
+      "new_failure_mode": "IK_NOT_FOUND"
+    }
+  ]
+}

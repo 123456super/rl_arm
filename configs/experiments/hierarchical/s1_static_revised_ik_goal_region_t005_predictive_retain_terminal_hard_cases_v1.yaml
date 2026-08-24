@@ -1,0 +1,18 @@
+# 23-reset hard-case gate configuration.  This intentionally overrides the
+# inherited single-seed 9006 smoke manifest.
+includes:
+  - s1_static_revised_ik_goal_region_t005_predictive_retain_terminal_9006_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_predictive_retain_terminal_hard_cases_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_predictive_retain_terminal_hard_cases_v1
+    parent_architecture: hierarchical_s1_static_revised_ik_goal_region_t005_predictive_retain_terminal_9006_v1
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_predictive_retain_terminal_hard_cases_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json
+  nominal_only: true

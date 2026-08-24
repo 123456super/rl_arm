@@ -1,0 +1,21 @@
+# Latency-focused follow-up to t005.  Zero requested commands (notably
+# PLAN_FAILED episodes) skip only the goal-velocity LP; the strict safety
+# projection, bounds and all success/collision rules remain unchanged.
+includes:
+  - s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_t005_latency_hard_cases_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_t005_latency_hard_cases_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1
+  safety_filter:
+    goal_velocity_priority_require_nonzero_request: true
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_latency_hard_cases_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json
+  nominal_only: true

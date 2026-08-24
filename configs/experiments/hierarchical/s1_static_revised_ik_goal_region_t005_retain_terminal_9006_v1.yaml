@@ -1,0 +1,21 @@
+# Targeted smoke for retained goal-region terminal reuse after AVOID_HOLD.
+# The planner keeps the original task goal and success tolerance unchanged;
+# only the already validated goal-region joint terminal is reused on replan.
+includes:
+  - s1_static_revised_ik_goal_region_t005_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_retain_terminal_9006_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_retain_terminal_9006_v1
+    parent_architecture: hierarchical_s1_revised_ik_goal_region_t005_hard_cases_v1
+  safety_filter:
+    goal_velocity_priority_require_nonzero_request: true
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_retain_terminal_9006_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_obstacle_aware_9006.json
+  nominal_only: true

@@ -1,0 +1,20 @@
+# Full hard-case gate for the temporally consistent strict goal-velocity
+# filter.  Run only after the 9027 smoke and the 9027/9093/9143 paired gate.
+# All task, geometry, safety rows, state-machine semantics and success rules
+# remain inherited; this file only changes the manifest and output namespace.
+includes:
+  - s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_9027_v1.yaml
+
+architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_hard_cases_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_hard_cases_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_9027_v1
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_hard_cases_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json
+  nominal_only: true

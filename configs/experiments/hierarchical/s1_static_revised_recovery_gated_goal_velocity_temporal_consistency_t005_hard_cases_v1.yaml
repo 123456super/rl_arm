@@ -1,0 +1,18 @@
+# Full 23-reset hard-case gate for the conservative 0.005 m/s temporal
+# consistency candidate. Run after the t005 triplet passed.
+includes:
+  - s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_9027_v1.yaml
+
+architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_t005_9027_v1
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_hard_cases.json
+  nominal_only: true

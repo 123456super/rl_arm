@@ -1,0 +1,18 @@
+# Smoke variant: retain the selected high-clearance goal-region terminal, but
+# keep the established recovery/goal-velocity filter semantics for comparison.
+includes:
+  - s1_static_revised_ik_goal_region_t005_clearance_terminal_9006_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_retain_terminal_9006_v2
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_retain_terminal_9006_v2
+    parent_architecture: hierarchical_s1_static_revised_ik_goal_region_t005_clearance_terminal_9006_v1
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_retain_terminal_9006_v2
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_obstacle_aware_9006.json
+  nominal_only: true

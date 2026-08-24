@@ -1,0 +1,25 @@
+# Targeted smoke: use the expanded goal-region search, but prefer the
+# obstacle-valid terminal with the smallest original-goal error before path
+# clearance. Strict d_safe, success tolerance, horizon, state machine and
+# collision rules remain unchanged. Goal-velocity priority is not enabled in
+# this isolation test.
+includes:
+  - s1_static_revised_ik_goal_region_t005_expanded_diagnostic_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_expanded_goal_error_smoke_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_expanded_goal_error_smoke_v1
+    parent_architecture: hierarchical_s1_static_revised_ik_goal_region_t005_expanded_diagnostic_v1
+    planner:
+      goal_region_candidate_selection: goal_error_then_clearance
+  safety_filter:
+    goal_velocity_priority_for_goal_region: false
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_expanded_goal_error_smoke_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_goal_region_terminal_priority_cases.json
+  nominal_only: true

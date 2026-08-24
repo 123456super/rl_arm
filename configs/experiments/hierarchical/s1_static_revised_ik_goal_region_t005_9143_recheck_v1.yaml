@@ -1,0 +1,13 @@
+# Single-seed regression recheck for hard-case 9143 using the validated
+# temporal-consistency baseline configuration.
+includes:
+  - s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_9143_recheck_v1
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_9143_recheck_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_obstacle_aware_9143.json
+  nominal_only: true

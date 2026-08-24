@@ -1,0 +1,22 @@
+# Final targeted smoke: track the high-clearance retained terminal through
+# AVOID_HOLD with the strict filter; recovery and goal-velocity overrides stay
+# disabled for this validated terminal.
+includes:
+  - s1_static_revised_ik_goal_region_t005_clearance_terminal_9006_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_clearance_track_terminal_9006_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_clearance_track_terminal_9006_v1
+    parent_architecture: hierarchical_s1_static_revised_ik_goal_region_t005_clearance_terminal_9006_v1
+    tracker:
+      goal_region_hold_waypoint_gain: 1.0
+      servo_trigger_m: 0.055
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_clearance_track_terminal_9006_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_obstacle_aware_9006.json
+  nominal_only: true

@@ -224,6 +224,10 @@ def validate_config(config: dict[str, Any]) -> None:
         "predictive_candidate_limit",
         "ik_target_shell_attempts",
         "ik_target_shell_radius_m",
+        "ik_goal_region_attempts",
+        "ik_goal_region_radius_m",
+        "ik_obstacle_aware_nullspace_attempts",
+        "ik_obstacle_aware_nullspace_step_rad",
     ):
         value = float(planner.get(key, 0.0))
         if not isfinite(value) or value < 0.0:
@@ -232,11 +236,21 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("hierarchical planner predictive_candidate_limit must be positive")
     if int(planner.get("ik_target_shell_attempts", 0)) < 0:
         raise ValueError("hierarchical planner ik_target_shell_attempts must be non-negative")
+    if int(planner.get("ik_goal_region_attempts", 0)) < 0:
+        raise ValueError("hierarchical planner ik_goal_region_attempts must be non-negative")
     shell_radius = float(planner.get("ik_target_shell_radius_m", 0.0))
     if shell_radius > float(planner.get("ik_goal_tolerance_m", 0.0)):
         raise ValueError("hierarchical planner ik_target_shell_radius_m must not exceed ik_goal_tolerance_m")
+    goal_region_radius = float(planner.get("ik_goal_region_radius_m", 0.0))
+    if goal_region_radius > float(planner.get("ik_goal_tolerance_m", 0.0)):
+        raise ValueError("hierarchical planner ik_goal_region_radius_m must not exceed ik_goal_tolerance_m")
     if "ik_target_shell_enabled" in planner and not isinstance(planner["ik_target_shell_enabled"], bool):
         raise TypeError("hierarchical planner ik_target_shell_enabled must be boolean")
+    if "ik_goal_region_enabled" in planner and not isinstance(planner["ik_goal_region_enabled"], bool):
+        raise TypeError("hierarchical planner ik_goal_region_enabled must be boolean")
+    for key in ("ik_obstacle_aware_nullspace_enabled",):
+        if key in planner and not isinstance(planner[key], bool):
+            raise TypeError(f"env.hierarchical_control.planner.{key} must be boolean")
     for key in (
         "waypoint_gain", "waypoint_tolerance_rad", "servo_trigger_m", "servo_gain", "servo_damping",
         "servo_velocity_damping", "servo_near_goal_radius_m", "servo_near_goal_gain_scale",

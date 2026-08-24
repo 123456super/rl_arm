@@ -13,11 +13,30 @@ def main() -> None:
     parser.add_argument("--old", required=True)
     parser.add_argument("--new", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--seeds",
+        nargs="+",
+        type=int,
+        default=None,
+        help="compare only these reset seeds; useful when the two CSVs use different manifest episode indices",
+    )
     args = parser.parse_args()
     with open(args.old, newline="", encoding="utf-8") as file:
-        old = {(int(row["seed"]), int(row["episode"])): row for row in csv.DictReader(file)}
+        old_rows = list(csv.DictReader(file))
     with open(args.new, newline="", encoding="utf-8") as file:
-        new = {(int(row["seed"]), int(row["episode"])): row for row in csv.DictReader(file)}
+        new_rows = list(csv.DictReader(file))
+    selected_seeds = None if args.seeds is None else set(args.seeds)
+    if selected_seeds is not None:
+        old_rows = [row for row in old_rows if int(row["seed"]) in selected_seeds]
+        new_rows = [row for row in new_rows if int(row["seed"]) in selected_seeds]
+        # Episode numbers are manifest positions and can differ between a
+        # full hard-case manifest and a small diagnostic manifest.  The reset
+        # seed is the stable paired identity in this mode.
+        old = {int(row["seed"]): row for row in old_rows}
+        new = {int(row["seed"]): row for row in new_rows}
+    else:
+        old = {(int(row["seed"]), int(row["episode"])): row for row in old_rows}
+        new = {(int(row["seed"]), int(row["episode"])): row for row in new_rows}
     if set(old) != set(new):
         raise ValueError("old/new CSVs do not contain identical seed/episode keys")
     transitions = {"old_success_new_success": 0, "old_success_new_failure": 0, "old_failure_new_success": 0, "old_failure_new_failure": 0}
@@ -34,7 +53,18 @@ def main() -> None:
         else:
             transition = "old_failure_new_failure"
         transitions[transition] += 1
-        rows.append({"seed": key[0], "episode": key[1], "old_success": int(old_success), "new_success": int(new_success), "transition": transition, "old_failure_mode": old[key].get("hierarchical_failure_mode", ""), "new_failure_mode": new[key].get("hierarchical_failure_mode", "")})
+        rows.append(
+            {
+                "seed": int(old[key]["seed"]),
+                "episode_old": int(old[key]["episode"]),
+                "episode_new": int(new[key]["episode"]),
+                "old_success": int(old_success),
+                "new_success": int(new_success),
+                "transition": transition,
+                "old_failure_mode": old[key].get("hierarchical_failure_mode", ""),
+                "new_failure_mode": new[key].get("hierarchical_failure_mode", ""),
+            }
+        )
     report = {
         "old": str(args.old),
         "new": str(args.new),

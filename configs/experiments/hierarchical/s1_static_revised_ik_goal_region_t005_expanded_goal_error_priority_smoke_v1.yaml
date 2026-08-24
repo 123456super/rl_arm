@@ -1,0 +1,22 @@
+# Final targeted combination smoke: choose the obstacle-valid terminal with
+# the smallest original-goal error, then use the validated t005 goal-velocity
+# objective for that terminal. All strict safety rows, d_safe, success
+# tolerance, horizon, state machine and collision rules remain unchanged.
+includes:
+  - s1_static_revised_ik_goal_region_t005_expanded_goal_error_smoke_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_expanded_goal_error_priority_smoke_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_expanded_goal_error_priority_smoke_v1
+    parent_architecture: hierarchical_s1_static_revised_ik_goal_region_t005_expanded_goal_error_smoke_v1
+  safety_filter:
+    goal_velocity_priority_for_goal_region: true
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_expanded_goal_error_priority_smoke_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_goal_region_terminal_priority_cases.json
+  nominal_only: true

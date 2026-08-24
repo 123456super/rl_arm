@@ -1,0 +1,21 @@
+# Targeted smoke: apply the already validated t005 goal-velocity objective to
+# obstacle-checked goal-region terminals only. All strict safety rows, d_safe,
+# success tolerance, horizon, state machine and collision rules are unchanged.
+includes:
+  - s1_static_revised_ik_goal_region_t005_clearance_retain_terminal_hard_cases_v1.yaml
+
+architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_terminal_priority_smoke_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_static_revised_ik_goal_region_t005_terminal_priority_smoke_v1
+    parent_architecture: hierarchical_s1_static_revised_ik_goal_region_t005_clearance_retain_terminal_hard_cases_v1
+  safety_filter:
+    goal_velocity_priority_for_goal_region: true
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_goal_region_t005_terminal_priority_smoke_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_goal_region_terminal_priority_cases.json
+  nominal_only: true
