@@ -1,0 +1,24 @@
+# Mechanism smoke for the strictly valid beam terminal found on reset 9006.
+# Only this feasible-region terminal must reach its final joint waypoint before
+# SERVO; ordinary t005 paths keep the original TCP-error transition rule.
+includes:
+  - s1_static_revised_ik_obstacle_aware_beam_targeted_v1.yaml
+
+architecture_version: hierarchical_s1_revised_ik_obstacle_aware_beam_terminal_track_9006_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_revised_ik_obstacle_aware_beam_terminal_track_9006_v1
+    parent_architecture: hierarchical_s1_revised_ik_obstacle_aware_beam_targeted_v1
+    planner:
+      ik_obstacle_aware_beam_retain_terminal_enabled: true
+    tracker:
+      feasible_terminal_track_to_joint_enabled: true
+      feasible_terminal_joint_tolerance_rad: 0.02
+
+train:
+  output_dir: outputs/hierarchical/s1_static_revised_ik_obstacle_aware_beam_terminal_track_9006_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_hierarchical_obstacle_aware_9006.json
+  nominal_only: true

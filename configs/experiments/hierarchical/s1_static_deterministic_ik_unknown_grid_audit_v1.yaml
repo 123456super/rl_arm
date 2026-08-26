@@ -1,0 +1,22 @@
+# Follow-up endpoint IK audit for the nine unknown nominal seeds only.
+# This is a deterministic 3^6 rest-pose grid, not an episode-success test.
+includes:
+  - s1_static_deterministic_ik_feasibility_audit_v1.yaml
+
+architecture_version: hierarchical_s1_deterministic_ik_unknown_grid_audit_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_deterministic_ik_unknown_grid_audit_v1
+    parent_architecture: hierarchical_s1_deterministic_ik_feasibility_audit_v1
+    planner:
+      ik_audit_grid_levels: 3
+      ik_audit_max_iterations: 500
+      ik_audit_residual_threshold: 1.0e-6
+
+train:
+  output_dir: outputs/hierarchical/s1_static_deterministic_ik_unknown_grid_audit_v1
+
+eval:
+  seed_manifest: outputs/hierarchical/s1_static_deterministic_ik_feasibility_audit_v1/unknown_manifest.json
+  nominal_only: true

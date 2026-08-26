@@ -1,0 +1,17 @@
+{
+  "manifest_version": 1,
+  "protocol": "hierarchical_s1_deterministic_ik_unknown_after_grid_v1",
+  "source_manifest": "outputs/hierarchical/s1_static_deterministic_ik_feasibility_audit_v1/unknown_manifest.json",
+  "description": "Only unknown seeds remaining after deterministic 3^6 rest-pose grid IK audit.",
+  "seeds": [
+    9006,
+    9021,
+    9065,
+    9095,
+    9098,
+    9102,
+    9110,
+    9120,
+    9142
+  ]
+}

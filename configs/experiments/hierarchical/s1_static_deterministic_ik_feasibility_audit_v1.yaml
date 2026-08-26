@@ -1,0 +1,22 @@
+# Full nominal-reset endpoint IK audit.  This is diagnostic-only: it keeps the
+# validated t005 planner and strict task geometry, and adds no exploratory IK
+# branch.  A failed finite search is classified as unknown by the audit.
+includes:
+  - s1_static_revised_recovery_gated_goal_velocity_temporal_consistency_t005_nominal_v1.yaml
+
+architecture_version: hierarchical_s1_deterministic_ik_feasibility_audit_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_deterministic_ik_feasibility_audit_v1
+    parent_architecture: hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_t005_nominal_v1
+    planner:
+      # Endpoint feasibility does not require an RRT path or controller rollout.
+      ik_feasibility_audit_only: true
+
+train:
+  output_dir: outputs/hierarchical/s1_static_deterministic_ik_feasibility_audit_v1
+
+eval:
+  seed_manifest: configs/experiments/reaching_recovery/manifests/v1_final.json
+  nominal_only: true

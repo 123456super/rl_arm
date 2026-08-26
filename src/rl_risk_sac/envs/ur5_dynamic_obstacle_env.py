@@ -101,6 +101,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.hierarchical_selected_path_filter_intervention = float("nan")
         self.hierarchical_ik_candidate_errors_m: list[float] = []
         self.hierarchical_ik_candidate_clearances_m: list[float] = []
+        self.hierarchical_ik_candidate_qs: list[np.ndarray] = []
         self.hierarchical_ik_candidate_kinds: list[str] = []
         # A goal-region IK solution is a valid terminal configuration for the
         # original task (its TCP remains within the normal success tolerance).
@@ -301,6 +302,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.hierarchical_selected_path_min_clearance_m = float("nan")
         self.hierarchical_ik_candidate_errors_m = []
         self.hierarchical_ik_candidate_clearances_m = []
+        self.hierarchical_ik_candidate_qs = []
         self.hierarchical_ik_candidate_kinds = []
         self.hierarchical_goal_region_terminal_q = None
         self.hierarchical_selected_terminal_is_goal_region = False
@@ -369,6 +371,14 @@ class UR5DynamicObstacleEnv(gym.Env):
             self.hierarchical_state = "PLAN_FAILED"
             self.hierarchical_path = []
             self.hierarchical_plan_reason = "ik_not_found"
+            self.hierarchical_planning_time_s = perf_counter() - planning_started_at
+            self.hierarchical_planning_time_total_s += self.hierarchical_planning_time_s
+            self._hierarchical_planning_start_q = None
+            return
+        if bool(self.hierarchical_planner_cfg.get("ik_feasibility_audit_only", False)):
+            self.hierarchical_state = "PLAN_FAILED"
+            self.hierarchical_path = []
+            self.hierarchical_plan_reason = "ik_feasibility_audit_only"
             self.hierarchical_planning_time_s = perf_counter() - planning_started_at
             self.hierarchical_planning_time_total_s += self.hierarchical_planning_time_s
             self._hierarchical_planning_start_q = None
@@ -503,12 +513,30 @@ class UR5DynamicObstacleEnv(gym.Env):
                 selected["preferred_terminal"]
                 or (
                     candidate_index < len(self.hierarchical_ik_candidate_kinds)
-                    and self.hierarchical_ik_candidate_kinds[candidate_index] == "goal_region"
+                    and (
+                        self.hierarchical_ik_candidate_kinds[candidate_index] == "goal_region"
+                        or (
+                            self.hierarchical_ik_candidate_kinds[candidate_index]
+                            == "obstacle_aware_beam"
+                            and self.hierarchical_planner_cfg.get(
+                                "ik_obstacle_aware_beam_retain_terminal_enabled", False
+                            )
+                        )
+                    )
                 )
             )
             if (
                 candidate_index < len(self.hierarchical_ik_candidate_kinds)
-                and self.hierarchical_ik_candidate_kinds[candidate_index] == "goal_region"
+                and (
+                    self.hierarchical_ik_candidate_kinds[candidate_index] == "goal_region"
+                    or (
+                        self.hierarchical_ik_candidate_kinds[candidate_index]
+                        == "obstacle_aware_beam"
+                        and self.hierarchical_planner_cfg.get(
+                            "ik_obstacle_aware_beam_retain_terminal_enabled", False
+                        )
+                    )
+                )
             ):
                 self.hierarchical_goal_region_terminal_q = np.asarray(ik_candidates[candidate_index], dtype=np.float64).copy()
         if not successful_plans:
@@ -676,6 +704,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.hierarchical_ik_candidate_errors_m = []
         self.hierarchical_ik_candidate_clearances_m = []
         self.hierarchical_ik_candidate_kinds = []
+        raw_goal_seeds: list[np.ndarray] = []
 
         # Preserve a previously selected goal-region terminal across
         # AVOID_HOLD/replan.  Validate it against the current obstacle state;
@@ -688,6 +717,7 @@ class UR5DynamicObstacleEnv(gym.Env):
                 candidates.append(retained)
                 self.hierarchical_ik_candidate_errors_m.append(float(retained_error))
                 self.hierarchical_ik_candidate_clearances_m.append(float(self._planning_clearance(retained)))
+                self.hierarchical_ik_candidate_qs.append(retained.copy())
                 self.hierarchical_ik_candidate_kinds.append("retained_goal_region")
 
         def run_ik_attempts(
@@ -728,6 +758,8 @@ class UR5DynamicObstacleEnv(gym.Env):
                     self.hierarchical_ik_goal_reachable_count += 1
                     if self._planning_state_validity_reason(candidate, ignore_obstacle=True) is None:
                         self.hierarchical_ik_obstacle_free_goal_reachable_count += 1
+                    if candidate_kind == "exact":
+                        raw_goal_seeds.append(candidate.copy())
                 if error > goal_tolerance:
                     self.hierarchical_ik_rejection_counts["goal_error"] += 1
                     continue
@@ -743,6 +775,7 @@ class UR5DynamicObstacleEnv(gym.Env):
                     self.hierarchical_ik_goal_region_candidate_count += 1
                 self.hierarchical_ik_candidate_errors_m.append(error)
                 self.hierarchical_ik_candidate_clearances_m.append(float(self._planning_clearance(candidate)))
+                self.hierarchical_ik_candidate_qs.append(candidate.copy())
 
         run_ik_attempts(rest_poses[:attempts])
         # When raw IK can reach the goal but every exact-target solution is
@@ -815,6 +848,34 @@ class UR5DynamicObstacleEnv(gym.Env):
                     self.hierarchical_ik_candidate_kinds.append("obstacle_aware")
                     self.hierarchical_ik_candidate_errors_m.append(error)
                     self.hierarchical_ik_candidate_clearances_m.append(float(self._planning_clearance(trial)))
+                    self.hierarchical_ik_candidate_qs.append(trial.copy())
+        # Search a small beam of redundant exact-target configurations before
+        # goal-region sampling.  Unlike a single local nullspace trajectory,
+        # this keeps several clearance frontiers and reprojects each one in
+        # task space at every iteration.  It is only activated for raw
+        # goal-reachable seeds that failed the strict obstacle checks.
+        if (
+            not candidates
+            and raw_goal_seeds
+            and bool(self.hierarchical_planner_cfg.get("ik_obstacle_aware_beam_enabled", False))
+        ):
+            self.hierarchical_ik_obstacle_aware_attempted = True
+            beam_candidates = self._obstacle_aware_beam_ik(raw_goal_seeds, lower, upper)
+            for trial in beam_candidates:
+                error = self._planning_goal_error(trial)
+                if not np.isfinite(self.hierarchical_ik_min_goal_error_m) or error < self.hierarchical_ik_min_goal_error_m:
+                    self.hierarchical_ik_min_goal_error_m = error
+                state_reason = self._planning_state_validity_reason(trial)
+                if error > goal_tolerance:
+                    self.hierarchical_ik_rejection_counts["goal_error"] += 1
+                elif state_reason is not None:
+                    self.hierarchical_ik_rejection_counts[state_reason] += 1
+                elif not any(np.linalg.norm(trial - previous) < 1.0e-3 for previous in candidates):
+                    candidates.append(trial)
+                    self.hierarchical_ik_candidate_kinds.append("obstacle_aware_beam")
+                    self.hierarchical_ik_candidate_errors_m.append(error)
+                    self.hierarchical_ik_candidate_clearances_m.append(float(self._planning_clearance(trial)))
+                    self.hierarchical_ik_candidate_qs.append(trial.copy())
         # Search a bounded, obstacle-aware goal region only after exact-target
         # IK (and the optional exact-target nullspace branch) failed.  Every
         # returned solution is still checked against the original goal error,
@@ -959,12 +1020,126 @@ class UR5DynamicObstacleEnv(gym.Env):
                     self.hierarchical_ik_candidate_kinds.append("dls")
                     self.hierarchical_ik_candidate_errors_m.append(error)
                     self.hierarchical_ik_candidate_clearances_m.append(float(self._planning_clearance(dls_candidate)))
+                    self.hierarchical_ik_candidate_qs.append(dls_candidate.copy())
                 else:
                     if error > goal_tolerance:
                         self.hierarchical_ik_rejection_counts["goal_error"] += 1
                     elif state_reason is not None:
                         self.hierarchical_ik_rejection_counts[state_reason] += 1
         return candidates
+
+    def _obstacle_aware_beam_ik(
+        self, raw_seeds: list[np.ndarray], lower: np.ndarray, upper: np.ndarray
+    ) -> list[np.ndarray]:
+        """Explore multiple redundant exact-target IK frontiers.
+
+        The beam is deliberately bounded and deterministic for a fixed reset:
+        candidates are generated from task-space DLS and finite-difference
+        clearance gradients, then ranked by clearance with a goal-error
+        penalty.  It is a feasibility search, not a change to the task or
+        safety constraints; the caller still applies the strict validity test.
+        """
+        cfg = self.hierarchical_planner_cfg
+        width = max(1, int(cfg.get("ik_obstacle_aware_beam_width", 16)))
+        iterations = max(1, int(cfg.get("ik_obstacle_aware_beam_iterations", 24)))
+        seed_limit = max(1, int(cfg.get("ik_obstacle_aware_beam_seed_limit", 12)))
+        step = float(cfg.get("ik_obstacle_aware_beam_step_rad", 0.08))
+        finite_step = float(cfg.get("ik_obstacle_aware_beam_finite_difference_rad", 0.02))
+        gradient_gain = float(cfg.get("ik_obstacle_aware_beam_gradient_gain", 1.0))
+        damping = float(cfg.get("ik_obstacle_aware_beam_damping", 0.08))
+        goal_tolerance = float(cfg.get("ik_goal_tolerance_m", 0.055))
+        if step <= 0.0 or finite_step <= 0.0:
+            return []
+
+        beam: list[np.ndarray] = []
+        for seed in raw_seeds[:seed_limit]:
+            candidate = np.clip(np.asarray(seed, dtype=np.float64), lower, upper)
+            if not any(np.linalg.norm(candidate - previous) < 1.0e-3 for previous in beam):
+                beam.append(candidate.copy())
+
+        saved_q, saved_qdot = self._joint_state()
+        try:
+            for _ in range(iterations):
+                expanded: list[tuple[float, float, np.ndarray]] = []
+                for q in beam:
+                    for joint_id, value in zip(self.joint_ids, q, strict=True):
+                        p.resetJointState(
+                            self.robot_id,
+                            joint_id,
+                            float(value),
+                            targetVelocity=0.0,
+                            physicsClientId=self.physics_client_id,
+                        )
+                    ee_position, _ = self._end_effector_state()
+                    error_vector = np.asarray(self.goal, dtype=np.float64) - np.asarray(ee_position, dtype=np.float64)
+                    jacobian = np.asarray(self._link_origin_jacobian(self.tool_link_id), dtype=np.float64)
+                    task_update = jacobian.T @ np.linalg.solve(
+                        jacobian @ jacobian.T + damping**2 * np.eye(3), error_vector
+                    )
+                    projector = np.eye(self.joint_count) - np.linalg.pinv(jacobian) @ jacobian
+                    clearance_gradient = np.zeros(self.joint_count, dtype=np.float64)
+                    for index in range(self.joint_count):
+                        q_plus = q.copy()
+                        q_minus = q.copy()
+                        q_plus[index] = min(upper[index], q_plus[index] + finite_step)
+                        q_minus[index] = max(lower[index], q_minus[index] - finite_step)
+                        denominator = max(q_plus[index] - q_minus[index], 1.0e-6)
+                        clearance_gradient[index] = (
+                            self._planning_clearance(q_plus) - self._planning_clearance(q_minus)
+                        ) / denominator
+                    null_direction = projector @ clearance_gradient
+                    null_norm = float(np.linalg.norm(null_direction))
+                    if null_norm > 1.0e-9:
+                        null_direction = null_direction / null_norm
+
+                    directions = [
+                        task_update + gradient_gain * null_direction,
+                        task_update - gradient_gain * null_direction,
+                        task_update,
+                        null_direction,
+                        -null_direction,
+                    ]
+                    # Add projected joint directions to escape a locally flat
+                    # clearance gradient without introducing random rest poses.
+                    for column in range(min(self.joint_count, projector.shape[1])):
+                        basis = projector[:, column]
+                        basis_norm = float(np.linalg.norm(basis))
+                        if basis_norm > 1.0e-9:
+                            directions.extend((basis / basis_norm, -basis / basis_norm))
+                    for direction in directions:
+                        direction_norm = float(np.linalg.norm(direction))
+                        if direction_norm <= 1.0e-9:
+                            continue
+                        self.hierarchical_ik_obstacle_aware_candidate_count += 1
+                        trial = np.clip(q + step * direction / direction_norm, lower, upper)
+                        error = self._planning_goal_error(trial)
+                        clearance = self._planning_clearance(trial)
+                        if error <= goal_tolerance and clearance >= float(self.risk_config.d_safe):
+                            return [trial]
+                        score = float(clearance - 0.75 * max(error - goal_tolerance, 0.0))
+                        expanded.append((score, error, trial))
+
+                expanded.sort(key=lambda item: (-item[0], item[1]))
+                next_beam: list[np.ndarray] = []
+                for _, _, trial in expanded:
+                    if any(np.linalg.norm(trial - previous) < 2.0e-3 for previous in next_beam):
+                        continue
+                    next_beam.append(trial)
+                    if len(next_beam) >= width:
+                        break
+                if not next_beam:
+                    break
+                beam = next_beam
+            return beam
+        finally:
+            for joint_id, value, velocity in zip(self.joint_ids, saved_q, saved_qdot, strict=True):
+                p.resetJointState(
+                    self.robot_id,
+                    joint_id,
+                    float(value),
+                    targetVelocity=float(velocity),
+                    physicsClientId=self.physics_client_id,
+                )
 
     def _obstacle_aware_nullspace_ik(
         self, seed: np.ndarray, lower: np.ndarray, upper: np.ndarray
@@ -1155,8 +1330,22 @@ class UR5DynamicObstacleEnv(gym.Env):
             waypoint_error = waypoint - q
         if update_state:
             self.hierarchical_waypoint_index = index
-        if update_state and index == len(self.hierarchical_path) - 1 and np.linalg.norm(self._goal_error()) <= float(self.hierarchical_tracker_cfg.get("servo_trigger_m", 0.10)):
-            self.hierarchical_state = "SERVO"
+        if update_state and index == len(self.hierarchical_path) - 1:
+            track_feasible_terminal = bool(
+                self.hierarchical_selected_terminal_is_goal_region
+                and self.hierarchical_tracker_cfg.get("feasible_terminal_track_to_joint_enabled", False)
+            )
+            feasible_terminal_tolerance = float(
+                self.hierarchical_tracker_cfg.get("feasible_terminal_joint_tolerance_rad", tolerance)
+            )
+            terminal_ready = (
+                np.linalg.norm(waypoint_error) <= feasible_terminal_tolerance
+                if track_feasible_terminal
+                else np.linalg.norm(self._goal_error())
+                <= float(self.hierarchical_tracker_cfg.get("servo_trigger_m", 0.10))
+            )
+            if terminal_ready:
+                self.hierarchical_state = "SERVO"
         if update_state and self.hierarchical_state == "SERVO":
             goal_error_norm = float(np.linalg.norm(self._goal_error()))
             improvement = float(self.prev_goal_error_norm - goal_error_norm)
@@ -1289,6 +1478,8 @@ class UR5DynamicObstacleEnv(gym.Env):
             "hierarchical_selected_path_min_clearance_m": self.hierarchical_selected_path_min_clearance_m,
             "hierarchical_ik_candidate_errors_m": tuple(self.hierarchical_ik_candidate_errors_m),
             "hierarchical_ik_candidate_clearances_m": tuple(self.hierarchical_ik_candidate_clearances_m),
+            "hierarchical_ik_candidate_qs": tuple(q.copy() for q in self.hierarchical_ik_candidate_qs),
+            "hierarchical_ik_candidate_kinds": tuple(self.hierarchical_ik_candidate_kinds),
             "hierarchical_ik_attempts_used": self.hierarchical_ik_attempts_used,
             "hierarchical_ik_fallback_used": self.hierarchical_ik_fallback_used,
             "hierarchical_ik_fallback_attempted": self.hierarchical_ik_fallback_attempted,

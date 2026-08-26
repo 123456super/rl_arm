@@ -1,12 +1,16 @@
 # 当前研究状态
 
-> 更新时间：2026-08-24。本页是当前唯一状态入口，只记录决策、进度、下一步和结论边界。实现与实验规则见[分层控制实验协议](hierarchical_control_protocol.md)，S1 执行细节见[S1 静态障碍物协议](s1_static_obstacle_protocol.md)。
+> 更新时间：2026-08-26。本页是当前唯一状态入口，只记录决策、进度、下一步和结论边界。实现与实验规则见[分层控制实验协议](hierarchical_control_protocol.md)，S1 执行细节见[S1 静态障碍物协议](s1_static_obstacle_protocol.md)。
 
 本轮所有 S1 静态实验的配置继承、manifest、paired gate、失败方向和根因统一登记在 [S1 静态障碍物实验谱系、失败方向与根因登记](s1_static_experiment_registry.md)。后续开始新实验前必须先查该登记册。
+
+截至 2026-08-26，静态障碍物成功率目标已经满足，S1 静态线冻结为当前结果，后续不再继续做静态方向的加法搜索；下一阶段转入 S1-R / dynamic 的授权与准备流程。
 
 ## 1. 当前决策
 
 论文主架构的 frozen baseline 是 `hierarchical_s1_nominal_final_v1`。在该基线上已完成不改变任务定义的 IK/planner/tracker 改进分支 `hierarchical_s1_revised_v2`：结构化 IK 初值与 DLS fallback、多候选路径按 clearance/length 选择、起点边界容差、adaptive terminal DLS、关节中心性与 clearance-aware tracker。两者仍共用 `TRACK / AVOID_HOLD / REPLAN / SERVO / PLAN_FAILED` 状态机、最终 success 判定和唯一 safety filter 出口。
+
+静态障碍物方向已经达成当前要求：`hierarchical_s1_revised_recovery_gated_goal_velocity_temporal_consistency_t005_nominal_v1` 作为 zero-residual 静态 nominal 冻结，不再扩展静态搜索；后续工作进入下一阶段的前置流程与授权检查。
 
 旧 direct-SAC 不再继续进行参数、训练步数或 hard-case curriculum 修补。历史证据支持改变职责划分，但不等于新方法已经取得更高性能。完整论证和结果来源见：
 
@@ -29,11 +33,16 @@
 | t005 latency 分支 | 已完成但不采用 | hard-case 仍为 `12/23`，p95 `24.57 ms`、p99 `267.78 ms`、max `1.577 s`；尾延迟未改善，不能替换 t005 |
 | obstacle-aware nullspace IK smoke | 已完成但不采用 | `9006` 仍为 `IK_NOT_FOUND`；局部 clearance-gradient 无法越过障碍阻塞，2000 次多分支 rest-pose 扫描最佳 clearance 约 `0.111m<0.12m` |
 | target-shell + t005 smoke | 已完成但不采用 | `9006` 找到路径但为 `FILTER_STOP_TIMEOUT`，最终误差约 `0.093m`；没有新增成功，不扩展 hard-case |
+| obstacle-aware IK beam targeted | 已完成但不采用 | targeted 7 reset `0/7`，collision `0`，相对 t005 无 failure→success；`9006` 虽找到 `d_min≈0.1469m` 的 terminal/path，仍 `FILTER_STOP_TIMEOUT` |
+| beam terminal joint-track smoke | 已完成但不采用 | `9006` 对 strict-valid terminal 收紧到 `0.02rad` joint tolerance 后仍 timeout，最终误差约 `0.0815m`、collision `0`，未进入 SERVO |
+| nominal deterministic IK 三分类审计 | 已完成 | `189 certified_feasible`、`2 certified_infeasible`、`9 unknown`；后续只允许使用 `unknown_manifest.json` 中的 9 个 reset |
+| unknown deterministic IK `3^6` rest-pose grid | 已完成 | 9/9 仍为 `unknown`；9006/9102/9110 的 raw goal 可达但 grid 候选全被 clearance/contact 拒绝，其余 6 个仍未达到 `0.055m` goal-error；不构成 infeasible 证明 |
+| unknown continuous endpoint-IK refinement | 已完成 | 对 9 个 unknown 做有界连续 refinement：`0` 个升级到 `certified_feasible`，`9` 个继续保留 unknown；这不是 infeasible 证明 |
 | IK/predictive v1 hard-case | 已完成但未通过 | `9/23=39.13%` full，`9/12=75.00%` plan-conditioned，collision `0`；没有修复任何 IK failure |
 | IK/predictive v2 hard-case | 已完成，达到最低回归门槛但无增益 | `10/23=43.48%` full，`10/12=83.33%` plan-conditioned，collision `0`；相对 recovery-gated 为 10→10，逐 reset 无修复也无回归 |
 | IK target-shell v1 hard-case | 已完成但不采用 | `10/23=43.48%` full，`10/13=76.92%` plan-conditioned，collision `0`；IK found `13/23`，无成功增益，`9006` 仅由 IK failure 变为 filter timeout |
-| recovery-gated Residual 三训练 seed | 暂缓 | 用户当前决定先不训练；保留新 signature 与 nominal 结果，等待 paired comparison/下一步指示 |
-| S2 dynamic 与 S3 robust final | 待运行 | S1-R 三 seed 消融完成后执行；当前该前置条件未满足 |
+| recovery-gated Residual 三训练 seed | 下一阶段待启动 | 静态成功率目标已满足，保留新 signature 与 nominal 结果，等待授权进入下一阶段 |
+| S2 dynamic 与 S3 robust final | 下一阶段待启动 | 仍需按协议完成前置条件；当前静态阶段已冻结 |
 
 静态和动态各一次 nominal-only 单 episode smoke 已成功且无碰撞；它们只证明链路可运行，不是论文统计结果。
 
@@ -170,12 +179,14 @@ HiGHS LP 版本的两个 seed 完整 paired 结果为 `2/2=100%`：`9093` 最终
 - 扩展 goal-region 搜索（`384` samples、完整 `0.055m` success ball）：targeted `7` reset 为 `0/7`，其中 `9098/9120` 为 raw goal unreachable，`9102/9108/9192` 仍被 obstacle clearance/contact 拒绝；`9006/9110` 虽找到合法终端，仍为 `FILTER_STOP_TIMEOUT`。
 - 对 goal-region terminal 启用 t005 goal-velocity priority：`9006/9110` 为 `0/2`，均 `FILTER_STOP_TIMEOUT`；实际目标速度优先已生效，但未消除终端振荡/时限失败。
 - goal-error-first terminal selection 及其与 goal-velocity priority 的组合：`9006/9110` 仍为 `0/2`，最终误差约 `0.0796/0.1152m`（组合约 `0.0902/0.1146m`），无碰撞、无新增成功。
+- obstacle-aware IK beam targeted：在 `9006/9098/9120/9102/9108/9110/9192` 上为 `0/7`，相对 t005 `failure→success=0`、`success→failure=0`；`9006` 找到严格合法 terminal/path 但仍 `FILTER_STOP_TIMEOUT`，因此没有把构型可行性误记为 episode 成功。
+- beam terminal joint-track：只对 `9006` 的 strict-valid terminal 要求先到 `0.02rad` joint tolerance，再允许 SERVO；结果仍 timeout、最终误差约 `0.0815m`，且未进入 SERVO，排除“仅因提前切 SERVO 而失败”。
 
 因此该分支已同时排除“单纯增加 goal-region 采样预算”“改变合法终端排序”和“对 goal-region terminal 直接复用目标速度优先 objective”三种低风险改法。当前最优静态候选仍冻结为 t005；不再继续扩大 IK 搜索、不运行该分支 nominal、不训练 Residual，也不放宽 `d_safe=0.12m`、success tolerance `0.055m` 或 12 秒 horizon。若重新开启研究，下一步必须是带可行性证明/可达性判定的 obstacle-aware IK 分支，而不是继续盲搜。
 
 ### 5.7 当前执行状态（冻结，不是待运行队列）
 
-截至 2026-08-24，本轮 S1 静态实验已经完成“候选提出 → targeted smoke → hard-case paired → nominal gate → 失败归因”的闭环。当前没有获准继续运行的实验，也没有获准训练 Residual。以下是唯一有效的状态解释：
+截至 2026-08-26，本轮 S1 静态实验已经完成“候选提出 → targeted smoke → hard-case paired → nominal gate → 失败归因 → unknown 收敛审计”的闭环。静态障碍物成功率目标已满足，原有改进队列冻结，Residual 进入下一阶段准备流程；用户仅在静态末尾补做了 nominal endpoint IK 三分类及 unknown refinement 作为收口诊断。以下是唯一有效的状态解释：
 
 | 项目 | 当前状态 | 说明 |
 | --- | --- | --- |
@@ -183,20 +194,37 @@ HiGHS LP 版本的两个 seed 完整 paired 结果为 `2/2=100%`：`9093` 最终
 | recovery-gated nominal | 已通过 gate，保留为父版本 | 187/200 full、187/189 plan-conditioned、0 collision |
 | IK/goal-region 后续分支 | 全部冻结 | 没有 paired failure→success；不得直接扩展到 23-case 或 nominal |
 | t005 latency 变体 | 拒绝 | 12/23 不变，p99/max 未改善 |
-| Residual 三 seed | 暂缓 | 确定性 IK 瓶颈尚未解决，不能用学习补偿 |
-| S2 dynamic / S3 robust | 待后续授权 | 不能写成“已完成”；进入条件仍见协议第 6 节 |
+| obstacle-aware IK beam | 拒绝 | targeted 0/7，无 paired 新成功；高计算开销且未解决 terminal timeout |
+| Residual 三 seed | 下一阶段待启动 | 静态障碍物成功率已满足要求，按协议进入下一阶段准备 |
+| S2 dynamic / S3 robust | 下一阶段准备中 | 静态阶段已冻结；进入条件仍见协议第 6 节 |
 
 “当前下一步”不是继续重复搜索，而是：如果重新开启研究，只能提出改变问题层级的新假设，例如带时间/动力学约束的 terminal reachability、障碍感知构型图搜索或可行性证明。任何只增加 samples、只换 selector、只复用 terminal、只开 priority 的配置均已被登记册否定。
 
+用户已重新开启的第一步是全 nominal deterministic IK 三分类审计。配置为
+`configs/experiments/hierarchical/s1_static_deterministic_ik_feasibility_audit_v1.yaml`，固定
+`v1_final.json` 的 200 个 reset。分类语义严格限定为终端 IK：找到同时满足目标误差、
+workspace、self-collision、obstacle contact 和 `d_safe=0.12m` 的具体关节构型，才是
+`certified_feasible`；只有 URDF 绝对 reach 上界、workspace 或 tool capsule/障碍 forbidden
+shell 的解析几何矛盾才是 `certified_infeasible`；任何有限 IK 搜索未找到候选都必须是
+`unknown`。该审计不声称路径或 12 秒动态可达性，不改变 t005 nominal 结果。合并脚本会生成
+唯一允许后续研究的 unknown seed manifest。
+
+该审计已完成：`189/200` 个 reset 有通过 strict endpoint validity 的具体构型，
+`9108/9192` 由 tool capsule + obstacle radius + `d_safe` forbidden shell 解析证明不可行，
+剩余 unknown 为 `9006, 9021, 9065, 9095, 9098, 9102, 9110, 9120, 9142`。其中
+`9021/9065/9095/9098/9120/9142` 是 raw goal error 未达 `0.055m`，
+`9006/9102/9110` 是 raw goal reachable 但所有有限候选被 obstacle clearance/contact 拒绝。
+后续实验不得重新覆盖全部 nominal，只处理这 9 个 seed。`3^6` rest-pose grid 已完成且没有升级任何样本；该阴性结果仍不能写成 endpoint IK infeasible。下一步只运行独立的 continuous refinement，并以 `remaining_unknown_manifest` 继续收敛审计。
+
 - plan-conditioned success `<95%`：只定位 IK、planner、tracker、servo 或 safety filter，不训练 Residual，也不更换总体架构。
-- plan-conditioned success `>=95%`：满足 nominal gate，但是否立即训练由当前实验决策单独确定；本轮用户已明确暂缓 Residual 训练。
-- S1 deterministic/zero-residual 诊断链已完成；S1-R Residual 三 seed 消融尚未完成，因此 S2 dynamic 与 S3 robust 仍保持 pending，不能把静态 nominal 候选写成完整学习架构 final。
+- plan-conditioned success `>=95%`：满足 nominal gate，且本轮静态障碍物目标已经达成；当前不再继续静态优化。
+- S1 deterministic/zero-residual 诊断链已完成；S1-R Residual 三 seed 消融尚未启动，因此 S2 dynamic 与 S3 robust 仍需按协议推进，不能把静态 nominal 候选写成完整学习架构 final。
 
 ## 6. revised v2 之后的固定流程
 
 1. hard-case diagnostic；若 IK/plan/terminal timeout 没有改善，停止训练并回到模块归因。
 2. revised nominal-only 200 final；已保存 CSV、summary 和 trace。
-3. recovery-gated plan-conditioned 为 `98.94%`，collision 为 `0`，nominal gate 已通过；但当前明确暂缓 Residual 训练，不运行 4401/4402/4403。
+3. recovery-gated plan-conditioned 为 `98.94%`，collision 为 `0`，nominal gate 已通过；静态障碍物成功率已满足要求，后续进入下一阶段准备，不再运行 4401/4402/4403。
 4. 若后续获准训练，必须使用 recovery-gated 新 config/signature，从随机初始化开始，并与该 zero-residual nominal 成对比较。
 5. 每个新 seed 按 validation manifest 选 checkpoint，再用同一 final manifest 评估；不得加载旧 actor/replay。
 6. 报告 old/new nominal 与 old/new S1-R 的 pooled、逐 seed 及逐 reset paired 转移：old failure→new success、old success→new failure。

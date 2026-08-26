@@ -228,6 +228,13 @@ def validate_config(config: dict[str, Any]) -> None:
         "ik_goal_region_radius_m",
         "ik_obstacle_aware_nullspace_attempts",
         "ik_obstacle_aware_nullspace_step_rad",
+        "ik_obstacle_aware_beam_width",
+        "ik_obstacle_aware_beam_iterations",
+        "ik_obstacle_aware_beam_seed_limit",
+        "ik_obstacle_aware_beam_step_rad",
+        "ik_obstacle_aware_beam_finite_difference_rad",
+        "ik_obstacle_aware_beam_gradient_gain",
+        "ik_obstacle_aware_beam_damping",
     ):
         value = float(planner.get(key, 0.0))
         if not isfinite(value) or value < 0.0:
@@ -252,10 +259,17 @@ def validate_config(config: dict[str, Any]) -> None:
         if key in planner and not isinstance(planner[key], bool):
             raise TypeError(f"env.hierarchical_control.planner.{key} must be boolean")
     for key in (
+        "ik_obstacle_aware_beam_enabled",
+        "ik_obstacle_aware_beam_retain_terminal_enabled",
+    ):
+        if key in planner and not isinstance(planner[key], bool):
+            raise TypeError(f"env.hierarchical_control.planner.{key} must be boolean")
+    for key in (
         "waypoint_gain", "waypoint_tolerance_rad", "servo_trigger_m", "servo_gain", "servo_damping",
         "servo_velocity_damping", "servo_near_goal_radius_m", "servo_near_goal_gain_scale",
         "filter_intervention_threshold", "filter_aware_gain_floor", "filter_aware_blend_strength",
         "filter_aware_min_alignment",
+        "feasible_terminal_joint_tolerance_rad",
         "servo_stall_improvement_m", "servo_stall_filter_ratio",
     ):
         value = float(tracker.get(key, 0.0))
@@ -265,7 +279,13 @@ def validate_config(config: dict[str, Any]) -> None:
         value = float(tracker.get(key, 0.0))
         if not isfinite(value) or value < 0.0:
             raise ValueError(f"env.hierarchical_control.tracker.{key} must be finite and non-negative")
-    for key in ("adaptive_damping", "nullspace_limit_avoidance", "clearance_aware_gain", "filter_aware_servo"):
+    for key in (
+        "adaptive_damping",
+        "nullspace_limit_avoidance",
+        "clearance_aware_gain",
+        "filter_aware_servo",
+        "feasible_terminal_track_to_joint_enabled",
+    ):
         if key in tracker and not isinstance(tracker[key], bool):
             raise TypeError(f"env.hierarchical_control.tracker.{key} must be boolean")
     if float(tracker.get("filter_aware_gain_floor", 0.35)) > 1.0 or float(tracker.get("servo_near_goal_gain_scale", 0.65)) > 1.0:

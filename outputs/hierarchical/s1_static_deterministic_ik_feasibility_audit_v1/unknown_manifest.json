@@ -1,0 +1,18 @@
+{
+  "manifest_version": 1,
+  "protocol": "hierarchical_s1_deterministic_ik_unknown_v1",
+  "source_protocol": "hierarchical_s1_deterministic_ik_feasibility_audit_v1",
+  "source_seed_manifest": "configs/experiments/reaching_recovery/manifests/v1_final.json",
+  "description": "Only resets without a deterministic endpoint IK certificate; use for follow-up research.",
+  "seeds": [
+    9006,
+    9021,
+    9065,
+    9095,
+    9098,
+    9102,
+    9110,
+    9120,
+    9142
+  ]
+}

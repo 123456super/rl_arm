@@ -1,10 +1,10 @@
 # S1 静态障碍物实验谱系、失败方向与根因登记
 
-> 更新时间：2026-08-24。本文是 S1 静态障碍物后续实验的详细登记册。它记录每次实验的父版本、固定条件、目标假设、结果、paired gate、失败原因和停止理由。开始任何新实验前，必须先查本登记册，避免重复已经否定的方向。
+> 更新时间：2026-08-26。本文是 S1 静态障碍物后续实验的详细登记册。它记录每次实验的父版本、固定条件、目标假设、结果、paired gate、失败原因和停止理由。开始任何新实验前，必须先查本登记册，避免重复已经否定的方向。
 
 ## 1. 结论先行
 
-当前唯一可继续作为静态 nominal 候选的是：
+当前静态障碍物方向已经满足要求，唯一冻结的静态 nominal 候选是：
 
 ```text
 配置：configs/experiments/hierarchical/
@@ -146,8 +146,31 @@ plan-conditioned success >= 0.95（候选 nominal gate）
 | feasibility audit | `s1_static_revised_ik_feasibility_audit_v1.yaml` | 区分 raw goal error 不足与障碍阻塞 | raw goal reachable `17/23`；raw unreachable `6/23`；accepted obstacle-valid `12/23`；obstacle-blocked `5/23` | 根因从“搜索次数不足”转为目标可达性/障碍几何可行性 |
 | nullspace v1/v2 | `s1_static_revised_ik_obstacle_aware_nullspace_9006_v1/v2.yaml` | 在 exact target 附近沿 clearance gradient 搜索 | 9006 仍 IK failure；2000 多分支最佳 clearance 约 `0.111m<0.12m` | 局部 nullspace 不能跨越障碍阻塞；不扩展 |
 | target-shell | `s1_static_revised_ik_shell_v1.yaml`；`outputs/hierarchical/s1_static_revised_ik_shell_v1/` | 在原 `0.055m` success 球内搜索 shell target | `10/23`，IK found `13/23`，timeout 3，collision 0；无 failure→success；9006 变为 filter timeout | shell 改善入口 IK，但没有证明终端 12 秒可完成；停止 |
+| nominal deterministic IK 三分类 | `s1_static_deterministic_ik_feasibility_audit_v1.yaml`；`outputs/hierarchical/s1_static_deterministic_ik_feasibility_audit_v1/` | 全部 200 nominal reset 的 endpoint IK 证书审计 | `189 certified_feasible`、`2 certified_infeasible`、`9 unknown`；infeasible 为 `9108/9192` 的 tool-obstacle forbidden shell | 后续只允许使用 `unknown_manifest.json` 的 9 个 reset；有限搜索失败仍不是 infeasible |
+| unknown `3^6` grid | `s1_static_deterministic_ik_unknown_grid_audit_v1.yaml`；`outputs/hierarchical/s1_static_deterministic_ik_unknown_grid_audit_v1/` | 对 9 个 unknown 做 729 个 deterministic rest poses 的 endpoint IK 查询 | 预检查 smoke：9006/9102/9110 raw reachable 但无 strict candidate；9021 仍 min error `0.1413m`；全量结果为 9/9 unknown | 只证明该网格未构造证书；不升级 infeasible，不回到 200 reset |
+| unknown continuous refinement | `s1_static_deterministic_ik_unknown_continuous_refinement_v1.yaml`；`outputs/hierarchical/s1_static_deterministic_ik_unknown_continuous_refinement_v1/` | 从固定网格/粗网格起点做有界误差最小化或 success-ball 内 clearance 最大化 | `0` 个升级到 `certified_feasible`，`9` 个继续 unknown | 静态 endpoint IK 已收口，不再继续扩大该方向搜索 |
 
 ### 5.3 goal-region / terminal reuse 线
+
+### 5.3.1 obstacle-aware beam feasibility follow-up (2026-08-24)
+
+新增 `hierarchical_s1_revised_ik_obstacle_aware_beam_targeted_v1`，在 t005 的
+raw goal-reachable / obstacle-blocked 诊断子集上测试多分支 nullspace beam。它只在
+严格 exact-target IK 已达到原 `0.055m` 目标误差、但 clearance/contact 拒绝全部候选时
+启用；所有候选仍使用原 `d_safe=0.12m`、碰撞、路径和最终 success 判定。
+
+结果：targeted 7 reset 为 `0/7`，collision `0`；相对 t005 paired 为
+`old_failure→new_success=0`、`old_success→new_failure=0`。`9006` 找到
+`d_min≈0.1469m` 的合法 terminal/path，但仍以 `FILTER_STOP_TIMEOUT` 结束；其余
+blocked reset 没有形成最终成功。该方向没有通过最小 paired gain gate，不进入 23-case
+或 nominal，避免把“找到构型”误写成“提高成功率”。
+
+对 `9006` 又完成了只作用于 strict-valid beam terminal 的 joint-terminal tracking
+机制 smoke：普通 t005 episode 的 SERVO 切换保持不变，仅要求该 terminal 的最终关节
+误差先进入 `0.02rad` 再允许 SERVO。结果仍为 `FILTER_STOP_TIMEOUT`、最终误差约
+`0.0815m`、collision `0`，且 240 步内未进入 SERVO。说明失败不是单纯“过早切入
+SERVO”，而是 strict predictive hold/replan 下无法在 12 秒内稳定到达该 terminal；
+该组合也停止，不扩展。
 
 | ID / 父版本 | 配置与输出 | 只改变的内容 | 结果 | 决策 |
 | --- | --- | --- | --- | --- |
@@ -237,7 +260,7 @@ s1_static_revised_ik_goal_region_t005_servo_damped_9006_v1.yaml
 | terminal 构型和命令复用 | retain、hold、slow、track、waypoint、servo damping smoke | 合法 path/terminal 仍不能在 12s 内完成 | 不再只换 terminal hold/gain/trigger/retain |
 | terminal selector | clearance、predictive、goal-error、组合 priority | 无新增成功；predictive 导致 9143 回归 | 不再只改 selector 排序 |
 | goal-region terminal priority | priority smoke v1（继承错误）、v2（继承正确）、priority+goal-error | 正确 v2 trace 已证明 objective 生效，但 9006/9110 仍 timeout | 终端问题必须升级到 time/dynamics reachability，不再重跑 23-case |
-| nominal / Residual | recovery-gated nominal、t005 nominal；Residual 三 seed 未运行 | t005 是 zero-residual 最佳候选；Residual 尚无正式结果 | 未获授权前不训练、不把 nominal 写成 S1-R final |
+| nominal / Residual | recovery-gated nominal、t005 nominal；Residual 三 seed 尚未启动 | t005 是 zero-residual 最佳候选；静态障碍物成功率已满足要求 | 静态阶段冻结，不再扩大 nominal 搜索；Residual 进入下一阶段授权流程 |
 
 单独的 9143 recheck 也已登记：普通 t005 recheck 成功，而 predictive terminal recheck 失败；这两项只是确认既有 paired 结论，不构成新改进方向。
 
@@ -342,3 +365,9 @@ next_allowed_hypothesis:
 8. 每次结果立即补充本登记册：配置、manifest、输出、summary、paired、trace、结果、根因、停止理由。
 
 下一次若继续攻克 goal-region terminal，必须改变问题层级，例如做带时间/动力学约束的 terminal reachability 或可行性证明；不能再次尝试“更多 samples + clearance selector + priority 开关”的组合。
+
+重新开启研究前新增的强制前置 gate 已完成：full nominal deterministic IK 三分类审计给出
+`189/200` 构造可行、`9108/9192` 解析不可行、`9` 个 unknown；连续 refinement 也未将这
+9 个样本升级为 `certified_feasible`。这说明静态 endpoint IK 已经收口，后续新的 IK/构型
+搜索实验只允许读取合并审计自动生成的 unknown manifest，不得再次把 200 个 reset 全量
+投入探索性搜索。

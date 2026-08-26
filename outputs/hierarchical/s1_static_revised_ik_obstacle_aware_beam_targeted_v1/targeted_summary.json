@@ -1,0 +1,83 @@
+{
+  "protocol": "hierarchical_s1_revised_ik_obstacle_aware_beam_targeted_v1",
+  "seed_manifest": "configs/experiments/reaching_recovery/manifests/v1_hierarchical_goal_region_expanded_cases.json",
+  "episodes": 7,
+  "main": {
+    "full_success": {
+      "count": 0,
+      "total": 7,
+      "rate": 0.0
+    },
+    "plan_conditioned_success": {
+      "count": 0,
+      "total": 1,
+      "rate": 0.0
+    },
+    "ik_found": {
+      "count": 1,
+      "total": 7,
+      "rate": 0.14285714285714285
+    },
+    "plan_found": {
+      "count": 1,
+      "total": 7,
+      "rate": 0.14285714285714285
+    },
+    "timeouts": {
+      "count": 1,
+      "total": 7,
+      "rate": 0.14285714285714285
+    },
+    "collision_any": {
+      "count": 0,
+      "total": 7,
+      "rate": 0.0
+    },
+    "mean_final_position_error_m": 0.11788110222135272,
+    "mean_success_completion_time_s": null
+  },
+  "mechanism": {
+    "direct_path": {
+      "count": 1,
+      "total": 1,
+      "rate": 1.0
+    },
+    "rrt_path": {
+      "count": 0,
+      "total": 1,
+      "rate": 0.0
+    },
+    "mean_initial_plan_iterations": 0.0,
+    "mean_initial_planning_time_s": 5.188350049861973,
+    "mean_total_planning_time_s": 60.0200871421756,
+    "mean_replans_per_episode": 0.42857142857142855,
+    "state_step_rates": {
+      "TRACK": 0.004761904761904762,
+      "AVOID_HOLD": 0.0005952380952380953,
+      "REPLAN": 0.0,
+      "SERVO": 0.1488095238095238,
+      "PLAN_FAILED": 0.8458333333333333
+    },
+    "filter_intervention_step_rate": 1.0,
+    "filter_safe_stop_step_rate": 0.0,
+    "filter_recovery_relaxed_step_rate": 0.0,
+    "mean_nominal_qdot_norm": 0.08630800293315025,
+    "mean_residual_qdot_norm": 0.0,
+    "mean_episode_min_predictive_h_m": 0.07770101963574848
+  },
+  "failure_mode_counts": {
+    "SUCCESS": 0,
+    "IK_NOT_FOUND": 6,
+    "PLAN_NOT_FOUND": 0,
+    "TRACK_TIMEOUT": 0,
+    "SERVO_TIMEOUT": 0,
+    "FILTER_STOP_TIMEOUT": 1,
+    "COLLISION_TERMINATION": 0
+  },
+  "gate": {
+    "plan_conditioned_success_threshold": 0.95,
+    "plan_conditioned_success_pass": false,
+    "recommended_full_success_threshold": 0.9,
+    "recommended_full_success_pass": false
+  }
+}

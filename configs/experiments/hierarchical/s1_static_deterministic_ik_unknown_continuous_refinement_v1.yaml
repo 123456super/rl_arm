@@ -1,0 +1,26 @@
+# Continuous deterministic endpoint-IK refinement for the nine unknown seeds.
+# It keeps the original strict checks and never converts solver failure into
+# certified infeasibility.
+includes:
+  - s1_static_deterministic_ik_unknown_grid_audit_v1.yaml
+
+architecture_version: hierarchical_s1_deterministic_ik_unknown_continuous_refinement_v1
+
+env:
+  hierarchical_control:
+    architecture_version: hierarchical_s1_deterministic_ik_unknown_continuous_refinement_v1
+    parent_architecture: hierarchical_s1_deterministic_ik_unknown_grid_audit_v1
+    planner:
+      ik_refinement_grid_levels: 3
+      ik_refinement_seed_max_iterations: 1000
+      ik_refinement_seed_residual_threshold: 1.0e-8
+      ik_refinement_starts: 16
+      ik_refinement_coarse_starts: 16
+      ik_refinement_max_iterations: 160
+
+train:
+  output_dir: outputs/hierarchical/s1_static_deterministic_ik_unknown_continuous_refinement_v1
+
+eval:
+  seed_manifest: outputs/hierarchical/s1_static_deterministic_ik_feasibility_audit_v1/unknown_manifest.json
+  nominal_only: true
