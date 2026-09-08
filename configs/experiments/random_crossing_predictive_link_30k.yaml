@@ -1,0 +1,33 @@
+# P2.2 smoke training for Predictive-Link-SAC.
+# This is a development run, not a formal thesis result.
+includes:
+  - random_crossing_link_fixed_penalty1.yaml
+
+seed: 101
+
+env:
+  observation:
+    schema_version: link_risk_pred_v1
+    predictive_risk:
+      horizon: 1.0
+      step: 0.05
+      w_min_distance: 0.55
+      w_enter_time: 0.30
+      w_approach: 0.15
+
+train:
+  method: predictive_link
+  total_steps: 30000
+  progress_interval: 100
+  log_interval: 10
+  save_interval: 10000
+  output_dir: outputs/predictive_link
+  run_name: predictive_link_seed101_steps30000
+
+eval:
+  method: predictive_link
+  episodes: 20
+  seed: 1001
+
+smoke:
+  method: predictive_link

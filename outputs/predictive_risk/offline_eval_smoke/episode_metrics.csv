@@ -1,0 +1,2 @@
+episode,length,terminated,truncated,first_warning_time,first_violation_time,warning_lead_time,min_current_distance,min_predicted_distance,mean_future_min_distance_error,critical_link_identification_rate,false_positive_rate,false_negative_rate
+0,240,0,1,0.0,inf,nan,0.1346694976091385,-0.061430830508470535,-0.035022012846699604,0.8625,0.2833333333333333,0.0

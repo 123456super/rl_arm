@@ -8,19 +8,27 @@ import numpy as np
 
 @dataclass(frozen=True)
 class ObstacleState:
+    """Position and velocity of one spherical obstacle."""
+
     center: np.ndarray
     velocity: np.ndarray
     enabled: bool
 
 
 class ObstacleProvider(Protocol):
+    """Interface for obstacle state machines used by the environment."""
+
     def reset(self, rng: np.random.Generator) -> tuple[ObstacleState, ...]: ...
 
     def advance(self, dt: float) -> tuple[ObstacleState, ...]: ...
 
 
 class SphericalObstacleProvider:
-    """One spherical obstacle with random or named crossing scenarios."""
+    """Spherical obstacle generator with random or named crossing scenarios.
+
+    它只维护障碍物的运动状态，不创建 PyBullet 物体。环境会把这里的状态
+    同步到可视化/碰撞球上。
+    """
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
@@ -30,6 +38,7 @@ class SphericalObstacleProvider:
         self._states = tuple(self._disabled_state() for _ in range(self.count))
 
     def reset(self, rng: np.random.Generator) -> tuple[ObstacleState, ...]:
+        """Sample initial obstacle positions and velocities for a new episode."""
         if not self.enabled:
             self._states = tuple(self._disabled_state() for _ in range(self.count))
             return self._states
@@ -45,6 +54,7 @@ class SphericalObstacleProvider:
         return self._states
 
     def advance(self, dt: float) -> tuple[ObstacleState, ...]:
+        """Move obstacles with constant velocity and bounce at configured bounds."""
         if not self.enabled:
             return self._states
 
@@ -63,6 +73,7 @@ class SphericalObstacleProvider:
         return self._states
 
     def _sample_random(self, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+        """Sample a crossing path from one side of the workspace to the other."""
         random_cfg = self.config["random"]
         side = -1.0 if rng.random() < 0.5 else 1.0
         center = np.array(
@@ -84,6 +95,7 @@ class SphericalObstacleProvider:
         return center, self._velocity_toward(rng, center, target)
 
     def _sample_named(self, rng: np.random.Generator, scenario: str) -> tuple[np.ndarray, np.ndarray]:
+        """Sample a controlled crossing path near a named robot-link region."""
         scenarios = self.config["scenarios"]
         if scenario not in scenarios:
             raise ValueError(f"Unknown obstacle scenario {scenario!r}; expected random or one of {sorted(scenarios)}")
@@ -108,6 +120,7 @@ class SphericalObstacleProvider:
         center: np.ndarray,
         target: np.ndarray,
     ) -> np.ndarray:
+        """Choose a random speed and point the velocity from center to target."""
         direction = target - center
         direction = direction / (np.linalg.norm(direction) + 1e-8)
         speed = rng.uniform(*self.config["speed_range"])

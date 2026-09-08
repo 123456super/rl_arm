@@ -6,11 +6,17 @@ import torch
 
 
 def resolve_device(config: dict[str, Any]) -> str:
+    """解析训练设备，支持 CPU、指定 cuda:id 和自动选择 CUDA。
+
+    配置里的 `device: cuda:auto` 会在候选 GPU 中按空闲显存和算力打分；
+    如果 CUDA 不可用且允许 fallback，就返回 cpu，避免训练脚本直接崩溃。
+    """
     requested = str(config.get("device", "cpu"))
     selection_cfg = config.get("device_selection", {})
     auto_values = {"cuda", "cuda:auto", "auto"}
 
     if requested not in auto_values:
+        # 用户明确指定 cpu 或 cuda:0 等设备时，尽量尊重请求。
         if requested.startswith("cuda") and not torch.cuda.is_available():
             if bool(selection_cfg.get("fallback_to_cpu", True)):
                 return "cpu"
@@ -36,12 +42,14 @@ def resolve_device(config: dict[str, Any]) -> str:
     if invalid:
         raise ValueError(f"Invalid CUDA device ids {invalid}; available ids are 0..{device_count - 1}")
 
+    # 自动选择分数 = 空闲显存比例 * memory_weight + 相对算力 * compute_weight。
     min_free_memory_gb = float(selection_cfg.get("min_free_memory_gb", 0.0))
     memory_weight = float(selection_cfg.get("memory_weight", 0.7))
     compute_weight = float(selection_cfg.get("compute_weight", 0.3))
 
     summaries = []
     for device_id in candidate_ids:
+        # mem_get_info 返回当前可用显存；device_properties 提供 SM 数量等硬件信息。
         free_bytes, total_bytes = torch.cuda.mem_get_info(device_id)
         props = torch.cuda.get_device_properties(device_id)
         free_gb = free_bytes / 1024**3
@@ -78,6 +86,7 @@ def resolve_device(config: dict[str, Any]) -> str:
 
     selected = best[1]
     if bool(selection_cfg.get("print_summary", True)):
+        # 打印每张候选卡的分数，方便复现实验时知道为什么选中了某张 GPU。
         for item in summaries:
             marker = "*" if item["id"] == selected else " "
             print(

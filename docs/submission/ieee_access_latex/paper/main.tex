@@ -1,0 +1,182 @@
+\documentclass{ieeeaccess}
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\history{Date of publication xxxx 00, 0000, date of current version xxxx 00, 0000.}
+\doi{10.1109/ACCESS.2026.DOI}
+
+\title{Risk-Aware Soft Actor-Critic for Dynamic Obstacle Avoidance of a UR5 Manipulator}
+
+\author{\uppercase{First Author}\authorrefmark{1},
+\uppercase{Second Author}\authorrefmark{1}, and
+\uppercase{Corresponding Author}\authorrefmark{1}}
+
+\address[1]{School/College, Shanghai University, Shanghai, China}
+
+\corresp{Corresponding author: Corresponding Author (e-mail: author@shu.edu.cn).}
+
+\begin{abstract}
+Dynamic obstacle avoidance is a critical capability for robotic manipulators operating in unstructured and human-shared environments.
+This paper proposes a risk-aware soft actor-critic framework for dynamic obstacle avoidance of a UR5 manipulator.
+The method represents the manipulator links with capsule-based geometric primitives and incorporates link-level obstacle proximity into the reinforcement learning reward.
+By penalizing unsafe configurations and collisions during training, the learned policy is encouraged to reach target positions while maintaining safe distances from moving obstacles.
+Simulation experiments under randomized targets and dynamic obstacles are conducted to evaluate success rate, collision rate, minimum link-obstacle distance, trajectory efficiency, and policy robustness.
+The proposed method is compared with standard SAC and ablated variants to verify the contribution of link-level risk modeling.
+Experimental results show that the risk-aware formulation improves obstacle avoidance safety while preserving task performance.
+\end{abstract}
+
+\begin{keywords}
+Robot motion planning, reinforcement learning, soft actor-critic, robotic manipulators, obstacle avoidance, risk-aware control, collision avoidance, dynamic environments, UR5 manipulator.
+\end{keywords}
+
+\titlepgskip=-15pt
+\maketitle
+
+\section{Introduction}
+\label{sec:introduction}
+
+Robotic manipulators are increasingly expected to operate in dynamic and partially structured environments.
+In such scenarios, obstacle avoidance should consider not only the end-effector but also the whole body of the robot, since collisions may occur along any link of the manipulator.
+
+Write this section around four questions:
+\begin{itemize}
+    \item Why is dynamic obstacle avoidance important for robotic manipulators?
+    \item Why are traditional planning or control methods insufficient in the target setting?
+    \item Why can reinforcement learning help, and why does ordinary reinforcement learning still have safety limitations?
+    \item What are the main contributions of the proposed risk-aware SAC method?
+\end{itemize}
+
+The main contributions of this paper are summarized as follows:
+\begin{itemize}
+    \item A risk-aware reinforcement learning framework is proposed for dynamic obstacle avoidance of a UR5 manipulator.
+    \item A link-level capsule representation is introduced to evaluate proximity risk between the manipulator body and dynamic obstacles.
+    \item The risk information is integrated into the SAC training objective through a safety-aware reward design.
+    \item Comparative and ablation experiments are conducted to evaluate task success, collision avoidance, and robustness.
+\end{itemize}
+
+\section{Related Work}
+\label{sec:related_work}
+
+\subsection{Obstacle Avoidance for Robotic Manipulators}
+Discuss sampling-based planning, optimization-based trajectory generation, artificial potential fields, model predictive control, and their limitations in dynamic environments.
+
+\subsection{Reinforcement Learning for Manipulator Control}
+Discuss DDPG, TD3, PPO, SAC, and continuous-control robotic manipulation.
+
+\subsection{Safe and Risk-Aware Reinforcement Learning}
+Discuss constrained RL, risk-sensitive RL, collision penalties, control barrier functions, and safety-aware reward shaping.
+
+\section{Problem Formulation}
+\label{sec:problem}
+
+Define the dynamic obstacle avoidance task as a Markov decision process.
+Let $s_t$ denote the state, $a_t$ denote the action, and $r_t$ denote the reward at time step $t$.
+The objective is to learn a policy $\pi(a_t|s_t)$ that drives the UR5 end-effector toward a target while avoiding collisions between any robot link and moving obstacles.
+
+\subsection{State and Action Spaces}
+Describe joint positions, joint velocities, end-effector pose, target position, obstacle position, obstacle velocity, and optional risk features.
+
+\subsection{Collision and Safety Definitions}
+Define the minimum distance between link capsules and obstacles:
+\begin{equation}
+    d_{\min}(s_t) = \min_{i,j} d(C_i(q_t), O_j(t)),
+\end{equation}
+where $C_i(q_t)$ is the capsule of the $i$-th link under joint configuration $q_t$, and $O_j(t)$ is the $j$-th obstacle.
+
+\section{Method}
+\label{sec:method}
+
+\subsection{Capsule-Based Link-Level Risk Modeling}
+Describe how each UR5 link is approximated as a capsule and how the link-obstacle distance is computed.
+
+\subsection{Risk-Aware Reward Design}
+An example reward decomposition is:
+\begin{equation}
+    r_t = r_{\mathrm{goal}} + r_{\mathrm{progress}} + r_{\mathrm{safety}} + r_{\mathrm{collision}} + r_{\mathrm{action}} + r_{\mathrm{time}}.
+\end{equation}
+
+Explain every term and connect it to the implementation.
+
+\subsection{Soft Actor-Critic Training}
+Describe actor, critic, entropy regularization, replay buffer, target network update, and the training loop.
+
+\subsection{Predictive Risk Extension}
+If the final experiment uses predictive risk, describe short-horizon obstacle prediction and the corresponding future-distance penalty here.
+If not used, remove this subsection.
+
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Experimental Setup}
+Describe simulator, UR5 model, random target generation, dynamic obstacle generation, training steps, evaluation episodes, random seeds, and hardware.
+
+\subsection{Baselines}
+Suggested baselines:
+\begin{itemize}
+    \item Standard SAC without explicit risk penalty.
+    \item SAC with end-effector-only obstacle distance penalty.
+    \item The proposed link-level risk-aware SAC.
+\end{itemize}
+
+\subsection{Evaluation Metrics}
+Use metrics such as success rate, collision rate, average return, final distance to target, minimum link-obstacle distance, episode length, path length, and action smoothness.
+
+\subsection{Main Results}
+Insert the main comparison table and discuss safety-performance tradeoffs.
+
+\subsection{Ablation Study}
+Discuss the effects of risk weight, safety threshold, link-level distance, and predictive risk.
+
+\subsection{Robustness Analysis}
+Evaluate the method under different obstacle speeds, obstacle counts, and target distributions.
+
+\section{Discussion}
+\label{sec:discussion}
+
+Discuss practical implications, limitations, and sim-to-real considerations.
+Be explicit if the current work is simulation-only.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper presented a risk-aware SAC framework for dynamic obstacle avoidance of a UR5 manipulator.
+By incorporating link-level geometric risk into reinforcement learning, the proposed method improves collision avoidance behavior in dynamic environments.
+Future work will investigate real-robot validation, richer perception inputs, and formal safety constraints.
+
+\section*{Acknowledgment}
+
+Add funding information and any required AI-use disclosure here.
+
+\begin{thebibliography}{00}
+
+\bibitem{haarnoja2018sac}
+T. Haarnoja, A. Zhou, P. Abbeel, and S. Levine, ``Soft actor-critic: Off-policy maximum entropy deep reinforcement learning with a stochastic actor,'' in \emph{Proc. Int. Conf. Mach. Learn.}, 2018, pp. 1861--1870.
+
+\bibitem{khatib1986real}
+O. Khatib, ``Real-time obstacle avoidance for manipulators and mobile robots,'' \emph{Int. J. Robot. Res.}, vol. 5, no. 1, pp. 90--98, 1986.
+
+\end{thebibliography}
+
+\begin{IEEEbiography}{First Author}
+Biography text here. Include education, current affiliation, research interests, and major achievements.
+\end{IEEEbiography}
+
+\begin{IEEEbiography}{Second Author}
+Biography text here.
+\end{IEEEbiography}
+
+\EOD
+
+\end{document}

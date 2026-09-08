@@ -8,6 +8,8 @@ import torch
 
 @dataclass
 class Batch:
+    """Torch tensors sampled from the replay buffer."""
+
     observations: torch.Tensor
     actions: torch.Tensor
     rewards: torch.Tensor
@@ -17,6 +19,12 @@ class Batch:
 
 
 class ReplayBuffer:
+    """Fixed-size circular replay buffer for off-policy SAC training.
+
+    cost 和 reward 分开存：固定惩罚方法会把 cost 扣进环境 reward，
+    LDRC 方法还会用原始 cost 训练 cost critic。
+    """
+
     def __init__(self, obs_dim: int, action_dim: int, capacity: int, device: str) -> None:
         self.capacity = int(capacity)
         self.device = torch.device(device)
@@ -38,6 +46,7 @@ class ReplayBuffer:
         next_observation: np.ndarray,
         done: bool,
     ) -> None:
+        """Store one transition at the current circular-buffer position."""
         self.observations[self.ptr] = observation
         self.actions[self.ptr] = action
         self.rewards[self.ptr] = reward
@@ -48,6 +57,7 @@ class ReplayBuffer:
         self.size = min(self.size + 1, self.capacity)
 
     def sample(self, batch_size: int) -> Batch:
+        """Uniformly sample transitions and move them to the configured device."""
         indices = np.random.randint(0, self.size, size=batch_size)
         return Batch(
             observations=self._tensor(self.observations[indices]),

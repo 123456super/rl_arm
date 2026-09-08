@@ -7,6 +7,11 @@ import yaml
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
+    """加载并校验实验配置。
+
+    配置文件支持 includes 递归组合：默认配置可以引用 robot/env/algo/run
+    子配置，实验 YAML 再覆盖其中少量字段。
+    """
     config_path = Path(path)
     config = _load_config_with_includes(config_path)
     validate_config(config)
@@ -14,6 +19,7 @@ def load_config(path: str | Path) -> dict[str, Any]:
 
 
 def _load_config_with_includes(path: Path) -> dict[str, Any]:
+    """递归读取 YAML，并让当前文件覆盖被 include 的基础配置。"""
     with open(path, "r", encoding="utf-8") as file:
         current = yaml.safe_load(file) or {}
 
@@ -22,14 +28,17 @@ def _load_config_with_includes(path: Path) -> dict[str, Any]:
     for include in includes:
         include_path = Path(include)
         if not include_path.is_absolute():
+            # include 使用相对路径时，以当前 YAML 所在目录为基准。
             include_path = path.parent / include_path
         deep_update(merged, _load_config_with_includes(include_path))
 
+    # 当前文件优先级最高，所以最后 merge。
     deep_update(merged, current)
     return merged
 
 
 def deep_update(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+    """递归合并字典，保留未被覆盖的嵌套配置。"""
     for key, value in updates.items():
         if isinstance(value, dict) and isinstance(base.get(key), dict):
             deep_update(base[key], value)
@@ -39,6 +48,11 @@ def deep_update(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]
 
 
 def validate_config(config: dict[str, Any]) -> None:
+    """对训练/评估所需配置做早期校验。
+
+    这里的目标不是检查每个字段的物理合理性，而是尽早发现缺键、
+    维度不一致、非法模式等会导致训练半路崩掉的问题。
+    """
     required_paths = [
         ("robot", "urdf"),
         ("robot", "base_position"),
@@ -95,9 +109,11 @@ def validate_config(config: dict[str, Any]) -> None:
 
     robot_cfg = config["robot"]
     joint_count = len(robot_cfg["joint_names"])
+    # reset 初始关节角必须和可控关节数量一致，否则 PyBullet 重置时会错位。
     if len(config["robot"]["reset"]["default_joint_positions"]) != joint_count:
         raise ValueError("robot.reset.default_joint_positions must match robot joint count")
 
+    # 胶囊体是连杆级风险的基础，没有 capsule 就无法构造 observation。
     if len(config["robot"]["capsules"]) <= 0:
         raise ValueError("robot.capsules must contain at least one capsule")
     for capsule in config["robot"]["capsules"]:
@@ -106,6 +122,7 @@ def validate_config(config: dict[str, Any]) -> None:
 
     execution_cfg = config["env"]["execution"]
     fixed_smoothing_mode = str(execution_cfg["fixed_smoothing_mode"])
+    # 固定方法目前只支持历史 EMA 和论文式 Butterworth+quintic RTB。
     if fixed_smoothing_mode not in {"ema", "butterworth_quintic"}:
         raise ValueError("env.execution.fixed_smoothing_mode must be 'ema' or 'butterworth_quintic'")
     if float(execution_cfg["rtb"]["cutoff_angular_frequency"]) <= 0.0:
@@ -115,6 +132,7 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("env.execution.max_policy_velocity_delta must be positive or null")
 
     goal_cfg = config["env"]["goal"]
+    # static 用于普通到达任务；linear_bounce 用于动态目标跟踪实验。
     if str(goal_cfg["mode"]) not in {"static", "linear_bounce"}:
         raise ValueError("env.goal.mode must be 'static' or 'linear_bounce'")
     if not _valid_range(goal_cfg["speed_range"], lower_bound=0.0):
@@ -135,6 +153,7 @@ def validate_config(config: dict[str, Any]) -> None:
 
 
 def _valid_range(value: Any, lower_bound: float | None = None) -> bool:
+    """检查形如 [low, high] 的采样范围是否合法。"""
     if not isinstance(value, (list, tuple)) or len(value) != 2:
         return False
     low, high = float(value[0]), float(value[1])

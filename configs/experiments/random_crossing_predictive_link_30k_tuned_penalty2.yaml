@@ -1,0 +1,11 @@
+# P2.2 tuned smoke training for Predictive-Link-SAC with stronger safety penalty.
+# This keeps the h=0.5 predictive observation from the first tuned run, then
+# increases the fixed risk penalty to test whether collision can be reduced.
+includes:
+  - random_crossing_predictive_link_30k_tuned.yaml
+
+sac:
+  fixed_risk_penalty: 2.0
+
+train:
+  run_name: predictive_link_tuned_h0p5_penalty2_seed101_steps30000

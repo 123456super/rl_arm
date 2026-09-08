@@ -12,6 +12,13 @@ from rl_risk_sac.algorithms.replay_buffer import Batch
 
 
 class SACAgent:
+    """Soft Actor-Critic agent with an optional cost constraint branch.
+
+    `ee_fixed` 和 `link_fixed` 使用普通 SAC，只是环境 reward 已经扣除了固定
+    风险惩罚；`ldrc_*` 额外训练 cost critic，并用拉格朗日乘子把 cost
+    压到安全阈值以下。
+    """
+
     def __init__(
         self,
         obs_dim: int,
@@ -29,6 +36,8 @@ class SACAgent:
         self.tau = float(sac_cfg["tau"])
         self.batch_size = int(sac_cfg["batch_size"])
         self.target_entropy = -float(action_dim)
+        # c_safe 是期望 episode 平均 cost 上限；约束方法会根据 cost_ema
+        # 自动调大/调小 lagrange_multiplier。
         self.cost_safe = float(config["risk"]["cost"]["c_safe"])
         self.lambda_lr = float(sac_cfg["lambda_lr"])
         self.cost_ema_rho = float(sac_cfg["cost_ema_rho"])
@@ -36,6 +45,7 @@ class SACAgent:
         self.lagrange_multiplier = float(sac_cfg["initial_lambda"]) if self.constrained else 0.0
 
         self.actor = GaussianActor(obs_dim, action_dim, hidden_dims).to(self.device)
+        # SAC 使用 twin Q 减小过估计。这里 reward 和 cost 各有一套 twin Q。
         self.reward_q1 = QNetwork(obs_dim, action_dim, hidden_dims).to(self.device)
         self.reward_q2 = QNetwork(obs_dim, action_dim, hidden_dims).to(self.device)
         self.reward_target_q1 = QNetwork(obs_dim, action_dim, hidden_dims).to(self.device)
@@ -72,6 +82,7 @@ class SACAgent:
         return self.log_alpha.exp()
 
     def select_action(self, observation: np.ndarray, deterministic: bool = False) -> np.ndarray:
+        """Return a normalized action in [-1, 1] for the environment."""
         obs = torch.as_tensor(observation, dtype=torch.float32, device=self.device).unsqueeze(0)
         with torch.no_grad():
             if deterministic:
@@ -81,7 +92,9 @@ class SACAgent:
         return action.squeeze(0).cpu().numpy()
 
     def update(self, batch: Batch) -> dict[str, float]:
+        """Run one SAC gradient update from a replay-buffer batch."""
         with torch.no_grad():
+            # reward target 是标准 SAC Bellman 目标：r + gamma*(Q - alpha*logpi)。
             next_action, next_log_prob = self.actor.sample(batch.next_observations)
             target_reward_q = torch.min(
                 self.reward_target_q1(batch.next_observations, next_action),
@@ -97,6 +110,7 @@ class SACAgent:
             )
             cost_target = batch.costs + self.gamma * (1.0 - batch.dones) * target_cost_q
 
+        # 更新 reward critic：拟合奖励回报。
         reward_q1 = self.reward_q1(batch.observations, batch.actions)
         reward_q2 = self.reward_q2(batch.observations, batch.actions)
         reward_q_loss = F.mse_loss(reward_q1, reward_target) + F.mse_loss(reward_q2, reward_target)
@@ -104,6 +118,8 @@ class SACAgent:
         reward_q_loss.backward()
         self.reward_q_optimizer.step()
 
+        # 更新 cost critic：拟合安全代价回报。非 LDRC 方法也训练它，
+        # 这样日志和 checkpoint 结构保持一致。
         cost_q1 = self.cost_q1(batch.observations, batch.actions)
         cost_q2 = self.cost_q2(batch.observations, batch.actions)
         cost_q_loss = F.mse_loss(cost_q1, cost_target) + F.mse_loss(cost_q2, cost_target)
@@ -116,6 +132,7 @@ class SACAgent:
         cost_q = torch.min(self.cost_q1(batch.observations, action), self.cost_q2(batch.observations, action))
         actor_loss = (self.alpha.detach() * log_prob - reward_q).mean()
         if self.constrained:
+            # 约束 SAC 的 actor 在最大化 reward 的同时惩罚高 cost 动作。
             actor_loss = actor_loss + self.lagrange_multiplier * cost_q.mean()
 
         self.actor_optimizer.zero_grad(set_to_none=True)
@@ -143,6 +160,7 @@ class SACAgent:
         }
 
     def update_lagrange(self, episode_mean_cost: float) -> None:
+        """Update the Lagrange multiplier from episode-level mean cost."""
         if not self.constrained:
             return
         self.cost_ema = (1.0 - self.cost_ema_rho) * self.cost_ema + self.cost_ema_rho * float(episode_mean_cost)

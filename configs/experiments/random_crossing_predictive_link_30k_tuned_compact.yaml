@@ -1,0 +1,13 @@
+# P2.2 tuned smoke training for Predictive-Link-SAC with compact predictive observation.
+# Keeps h=0.5 and penalty=1.0, but removes per-link predicted risk scores
+# from the observation to reduce noisy/over-conservative inputs to the actor.
+includes:
+  - random_crossing_predictive_link_30k_tuned.yaml
+
+env:
+  observation:
+    predictive_risk:
+      include_per_link_score: false
+
+train:
+  run_name: predictive_link_tuned_h0p5_compact_seed101_steps30000

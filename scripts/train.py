@@ -20,6 +20,11 @@ from rl_risk_sac.utils.seeding import set_seed
 
 
 def parse_args() -> argparse.Namespace:
+    """解析训练命令行参数。
+
+    常用入口是 `--config configs/xxx.yaml`。resume 相关参数用于从已有
+    actor/agent_state 继续训练；`--start-step` 只影响日志和进度条的起始步数。
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--resume-actor", default=None)
@@ -30,6 +35,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_run_dir(config: dict[str, Any], method: str, run_name: str | None) -> Path:
+    """根据配置生成本次训练的输出目录。
+
+    如果显式传入 run_name，就直接复用该名字；否则目录名会包含时间戳、
+    机器人型号、方法名、随机种子和总步数，方便之后追踪实验。
+    """
     output_root = Path(config["train"]["output_dir"])
     if run_name:
         return output_root / run_name
@@ -43,6 +53,15 @@ def build_run_dir(config: dict[str, Any], method: str, run_name: str | None) -> 
 
 
 def main() -> None:
+    """训练主入口。
+
+    整体流程：
+    1. 读取 YAML 配置并解析运行设备；
+    2. 创建 Gym 环境、SAC/LDRC-SAC agent 和 replay buffer；
+    3. 循环采样 transition，写入经验池，并按间隔更新网络；
+    4. 每个 episode 结束时写 episode 指标，并更新约束方法的拉格朗日乘子；
+    5. 按间隔保存 checkpoint，最后保存最终模型。
+    """
     args = parse_args()
     config = load_config(args.config)
     if args.run_name is not None:
@@ -53,11 +72,15 @@ def main() -> None:
 
     config["device"] = resolve_device(config)
     set_seed(int(config["seed"]))
+    # 环境决定 observation/action 维度；agent 只依赖这些维度和算法配置，
+    # 不直接知道 PyBullet、URDF 或障碍物细节。
     env = UR5DynamicObstacleEnv(config, method=method)
     obs_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     agent = SACAgent(obs_dim, action_dim, config, method=method)
     if args.resume_actor is not None:
+        # 如果只给 actor 路径，默认把同目录下 actor*.pt 对应的
+        # agent_state*.pt 当作优化器外的训练状态。
         resume_state = args.resume_state
         if resume_state is None:
             actor_path = Path(args.resume_actor)
@@ -75,6 +98,7 @@ def main() -> None:
         device=config.get("device", "cpu"),
     )
 
+    # 每次训练都落一个完整 config.json，保证之后评估/画图能复现实验条件。
     run_dir = build_run_dir(config, method, config["train"].get("run_name"))
     run_dir.mkdir(parents=True, exist_ok=True)
     latest_path = Path(config["train"]["output_dir"]) / "latest_run.txt"
@@ -84,6 +108,7 @@ def main() -> None:
         json.dump(config, file, ensure_ascii=False, indent=2)
 
     metrics_path = run_dir / "train_metrics.csv"
+    # episode 级指标：每一行对应一个完整 episode，适合论文表格或收敛曲线。
     fieldnames = [
         "episode",
         "step",
@@ -103,6 +128,7 @@ def main() -> None:
     writer.writeheader()
 
     progress_path = run_dir / "progress.csv"
+    # step 级粗粒度进度：即使一个 episode 很长，也能看到训练是否还在推进。
     progress_fieldnames = [
         "step",
         "total_steps",
@@ -136,6 +162,8 @@ def main() -> None:
 
     observation, _ = env.reset(seed=int(config["seed"]))
     episode = 0
+    # 下面这些变量累计当前 episode 的 reward/cost/risk 等信息；
+    # 一旦 done，就写入 train_metrics.csv 并清零。
     episode_reward = 0.0
     episode_cost = 0.0
     episode_length = 0
@@ -154,10 +182,14 @@ def main() -> None:
     progress = trange(args.start_step + 1, total_steps + 1, desc=f"train:{method}")
     for step in progress:
         if step <= warmup_steps:
+            # warmup 阶段随机探索，先填充 replay buffer，避免一开始就用
+            # 几乎空的数据训练 critic。
             action = env.action_space.sample()
         else:
             action = agent.select_action(observation, deterministic=False)
 
+        # env.step 返回 Gymnasium 五元组外加本项目的 cost；cost 不等于负 reward，
+        # 它单独表示安全约束代价。
         next_observation, reward, cost, terminated, truncated, info = env.step(action)
         done = terminated or truncated
         replay.add(observation, action, reward, cost, next_observation, done)
@@ -172,10 +204,13 @@ def main() -> None:
         episode_violations += int(info["safety_violation"])
 
         if step >= update_after and len(replay) >= agent.batch_size and step % update_every == 0:
+            # SAC 是 off-policy 算法：从经验池随机采样，而不是只用最新一步。
             batch = replay.sample(agent.batch_size)
             update_info = agent.update(batch)
 
         if step % progress_interval == 0 or step == total_steps:
+            # progress.csv 和 stdout 是“训练还活着吗”的轻量监控，
+            # 不要求等到 episode 结束才输出。
             progress_row = {
                 "step": step,
                 "total_steps": total_steps,
@@ -213,6 +248,8 @@ def main() -> None:
         if done:
             episode += 1
             mean_cost = float(np.mean(episode_costs)) if episode_costs else 0.0
+            # 普通 SAC 中这个函数会直接 return；LDRC 方法会根据 episode
+            # 平均 cost 调整 lambda，使策略逐渐满足安全约束。
             agent.update_lagrange(mean_cost)
             recent_rewards.append(episode_reward)
             writer.writerow(
@@ -245,6 +282,7 @@ def main() -> None:
                 )
 
             observation, _ = env.reset()
+            # 开启下一个 episode 的统计。
             episode_reward = 0.0
             episode_cost = 0.0
             episode_length = 0
@@ -254,6 +292,7 @@ def main() -> None:
             episode_violations = 0
 
         if step % save_interval == 0:
+            # 中间 checkpoint 用 step 后缀保存，便于后续做 checkpoint selection。
             agent.save(run_dir, suffix=f"_step_{step}")
 
     agent.save(run_dir)

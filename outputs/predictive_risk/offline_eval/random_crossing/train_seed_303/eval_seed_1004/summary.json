@@ -1,0 +1,25 @@
+{
+  "config": "configs/experiments/random_crossing.yaml",
+  "method": "link_fixed",
+  "checkpoint": "outputs/rechecks/link_fixed_penalty1/train/link_fixed/seed_303/link_fixed_seed303_steps100000/actor_step_100000.pt",
+  "episodes": 100,
+  "seed": 1004,
+  "predictive_risk_config": {
+    "horizon": 1.0,
+    "step": 0.05,
+    "d_safe": 0.12,
+    "sigma_d": 0.12,
+    "tau_enter": 1.0,
+    "v_max": 0.7,
+    "eps": 1e-08,
+    "w_min_distance": 0.55,
+    "w_enter_time": 0.3,
+    "w_approach": 0.15
+  },
+  "mean_warning_lead_time": 3.1066666666666674,
+  "episodes_with_warning_and_violation": 15,
+  "mean_future_min_distance_error": -0.04293239985385624,
+  "mean_critical_link_identification_rate": 0.7557371646119152,
+  "mean_false_positive_rate": 0.1569698560227453,
+  "mean_false_negative_rate": 0.005214285714285714
+}

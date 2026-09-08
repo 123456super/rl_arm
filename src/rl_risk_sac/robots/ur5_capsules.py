@@ -9,6 +9,8 @@ import pybullet as p
 
 @dataclass(frozen=True)
 class CapsuleSpec:
+    """Configured capsule endpoint links and radius for one robot body segment."""
+
     name: str
     parent_link_name: str
     child_link_name: str
@@ -18,6 +20,8 @@ class CapsuleSpec:
 
 @dataclass
 class CapsuleState:
+    """World-space capsule used by risk detection at one simulator step."""
+
     start: np.ndarray
     end: np.ndarray
     radius: float
@@ -25,7 +29,11 @@ class CapsuleState:
 
 
 class UR5CapsuleModel:
-    """Capsule approximation for the main links of the bundled UR5-like arm."""
+    """Capsule approximation for the main links of the bundled UR5 arm.
+
+    PyBullet 的 URDF 几何很复杂；避障风险只需要每段连杆的大致占据体，
+    所以这里用“父 link 世界坐标 -> 子 link 世界坐标 + 半径”的胶囊近似。
+    """
 
     def __init__(self, specs: list[dict[str, Any]]) -> None:
         self.specs = self._load_specs(specs)
@@ -51,14 +59,17 @@ class UR5CapsuleModel:
         return capsule_specs
 
     def resolve_link_names(self, link_name_to_id: dict[str, int]) -> None:
+        """Cache the mapping from URDF link names to PyBullet link ids."""
         self.link_name_to_id = dict(link_name_to_id)
 
     def states(self, robot_id: int, physics_client_id: int) -> list[CapsuleState]:
+        """Read current PyBullet link poses and return all capsule states."""
         states: list[CapsuleState] = []
         base_pos, _ = p.getBasePositionAndOrientation(robot_id, physicsClientId=physics_client_id)
         base = np.asarray(base_pos, dtype=np.float32)
 
         for spec in self.specs:
+            # base 在 PyBullet 中没有普通 link id，这里用 -1 表示机器人基座。
             parent_link = self._resolve_link_id(spec.parent_link_name)
             child_link = self._resolve_link_id(spec.child_link_name)
             if parent_link < 0:

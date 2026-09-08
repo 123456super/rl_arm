@@ -1,0 +1,17 @@
+# P4.2 fixed-actor counterfactual evaluation for Instant-Link-SAC + minimal QP.
+# Do not train with this config. Use it with scripts/evaluate.py and an existing
+# link_fixed_penalty1 checkpoint.
+includes:
+  - random_crossing_link_fixed_penalty1.yaml
+
+env:
+  execution:
+    safety_qp:
+      enabled: true
+      activation_distance: 0.24
+      gain: 3.0
+      fd_epsilon: 0.001
+      max_iterations: 8
+
+eval:
+  method: link_fixed

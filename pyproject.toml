@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rl-risk-sac"
 version = "0.1.0"
-description = "Link-level dynamic risk constrained SAC prototype for UR5-like obstacle avoidance."
+description = "Link-level dynamic risk constrained SAC prototype for UR5 obstacle avoidance."
 requires-python = ">=3.13"
 dependencies = [
   "numpy>=1.24",

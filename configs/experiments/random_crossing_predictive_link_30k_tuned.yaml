@@ -1,0 +1,37 @@
+# P2.2 tuned smoke training for Predictive-Link-SAC.
+# Compared with random_crossing_predictive_link_30k.yaml, this version makes
+# predictive risk less conservative before running any multi-seed comparison.
+includes:
+  - random_crossing_link_fixed_penalty1.yaml
+
+seed: 101
+
+env:
+  observation:
+    schema_version: link_risk_pred_v1
+    predictive_risk:
+      # The 1.0 s offline setting gave useful lead time but medium false positives.
+      # Start P2.2 tuning with a shorter horizon so the policy sees fewer early warnings.
+      horizon: 0.5
+      step: 0.05
+      # Keep the ordering signal but reduce raw predicted-risk magnitudes in observation.
+      w_min_distance: 0.30
+      w_enter_time: 0.20
+      w_approach: 0.10
+
+train:
+  method: predictive_link
+  total_steps: 30000
+  progress_interval: 100
+  log_interval: 10
+  save_interval: 10000
+  output_dir: outputs/predictive_link
+  run_name: predictive_link_tuned_h0p5_seed101_steps30000
+
+eval:
+  method: predictive_link
+  episodes: 20
+  seed: 1001
+
+smoke:
+  method: predictive_link

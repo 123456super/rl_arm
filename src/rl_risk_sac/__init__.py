@@ -1,4 +1,8 @@
-"""Simulation prototype for link-level dynamic risk constrained SAC."""
+"""连杆级动态风险约束 SAC 的仿真原型包。
+
+src/rl_risk_sac 按“环境、算法、几何风险、任务、控制执行、工具”分层。
+顶层包只暴露版本号，具体能力从各子包导入。
+"""
 
 __all__ = ["__version__"]
 

@@ -1,0 +1,25 @@
+{
+  "config": "configs/experiments/upper_arm_crossing.yaml",
+  "method": "link_fixed",
+  "checkpoint": "outputs/rechecks/link_fixed_penalty1/train/link_fixed/seed_202/link_fixed_seed202_steps100000/actor_step_100000.pt",
+  "episodes": 100,
+  "seed": 1006,
+  "predictive_risk_config": {
+    "horizon": 1.0,
+    "step": 0.05,
+    "d_safe": 0.12,
+    "sigma_d": 0.12,
+    "tau_enter": 1.0,
+    "v_max": 0.7,
+    "eps": 1e-08,
+    "w_min_distance": 0.55,
+    "w_enter_time": 0.3,
+    "w_approach": 0.15
+  },
+  "mean_warning_lead_time": 2.2066666666666666,
+  "episodes_with_warning_and_violation": 15,
+  "mean_future_min_distance_error": -0.05211394619422469,
+  "mean_critical_link_identification_rate": 0.7674306708323446,
+  "mean_false_positive_rate": 0.151169317627666,
+  "mean_false_negative_rate": 0.005102428648490254
+}

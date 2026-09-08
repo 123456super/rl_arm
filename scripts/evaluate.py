@@ -16,7 +16,11 @@ from rl_risk_sac.utils.seeding import set_seed
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/default.yaml")
-    parser.add_argument("--method", default=None, choices=["ee_fixed", "link_fixed", "ldrc_fixed", "ldrc_adaptive"])
+    parser.add_argument(
+        "--method",
+        default=None,
+        choices=["ee_fixed", "link_fixed", "predictive_link", "ldrc_fixed", "ldrc_adaptive"],
+    )
     parser.add_argument("--checkpoint", default=None)
     parser.add_argument("--episodes", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
@@ -63,6 +67,10 @@ def main() -> None:
         physics_rms_jerks = []
         action_variations = []
         policy_rate_limit_events = 0
+        safety_qp_interventions = 0
+        safety_qp_infeasible = 0
+        safety_qp_correction_norms = []
+        safety_qp_solve_times = []
         success = False
         collision = False
         final_position_error = 0.0
@@ -84,6 +92,10 @@ def main() -> None:
             physics_rms_jerks.append(float(info["physics_rms_jerk"]))
             action_variations.append(float(np.linalg.norm(info["qdot_cmd"] - prev_qdot_cmd)))
             policy_rate_limit_events += int(info["policy_rate_limited"])
+            safety_qp_interventions += int(info.get("safety_qp_intervened", False))
+            safety_qp_infeasible += int(info.get("safety_qp_infeasible", False))
+            safety_qp_correction_norms.append(float(info.get("safety_qp_correction_norm", 0.0)))
+            safety_qp_solve_times.append(float(info.get("safety_qp_solve_time_ms", 0.0)))
             success = bool(info["success"])
             collision = bool(info["collision"])
             final_position_error = float(info["goal_error_norm"])
@@ -106,7 +118,14 @@ def main() -> None:
                         "qdot_norm": float(np.linalg.norm(info["qdot_cmd"])),
                         "qdot_policy_norm": float(np.linalg.norm(info["qdot_policy"])),
                         "qdot_policy_limited_norm": float(np.linalg.norm(info["qdot_policy_limited"])),
+                        "qdot_policy_safe_target_norm": float(
+                            np.linalg.norm(info.get("qdot_policy_safe_target", info["qdot_policy_limited"]))
+                        ),
                         "policy_rate_limited": int(info["policy_rate_limited"]),
+                        "safety_qp_intervened": int(info.get("safety_qp_intervened", False)),
+                        "safety_qp_infeasible": int(info.get("safety_qp_infeasible", False)),
+                        "safety_qp_correction_norm": float(info.get("safety_qp_correction_norm", 0.0)),
+                        "safety_qp_solve_time_ms": float(info.get("safety_qp_solve_time_ms", 0.0)),
                         "acc_norm": float(np.linalg.norm(info["joint_acc"])),
                         "jerk_norm": float(np.linalg.norm(info["joint_jerk"])),
                         "physics_rms_acceleration": float(info["physics_rms_acceleration"]),
@@ -159,6 +178,20 @@ def main() -> None:
                 "safety_violation_rate": violations / max(step + 1, 1),
                 "mean_action_variation": float(np.mean(action_variations)) if action_variations else 0.0,
                 "policy_rate_limit_rate": policy_rate_limit_events / max(step + 1, 1),
+                "safety_qp_intervention_rate": safety_qp_interventions / max(step + 1, 1),
+                "safety_qp_infeasible_rate": safety_qp_infeasible / max(step + 1, 1),
+                "mean_safety_qp_correction_norm": float(np.mean(safety_qp_correction_norms))
+                if safety_qp_correction_norms
+                else 0.0,
+                "max_safety_qp_correction_norm": float(np.max(safety_qp_correction_norms))
+                if safety_qp_correction_norms
+                else 0.0,
+                "mean_safety_qp_solve_time_ms": float(np.mean(safety_qp_solve_times))
+                if safety_qp_solve_times
+                else 0.0,
+                "max_safety_qp_solve_time_ms": float(np.max(safety_qp_solve_times))
+                if safety_qp_solve_times
+                else 0.0,
                 "rms_acceleration": float(np.sqrt(np.mean(np.square(acc)))) if len(acc) else 0.0,
                 "rms_jerk": float(np.sqrt(np.mean(np.square(jerk)))) if len(jerk) else 0.0,
                 "physics_rms_acceleration": float(np.sqrt(np.mean(np.square(physics_rms_accelerations))))
@@ -201,6 +234,10 @@ def main() -> None:
         "mean_safety_violation_count": float(np.mean([r["safety_violation_count"] for r in rows])),
         "mean_action_variation": float(np.mean([r["mean_action_variation"] for r in rows])),
         "mean_policy_rate_limit_rate": float(np.mean([r["policy_rate_limit_rate"] for r in rows])),
+        "mean_safety_qp_intervention_rate": float(np.mean([r["safety_qp_intervention_rate"] for r in rows])),
+        "mean_safety_qp_infeasible_rate": float(np.mean([r["safety_qp_infeasible_rate"] for r in rows])),
+        "mean_safety_qp_correction_norm": float(np.mean([r["mean_safety_qp_correction_norm"] for r in rows])),
+        "mean_safety_qp_solve_time_ms": float(np.mean([r["mean_safety_qp_solve_time_ms"] for r in rows])),
         "mean_rms_acceleration": float(np.mean([r["rms_acceleration"] for r in rows])),
         "mean_rms_jerk": float(np.mean([r["rms_jerk"] for r in rows])),
         "mean_physics_rms_acceleration": float(np.mean([r["physics_rms_acceleration"] for r in rows])),

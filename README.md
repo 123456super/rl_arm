@@ -2,7 +2,7 @@
 
 本项目是 UR5 在单动态球形障碍物场景下的连杆级动态风险 SAC 仿真原型。最终论文主比较使用末端风险基线、连杆级固定风险惩罚 SAC（`w_R=1.0`）和连杆级约束 SAC；当前 held-out 结果支持前者作为部署候选，而非将约束 SAC 表述为整体最优。
 
-正式结论、论文图表、分层设计和实机前检查分别见 [实验结论](docs/experiment_conclusions.md)、[论文材料](docs/paper_materials.md)、[系统架构](docs/architecture.md) 和 [部署预检](docs/deployment_preflight.md)。
+文档已按当前论文主线、旧实验材料、工程说明和投稿材料归类，入口见 [docs/README.md](docs/README.md)。
 
 ## 环境
 
@@ -54,7 +54,7 @@ conda run -n rl python scripts/smoke_test.py
 
 ## 训练
 
-详细训练流程、过程观察和下一步决策见 [docs/training_guide.md](docs/training_guide.md)。
+详细训练流程、过程观察和下一步决策见 [docs/project/training_guide.md](docs/project/training_guide.md)。
 
 训练命令固定为读取 YAML 配置，方法、步数、seed、输出目录都在配置文件里改：
 
@@ -66,7 +66,6 @@ conda run -n rl python scripts/train.py --config configs/default.yaml
 
 ```bash
 conda run -n rl python scripts/train.py --config configs/experiments/ur5_short_train.yaml
-conda run -n rl python scripts/train.py --config configs/experiments/ur5e_short_train.yaml
 ```
 
 使用固定 Butterworth—五次多项式 RTB 重新训练部署候选：
@@ -105,9 +104,7 @@ python scripts/evaluate.py --checkpoint outputs/runs/某次训练目录/actor.pt
 configs/
   default.yaml          # 默认入口，组合下面几个配置
   ur5.yaml              # 使用真实导出的 UR5 URDF 的入口
-  ur5e.yaml             # 使用真实导出的 UR5e URDF 的入口
   robot/ur5.yaml        # UR5 URDF、真实关节名、真实 link 名称
-  robot/ur5e.yaml       # UR5e URDF、真实关节名、真实 link 名称
   environment/sim.yaml  # PyBullet、目标、障碍物、场景和可视化
   algo/sac.yaml         # 风险代价、平滑、奖励和 SAC 超参数
   run/dev.yaml          # train、eval、smoke 的运行参数
@@ -115,20 +112,14 @@ configs/
 
 `env.obstacle.enabled` 可关闭动态障碍物，用于基础目标到达能力检查。`env.obstacle.scenario` 默认为 `random`，也可设置为 `upper_arm_crossing`、`elbow_crossing`、`forearm_crossing` 或 `wrist_crossing`，用于后续构造靠近不同非末端连杆区域的受控测试场景。
 
-## UR5/UR5e 离线模型
+## UR5 离线模型
 
-`assets/robots/universal_robots/ur_models/` 是从 ROS2 环境导出的离线 URDF 目录，当前包含 `ur5.urdf`、`ur5e.urdf` 和对应 meshes。PyBullet 已验证可以直接加载这两个 URDF；官方 URDF 中包含固定关节，因此配置使用 `joint_names` 和 `tool_link_name` 自动解析 PyBullet id。
+`assets/robots/universal_robots/ur_models/` 是从 ROS2 环境导出的离线 URDF 目录，当前只保留 `ur5.urdf` 和对应 meshes。PyBullet 已验证可以直接加载该 URDF；官方 URDF 中包含固定关节，因此配置使用 `joint_names` 和 `tool_link_name` 自动解析 PyBullet id。
 
 使用默认 UR5 配置做快速检查：
 
 ```bash
 conda run -n rl python scripts/smoke_test.py --config configs/ur5.yaml
-```
-
-使用 UR5e 配置做快速检查：
-
-```bash
-conda run -n rl python scripts/smoke_test.py --config configs/ur5e.yaml
 ```
 
 使用 UR5 配置做短训练：
@@ -137,7 +128,7 @@ conda run -n rl python scripts/smoke_test.py --config configs/ur5e.yaml
 conda run -n rl python scripts/train.py --config configs/experiments/ur5_short_train.yaml
 ```
 
-当前项目已删除旧的简化 UR5-like 模型，只适配 `ur5.urdf` 和 `ur5e.urdf`。正式实验前仍建议复核胶囊体半径、工具 TCP 和目标/障碍物工作空间是否符合论文场景。
+当前项目只适配真实导出的 `ur5.urdf`。正式实验前仍建议复核胶囊体半径、工具 TCP 和目标/障碍物工作空间是否符合论文场景。
 
 ## 方法名称
 
