@@ -101,7 +101,10 @@ conda run -n rl python scripts/train.py --config configs/experiments/no_obstacle
 | `collision`、`safety_violation_rate`、`min_distance` | 碰撞与距离安全 | `d_safe`、风险代价、障碍物设定、速度限制 |
 | `episode_cost`、`mean_risk` | 风险信号是否连续且可区分 | 风险特征、距离/TTC 标定、事件代价 |
 | `lambda`（仅 `ldrc_*`） | 是否随长期 episode 代价调整 | `C_safe`、cost 量级和 lambda 学习率 |
-| `rms_jerk`、`action_variation` | 执行层平滑性 | `fixed_beta` 或 adaptive 参数；不能只以 jerk 判断安全性 |
+| `rms_jerk`、`action_variation` | 20 Hz策略周期层面的平滑性 | EMA/RTB 或 adaptive 参数；不能只以 jerk 判断安全性 |
+| `physics_rms_jerk` | 约240 Hz物理子步层面的平滑性 | 用于识别策略周期边界处的速度跳变，并评价五次融合效果 |
+
+固定方法默认使用 `env.execution.fixed_smoothing_mode: butterworth_quintic`。如需复现既有正式结果，应显式覆盖为 `ema`；新RTB正式结果必须重新训练，不应直接替换旧表。
 
 常用查看方式：
 

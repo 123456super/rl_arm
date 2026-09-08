@@ -79,10 +79,12 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     frame = pd.read_csv(trace_path)
+    physics_trace_path = trace_path.with_name(f"{trace_path.stem}_physics.csv")
+    motion_frame = pd.read_csv(physics_trace_path) if physics_trace_path.exists() else frame
     stem = trace_path.stem
 
     save_risk_plot(frame, output_dir / f"{stem}_risk_beta.png")
-    save_motion_plot(frame, output_dir / f"{stem}_motion_smoothness.png")
+    save_motion_plot(motion_frame, output_dir / f"{stem}_motion_smoothness.png")
     print(f"saved: {output_dir}")
 
 

@@ -1,0 +1,16 @@
+# Legacy executor entry for reproducing the existing fixed-beta results.
+includes:
+  - random_crossing_link_fixed_penalty1.yaml
+
+env:
+  execution:
+    fixed_smoothing_mode: ema
+    # Preserve the historical executor exactly; the new paper-style rate limiter is disabled for reproduction.
+    max_policy_velocity_delta: null
+
+train:
+  method: link_fixed
+  output_dir: outputs/experiments/random_crossing_link_fixed_penalty1_ema
+
+eval:
+  method: link_fixed

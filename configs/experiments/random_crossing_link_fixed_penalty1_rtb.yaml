@@ -1,0 +1,16 @@
+# Retraining entry for the calibrated link-risk method with fixed two-stage RTB.
+includes:
+  - random_crossing_link_fixed_penalty1.yaml
+
+env:
+  execution:
+    fixed_smoothing_mode: butterworth_quintic
+    rtb:
+      cutoff_angular_frequency: 30.0
+
+train:
+  method: link_fixed
+  output_dir: outputs/experiments/random_crossing_link_fixed_penalty1_rtb
+
+eval:
+  method: link_fixed

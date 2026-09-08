@@ -23,6 +23,8 @@ METRIC_COLUMNS = [
     "mean_action_variation",
     "rms_acceleration",
     "rms_jerk",
+    "physics_rms_acceleration",
+    "physics_rms_jerk",
 ]
 
 

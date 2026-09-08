@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol, Sequence
+
+import numpy as np
+
+from rl_risk_sac.robots.ur5_capsules import CapsuleState
+from rl_risk_sac.scene import ObstacleState
+from rl_risk_sac.utils.risk import LinkRisk, RiskConfig, compute_link_risk
+
+
+class RiskDetector(Protocol):
+    """Geometry backend used by the task environment.
+
+    A detector consumes geometry snapshots rather than simulator handles. This
+    keeps observations and rewards independent from PyBullet and leaves a clean
+    extension point for GJK/FCL, multiple obstacles, or a real perception stack.
+    """
+
+    def detect(
+        self,
+        capsules: list[CapsuleState],
+        previous_capsules: list[CapsuleState] | None,
+        obstacles: Sequence[ObstacleState],
+    ) -> LinkRisk: ...
+
+
+@dataclass(frozen=True)
+class LinkRiskDetector:
+    config: RiskConfig
+    obstacle_radius: float
+    dt: float
+    end_effector_only: bool = False
+    no_obstacle_distance: float = 1.5
+
+    def detect(
+        self,
+        capsules: list[CapsuleState],
+        previous_capsules: list[CapsuleState] | None,
+        obstacles: Sequence[ObstacleState],
+    ) -> LinkRisk:
+        active_obstacles = [obstacle for obstacle in obstacles if obstacle.enabled]
+        if not active_obstacles:
+            return _empty_risk(capsules, self.config, self.no_obstacle_distance)
+
+        risks = [
+            compute_link_risk(
+                capsules=capsules,
+                prev_capsules=previous_capsules,
+                obstacle_center=obstacle.center,
+                obstacle_velocity=obstacle.velocity,
+                obstacle_radius=self.obstacle_radius,
+                dt=self.dt,
+                config=self.config,
+                use_end_effector_only=self.end_effector_only,
+            )
+            for obstacle in active_obstacles
+        ]
+        return _aggregate_link_risks(risks)
+
+
+@dataclass(frozen=True)
+class NullRiskDetector:
+    config: RiskConfig
+    no_obstacle_distance: float
+
+    def detect(
+        self,
+        capsules: list[CapsuleState],
+        previous_capsules: list[CapsuleState] | None,
+        obstacles: Sequence[ObstacleState],
+    ) -> LinkRisk:
+        del previous_capsules, obstacles
+        return _empty_risk(capsules, self.config, self.no_obstacle_distance)
+
+
+def _aggregate_link_risks(risks: list[LinkRisk]) -> LinkRisk:
+    if len(risks) == 1:
+        return risks[0]
+
+    distance_stack = np.stack([risk.distances for risk in risks])
+    nearest_obstacle_indices = np.argmin(distance_stack, axis=0)
+    link_indices = np.arange(distance_stack.shape[1])
+
+    closest_points = np.stack([risk.closest_points for risk in risks])[nearest_obstacle_indices, link_indices]
+    distances = distance_stack[nearest_obstacle_indices, link_indices]
+    directions = np.stack([risk.directions for risk in risks])[nearest_obstacle_indices, link_indices]
+    link_velocities = np.stack([risk.link_velocities for risk in risks])[nearest_obstacle_indices, link_indices]
+    approach_velocities = np.stack([risk.approach_velocities for risk in risks])[nearest_obstacle_indices, link_indices]
+    ttc = np.stack([risk.ttc for risk in risks])[nearest_obstacle_indices, link_indices]
+    per_link_risk = np.max(np.stack([risk.risks for risk in risks]), axis=0)
+
+    return LinkRisk(
+        closest_points=closest_points.astype(np.float32),
+        distances=distances.astype(np.float32),
+        directions=directions.astype(np.float32),
+        link_velocities=link_velocities.astype(np.float32),
+        approach_velocities=approach_velocities.astype(np.float32),
+        ttc=ttc.astype(np.float32),
+        risks=per_link_risk.astype(np.float32),
+        risk_global=float(np.max(per_link_risk)),
+        d_min=float(np.min(distance_stack)),
+        closest_link=int(np.argmin(distances)),
+    )
+
+
+def _empty_risk(capsules: list[CapsuleState], config: RiskConfig, no_obstacle_distance: float) -> LinkRisk:
+    count = len(capsules)
+    return LinkRisk(
+        closest_points=np.zeros((count, 3), dtype=np.float32),
+        distances=np.full(count, no_obstacle_distance, dtype=np.float32),
+        directions=np.zeros((count, 3), dtype=np.float32),
+        link_velocities=np.zeros((count, 3), dtype=np.float32),
+        approach_velocities=np.zeros(count, dtype=np.float32),
+        ttc=np.full(count, config.ttc_max, dtype=np.float32),
+        risks=np.zeros(count, dtype=np.float32),
+        risk_global=0.0,
+        d_min=no_obstacle_distance,
+        closest_link=0,
+    )

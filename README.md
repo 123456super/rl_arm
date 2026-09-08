@@ -2,7 +2,7 @@
 
 本项目是 UR5 在单动态球形障碍物场景下的连杆级动态风险 SAC 仿真原型。最终论文主比较使用末端风险基线、连杆级固定风险惩罚 SAC（`w_R=1.0`）和连杆级约束 SAC；当前 held-out 结果支持前者作为部署候选，而非将约束 SAC 表述为整体最优。
 
-正式结论、论文图表和实机前检查分别见 [实验结论](docs/experiment_conclusions.md)、[论文材料](docs/paper_materials.md) 和 [部署预检](docs/deployment_preflight.md)。
+正式结论、论文图表、分层设计和实机前检查分别见 [实验结论](docs/experiment_conclusions.md)、[论文材料](docs/paper_materials.md)、[系统架构](docs/architecture.md) 和 [部署预检](docs/deployment_preflight.md)。
 
 ## 环境
 
@@ -69,6 +69,20 @@ conda run -n rl python scripts/train.py --config configs/experiments/ur5_short_t
 conda run -n rl python scripts/train.py --config configs/experiments/ur5e_short_train.yaml
 ```
 
+使用固定 Butterworth—五次多项式 RTB 重新训练部署候选：
+
+```bash
+conda run -n rl python scripts/train.py --config configs/experiments/random_crossing_link_fixed_penalty1_rtb.yaml
+```
+
+论文式动态目标接口使用 `linear_bounce` 目标提供器，必须独立重训：
+
+```bash
+conda run -n rl python scripts/train.py --config configs/experiments/dynamic_target_tracking.yaml
+```
+
+既有正式结果使用旧的一阶 EMA 执行器。需要复现实验时使用 `random_crossing_link_fixed_penalty1_ema.yaml`；旧结果不能作为新 RTB 有效性的证据。
+
 ## 评估
 
 ```bash
@@ -80,6 +94,8 @@ python scripts/evaluate.py --checkpoint outputs/runs/某次训练目录/actor.pt
 ```bash
 python scripts/evaluate.py --checkpoint outputs/runs/某次训练目录/actor.pt --episodes 3 --trace-output outputs/runs/某次训练目录/traces
 ```
+
+启用 `trace-output` 后会同时生成20 Hz策略轨迹和带 `_physics.csv` 后缀的约240 Hz物理子步轨迹；后者用于展示RTB下的关节速度、加速度和jerk连续性。
 
 ## 场景配置
 

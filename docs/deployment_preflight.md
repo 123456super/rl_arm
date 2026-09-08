@@ -4,6 +4,8 @@
 
 离线预检已通过，报告位于 `outputs/deployment_preflight/offline_report.json`。该检查只在 PyBullet 中运行，不连接真实机械臂；它证明 checkpoint 可加载、推理值有限，且仿真输出不超过配置的关节速度限幅。它不构成实机安全验收或形式化安全保证。
 
+**版本提示：**该历史报告及下面三个 checkpoint 基于旧的一阶 EMA 固定执行器。代码现已默认启用 Butterworth—五次多项式 RTB，因此这些 checkpoint 只能用于执行层反事实检查；在新执行器下完成重训、held-out 评估和重新预检前，不得将其作为RTB实机部署候选。
+
 ## 固化的部署候选
 
 | train seed | selected step | checkpoint |
@@ -22,7 +24,7 @@
 | 推理输入 | UR5 PyBullet observation 维度匹配，所有候选在 20 个确定性控制步内均为有限值 |
 | 策略动作 | 三个候选的归一化动作均未越过 `[-1, 1]` |
 | 仿真关节命令 | `env.action_scale=0.7 rad/s`；三个候选的最大绝对命令分别为 0.643、0.678、0.580 rad/s |
-| 固定平滑 | `env.fixed_beta=0.35` |
+| 固定平滑 | 历史候选为 `env.fixed_beta=0.35`；新候选为 `butterworth_quintic`、`omega_c=30 rad/s`，尚待重训验证 |
 | 风险阈值 | `risk.d_safe=0.12 m` |
 | 仿真目标工作空间 | `x=[0.25, 0.78]`、`y=[-0.45, 0.45]`、`z=[0.18, 0.78] m` |
 

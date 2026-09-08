@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Protocol
+
+import numpy as np
+
+
+@dataclass(frozen=True)
+class ObstacleState:
+    center: np.ndarray
+    velocity: np.ndarray
+    enabled: bool
+
+
+class ObstacleProvider(Protocol):
+    def reset(self, rng: np.random.Generator) -> tuple[ObstacleState, ...]: ...
+
+    def advance(self, dt: float) -> tuple[ObstacleState, ...]: ...
+
+
+class SphericalObstacleProvider:
+    """One spherical obstacle with random or named crossing scenarios."""
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        self.config = config
+        self.enabled = bool(config.get("enabled", True))
+        self.scenario = str(config.get("scenario", "random"))
+        self.count = max(1, int(config.get("count", 1)))
+        self._states = tuple(self._disabled_state() for _ in range(self.count))
+
+    def reset(self, rng: np.random.Generator) -> tuple[ObstacleState, ...]:
+        if not self.enabled:
+            self._states = tuple(self._disabled_state() for _ in range(self.count))
+            return self._states
+
+        states = []
+        for _ in range(self.count):
+            if self.scenario == "random":
+                center, velocity = self._sample_random(rng)
+            else:
+                center, velocity = self._sample_named(rng, self.scenario)
+            states.append(ObstacleState(center=center, velocity=velocity, enabled=True))
+        self._states = tuple(states)
+        return self._states
+
+    def advance(self, dt: float) -> tuple[ObstacleState, ...]:
+        if not self.enabled:
+            return self._states
+
+        next_states = []
+        bounds = self.config["bounds"]
+        for state in self._states:
+            center = (state.center + state.velocity * dt).astype(np.float32)
+            velocity = state.velocity.copy()
+            for axis_index, axis in enumerate(("x", "y", "z")):
+                low, high = bounds[axis]
+                if center[axis_index] < low or center[axis_index] > high:
+                    velocity[axis_index] *= -1.0
+                    center[axis_index] = np.clip(center[axis_index], low, high)
+            next_states.append(ObstacleState(center=center, velocity=velocity, enabled=True))
+        self._states = tuple(next_states)
+        return self._states
+
+    def _sample_random(self, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+        random_cfg = self.config["random"]
+        side = -1.0 if rng.random() < 0.5 else 1.0
+        center = np.array(
+            [
+                rng.uniform(*random_cfg["x_range"]),
+                side * rng.uniform(*random_cfg["start_y_abs_range"]),
+                rng.uniform(*random_cfg["z_range"]),
+            ],
+            dtype=np.float32,
+        )
+        target = np.array(
+            [
+                rng.uniform(*random_cfg["x_range"]),
+                -side * rng.uniform(*random_cfg["target_y_abs_range"]),
+                rng.uniform(*random_cfg["z_range"]),
+            ],
+            dtype=np.float32,
+        )
+        return center, self._velocity_toward(rng, center, target)
+
+    def _sample_named(self, rng: np.random.Generator, scenario: str) -> tuple[np.ndarray, np.ndarray]:
+        scenarios = self.config["scenarios"]
+        if scenario not in scenarios:
+            raise ValueError(f"Unknown obstacle scenario {scenario!r}; expected random or one of {sorted(scenarios)}")
+
+        scenario_cfg = scenarios[scenario]
+        side = -1.0 if rng.random() < 0.5 else 1.0
+        x_center = rng.uniform(*scenario_cfg["x_range"])
+        z_range = scenario_cfg["z_range"]
+        center = np.array(
+            [x_center, side * float(scenario_cfg["start_y_abs"]), rng.uniform(*z_range)],
+            dtype=np.float32,
+        )
+        target = np.array(
+            [x_center, -side * float(scenario_cfg["target_y_abs"]), rng.uniform(*z_range)],
+            dtype=np.float32,
+        )
+        return center, self._velocity_toward(rng, center, target)
+
+    def _velocity_toward(
+        self,
+        rng: np.random.Generator,
+        center: np.ndarray,
+        target: np.ndarray,
+    ) -> np.ndarray:
+        direction = target - center
+        direction = direction / (np.linalg.norm(direction) + 1e-8)
+        speed = rng.uniform(*self.config["speed_range"])
+        return (direction * speed).astype(np.float32)
+
+    def _disabled_state(self) -> ObstacleState:
+        return ObstacleState(
+            center=np.asarray(self.config["disabled_position"], dtype=np.float32).copy(),
+            velocity=np.zeros(3, dtype=np.float32),
+            enabled=False,
+        )

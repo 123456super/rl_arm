@@ -56,9 +56,13 @@ def validate_config(config: dict[str, Any]) -> None:
         ("env", "success_tolerance"),
         ("env", "workspace"),
         ("env", "observation", "space_bound"),
+        ("env", "observation", "schema_version"),
         ("env", "observation", "distance_clip"),
         ("env", "observation", "no_obstacle_distance"),
         ("env", "execution", "joint_motor_force"),
+        ("env", "execution", "max_policy_velocity_delta"),
+        ("env", "execution", "fixed_smoothing_mode"),
+        ("env", "execution", "rtb", "cutoff_angular_frequency"),
         ("env", "visual"),
         ("env", "obstacle", "enabled"),
         ("env", "obstacle", "scenario"),
@@ -69,7 +73,9 @@ def validate_config(config: dict[str, Any]) -> None:
         ("env", "obstacle", "random"),
         ("env", "obstacle", "scenarios"),
         ("env", "goal", "fixed"),
+        ("env", "goal", "mode"),
         ("env", "goal", "position"),
+        ("env", "goal", "speed_range"),
         ("risk", "weights"),
         ("risk", "cost"),
         ("smoothing",),
@@ -98,6 +104,27 @@ def validate_config(config: dict[str, Any]) -> None:
         if "parent_link_name" not in capsule or "child_link_name" not in capsule:
             raise KeyError("robot.capsules entries must define parent_link_name and child_link_name")
 
+    execution_cfg = config["env"]["execution"]
+    fixed_smoothing_mode = str(execution_cfg["fixed_smoothing_mode"])
+    if fixed_smoothing_mode not in {"ema", "butterworth_quintic"}:
+        raise ValueError("env.execution.fixed_smoothing_mode must be 'ema' or 'butterworth_quintic'")
+    if float(execution_cfg["rtb"]["cutoff_angular_frequency"]) <= 0.0:
+        raise ValueError("env.execution.rtb.cutoff_angular_frequency must be positive")
+    max_delta = execution_cfg["max_policy_velocity_delta"]
+    if max_delta is not None and float(max_delta) <= 0.0:
+        raise ValueError("env.execution.max_policy_velocity_delta must be positive or null")
+
+    goal_cfg = config["env"]["goal"]
+    if str(goal_cfg["mode"]) not in {"static", "linear_bounce"}:
+        raise ValueError("env.goal.mode must be 'static' or 'linear_bounce'")
+    if not _valid_range(goal_cfg["speed_range"], lower_bound=0.0):
+        raise ValueError("env.goal.speed_range must contain two non-negative bounds")
+    obstacle_cfg = config["env"]["obstacle"]
+    if not _valid_range(obstacle_cfg["speed_range"], lower_bound=0.0):
+        raise ValueError("env.obstacle.speed_range must contain two non-negative bounds")
+    if int(obstacle_cfg.get("count", 1)) <= 0:
+        raise ValueError("env.obstacle.count must be positive when provided")
+
     weights = config.get("device_selection", {})
     memory_weight = float(weights.get("memory_weight", 0.7))
     compute_weight = float(weights.get("compute_weight", 0.3))
@@ -105,3 +132,14 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("device_selection.memory_weight and compute_weight must be non-negative")
     if memory_weight == 0 and compute_weight == 0:
         raise ValueError("At least one of device_selection.memory_weight or compute_weight must be positive")
+
+
+def _valid_range(value: Any, lower_bound: float | None = None) -> bool:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return False
+    low, high = float(value[0]), float(value[1])
+    if high < low:
+        return False
+    if lower_bound is not None and low < lower_bound:
+        return False
+    return True

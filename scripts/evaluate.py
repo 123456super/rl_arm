@@ -59,13 +59,17 @@ def main() -> None:
         violations = 0
         accelerations = []
         jerks = []
+        physics_rms_accelerations = []
+        physics_rms_jerks = []
         action_variations = []
+        policy_rate_limit_events = 0
         success = False
         collision = False
         final_position_error = 0.0
         closest_link = -1
         prev_qdot_cmd = np.zeros(env.action_space.shape[0], dtype=np.float32)
         trace_rows = []
+        physics_trace_rows = []
         for step in range(int(config["env"]["max_episode_steps"])):
             action = agent.select_action(observation, deterministic=True)
             observation, reward, cost, terminated, truncated, info = env.step(action)
@@ -76,7 +80,10 @@ def main() -> None:
             violations += int(info["safety_violation"])
             accelerations.append(info["joint_acc"])
             jerks.append(info["joint_jerk"])
+            physics_rms_accelerations.append(float(info["physics_rms_acceleration"]))
+            physics_rms_jerks.append(float(info["physics_rms_jerk"]))
             action_variations.append(float(np.linalg.norm(info["qdot_cmd"] - prev_qdot_cmd)))
+            policy_rate_limit_events += int(info["policy_rate_limited"])
             success = bool(info["success"])
             collision = bool(info["collision"])
             final_position_error = float(info["goal_error_norm"])
@@ -97,10 +104,36 @@ def main() -> None:
                         "collision": int(info["collision"]),
                         "success": int(info["success"]),
                         "qdot_norm": float(np.linalg.norm(info["qdot_cmd"])),
+                        "qdot_policy_norm": float(np.linalg.norm(info["qdot_policy"])),
+                        "qdot_policy_limited_norm": float(np.linalg.norm(info["qdot_policy_limited"])),
+                        "policy_rate_limited": int(info["policy_rate_limited"]),
                         "acc_norm": float(np.linalg.norm(info["joint_acc"])),
                         "jerk_norm": float(np.linalg.norm(info["joint_jerk"])),
+                        "physics_rms_acceleration": float(info["physics_rms_acceleration"]),
+                        "physics_rms_jerk": float(info["physics_rms_jerk"]),
                     }
                 )
+                for substep, (substep_qdot, substep_acc, substep_jerk) in enumerate(
+                    zip(
+                        info["qdot_substeps"],
+                        info["joint_acc_substeps"],
+                        info["joint_jerk_substeps"],
+                    )
+                ):
+                    physics_row = {
+                        "physics_step": step * env.sim_substeps + substep,
+                        "time": step * float(config["env"]["control_dt"])
+                        + (substep + 1) * float(config["env"]["time_step"]),
+                        "policy_step": step,
+                        "qdot_norm": float(np.linalg.norm(substep_qdot)),
+                        "acc_norm": float(np.linalg.norm(substep_acc)),
+                        "jerk_norm": float(np.linalg.norm(substep_jerk)),
+                    }
+                    for joint_index in range(len(substep_qdot)):
+                        physics_row[f"qdot_{joint_index + 1}"] = float(substep_qdot[joint_index])
+                        physics_row[f"acc_{joint_index + 1}"] = float(substep_acc[joint_index])
+                        physics_row[f"jerk_{joint_index + 1}"] = float(substep_jerk[joint_index])
+                    physics_trace_rows.append(physics_row)
             prev_qdot_cmd = info["qdot_cmd"].copy()
             if terminated or truncated:
                 break
@@ -125,8 +158,15 @@ def main() -> None:
                 "safety_violation_count": violations,
                 "safety_violation_rate": violations / max(step + 1, 1),
                 "mean_action_variation": float(np.mean(action_variations)) if action_variations else 0.0,
+                "policy_rate_limit_rate": policy_rate_limit_events / max(step + 1, 1),
                 "rms_acceleration": float(np.sqrt(np.mean(np.square(acc)))) if len(acc) else 0.0,
                 "rms_jerk": float(np.sqrt(np.mean(np.square(jerk)))) if len(jerk) else 0.0,
+                "physics_rms_acceleration": float(np.sqrt(np.mean(np.square(physics_rms_accelerations))))
+                if physics_rms_accelerations
+                else 0.0,
+                "physics_rms_jerk": float(np.sqrt(np.mean(np.square(physics_rms_jerks))))
+                if physics_rms_jerks
+                else 0.0,
             }
         )
         if trace_dir is not None and trace_rows:
@@ -135,6 +175,11 @@ def main() -> None:
                 writer = csv.DictWriter(file, fieldnames=list(trace_rows[0].keys()))
                 writer.writeheader()
                 writer.writerows(trace_rows)
+            physics_trace_path = trace_dir / f"episode_{episode:04d}_physics.csv"
+            with open(physics_trace_path, "w", newline="", encoding="utf-8") as file:
+                writer = csv.DictWriter(file, fieldnames=list(physics_trace_rows[0].keys()))
+                writer.writeheader()
+                writer.writerows(physics_trace_rows)
 
     env.close()
     output = Path(output_arg) if output_arg else Path(checkpoint).resolve().parent / "eval_metrics.csv"
@@ -155,8 +200,11 @@ def main() -> None:
         "mean_cost": float(np.mean([r["cost"] for r in rows])),
         "mean_safety_violation_count": float(np.mean([r["safety_violation_count"] for r in rows])),
         "mean_action_variation": float(np.mean([r["mean_action_variation"] for r in rows])),
+        "mean_policy_rate_limit_rate": float(np.mean([r["policy_rate_limit_rate"] for r in rows])),
         "mean_rms_acceleration": float(np.mean([r["rms_acceleration"] for r in rows])),
         "mean_rms_jerk": float(np.mean([r["rms_jerk"] for r in rows])),
+        "mean_physics_rms_acceleration": float(np.mean([r["physics_rms_acceleration"] for r in rows])),
+        "mean_physics_rms_jerk": float(np.mean([r["physics_rms_jerk"] for r in rows])),
     }
     print(summary)
     print(f"saved: {output}")

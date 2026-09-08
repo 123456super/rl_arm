@@ -1,0 +1,17 @@
+# Paper-inspired dynamic-target extension. This is a new task and requires
+# training from scratch; static-reaching checkpoints are not valid evidence.
+includes:
+  - random_crossing_link_fixed_penalty1_rtb.yaml
+
+env:
+  goal:
+    mode: linear_bounce
+    fixed: false
+    speed_range: [0.02, 0.08]
+
+train:
+  method: link_fixed
+  output_dir: outputs/experiments/dynamic_target_tracking
+
+eval:
+  method: link_fixed

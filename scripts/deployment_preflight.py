@@ -32,8 +32,11 @@ def check_config(config: dict[str, Any]) -> list[str]:
         failures.append("sac.fixed_risk_penalty must be 1.0 for the deployment candidate")
     if not 0.0 < float(config["env"]["action_scale"]):
         failures.append("env.action_scale must be positive")
-    if not 0.0 <= float(config["env"]["fixed_beta"]) <= 1.0:
-        failures.append("env.fixed_beta must be in [0, 1]")
+    smoothing_mode = str(config["env"]["execution"]["fixed_smoothing_mode"])
+    if smoothing_mode == "ema" and not 0.0 <= float(config["env"]["fixed_beta"]) <= 1.0:
+        failures.append("env.fixed_beta must be in [0, 1] when fixed_smoothing_mode=ema")
+    if float(config["env"]["execution"]["rtb"]["cutoff_angular_frequency"]) <= 0.0:
+        failures.append("env.execution.rtb.cutoff_angular_frequency must be positive")
     if not 0.0 < float(config["risk"]["d_safe"]):
         failures.append("risk.d_safe must be positive")
     for axis, limits in config["env"]["workspace"].items():
@@ -118,6 +121,10 @@ def main() -> None:
             "method": "link_fixed_penalty1",
             "fixed_risk_penalty": config["sac"]["fixed_risk_penalty"],
             "action_scale_rad_s": config["env"]["action_scale"],
+            "fixed_smoothing_mode": config["env"]["execution"]["fixed_smoothing_mode"],
+            "rtb_cutoff_angular_frequency_rad_s": config["env"]["execution"]["rtb"][
+                "cutoff_angular_frequency"
+            ],
             "fixed_beta": config["env"]["fixed_beta"],
             "d_safe_m": config["risk"]["d_safe"],
             "workspace_m": config["env"]["workspace"],
