@@ -1,0 +1,27 @@
+# P5.1 held-out fixed-actor ablation. Parameters were selected only with
+# eval seed 2001; seeds 1004/1005/1006 are reserved for this final comparison.
+method: link_fixed
+
+checkpoints:
+  101: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_101/link_fixed_seed101_steps100000/actor_step_100000.pt
+  202: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_202/link_fixed_seed202_steps100000/actor_step_50000.pt
+  303: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_303/link_fixed_seed303_steps100000/actor_step_100000.pt
+
+variants:
+  minimal_qp_endpoint:
+    config: configs/experiments/random_crossing_link_fixed_penalty1_minimal_qp_endpoint.yaml
+  qp_acceleration_12:
+    config: configs/experiments/random_crossing_link_fixed_penalty1_qp_acceleration_relaxed.yaml
+  qp_acceleration_12_jerk_500:
+    config: configs/experiments/random_crossing_link_fixed_penalty1_qp_acceleration_jerk_relaxed.yaml
+
+evaluation:
+  seeds: [1004, 1005, 1006]
+  episodes_per_seed: 100
+  scenarios:
+    - random_crossing
+    - upper_arm_crossing
+    - elbow_crossing
+    - forearm_crossing
+    - wrist_crossing
+  output_root: outputs/current_results/p5_motion_bounds_heldout

@@ -1,0 +1,49 @@
+# P2.2 100k gate on validation seed 2001. Select the predictive checkpoint
+# before any held-out or multi-seed P3 experiment.
+evaluation:
+  seeds: [2001]
+  episodes_per_seed: 100
+  scenarios: [random_crossing]
+  output_root: outputs/current_results/p2_predictive_100k_checkpoint_validation
+
+variants:
+  instant_link_step100k:
+    method: link_fixed
+    config: configs/experiments/random_crossing_link_fixed_penalty1.yaml
+    checkpoints:
+      101: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_101/link_fixed_seed101_steps100000/actor_step_100000.pt
+  predictive_h0p5_step40k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_100k_probe.yaml
+    checkpoints:
+      101: outputs/current_results/p2_predictive_100k_probe/train/predictive_h0p5_seed101_steps100000/actor_step_40000.pt
+  predictive_h0p5_step50k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_100k_probe.yaml
+    checkpoints:
+      101: outputs/current_results/p2_predictive_100k_probe/train/predictive_h0p5_seed101_steps100000/actor_step_50000.pt
+  predictive_h0p5_step60k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_100k_probe.yaml
+    checkpoints:
+      101: outputs/current_results/p2_predictive_100k_probe/train/predictive_h0p5_seed101_steps100000/actor_step_60000.pt
+  predictive_h0p5_step70k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_100k_probe.yaml
+    checkpoints:
+      101: outputs/current_results/p2_predictive_100k_probe/train/predictive_h0p5_seed101_steps100000/actor_step_70000.pt
+  predictive_h0p5_step80k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_100k_probe.yaml
+    checkpoints:
+      101: outputs/current_results/p2_predictive_100k_probe/train/predictive_h0p5_seed101_steps100000/actor_step_80000.pt
+  predictive_h0p5_step90k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_100k_probe.yaml
+    checkpoints:
+      101: outputs/current_results/p2_predictive_100k_probe/train/predictive_h0p5_seed101_steps100000/actor_step_90000.pt
+  predictive_h0p5_step100k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_100k_probe.yaml
+    checkpoints:
+      101: outputs/current_results/p2_predictive_100k_probe/train/predictive_h0p5_seed101_steps100000/actor_step_100000.pt

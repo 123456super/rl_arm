@@ -1,0 +1,12 @@
+# P5.1 relaxed acceleration candidate selected after the 8/400 validation
+# exposed a concentrated infeasibility tail in random_crossing.
+includes:
+  - random_crossing_link_fixed_penalty1_minimal_qp_endpoint.yaml
+
+env:
+  execution:
+    safety_qp:
+      motion_bounds:
+        max_acceleration: 12.0
+        max_jerk: null
+

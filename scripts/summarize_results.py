@@ -23,8 +23,18 @@ METRIC_COLUMNS = [
     "mean_action_variation",
     "rms_acceleration",
     "rms_jerk",
+    "peak_acceleration",
+    "peak_jerk",
     "physics_rms_acceleration",
     "physics_rms_jerk",
+    "physics_peak_acceleration",
+    "physics_peak_jerk",
+    "safety_qp_intervention_rate",
+    "safety_qp_infeasible_rate",
+    "mean_safety_qp_correction_norm",
+    "max_safety_qp_correction_norm",
+    "mean_safety_qp_solve_time_ms",
+    "max_safety_qp_solve_time_ms",
 ]
 
 

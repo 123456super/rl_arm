@@ -1,0 +1,18 @@
+# P2.2 gate before formal multi-seed training. Start from scratch with the
+# validation-selected h=0.5 full predictive observation; train seed 101 only.
+includes:
+  - random_crossing_predictive_link_30k_tuned.yaml
+
+seed: 101
+
+train:
+  total_steps: 100000
+  progress_interval: 100
+  log_interval: 10
+  save_interval: 10000
+  output_dir: outputs/current_results/p2_predictive_100k_probe/train
+  run_name: predictive_h0p5_seed101_steps100000
+
+eval:
+  episodes: 100
+  seed: 2001

@@ -1,0 +1,31 @@
+# P5.1 validation matrix. This is parameter-selection data, not held-out test
+# data. Use seed 2001 only; do not tune against 1004/1005/1006.
+method: link_fixed
+
+checkpoints:
+  101: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_101/link_fixed_seed101_steps100000/actor_step_100000.pt
+  202: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_202/link_fixed_seed202_steps100000/actor_step_50000.pt
+  303: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_303/link_fixed_seed303_steps100000/actor_step_100000.pt
+
+variants:
+  minimal_qp_endpoint:
+    config: configs/experiments/random_crossing_link_fixed_penalty1_minimal_qp_endpoint.yaml
+  qp_acceleration:
+    config: configs/experiments/random_crossing_link_fixed_penalty1_qp_acceleration.yaml
+  qp_acceleration_jerk:
+    config: configs/experiments/random_crossing_link_fixed_penalty1_qp_acceleration_jerk.yaml
+  qp_acceleration_relaxed:
+    config: configs/experiments/random_crossing_link_fixed_penalty1_qp_acceleration_relaxed.yaml
+  qp_acceleration_jerk_relaxed:
+    config: configs/experiments/random_crossing_link_fixed_penalty1_qp_acceleration_jerk_relaxed.yaml
+
+evaluation:
+  seeds: [2001]
+  episodes_per_seed: 20
+  scenarios:
+    - random_crossing
+    - upper_arm_crossing
+    - elbow_crossing
+    - forearm_crossing
+    - wrist_crossing
+  output_root: outputs/current_results/p5_motion_bounds_validation

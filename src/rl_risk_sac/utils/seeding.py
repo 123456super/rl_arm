@@ -7,6 +7,20 @@ import numpy as np
 import torch
 
 
+def derive_episode_seed(base_seed: int, episode: int) -> int:
+    """Return a unique deterministic seed for an evaluation episode.
+
+    Cantor pairing prevents the overlap produced by ``base_seed + episode``
+    when consecutive base seeds each evaluate many episodes.
+    """
+    base_seed = int(base_seed)
+    episode = int(episode)
+    if base_seed < 0 or episode < 0:
+        raise ValueError("base_seed and episode must be non-negative")
+    pair_sum = base_seed + episode
+    return pair_sum * (pair_sum + 1) // 2 + episode
+
+
 def set_seed(seed: int) -> None:
     """设置 Python、NumPy 和 PyTorch 的随机种子。
 

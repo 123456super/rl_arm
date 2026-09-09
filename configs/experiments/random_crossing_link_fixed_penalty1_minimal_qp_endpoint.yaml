@@ -1,0 +1,18 @@
+# P5 comparator: Butterworth nominal endpoint -> minimal safety QP -> quintic
+# substep trajectory. The QP endpoint is not filtered again after optimization.
+includes:
+  - random_crossing_link_fixed_penalty1_rtb.yaml
+
+env:
+  execution:
+    safety_qp:
+      enabled: true
+      activation_distance: 0.24
+      gain: 3.0
+      fd_epsilon: 0.001
+      max_iterations: 8
+      trajectory_mode: filtered_endpoint_qp
+
+eval:
+  method: link_fixed
+

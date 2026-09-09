@@ -1,0 +1,37 @@
+# P0 corrected fixed-actor rerun. Existing validation-selected actors are kept
+# fixed; only the collision/evaluation episodes are regenerated with unique
+# episode seeds. This matrix does not contain training commands.
+
+variants:
+  ee_fixed:
+    method: ee_fixed
+    config: configs/experiments/random_crossing_legacy_ema.yaml
+    checkpoints:
+      101: outputs/archive_old/formal_legacy/train/ee_fixed/seed_101/ee_fixed_seed101_steps100000_ckptsel/actor_step_100000.pt
+      202: outputs/archive_old/formal_legacy/train/ee_fixed/seed_202/ee_fixed_seed202_steps100000/actor_step_100000.pt
+      303: outputs/archive_old/formal_legacy/train/ee_fixed/seed_303/ee_fixed_seed303_steps100000/actor_step_100000.pt
+  link_fixed_penalty1:
+    method: link_fixed
+    config: configs/experiments/random_crossing_link_fixed_penalty1_ema.yaml
+    checkpoints:
+      101: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_101/link_fixed_seed101_steps100000/actor_step_100000.pt
+      202: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_202/link_fixed_seed202_steps100000/actor_step_50000.pt
+      303: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_303/link_fixed_seed303_steps100000/actor_step_100000.pt
+  ldrc_fixed:
+    method: ldrc_fixed
+    config: configs/experiments/random_crossing_legacy_ema.yaml
+    checkpoints:
+      101: outputs/archive_old/formal_legacy/train/ldrc_fixed/seed_101/ldrc_fixed_seed101_steps100000_ckptsel/actor_step_50000.pt
+      202: outputs/archive_old/formal_legacy/train/ldrc_fixed/seed_202/ldrc_fixed_seed202_steps100000/actor_step_50000.pt
+      303: outputs/archive_old/formal_legacy/train/ldrc_fixed/seed_303/ldrc_fixed_seed303_steps100000/actor_step_50000.pt
+
+evaluation:
+  seeds: [1004, 1005, 1006]
+  episodes_per_seed: 100
+  scenarios:
+    - random_crossing
+    - upper_arm_crossing
+    - elbow_crossing
+    - forearm_crossing
+    - wrist_crossing
+  output_root: outputs/current_results/baseline_3methods_independent_seeds

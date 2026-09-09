@@ -1,0 +1,11 @@
+# Evaluation-only compatibility entry for actors trained with the historical
+# fixed-beta EMA executor. It deliberately disables the later policy rate
+# limiter so the independent-seed rerun changes only episode sampling.
+includes:
+  - random_crossing.yaml
+
+env:
+  execution:
+    fixed_smoothing_mode: ema
+    max_policy_velocity_delta: null
+

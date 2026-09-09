@@ -5,6 +5,8 @@ from time import perf_counter
 
 import numpy as np
 
+from rl_risk_sac.utils.trajectory_blending import quintic_smoothstep
+
 
 @dataclass(frozen=True)
 class SafetyQPConfig:
@@ -122,3 +124,56 @@ def distance_rate_constraint(
     jacobian = np.asarray(distance_jacobian, dtype=np.float32)
     margin = float(distance) - float(safe_distance)
     return -jacobian, float(gain) * margin
+
+
+def quintic_endpoint_bounds(
+    previous_velocity: np.ndarray,
+    previous_acceleration: np.ndarray,
+    physics_dt: float,
+    sample_count: int,
+    max_acceleration: float | None = None,
+    max_jerk: float | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Endpoint bounds that enforce finite-difference limits on every quintic substep."""
+    previous_velocity = np.asarray(previous_velocity, dtype=np.float64)
+    previous_acceleration = np.asarray(previous_acceleration, dtype=np.float64)
+    if previous_velocity.shape != previous_acceleration.shape:
+        raise ValueError("previous velocity and acceleration must have the same shape")
+    if physics_dt <= 0.0 or sample_count <= 0:
+        raise ValueError("physics_dt and sample_count must be positive")
+    if max_acceleration is not None and max_acceleration <= 0.0:
+        raise ValueError("max_acceleration must be positive or null")
+    if max_jerk is not None and max_jerk <= 0.0:
+        raise ValueError("max_jerk must be positive or null")
+
+    phase = np.arange(1, sample_count + 1, dtype=np.float64) / float(sample_count)
+    blend = np.concatenate(([0.0], np.asarray(quintic_smoothstep(phase), dtype=np.float64)))
+    acceleration_coeff = np.diff(blend) / physics_dt
+    lower_delta = np.full(previous_velocity.shape, -np.inf, dtype=np.float64)
+    upper_delta = np.full(previous_velocity.shape, np.inf, dtype=np.float64)
+
+    def intersect(coeff: float, offset: np.ndarray, limit: float) -> None:
+        nonlocal lower_delta, upper_delta
+        low = (-limit - offset) / coeff
+        high = (limit - offset) / coeff
+        lower_delta = np.maximum(lower_delta, np.minimum(low, high))
+        upper_delta = np.minimum(upper_delta, np.maximum(low, high))
+
+    if max_acceleration is not None:
+        for coeff in acceleration_coeff:
+            if abs(coeff) > 1e-12:
+                intersect(float(coeff), np.zeros_like(previous_velocity), float(max_acceleration))
+    if max_jerk is not None:
+        jerk_coeff = np.diff(np.concatenate(([0.0], acceleration_coeff))) / physics_dt
+        for index, coeff in enumerate(jerk_coeff):
+            if abs(coeff) <= 1e-12:
+                continue
+            offset = -previous_acceleration / physics_dt if index == 0 else np.zeros_like(previous_velocity)
+            intersect(float(coeff), offset, float(max_jerk))
+
+    if np.any(lower_delta > upper_delta):
+        raise ValueError("acceleration and jerk limits have no feasible quintic endpoint")
+    return (
+        (previous_velocity + lower_delta).astype(np.float32),
+        (previous_velocity + upper_delta).astype(np.float32),
+    )

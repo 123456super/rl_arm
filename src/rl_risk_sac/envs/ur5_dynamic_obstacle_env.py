@@ -315,7 +315,7 @@ import pybullet as p
 from gymnasium import spaces
 
 from rl_risk_sac.collision import LinkRiskDetector, NullRiskDetector, RiskDetector
-from rl_risk_sac.control import ExecutionPipeline, SafetyQP, SafetyQPConfig
+from rl_risk_sac.control import ExecutionPipeline, SafetyQP, SafetyQPConfig, quintic_endpoint_bounds
 from rl_risk_sac.robots.ur5_capsules import CapsuleState, UR5CapsuleModel
 from rl_risk_sac.scene import ObstacleState, SphericalObstacleProvider
 from rl_risk_sac.tasks import ReachingObservationBuilder, ReachingObjective, WorkspaceTargetProvider
@@ -375,6 +375,14 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.safety_qp_gain = float(self.safety_qp_cfg.get("gain", 3.0))
         self.safety_qp_activation_distance = float(self.safety_qp_cfg.get("activation_distance", 0.24))
         self.safety_qp_fd_epsilon = float(self.safety_qp_cfg.get("fd_epsilon", 1e-3))
+        self.safety_qp_trajectory_mode = str(self.safety_qp_cfg.get("trajectory_mode", "post_qp_rtb"))
+        motion_bounds_cfg = self.safety_qp_cfg.get("motion_bounds", {})
+        self.safety_qp_max_acceleration = motion_bounds_cfg.get("max_acceleration")
+        self.safety_qp_max_jerk = motion_bounds_cfg.get("max_jerk")
+        self.safety_qp_max_acceleration = (
+            None if self.safety_qp_max_acceleration is None else float(self.safety_qp_max_acceleration)
+        )
+        self.safety_qp_max_jerk = None if self.safety_qp_max_jerk is None else float(self.safety_qp_max_jerk)
         self.obstacle_enabled = bool(self.obstacle_cfg.get("enabled", True))
 
         self.beta_min = float(smoothing_cfg["beta_min"])
@@ -564,17 +572,29 @@ class UR5DynamicObstacleEnv(gym.Env):
         raw_policy_velocity, limited_policy_velocity, rate_limited = self.execution_pipeline.prepare_policy_velocity(
             action
         )
-        qp_info = self._apply_safety_qp(pre_risk, limited_policy_velocity)
-        execution = self.execution_pipeline.smooth_prepared_velocity(
-            raw_policy_velocity=raw_policy_velocity,
-            limited_policy_velocity=limited_policy_velocity,
-            smoothing_target_velocity=qp_info["safe_policy_velocity"],
-            previous_command=self.prev_qdot_cmd,
-            risk_global=pre_risk.risk_global,
-            sample_count=self.sim_substeps,
-            adaptive=self.method.endswith("adaptive"),
-            rate_limited=rate_limited,
-        )
+        if self.safety_qp_enabled and self.safety_qp_trajectory_mode == "filtered_endpoint_qp":
+            qp_nominal_velocity = self.execution_pipeline.filter_rtb_target(limited_policy_velocity)
+            qp_info = self._apply_safety_qp(pre_risk, qp_nominal_velocity)
+            execution = self.execution_pipeline.interpolate_safe_endpoint(
+                raw_policy_velocity=raw_policy_velocity,
+                limited_policy_velocity=limited_policy_velocity,
+                safe_endpoint_velocity=qp_info["safe_policy_velocity"],
+                previous_command=self.prev_qdot_cmd,
+                sample_count=self.sim_substeps,
+                rate_limited=rate_limited,
+            )
+        else:
+            qp_info = self._apply_safety_qp(pre_risk, limited_policy_velocity)
+            execution = self.execution_pipeline.smooth_prepared_velocity(
+                raw_policy_velocity=raw_policy_velocity,
+                limited_policy_velocity=limited_policy_velocity,
+                smoothing_target_velocity=qp_info["safe_policy_velocity"],
+                previous_command=self.prev_qdot_cmd,
+                risk_global=pre_risk.risk_global,
+                sample_count=self.sim_substeps,
+                adaptive=self.method.endswith("adaptive"),
+                rate_limited=rate_limited,
+            )
         qdot_trajectory = execution.trajectory
         qdot_cmd = execution.command
         beta = execution.beta
@@ -620,10 +640,24 @@ class UR5DynamicObstacleEnv(gym.Env):
             collision=collision,
         )
         cost = self.objective.cost(risk, collision)
+        predictive_reward_penalty = 0.0
         if self.method in {"ee_fixed", "link_fixed", "predictive_link"}:
             # 固定惩罚方法把风险代价直接扣进 reward；LDRC 方法把 cost
             # 单独交给 SACAgent 的 cost critic 和拉格朗日乘子处理。
             reward -= float(self.config["sac"]["fixed_risk_penalty"]) * cost
+        if self.method == "predictive_link":
+            # Observation-only predictive SAC did not learn to exploit its early
+            # warning reliably. Keep this shaping term opt-in so all historical
+            # checkpoints and link_fixed baselines retain their exact objective.
+            predictive_signal = float(info.get("risk_pred_body", 0.0))
+            if self.config["sac"].get("predictive_risk_penalty_mode", "raw") == "excess":
+                # Isolate early-warning information instead of paying twice for
+                # risk already represented by the current-risk cost.
+                predictive_signal = max(predictive_signal - float(info["risk_global"]), 0.0)
+            predictive_reward_penalty = float(
+                self.config["sac"].get("predictive_risk_penalty", 0.0)
+            ) * predictive_signal
+            reward -= predictive_reward_penalty
 
         # policy 频率下的加速度/jerk 用于训练日志；physics_* 使用子步轨迹，
         # 更适合检查 RTB 平滑后的真实执行连续性。
@@ -635,6 +669,13 @@ class UR5DynamicObstacleEnv(gym.Env):
             {
                 "reward": float(reward),
                 "cost": float(cost),
+                "predictive_reward_penalty": float(predictive_reward_penalty),
+                "predictive_reward_signal": float(
+                    predictive_reward_penalty
+                    / max(float(self.config["sac"].get("predictive_risk_penalty", 0.0)), 1e-12)
+                )
+                if self.method == "predictive_link"
+                else 0.0,
                 "collision": bool(collision),
                 "success": bool(success),
                 "qdot_cmd": qdot_cmd.copy(),
@@ -646,6 +687,8 @@ class UR5DynamicObstacleEnv(gym.Env):
                 "joint_jerk": jerk.copy(),
                 "physics_rms_acceleration": float(np.sqrt(np.mean(np.square(physics_acceleration)))),
                 "physics_rms_jerk": float(np.sqrt(np.mean(np.square(physics_jerk)))),
+                "physics_peak_acceleration": float(np.max(np.abs(physics_acceleration))),
+                "physics_peak_jerk": float(np.max(np.abs(physics_jerk))),
                 "qdot_substeps": qdot_trajectory.copy(),
                 "joint_acc_substeps": physics_acceleration.copy(),
                 "joint_jerk_substeps": physics_jerk.copy(),
@@ -679,25 +722,48 @@ class UR5DynamicObstacleEnv(gym.Env):
             "active_constraints": 0,
             "solve_time_ms": 0.0,
         }
-        if not self.safety_qp_enabled or not self.obstacle_enabled or not self.obstacle_states:
+        if not self.safety_qp_enabled:
             return default
-        if risk.d_min > self.safety_qp_activation_distance:
+        motion_bounds_enabled = (
+            self.safety_qp_max_acceleration is not None or self.safety_qp_max_jerk is not None
+        )
+        safety_constraint_enabled = (
+            self.obstacle_enabled
+            and bool(self.obstacle_states)
+            and risk.d_min <= self.safety_qp_activation_distance
+            and 0 <= risk.closest_link < self.capsule_model.count
+        )
+        if not safety_constraint_enabled and not motion_bounds_enabled:
             return default
-        if risk.closest_link < 0 or risk.closest_link >= self.capsule_model.count:
-            return default
-
-        jacobian = self._surface_distance_jacobian(risk.closest_link, self.obstacle_center)
-        direction = risk.directions[risk.closest_link]
-        obstacle_distance_rate = float(np.dot(direction, self.obstacle_velocity))
-        margin = float(risk.distances[risk.closest_link]) - self.risk_config.d_safe
-        matrix = np.asarray([-jacobian], dtype=np.float32)
-        bound = np.asarray([obstacle_distance_rate + self.safety_qp_gain * margin], dtype=np.float32)
+        if safety_constraint_enabled:
+            jacobian = self._surface_distance_jacobian(risk.closest_link, self.obstacle_center)
+            direction = risk.directions[risk.closest_link]
+            obstacle_distance_rate = float(np.dot(direction, self.obstacle_velocity))
+            margin = float(risk.distances[risk.closest_link]) - self.risk_config.d_safe
+            matrix = np.asarray([-jacobian], dtype=np.float32)
+            bound = np.asarray([obstacle_distance_rate + self.safety_qp_gain * margin], dtype=np.float32)
+        else:
+            matrix = np.empty((0, self.joint_count), dtype=np.float32)
+            bound = np.empty(0, dtype=np.float32)
+        lower = np.full(self.joint_count, -self.action_scale, dtype=np.float32)
+        upper = np.full(self.joint_count, self.action_scale, dtype=np.float32)
+        if motion_bounds_enabled:
+            motion_lower, motion_upper = quintic_endpoint_bounds(
+                previous_velocity=self.prev_qdot_cmd,
+                previous_acceleration=self.prev_physics_joint_acc,
+                physics_dt=self.time_step,
+                sample_count=self.sim_substeps,
+                max_acceleration=self.safety_qp_max_acceleration,
+                max_jerk=self.safety_qp_max_jerk,
+            )
+            lower = np.maximum(lower, motion_lower)
+            upper = np.minimum(upper, motion_upper)
         result = self.safety_qp.solve(
             nominal_command=target_velocity,
             constraint_matrix=matrix,
             constraint_bound=bound,
-            lower_bound=np.full(self.joint_count, -self.action_scale, dtype=np.float32),
-            upper_bound=np.full(self.joint_count, self.action_scale, dtype=np.float32),
+            lower_bound=lower,
+            upper_bound=upper,
         )
         return {
             "safe_policy_velocity": result.command.copy(),

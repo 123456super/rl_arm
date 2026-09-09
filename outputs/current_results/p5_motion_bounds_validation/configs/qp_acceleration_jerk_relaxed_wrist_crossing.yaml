@@ -1,0 +1,6 @@
+includes:
+- /home/c211/jxf/rl/configs/experiments/random_crossing_link_fixed_penalty1_qp_acceleration_jerk_relaxed.yaml
+env:
+  obstacle:
+    enabled: true
+    scenario: wrist_crossing

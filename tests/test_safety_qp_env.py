@@ -37,3 +37,23 @@ def test_safety_qp_is_disabled_by_default() -> None:
         assert info["safety_qp_correction_norm"] == 0.0
     finally:
         env.close()
+
+
+def test_motion_bounded_qp_enforces_physics_substep_limits() -> None:
+    config = load_config(
+        "configs/experiments/random_crossing_link_fixed_penalty1_qp_acceleration_jerk.yaml"
+    )
+    config["device"] = "cpu"
+    env = UR5DynamicObstacleEnv(config, method="link_fixed")
+    try:
+        env.reset(seed=33)
+        for sign in (1.0, -1.0, 1.0, -1.0):
+            _, _, _, terminated, truncated, info = env.step(
+                np.full(env.action_space.shape, sign, dtype=np.float32)
+            )
+            assert info["physics_peak_acceleration"] <= 8.0 + 1e-3
+            assert info["physics_peak_jerk"] <= 400.0 + 1e-1
+            if terminated or truncated:
+                break
+    finally:
+        env.close()

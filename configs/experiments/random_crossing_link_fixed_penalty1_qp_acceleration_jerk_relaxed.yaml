@@ -1,0 +1,11 @@
+# P5.1 relaxed acceleration + jerk candidate. Validation only until frozen.
+includes:
+  - random_crossing_link_fixed_penalty1_qp_acceleration_relaxed.yaml
+
+env:
+  execution:
+    safety_qp:
+      motion_bounds:
+        max_acceleration: 12.0
+        max_jerk: 500.0
+

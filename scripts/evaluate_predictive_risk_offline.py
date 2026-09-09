@@ -19,7 +19,7 @@ from rl_risk_sac.utils.predictive_risk import (
     PredictiveRiskConfig,
     compute_predictive_link_risk,
 )
-from rl_risk_sac.utils.seeding import set_seed
+from rl_risk_sac.utils.seeding import derive_episode_seed, set_seed
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,7 +67,8 @@ def main() -> None:
     horizon_steps = max(1, int(np.ceil(pred_config.horizon / env.control_dt)))
 
     for episode in range(int(args.episodes)):
-        observation, info = env.reset(seed=int(args.seed) + episode)
+        episode_seed = derive_episode_seed(int(args.seed), episode)
+        observation, info = env.reset(seed=episode_seed)
         step_records: list[dict[str, Any]] = []
         terminated = False
         truncated = False
@@ -77,6 +78,7 @@ def main() -> None:
             step_records.append(
                 {
                     "episode": episode,
+                    "episode_seed": episode_seed,
                     "step": step,
                     "time": step * env.control_dt,
                     "d_now": float(info["d_min"]),
@@ -96,7 +98,7 @@ def main() -> None:
                 break
 
         _annotate_future_metrics(step_records, horizon_steps, env.risk_config.d_safe)
-        episode_rows.append(_episode_summary(episode, step_records, terminated, truncated))
+        episode_rows.append(_episode_summary(episode, episode_seed, step_records, terminated, truncated))
         all_step_rows.extend(step_records)
 
     env.close()
@@ -190,6 +192,7 @@ def _annotate_future_metrics(rows: list[dict[str, Any]], horizon_steps: int, d_s
 
 def _episode_summary(
     episode: int,
+    episode_seed: int,
     rows: list[dict[str, Any]],
     terminated: bool,
     truncated: bool,
@@ -207,6 +210,7 @@ def _episode_summary(
     )
     return {
         "episode": episode,
+        "episode_seed": episode_seed,
         "length": len(rows),
         "terminated": int(terminated),
         "truncated": int(truncated),

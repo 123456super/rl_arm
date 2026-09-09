@@ -10,7 +10,7 @@ from rl_risk_sac.algorithms import SACAgent
 from rl_risk_sac.envs import UR5DynamicObstacleEnv
 from rl_risk_sac.utils.config import load_config
 from rl_risk_sac.utils.device import resolve_device
-from rl_risk_sac.utils.seeding import set_seed
+from rl_risk_sac.utils.seeding import derive_episode_seed, set_seed
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,7 +55,8 @@ def main() -> None:
         trace_dir.mkdir(parents=True, exist_ok=True)
 
     for episode in range(episodes):
-        observation, _ = env.reset(seed=seed + episode)
+        episode_seed = derive_episode_seed(seed, episode)
+        observation, _ = env.reset(seed=episode_seed)
         total_reward = 0.0
         total_cost = 0.0
         risks = []
@@ -65,6 +66,8 @@ def main() -> None:
         jerks = []
         physics_rms_accelerations = []
         physics_rms_jerks = []
+        physics_peak_accelerations = []
+        physics_peak_jerks = []
         action_variations = []
         policy_rate_limit_events = 0
         safety_qp_interventions = 0
@@ -90,6 +93,8 @@ def main() -> None:
             jerks.append(info["joint_jerk"])
             physics_rms_accelerations.append(float(info["physics_rms_acceleration"]))
             physics_rms_jerks.append(float(info["physics_rms_jerk"]))
+            physics_peak_accelerations.append(float(info["physics_peak_acceleration"]))
+            physics_peak_jerks.append(float(info["physics_peak_jerk"]))
             action_variations.append(float(np.linalg.norm(info["qdot_cmd"] - prev_qdot_cmd)))
             policy_rate_limit_events += int(info["policy_rate_limited"])
             safety_qp_interventions += int(info.get("safety_qp_intervened", False))
@@ -130,6 +135,8 @@ def main() -> None:
                         "jerk_norm": float(np.linalg.norm(info["joint_jerk"])),
                         "physics_rms_acceleration": float(info["physics_rms_acceleration"]),
                         "physics_rms_jerk": float(info["physics_rms_jerk"]),
+                        "physics_peak_acceleration": float(info["physics_peak_acceleration"]),
+                        "physics_peak_jerk": float(info["physics_peak_jerk"]),
                     }
                 )
                 for substep, (substep_qdot, substep_acc, substep_jerk) in enumerate(
@@ -163,6 +170,7 @@ def main() -> None:
         rows.append(
             {
                 "episode": episode,
+                "episode_seed": episode_seed,
                 "reward": total_reward,
                 "cost": total_cost,
                 "length": step + 1,
@@ -194,12 +202,18 @@ def main() -> None:
                 else 0.0,
                 "rms_acceleration": float(np.sqrt(np.mean(np.square(acc)))) if len(acc) else 0.0,
                 "rms_jerk": float(np.sqrt(np.mean(np.square(jerk)))) if len(jerk) else 0.0,
+                "peak_acceleration": float(np.max(np.abs(acc))) if len(acc) else 0.0,
+                "peak_jerk": float(np.max(np.abs(jerk))) if len(jerk) else 0.0,
                 "physics_rms_acceleration": float(np.sqrt(np.mean(np.square(physics_rms_accelerations))))
                 if physics_rms_accelerations
                 else 0.0,
                 "physics_rms_jerk": float(np.sqrt(np.mean(np.square(physics_rms_jerks))))
                 if physics_rms_jerks
                 else 0.0,
+                "physics_peak_acceleration": float(np.max(physics_peak_accelerations))
+                if physics_peak_accelerations
+                else 0.0,
+                "physics_peak_jerk": float(np.max(physics_peak_jerks)) if physics_peak_jerks else 0.0,
             }
         )
         if trace_dir is not None and trace_rows:
@@ -240,8 +254,12 @@ def main() -> None:
         "mean_safety_qp_solve_time_ms": float(np.mean([r["mean_safety_qp_solve_time_ms"] for r in rows])),
         "mean_rms_acceleration": float(np.mean([r["rms_acceleration"] for r in rows])),
         "mean_rms_jerk": float(np.mean([r["rms_jerk"] for r in rows])),
+        "mean_peak_acceleration": float(np.mean([r["peak_acceleration"] for r in rows])),
+        "mean_peak_jerk": float(np.mean([r["peak_jerk"] for r in rows])),
         "mean_physics_rms_acceleration": float(np.mean([r["physics_rms_acceleration"] for r in rows])),
         "mean_physics_rms_jerk": float(np.mean([r["physics_rms_jerk"] for r in rows])),
+        "mean_physics_peak_acceleration": float(np.mean([r["physics_peak_acceleration"] for r in rows])),
+        "mean_physics_peak_jerk": float(np.mean([r["physics_peak_jerk"] for r in rows])),
     }
     print(summary)
     print(f"saved: {output}")

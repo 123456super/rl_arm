@@ -163,6 +163,33 @@ class ExecutionPipeline:
             rate_limited=rate_limited,
         )
 
+    def filter_rtb_target(self, policy_velocity: np.ndarray) -> np.ndarray:
+        """Return the Butterworth endpoint used as the nominal P5 QP command."""
+        if self.smoothing_mode != "butterworth_quintic":
+            raise ValueError("filtered-endpoint QP requires butterworth_quintic smoothing")
+        return self.rtb.filter(policy_velocity)
+
+    def interpolate_safe_endpoint(
+        self,
+        raw_policy_velocity: np.ndarray,
+        limited_policy_velocity: np.ndarray,
+        safe_endpoint_velocity: np.ndarray,
+        previous_command: np.ndarray,
+        sample_count: int,
+        rate_limited: bool,
+    ) -> ExecutionResult:
+        """Execute an already filtered and QP-constrained endpoint via quintic interpolation."""
+        trajectory = self.rtb.interpolate(previous_command, safe_endpoint_velocity, sample_count)
+        trajectory = np.clip(trajectory, -self.action_scale, self.action_scale).astype(np.float32)
+        return ExecutionResult(
+            policy_velocity=np.asarray(raw_policy_velocity, dtype=np.float32),
+            limited_policy_velocity=np.asarray(limited_policy_velocity, dtype=np.float32),
+            trajectory=trajectory,
+            command=trajectory[-1].copy(),
+            beta=self.fixed_beta,
+            rate_limited=rate_limited,
+        )
+
     def _adaptive_beta(self, risk_global: float) -> float:
         ratio = np.clip(risk_global / max(self.risk_high, 1e-6), 0.0, 1.0)
         beta_raw = self.beta_min + (self.beta_max - self.beta_min) * ratio

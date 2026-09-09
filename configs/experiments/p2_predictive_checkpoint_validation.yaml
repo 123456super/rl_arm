@@ -1,0 +1,75 @@
+# P2.2 checkpoint/config selection on the validation seed. These actors already
+# exist from the 30k smoke runs; this matrix performs evaluation only.
+# Seed 2001 is used for selection. Do not tune against held-out 1004/1005/1006.
+evaluation:
+  seeds: [2001]
+  episodes_per_seed: 100
+  scenarios: [random_crossing]
+  output_root: outputs/current_results/p2_predictive_checkpoint_validation
+
+variants:
+  instant_link_step30k:
+    method: link_fixed
+    config: configs/experiments/random_crossing_link_fixed_penalty1.yaml
+    checkpoints:
+      101: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_101/link_fixed_seed101_steps100000/actor_step_30000.pt
+  predictive_h1_step10k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_30k.yaml
+    checkpoints:
+      101: outputs/archive_old/predictive_link_incomplete/predictive_link_seed101_steps30000/actor_step_10000.pt
+  predictive_h1_step20k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_30k.yaml
+    checkpoints:
+      101: outputs/archive_old/predictive_link_incomplete/predictive_link_seed101_steps30000/actor_step_20000.pt
+  predictive_h1_step30k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_30k.yaml
+    checkpoints:
+      101: outputs/archive_old/predictive_link_incomplete/predictive_link_seed101_steps30000/actor_step_30000.pt
+  predictive_h0p5_step10k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_30k_tuned.yaml
+    checkpoints:
+      101: outputs/archive_old/predictive_link_incomplete/predictive_link_tuned_h0p5_seed101_steps30000/actor_step_10000.pt
+  predictive_h0p5_step20k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_30k_tuned.yaml
+    checkpoints:
+      101: outputs/archive_old/predictive_link_incomplete/predictive_link_tuned_h0p5_seed101_steps30000/actor_step_20000.pt
+  predictive_h0p5_step30k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_30k_tuned.yaml
+    checkpoints:
+      101: outputs/archive_old/predictive_link_incomplete/predictive_link_tuned_h0p5_seed101_steps30000/actor_step_30000.pt
+  predictive_compact_step10k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_30k_tuned_compact.yaml
+    checkpoints:
+      101: outputs/archive_old/predictive_link_incomplete/predictive_link_tuned_h0p5_compact_seed101_steps30000/actor_step_10000.pt
+  predictive_compact_step20k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_30k_tuned_compact.yaml
+    checkpoints:
+      101: outputs/archive_old/predictive_link_incomplete/predictive_link_tuned_h0p5_compact_seed101_steps30000/actor_step_20000.pt
+  predictive_compact_step30k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_30k_tuned_compact.yaml
+    checkpoints:
+      101: outputs/archive_old/predictive_link_incomplete/predictive_link_tuned_h0p5_compact_seed101_steps30000/actor_step_30000.pt
+  predictive_penalty2_step10k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_30k_tuned_penalty2.yaml
+    checkpoints:
+      101: outputs/archive_old/predictive_link_incomplete/predictive_link_tuned_h0p5_penalty2_seed101_steps30000/actor_step_10000.pt
+  predictive_penalty2_step20k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_30k_tuned_penalty2.yaml
+    checkpoints:
+      101: outputs/archive_old/predictive_link_incomplete/predictive_link_tuned_h0p5_penalty2_seed101_steps30000/actor_step_20000.pt
+  predictive_penalty2_step30k:
+    method: predictive_link
+    config: configs/experiments/random_crossing_predictive_link_30k_tuned_penalty2.yaml
+    checkpoints:
+      101: outputs/archive_old/predictive_link_incomplete/predictive_link_tuned_h0p5_penalty2_seed101_steps30000/actor_step_30000.pt

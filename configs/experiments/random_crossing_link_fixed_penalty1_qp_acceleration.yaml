@@ -1,0 +1,12 @@
+# P5.1 acceleration-bound ablation. Limit applies to every 240 Hz quintic
+# command substep, not only to the policy-frequency endpoint.
+includes:
+  - random_crossing_link_fixed_penalty1_minimal_qp_endpoint.yaml
+
+env:
+  execution:
+    safety_qp:
+      motion_bounds:
+        max_acceleration: 8.0
+        max_jerk: null
+

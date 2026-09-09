@@ -1,0 +1,10 @@
+# P2.2 predictive training-signal probe. Validation-only candidate.
+includes:
+  - random_crossing_predictive_link_30k_tuned.yaml
+
+sac:
+  predictive_risk_penalty: 0.1
+
+train:
+  output_dir: outputs/current_results/p2_predictive_reward_shaping/train
+  run_name: predictive_h0p5_reward0p1_seed101_steps30000

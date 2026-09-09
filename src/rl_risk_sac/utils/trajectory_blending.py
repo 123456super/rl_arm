@@ -77,8 +77,20 @@ class ButterworthQuinticRTB:
         """
         if sample_count <= 0:
             raise ValueError("sample_count must be positive")
-        start = self._as_velocity(start_velocity)
         target = self.filter(policy_velocity)
+        return self.interpolate(start_velocity, target, sample_count)
+
+    def interpolate(
+        self,
+        start_velocity: np.ndarray,
+        target_velocity: np.ndarray,
+        sample_count: int,
+    ) -> np.ndarray:
+        """Interpolate to an already filtered endpoint without changing filter state."""
+        if sample_count <= 0:
+            raise ValueError("sample_count must be positive")
+        start = self._as_velocity(start_velocity)
+        target = self._as_velocity(target_velocity)
         phase = np.arange(1, sample_count + 1, dtype=np.float32) / float(sample_count)
         blend = np.asarray(quintic_smoothstep(phase), dtype=np.float32)[:, None]
         return (start[None, :] + blend * (target - start)[None, :]).astype(np.float32)

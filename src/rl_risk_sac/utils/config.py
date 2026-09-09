@@ -130,6 +130,22 @@ def validate_config(config: dict[str, Any]) -> None:
     max_delta = execution_cfg["max_policy_velocity_delta"]
     if max_delta is not None and float(max_delta) <= 0.0:
         raise ValueError("env.execution.max_policy_velocity_delta must be positive or null")
+    safety_qp_cfg = execution_cfg.get("safety_qp", {})
+    trajectory_mode = str(safety_qp_cfg.get("trajectory_mode", "post_qp_rtb"))
+    if trajectory_mode not in {"post_qp_rtb", "filtered_endpoint_qp"}:
+        raise ValueError(
+            "env.execution.safety_qp.trajectory_mode must be 'post_qp_rtb' or 'filtered_endpoint_qp'"
+        )
+    motion_bounds = safety_qp_cfg.get("motion_bounds", {})
+    for key in ("max_acceleration", "max_jerk"):
+        value = motion_bounds.get(key)
+        if value is not None and float(value) <= 0.0:
+            raise ValueError(f"env.execution.safety_qp.motion_bounds.{key} must be positive or null")
+    if any(motion_bounds.get(key) is not None for key in ("max_acceleration", "max_jerk")):
+        if not bool(safety_qp_cfg.get("enabled", False)):
+            raise ValueError("safety QP must be enabled when motion bounds are configured")
+        if trajectory_mode != "filtered_endpoint_qp":
+            raise ValueError("motion bounds require safety_qp.trajectory_mode=filtered_endpoint_qp")
 
     goal_cfg = config["env"]["goal"]
     # static 用于普通到达任务；linear_bounce 用于动态目标跟踪实验。
@@ -142,6 +158,13 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("env.obstacle.speed_range must contain two non-negative bounds")
     if int(obstacle_cfg.get("count", 1)) <= 0:
         raise ValueError("env.obstacle.count must be positive when provided")
+
+    predictive_risk_penalty = float(config["sac"].get("predictive_risk_penalty", 0.0))
+    if predictive_risk_penalty < 0.0:
+        raise ValueError("sac.predictive_risk_penalty must be non-negative")
+    predictive_penalty_mode = str(config["sac"].get("predictive_risk_penalty_mode", "raw"))
+    if predictive_penalty_mode not in {"raw", "excess"}:
+        raise ValueError("sac.predictive_risk_penalty_mode must be 'raw' or 'excess'")
 
     weights = config.get("device_selection", {})
     memory_weight = float(weights.get("memory_weight", 0.7))

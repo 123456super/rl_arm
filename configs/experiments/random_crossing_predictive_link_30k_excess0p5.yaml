@@ -1,0 +1,11 @@
+# P2.2 lead-only shaping probe: stronger weight for the prediction increment.
+includes:
+  - random_crossing_predictive_link_30k_tuned.yaml
+
+sac:
+  predictive_risk_penalty: 0.5
+  predictive_risk_penalty_mode: excess
+
+train:
+  output_dir: outputs/current_results/p2_predictive_excess_shaping/train
+  run_name: predictive_h0p5_excess0p5_seed101_steps30000

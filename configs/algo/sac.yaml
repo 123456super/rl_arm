@@ -69,5 +69,11 @@ sac:
   hidden_dims: [256, 256]
   # ee_fixed/link_fixed 的固定风险惩罚权重，正式基线应做小范围网格搜索后确定。
   fixed_risk_penalty: 4.0
+  # Optional dense early-warning shaping for predictive_link only. Zero keeps
+  # all historical methods and checkpoints on their original objective.
+  predictive_risk_penalty: 0.0
+  # raw penalizes all predicted risk; excess penalizes only the positive gap
+  # over current risk and is the preferred non-duplicative training signal.
+  predictive_risk_penalty_mode: raw
   initial_alpha: 0.2
   initial_lambda: 0.1

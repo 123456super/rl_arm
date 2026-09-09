@@ -4,7 +4,13 @@
 """
 
 from rl_risk_sac.control.execution import ExecutionPipeline, ExecutionResult, JointVelocityRateLimiter
-from rl_risk_sac.control.safety_qp import SafetyQP, SafetyQPConfig, SafetyQPResult, distance_rate_constraint
+from rl_risk_sac.control.safety_qp import (
+    SafetyQP,
+    SafetyQPConfig,
+    SafetyQPResult,
+    distance_rate_constraint,
+    quintic_endpoint_bounds,
+)
 
 __all__ = [
     "ExecutionPipeline",
@@ -14,4 +20,5 @@ __all__ = [
     "SafetyQPConfig",
     "SafetyQPResult",
     "distance_rate_constraint",
+    "quintic_endpoint_bounds",
 ]

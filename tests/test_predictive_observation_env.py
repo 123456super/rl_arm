@@ -82,3 +82,47 @@ def test_compact_predictive_observation_omits_per_link_score_from_observation_on
 
     full_env.close()
     compact_env.close()
+
+
+def test_predictive_risk_penalty_adds_opt_in_dense_reward_signal() -> None:
+    base_config = _predictive_config()
+    shaped_config = copy.deepcopy(base_config)
+    base_config["sac"]["predictive_risk_penalty"] = 0.0
+    shaped_config["sac"]["predictive_risk_penalty"] = 0.25
+
+    base_env = UR5DynamicObstacleEnv(base_config, method="predictive_link")
+    shaped_env = UR5DynamicObstacleEnv(shaped_config, method="predictive_link")
+    base_env.reset(seed=104)
+    shaped_env.reset(seed=104)
+    action = np.zeros(base_env.action_space.shape, dtype=np.float32)
+
+    _, base_reward, base_cost, _, _, base_info = base_env.step(action)
+    _, shaped_reward, shaped_cost, _, _, shaped_info = shaped_env.step(action)
+
+    assert shaped_info["predictive_reward_penalty"] == 0.25 * shaped_info["risk_pred_body"]
+    assert base_info["predictive_reward_penalty"] == 0.0
+    assert shaped_cost == base_cost
+    np.testing.assert_allclose(
+        shaped_reward,
+        base_reward - shaped_info["predictive_reward_penalty"],
+        rtol=1e-6,
+        atol=1e-6,
+    )
+
+    base_env.close()
+    shaped_env.close()
+
+
+def test_predictive_excess_penalty_uses_only_early_warning_increment() -> None:
+    config = _predictive_config()
+    config["sac"]["predictive_risk_penalty"] = 0.5
+    config["sac"]["predictive_risk_penalty_mode"] = "excess"
+    env = UR5DynamicObstacleEnv(config, method="predictive_link")
+    env.reset(seed=105)
+
+    _, _, _, _, _, info = env.step(np.zeros(env.action_space.shape, dtype=np.float32))
+
+    expected_signal = max(info["risk_pred_body"] - info["risk_global"], 0.0)
+    np.testing.assert_allclose(info["predictive_reward_signal"], expected_signal, atol=1e-6)
+    np.testing.assert_allclose(info["predictive_reward_penalty"], 0.5 * expected_signal, atol=1e-6)
+    env.close()

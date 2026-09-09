@@ -1,0 +1,12 @@
+# P5.1 acceleration + jerk-bound ablation. Initial limits are validated on
+# seed 2001 before any held-out run is allowed.
+includes:
+  - random_crossing_link_fixed_penalty1_qp_acceleration.yaml
+
+env:
+  execution:
+    safety_qp:
+      motion_bounds:
+        max_acceleration: 8.0
+        max_jerk: 400.0
+
