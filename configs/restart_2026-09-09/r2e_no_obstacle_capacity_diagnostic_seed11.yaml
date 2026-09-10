@@ -1,0 +1,14 @@
+includes:
+  - r2c_collision_terminal_penalty100_dev_seed11.yaml
+
+# Diagnostic only: isolate whether the current SAC implementation and reaching
+# reward can solve the nominal task without obstacle/risk multi-task coupling.
+# This run is not eligible to become the thesis actor by itself.
+env:
+  obstacle:
+    enabled: false
+    episode_enable_probability: 0.0
+train:
+  total_steps: 100000
+  output_dir: outputs/restart_2026-09-09/r2e_no_obstacle_capacity/train
+  run_name: no_obstacle_capacity_dev_seed11_steps100000

@@ -1,0 +1,9 @@
+includes:
+  - r2_instant_link_base.yaml
+
+seed: 11
+sac:
+  fixed_risk_penalty: 2.0
+train:
+  output_dir: outputs/restart_2026-09-09/r2a_penalty_selection/train
+  run_name: penalty2_dev_seed11_steps100000

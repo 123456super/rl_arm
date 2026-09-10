@@ -67,6 +67,30 @@ def test_disabled_obstacle_stays_at_placeholder() -> None:
     np.testing.assert_allclose(advanced.velocity, 0.0)
 
 
+def test_episode_dropout_stays_disabled_during_advance() -> None:
+    config = _config()
+    config["episode_enable_probability"] = 0.0
+    provider = SphericalObstacleProvider(config)
+
+    (initial,) = provider.reset(np.random.default_rng(6))
+    (advanced,) = provider.advance(1.0)
+
+    assert not initial.enabled
+    assert not advanced.enabled
+    np.testing.assert_allclose(advanced.center, config["disabled_position"])
+
+
+def test_default_probability_preserves_random_sampling_sequence() -> None:
+    first_config = _config()
+    second_config = _config()
+    second_config["episode_enable_probability"] = 1.0
+    first = SphericalObstacleProvider(first_config).reset(np.random.default_rng(7))
+    second = SphericalObstacleProvider(second_config).reset(np.random.default_rng(7))
+
+    np.testing.assert_array_equal(first[0].center, second[0].center)
+    np.testing.assert_array_equal(first[0].velocity, second[0].velocity)
+
+
 def test_multiple_obstacles_keep_independent_states() -> None:
     config = _config()
     config["count"] = 3

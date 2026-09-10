@@ -64,10 +64,10 @@ def main() -> None:
         violations = 0
         accelerations = []
         jerks = []
-        physics_rms_accelerations = []
-        physics_rms_jerks = []
-        physics_peak_accelerations = []
-        physics_peak_jerks = []
+        command_acceleration_substeps = []
+        command_jerk_substeps = []
+        measured_acceleration_substeps = []
+        measured_jerk_substeps = []
         action_variations = []
         policy_rate_limit_events = 0
         safety_qp_interventions = 0
@@ -86,15 +86,15 @@ def main() -> None:
             observation, reward, cost, terminated, truncated, info = env.step(action)
             total_reward += reward
             total_cost += cost
-            risks.append(float(info["risk_global"]))
-            distances.append(float(info["d_min"]))
-            violations += int(info["safety_violation"])
+            risks.append(float(info["control_max_risk"]))
+            distances.append(float(info["control_min_distance"]))
+            violations += int(info["control_safety_violation"])
             accelerations.append(info["joint_acc"])
             jerks.append(info["joint_jerk"])
-            physics_rms_accelerations.append(float(info["physics_rms_acceleration"]))
-            physics_rms_jerks.append(float(info["physics_rms_jerk"]))
-            physics_peak_accelerations.append(float(info["physics_peak_acceleration"]))
-            physics_peak_jerks.append(float(info["physics_peak_jerk"]))
+            command_acceleration_substeps.append(info["command_acc_substeps"])
+            command_jerk_substeps.append(info["command_jerk_substeps"])
+            measured_acceleration_substeps.append(info["measured_acc_substeps"])
+            measured_jerk_substeps.append(info["measured_jerk_substeps"])
             action_variations.append(float(np.linalg.norm(info["qdot_cmd"] - prev_qdot_cmd)))
             policy_rate_limit_events += int(info["policy_rate_limited"])
             safety_qp_interventions += int(info.get("safety_qp_intervened", False))
@@ -115,9 +115,11 @@ def main() -> None:
                         "goal_error_norm": final_position_error,
                         "d_min": float(info["d_min"]),
                         "risk_global": float(info["risk_global"]),
+                        "control_min_distance": float(info["control_min_distance"]),
+                        "control_max_risk": float(info["control_max_risk"]),
                         "beta": float(info["beta"]),
                         "closest_link": closest_link,
-                        "safety_violation": int(info["safety_violation"]),
+                        "safety_violation": int(info["control_safety_violation"]),
                         "collision": int(info["collision"]),
                         "success": int(info["success"]),
                         "qdot_norm": float(np.linalg.norm(info["qdot_cmd"])),
@@ -133,17 +135,33 @@ def main() -> None:
                         "safety_qp_solve_time_ms": float(info.get("safety_qp_solve_time_ms", 0.0)),
                         "acc_norm": float(np.linalg.norm(info["joint_acc"])),
                         "jerk_norm": float(np.linalg.norm(info["joint_jerk"])),
-                        "physics_rms_acceleration": float(info["physics_rms_acceleration"]),
-                        "physics_rms_jerk": float(info["physics_rms_jerk"]),
-                        "physics_peak_acceleration": float(info["physics_peak_acceleration"]),
-                        "physics_peak_jerk": float(info["physics_peak_jerk"]),
+                        "command_rms_acceleration": float(info["command_rms_acceleration"]),
+                        "command_rms_jerk": float(info["command_rms_jerk"]),
+                        "measured_rms_acceleration": float(info["measured_rms_acceleration"]),
+                        "measured_rms_jerk": float(info["measured_rms_jerk"]),
                     }
                 )
-                for substep, (substep_qdot, substep_acc, substep_jerk) in enumerate(
+                for substep, (
+                    command_qdot,
+                    command_acc,
+                    command_jerk,
+                    measured_qdot,
+                    measured_acc,
+                    measured_jerk,
+                    substep_distance,
+                    substep_risk,
+                    substep_contact,
+                ) in enumerate(
                     zip(
                         info["qdot_substeps"],
-                        info["joint_acc_substeps"],
-                        info["joint_jerk_substeps"],
+                        info["command_acc_substeps"],
+                        info["command_jerk_substeps"],
+                        info["measured_qdot_substeps"],
+                        info["measured_acc_substeps"],
+                        info["measured_jerk_substeps"],
+                        info["substep_distance"],
+                        info["substep_risk"],
+                        info["substep_contact"],
                     )
                 ):
                     physics_row = {
@@ -151,14 +169,24 @@ def main() -> None:
                         "time": step * float(config["env"]["control_dt"])
                         + (substep + 1) * float(config["env"]["time_step"]),
                         "policy_step": step,
-                        "qdot_norm": float(np.linalg.norm(substep_qdot)),
-                        "acc_norm": float(np.linalg.norm(substep_acc)),
-                        "jerk_norm": float(np.linalg.norm(substep_jerk)),
+                        "command_qdot_norm": float(np.linalg.norm(command_qdot)),
+                        "command_acc_norm": float(np.linalg.norm(command_acc)),
+                        "command_jerk_norm": float(np.linalg.norm(command_jerk)),
+                        "measured_qdot_norm": float(np.linalg.norm(measured_qdot)),
+                        "measured_acc_norm": float(np.linalg.norm(measured_acc)),
+                        "measured_jerk_norm": float(np.linalg.norm(measured_jerk)),
+                        "distance_m": float(substep_distance),
+                        "risk": float(substep_risk),
+                        "contact": int(substep_contact),
                     }
-                    for joint_index in range(len(substep_qdot)):
-                        physics_row[f"qdot_{joint_index + 1}"] = float(substep_qdot[joint_index])
-                        physics_row[f"acc_{joint_index + 1}"] = float(substep_acc[joint_index])
-                        physics_row[f"jerk_{joint_index + 1}"] = float(substep_jerk[joint_index])
+                    for joint_index in range(len(command_qdot)):
+                        suffix = joint_index + 1
+                        physics_row[f"command_qdot_{suffix}"] = float(command_qdot[joint_index])
+                        physics_row[f"command_acc_{suffix}"] = float(command_acc[joint_index])
+                        physics_row[f"command_jerk_{suffix}"] = float(command_jerk[joint_index])
+                        physics_row[f"measured_qdot_{suffix}"] = float(measured_qdot[joint_index])
+                        physics_row[f"measured_acc_{suffix}"] = float(measured_acc[joint_index])
+                        physics_row[f"measured_jerk_{suffix}"] = float(measured_jerk[joint_index])
                     physics_trace_rows.append(physics_row)
             prev_qdot_cmd = info["qdot_cmd"].copy()
             if terminated or truncated:
@@ -166,6 +194,10 @@ def main() -> None:
 
         acc = np.asarray(accelerations, dtype=np.float32)
         jerk = np.asarray(jerks, dtype=np.float32)
+        command_acc = np.concatenate(command_acceleration_substeps, axis=0)
+        command_jerk = np.concatenate(command_jerk_substeps, axis=0)
+        measured_acc = np.concatenate(measured_acceleration_substeps, axis=0)
+        measured_jerk = np.concatenate(measured_jerk_substeps, axis=0)
         non_end_link_collision = bool(collision and 0 <= closest_link < env.capsule_model.count - 1)
         rows.append(
             {
@@ -204,16 +236,14 @@ def main() -> None:
                 "rms_jerk": float(np.sqrt(np.mean(np.square(jerk)))) if len(jerk) else 0.0,
                 "peak_acceleration": float(np.max(np.abs(acc))) if len(acc) else 0.0,
                 "peak_jerk": float(np.max(np.abs(jerk))) if len(jerk) else 0.0,
-                "physics_rms_acceleration": float(np.sqrt(np.mean(np.square(physics_rms_accelerations))))
-                if physics_rms_accelerations
-                else 0.0,
-                "physics_rms_jerk": float(np.sqrt(np.mean(np.square(physics_rms_jerks))))
-                if physics_rms_jerks
-                else 0.0,
-                "physics_peak_acceleration": float(np.max(physics_peak_accelerations))
-                if physics_peak_accelerations
-                else 0.0,
-                "physics_peak_jerk": float(np.max(physics_peak_jerks)) if physics_peak_jerks else 0.0,
+                "command_rms_acceleration": float(np.sqrt(np.mean(np.square(command_acc)))),
+                "command_rms_jerk": float(np.sqrt(np.mean(np.square(command_jerk)))),
+                "command_peak_acceleration": float(np.max(np.abs(command_acc))),
+                "command_peak_jerk": float(np.max(np.abs(command_jerk))),
+                "measured_rms_acceleration": float(np.sqrt(np.mean(np.square(measured_acc)))),
+                "measured_rms_jerk": float(np.sqrt(np.mean(np.square(measured_jerk)))),
+                "measured_peak_acceleration": float(np.max(np.abs(measured_acc))),
+                "measured_peak_jerk": float(np.max(np.abs(measured_jerk))),
             }
         )
         if trace_dir is not None and trace_rows:
@@ -256,10 +286,14 @@ def main() -> None:
         "mean_rms_jerk": float(np.mean([r["rms_jerk"] for r in rows])),
         "mean_peak_acceleration": float(np.mean([r["peak_acceleration"] for r in rows])),
         "mean_peak_jerk": float(np.mean([r["peak_jerk"] for r in rows])),
-        "mean_physics_rms_acceleration": float(np.mean([r["physics_rms_acceleration"] for r in rows])),
-        "mean_physics_rms_jerk": float(np.mean([r["physics_rms_jerk"] for r in rows])),
-        "mean_physics_peak_acceleration": float(np.mean([r["physics_peak_acceleration"] for r in rows])),
-        "mean_physics_peak_jerk": float(np.mean([r["physics_peak_jerk"] for r in rows])),
+        "mean_command_rms_acceleration": float(np.mean([r["command_rms_acceleration"] for r in rows])),
+        "mean_command_rms_jerk": float(np.mean([r["command_rms_jerk"] for r in rows])),
+        "mean_command_peak_acceleration": float(np.mean([r["command_peak_acceleration"] for r in rows])),
+        "mean_command_peak_jerk": float(np.mean([r["command_peak_jerk"] for r in rows])),
+        "mean_measured_rms_acceleration": float(np.mean([r["measured_rms_acceleration"] for r in rows])),
+        "mean_measured_rms_jerk": float(np.mean([r["measured_rms_jerk"] for r in rows])),
+        "mean_measured_peak_acceleration": float(np.mean([r["measured_peak_acceleration"] for r in rows])),
+        "mean_measured_peak_jerk": float(np.mean([r["measured_peak_jerk"] for r in rows])),
     }
     print(summary)
     print(f"saved: {output}")

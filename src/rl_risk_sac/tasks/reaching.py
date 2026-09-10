@@ -137,12 +137,24 @@ class ReachingObjective:
             value -= float(self.reward_config["collision_penalty"])
         return float(value)
 
-    def cost(self, risk: LinkRisk, collision: bool) -> float:
+    def cost(
+        self,
+        risk: LinkRisk,
+        collision: bool,
+        *,
+        risk_global: float | None = None,
+        d_min: float | None = None,
+    ) -> float:
         # cost 是约束 SAC 关注的安全代价：连续风险 + 是否进入安全距离
         # + 是否真实碰撞。它和 reward 分开记录，便于 LDRC 使用 cost critic。
-        violation = float(risk.d_min < self.safe_distance)
+        # ``risk`` remains the policy-step endpoint snapshot used by the next
+        # observation.  Training may override the two scalar summaries with
+        # maxima/minima measured across every physics substep in the transition.
+        effective_risk = risk.risk_global if risk_global is None else float(risk_global)
+        effective_distance = risk.d_min if d_min is None else float(d_min)
+        violation = float(effective_distance < self.safe_distance)
         return float(
-            float(self.cost_config["k_risk"]) * risk.risk_global
+            float(self.cost_config["k_risk"]) * effective_risk
             + float(self.cost_config["k_violation"]) * violation
             + float(self.cost_config["k_collision"]) * float(collision)
         )

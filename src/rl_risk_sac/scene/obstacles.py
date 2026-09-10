@@ -33,13 +33,23 @@ class SphericalObstacleProvider:
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
         self.enabled = bool(config.get("enabled", True))
+        self.episode_enable_probability = float(config.get("episode_enable_probability", 1.0))
         self.scenario = str(config.get("scenario", "random"))
         self.count = max(1, int(config.get("count", 1)))
         self._states = tuple(self._disabled_state() for _ in range(self.count))
 
     def reset(self, rng: np.random.Generator) -> tuple[ObstacleState, ...]:
         """Sample initial obstacle positions and velocities for a new episode."""
-        if not self.enabled:
+        # A small no-obstacle training mixture prevents the zero-risk placeholder
+        # observation from becoming an unseen deployment state.  Avoid drawing
+        # from the RNG at probability one so legacy/default trajectories remain
+        # bitwise reproducible.
+        episode_enabled = self.enabled
+        if episode_enabled and self.episode_enable_probability <= 0.0:
+            episode_enabled = False
+        elif episode_enabled and self.episode_enable_probability < 1.0:
+            episode_enabled = bool(rng.random() < self.episode_enable_probability)
+        if not episode_enabled:
             self._states = tuple(self._disabled_state() for _ in range(self.count))
             return self._states
 
@@ -61,6 +71,9 @@ class SphericalObstacleProvider:
         next_states = []
         bounds = self.config["bounds"]
         for state in self._states:
+            if not state.enabled:
+                next_states.append(state)
+                continue
             center = (state.center + state.velocity * dt).astype(np.float32)
             velocity = state.velocity.copy()
             for axis_index, axis in enumerate(("x", "y", "z")):
@@ -68,7 +81,7 @@ class SphericalObstacleProvider:
                 if center[axis_index] < low or center[axis_index] > high:
                     velocity[axis_index] *= -1.0
                     center[axis_index] = np.clip(center[axis_index], low, high)
-            next_states.append(ObstacleState(center=center, velocity=velocity, enabled=True))
+            next_states.append(ObstacleState(center=center, velocity=velocity, enabled=state.enabled))
         self._states = tuple(next_states)
         return self._states
 

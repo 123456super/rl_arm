@@ -1,0 +1,6 @@
+includes:
+- /home/c211/jxf/rl/configs/restart_2026-09-09/r2c_collision_terminal_penalty100_dev_seed11.yaml
+env:
+  obstacle:
+    enabled: false
+    scenario: random

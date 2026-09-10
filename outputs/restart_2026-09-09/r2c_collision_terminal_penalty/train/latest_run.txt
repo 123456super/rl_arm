@@ -1,0 +1,1 @@
+outputs/restart_2026-09-09/r2c_collision_terminal_penalty/train/penalty1_dropout20_collision100_dev_seed11_steps100000

@@ -237,7 +237,8 @@ capsule，下一步才能估算连杆最近点速度。
 
 - `qdot_substeps`
 
-  PyBullet 每个物理子步真正执行的速度轨迹。
+  PyBullet 每个物理子步下发的目标速度轨迹；实际反馈是
+  `measured_qdot_substeps`，二者不能混写。
 
 - `prev_qdot_cmd`
 
@@ -273,7 +274,9 @@ capsule，下一步才能估算连杆最近点速度。
 - `risk_pred_body`、`d_pred`、`t_enter_pred`：预测风险诊断字段。
 - `reward`、`cost`、`success`、`collision`：训练结果。
 - `qdot_cmd`、`qdot_policy`、`qdot_substeps`：动作执行信号。
-- `joint_acc`、`joint_jerk`、`physics_rms_acceleration`、`physics_rms_jerk`：平滑性指标。
+- `joint_acc`、`joint_jerk`：控制周期 endpoint 的命令导数。
+- `command_*_substeps`、`measured_*_substeps`：240 Hz 命令与反馈导数。
+- `control_min_distance`、`control_max_risk`、`substep_contact`：控制周期内逐子步安全测量。
 
 十、读这份文件的建议
 --------------------------------
@@ -492,6 +495,8 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.prev_joint_acc = np.zeros(self.joint_count, dtype=np.float32)
         self.prev_physics_qdot_cmd = np.zeros(self.joint_count, dtype=np.float32)
         self.prev_physics_joint_acc = np.zeros(self.joint_count, dtype=np.float32)
+        self.prev_measured_qdot = np.zeros(self.joint_count, dtype=np.float32)
+        self.prev_measured_joint_acc = np.zeros(self.joint_count, dtype=np.float32)
         self.beta = self.fixed_beta
         self.step_count = 0
         self.goal = np.zeros(3, dtype=np.float32)
@@ -516,6 +521,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         super().reset(seed=seed)
         if seed is not None:
             self.rng = np.random.default_rng(seed)
+            self.action_space.seed(seed)
 
         p.resetSimulation(physicsClientId=self.physics_client_id)
         p.setTimeStep(self.time_step, physicsClientId=self.physics_client_id)
@@ -547,6 +553,9 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.prev_joint_acc = np.zeros(self.joint_count, dtype=np.float32)
         self.prev_physics_qdot_cmd = np.zeros(self.joint_count, dtype=np.float32)
         self.prev_physics_joint_acc = np.zeros(self.joint_count, dtype=np.float32)
+        _, measured_qdot = self._joint_state()
+        self.prev_measured_qdot = measured_qdot.copy()
+        self.prev_measured_joint_acc = np.zeros(self.joint_count, dtype=np.float32)
         # 约束自适应方法从 beta_min 起步；固定方法直接使用配置里的 fixed_beta。
         self.execution_pipeline.reset(adaptive=self.method.endswith("adaptive"))
         self.beta = self.fixed_beta if self.method.endswith("fixed") else self.beta_min
@@ -599,8 +608,16 @@ class UR5DynamicObstacleEnv(gym.Env):
         qdot_cmd = execution.command
         beta = execution.beta
 
-        physics_accelerations = []
-        physics_jerks = []
+        command_accelerations = []
+        command_jerks = []
+        measured_positions = []
+        measured_velocities = []
+        measured_accelerations = []
+        measured_jerks = []
+        substep_distances = []
+        substep_risks = []
+        substep_contacts = []
+        previous_substep_capsules = self._capsules()
         for qdot_substep in qdot_trajectory:
             # 每个物理子步都移动障碍物和动态目标，使控制频率低于仿真频率时
             # 场景运动仍然连续。
@@ -615,19 +632,57 @@ class UR5DynamicObstacleEnv(gym.Env):
                 physicsClientId=self.physics_client_id,
             )
             p.stepSimulation(physicsClientId=self.physics_client_id)
-            physics_acc = (qdot_substep - self.prev_physics_qdot_cmd) / self.time_step
-            physics_jerk = (physics_acc - self.prev_physics_joint_acc) / self.time_step
-            physics_accelerations.append(physics_acc.copy())
-            physics_jerks.append(physics_jerk.copy())
+            command_acc = (qdot_substep - self.prev_physics_qdot_cmd) / self.time_step
+            command_jerk = (command_acc - self.prev_physics_joint_acc) / self.time_step
+            command_accelerations.append(command_acc.copy())
+            command_jerks.append(command_jerk.copy())
             self.prev_physics_qdot_cmd = qdot_substep.copy()
-            self.prev_physics_joint_acc = physics_acc.copy()
+            self.prev_physics_joint_acc = command_acc.copy()
+
+            # R1 measurement contract: every 240 Hz physics step is followed by
+            # simulator feedback, capsule geometry and contact sampling.  These
+            # are measurements of the executed transition, not aliases for the
+            # interpolated command trajectory.
+            measured_q, measured_qdot = self._joint_state()
+            measured_acc = (measured_qdot - self.prev_measured_qdot) / self.time_step
+            measured_jerk = (measured_acc - self.prev_measured_joint_acc) / self.time_step
+            current_capsules = self._capsules()
+            substep_risk = self.risk_detector.detect(
+                capsules=current_capsules,
+                previous_capsules=previous_substep_capsules,
+                obstacles=self.obstacle_states,
+                dt=self.time_step,
+            )
+            contact = self._has_contact()
+
+            measured_positions.append(measured_q.copy())
+            measured_velocities.append(measured_qdot.copy())
+            measured_accelerations.append(measured_acc.copy())
+            measured_jerks.append(measured_jerk.copy())
+            substep_distances.append(float(substep_risk.d_min))
+            substep_risks.append(float(substep_risk.risk_global))
+            substep_contacts.append(bool(contact))
+            self.prev_measured_qdot = measured_qdot.copy()
+            self.prev_measured_joint_acc = measured_acc.copy()
+            previous_substep_capsules = current_capsules
 
         self.step_count += 1
         obs, info = self._get_obs_and_info()
         risk = self.last_risk
         # 碰撞和成功是 episode 的两个正常终止原因；步数耗尽是 truncated。
-        collision = self._has_collision(risk.d_min)
-        success = info["goal_error_norm"] < self.success_tolerance and risk.d_min > self.risk_config.d_safe
+        control_min_distance = min(substep_distances) if substep_distances else float(risk.d_min)
+        control_max_risk = max(substep_risks) if substep_risks else float(risk.risk_global)
+        # Collision truth comes from PyBullet contact.  Capsule overlap is an
+        # approximate geometry signal and is already represented by the safety
+        # violation/cost; treating it as contact would contradict the R1
+        # calibration contract and terminate episodes on capsule false positives.
+        collision = bool(any(substep_contacts))
+        control_safety_violation = control_min_distance < self.risk_config.d_safe
+        success = (
+            info["goal_error_norm"] < self.success_tolerance
+            and not control_safety_violation
+            and not collision
+        )
         terminated = bool(collision or success)
         truncated = self.step_count >= self.max_episode_steps
 
@@ -639,7 +694,12 @@ class UR5DynamicObstacleEnv(gym.Env):
             success=success,
             collision=collision,
         )
-        cost = self.objective.cost(risk, collision)
+        cost = self.objective.cost(
+            risk,
+            collision,
+            risk_global=control_max_risk,
+            d_min=control_min_distance,
+        )
         predictive_reward_penalty = 0.0
         if self.method in {"ee_fixed", "link_fixed", "predictive_link"}:
             # 固定惩罚方法把风险代价直接扣进 reward；LDRC 方法把 cost
@@ -659,12 +719,16 @@ class UR5DynamicObstacleEnv(gym.Env):
             ) * predictive_signal
             reward -= predictive_reward_penalty
 
-        # policy 频率下的加速度/jerk 用于训练日志；physics_* 使用子步轨迹，
-        # 更适合检查 RTB 平滑后的真实执行连续性。
+        # policy 频率导数、240 Hz 命令导数和 240 Hz 反馈导数分开记录；
+        # 不再把插值命令误称为物理反馈。
         joint_acc = (qdot_cmd - self.prev_qdot_cmd) / self.control_dt
         jerk = (joint_acc - self.prev_joint_acc) / self.control_dt
-        physics_acceleration = np.asarray(physics_accelerations, dtype=np.float32)
-        physics_jerk = np.asarray(physics_jerks, dtype=np.float32)
+        command_acceleration = np.asarray(command_accelerations, dtype=np.float32)
+        command_jerk = np.asarray(command_jerks, dtype=np.float32)
+        measured_position = np.asarray(measured_positions, dtype=np.float32)
+        measured_velocity = np.asarray(measured_velocities, dtype=np.float32)
+        measured_acceleration = np.asarray(measured_accelerations, dtype=np.float32)
+        measured_jerk = np.asarray(measured_jerks, dtype=np.float32)
         info.update(
             {
                 "reward": float(reward),
@@ -678,6 +742,13 @@ class UR5DynamicObstacleEnv(gym.Env):
                 else 0.0,
                 "collision": bool(collision),
                 "success": bool(success),
+                "control_min_distance": float(control_min_distance),
+                "control_max_risk": float(control_max_risk),
+                "control_safety_violation": bool(control_safety_violation),
+                "control_collision": bool(collision),
+                "substep_distance": np.asarray(substep_distances, dtype=np.float32),
+                "substep_risk": np.asarray(substep_risks, dtype=np.float32),
+                "substep_contact": np.asarray(substep_contacts, dtype=np.bool_),
                 "qdot_cmd": qdot_cmd.copy(),
                 "qdot_policy": execution.policy_velocity.copy(),
                 "qdot_policy_limited": execution.limited_policy_velocity.copy(),
@@ -685,13 +756,30 @@ class UR5DynamicObstacleEnv(gym.Env):
                 "policy_rate_limited": bool(execution.rate_limited),
                 "joint_acc": joint_acc.copy(),
                 "joint_jerk": jerk.copy(),
-                "physics_rms_acceleration": float(np.sqrt(np.mean(np.square(physics_acceleration)))),
-                "physics_rms_jerk": float(np.sqrt(np.mean(np.square(physics_jerk)))),
-                "physics_peak_acceleration": float(np.max(np.abs(physics_acceleration))),
-                "physics_peak_jerk": float(np.max(np.abs(physics_jerk))),
+                "command_rms_acceleration": float(np.sqrt(np.mean(np.square(command_acceleration)))),
+                "command_rms_jerk": float(np.sqrt(np.mean(np.square(command_jerk)))),
+                "command_peak_acceleration": float(np.max(np.abs(command_acceleration))),
+                "command_peak_jerk": float(np.max(np.abs(command_jerk))),
+                "measured_rms_acceleration": float(np.sqrt(np.mean(np.square(measured_acceleration)))),
+                "measured_rms_jerk": float(np.sqrt(np.mean(np.square(measured_jerk)))),
+                "measured_peak_acceleration": float(np.max(np.abs(measured_acceleration))),
+                "measured_peak_jerk": float(np.max(np.abs(measured_jerk))),
+                # Deprecated aliases retained for existing analysis scripts.
+                # Their semantics are explicitly command-side, not feedback.
+                "physics_rms_acceleration": float(np.sqrt(np.mean(np.square(command_acceleration)))),
+                "physics_rms_jerk": float(np.sqrt(np.mean(np.square(command_jerk)))),
+                "physics_peak_acceleration": float(np.max(np.abs(command_acceleration))),
+                "physics_peak_jerk": float(np.max(np.abs(command_jerk))),
                 "qdot_substeps": qdot_trajectory.copy(),
-                "joint_acc_substeps": physics_acceleration.copy(),
-                "joint_jerk_substeps": physics_jerk.copy(),
+                "command_acc_substeps": command_acceleration.copy(),
+                "command_jerk_substeps": command_jerk.copy(),
+                "measured_q_substeps": measured_position.copy(),
+                "measured_qdot_substeps": measured_velocity.copy(),
+                "measured_acc_substeps": measured_acceleration.copy(),
+                "measured_jerk_substeps": measured_jerk.copy(),
+                # Deprecated command-side aliases.
+                "joint_acc_substeps": command_acceleration.copy(),
+                "joint_jerk_substeps": command_jerk.copy(),
                 "beta": float(beta),
                 "fixed_smoothing_mode": self.fixed_smoothing_mode,
                 "safety_qp_enabled": bool(self.safety_qp_enabled),
@@ -854,7 +942,10 @@ class UR5DynamicObstacleEnv(gym.Env):
             "goal_velocity": self.goal_velocity.copy(),
             "ee_pos": ee_pos.copy(),
             "goal_error_norm": float(np.linalg.norm(goal_error)),
-            "obstacle_enabled": bool(self.obstacle_enabled),
+            # This is episode-level presence, not merely the global configuration
+            # switch; R2b uses a frozen no-obstacle episode mixture during training.
+            "obstacle_enabled": bool(any(state.enabled for state in self.obstacle_states)),
+            "obstacle_configured": bool(self.obstacle_enabled),
             "obstacle_center": self.obstacle_center.copy(),
             "obstacle_velocity": self.obstacle_velocity.copy(),
             "obstacle_centers": np.asarray([state.center for state in self.obstacle_states], dtype=np.float32),
@@ -967,11 +1058,10 @@ class UR5DynamicObstacleEnv(gym.Env):
         """Return the current world-space capsule approximation of the arm."""
         return self.capsule_model.states(self.robot_id, self.physics_client_id)
 
-    def _has_collision(self, d_min: float) -> bool:
+    def _has_contact(self) -> bool:
+        """Return whether robot-obstacle contact exists at the current physics substep."""
         if not self.obstacle_enabled or not self.obstacle_ids:
             return False
-        if d_min <= 0.0:
-            return True
         return any(
             p.getContactPoints(
                 bodyA=self.robot_id,

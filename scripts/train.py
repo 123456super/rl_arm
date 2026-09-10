@@ -16,6 +16,7 @@ from rl_risk_sac.algorithms.replay_buffer import ReplayBuffer
 from rl_risk_sac.envs import UR5DynamicObstacleEnv
 from rl_risk_sac.utils.config import load_config
 from rl_risk_sac.utils.device import resolve_device
+from rl_risk_sac.utils.provenance import build_run_manifest, finalize_run_manifest
 from rl_risk_sac.utils.seeding import set_seed
 
 
@@ -72,6 +73,20 @@ def main() -> None:
 
     config["device"] = resolve_device(config)
     set_seed(int(config["seed"]))
+    repo_root = Path(__file__).resolve().parents[1]
+    run_dir = build_run_dir(config, method, config["train"].get("run_name"))
+    if run_dir.exists() and any(run_dir.iterdir()):
+        raise FileExistsError(f"Refusing to overwrite non-empty training directory: {run_dir}")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = run_dir / "run_manifest.json"
+    manifest = build_run_manifest(
+        repo_root=repo_root,
+        config_path=Path(args.config).resolve(),
+        config=config,
+        run_dir=run_dir,
+    )
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
     # 环境决定 observation/action 维度；agent 只依赖这些维度和算法配置，
     # 不直接知道 PyBullet、URDF 或障碍物细节。
     env = UR5DynamicObstacleEnv(config, method=method)
@@ -99,8 +114,6 @@ def main() -> None:
     )
 
     # 每次训练都落一个完整 config.json，保证之后评估/画图能复现实验条件。
-    run_dir = build_run_dir(config, method, config["train"].get("run_name"))
-    run_dir.mkdir(parents=True, exist_ok=True)
     latest_path = Path(config["train"]["output_dir"]) / "latest_run.txt"
     latest_path.parent.mkdir(parents=True, exist_ok=True)
     latest_path.write_text(str(run_dir) + "\n", encoding="utf-8")
@@ -117,6 +130,7 @@ def main() -> None:
         "episode_length",
         "success",
         "collision",
+        "obstacle_enabled",
         "safety_violation_rate",
         "min_distance",
         "mean_risk",
@@ -191,17 +205,21 @@ def main() -> None:
         # env.step 返回 Gymnasium 五元组外加本项目的 cost；cost 不等于负 reward，
         # 它单独表示安全约束代价。
         next_observation, reward, cost, terminated, truncated, info = env.step(action)
-        done = terminated or truncated
-        replay.add(observation, action, reward, cost, next_observation, done)
+        episode_done = terminated or truncated
+        # Time-limit truncation only resets the simulator episode; it is not an
+        # absorbing MDP state.  SAC must therefore bootstrap through truncated
+        # transitions and mask Bellman targets only for true terminations
+        # (collision or successful arrival).
+        replay.add(observation, action, reward, cost, next_observation, terminated)
         observation = next_observation
 
         episode_reward += reward
         episode_cost += cost
         episode_length += 1
         episode_costs.append(cost)
-        episode_risks.append(float(info["risk_global"]))
-        episode_distances.append(float(info["d_min"]))
-        episode_violations += int(info["safety_violation"])
+        episode_risks.append(float(info["control_max_risk"]))
+        episode_distances.append(float(info["control_min_distance"]))
+        episode_violations += int(info["control_safety_violation"])
 
         if step >= update_after and len(replay) >= agent.batch_size and step % update_every == 0:
             # SAC 是 off-policy 算法：从经验池随机采样，而不是只用最新一步。
@@ -220,8 +238,8 @@ def main() -> None:
                 "latest_cost": cost,
                 "episode_reward": episode_reward,
                 "episode_cost": episode_cost,
-                "risk_global": float(info["risk_global"]),
-                "d_min": float(info["d_min"]),
+                "risk_global": float(info["control_max_risk"]),
+                "d_min": float(info["control_min_distance"]),
                 "success": int(info["success"]),
                 "collision": int(info["collision"]),
                 "lambda": agent.lagrange_multiplier,
@@ -237,15 +255,15 @@ def main() -> None:
                 f"ep_len={episode_length} "
                 f"ep_reward={episode_reward:.3f} "
                 f"ep_cost={episode_cost:.3f} "
-                f"risk={float(info['risk_global']):.3f} "
-                f"d_min={float(info['d_min']):.3f} "
+                f"risk={float(info['control_max_risk']):.3f} "
+                f"d_min={float(info['control_min_distance']):.3f} "
                 f"lambda={agent.lagrange_multiplier:.3f} "
                 f"alpha={float(agent.alpha.detach().cpu()):.3f} "
                 f"replay={len(replay)}",
                 flush=True,
             )
 
-        if done:
+        if episode_done:
             episode += 1
             mean_cost = float(np.mean(episode_costs)) if episode_costs else 0.0
             # 普通 SAC 中这个函数会直接 return；LDRC 方法会根据 episode
@@ -261,6 +279,7 @@ def main() -> None:
                     "episode_length": episode_length,
                     "success": int(info["success"]),
                     "collision": int(info["collision"]),
+                    "obstacle_enabled": int(info["obstacle_enabled"]),
                     "safety_violation_rate": episode_violations / max(episode_length, 1),
                     "min_distance": min(episode_distances) if episode_distances else 0.0,
                     "mean_risk": float(np.mean(episode_risks)) if episode_risks else 0.0,
@@ -296,6 +315,7 @@ def main() -> None:
             agent.save(run_dir, suffix=f"_step_{step}")
 
     agent.save(run_dir)
+    finalize_run_manifest(manifest_path, run_dir)
     progress_file.close()
     metrics_file.close()
     env.close()

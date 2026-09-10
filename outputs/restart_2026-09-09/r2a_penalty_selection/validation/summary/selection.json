@@ -1,0 +1,5 @@
+{
+  "status": "gate_failed",
+  "reason": "R2a gate failed: no checkpoint meets both preregistered success thresholds",
+  "eligible_candidates": 0
+}

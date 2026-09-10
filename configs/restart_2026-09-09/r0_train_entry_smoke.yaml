@@ -1,0 +1,10 @@
+includes:
+  - r2a_penalty4_dev_seed11.yaml
+
+seed: 7
+device: cpu
+train:
+  total_steps: 12
+  save_interval: 6
+  progress_interval: 6
+  output_dir: outputs/restart_2026-09-09/r0_protocol/training_entry

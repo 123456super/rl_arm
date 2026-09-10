@@ -1,22 +1,28 @@
 # 文档索引
 
-`docs/` 已按当前论文主线、旧实验材料、工程说明和投稿材料分组。优先阅读 `current/`，旧结果只在需要追溯历史实验口径时使用。
+`docs/` 已按论文方案、重启实验、旧实验归档和投稿材料分组。2026-09-09 起全部论文实验从零重新执行，归档结果不得作为当前论文证据。
 
-## Current
+## Thesis
 
-当前论文主线与后续实验推进：
+唯一论文方案、架构与原创性边界：
 
-- [论文大纲](current/thesis_outline.md)
-- [实验计划清单](current/thesis_experiment_plan.md)
-- [实验结果事实源](current/thesis_experiment_results.md)
-- [实验进展说明](current/thesis_experiment_progress.md)
+- [论文大纲](thesis/thesis_outline.md)
 
-## Project
+## Restarted experiments
 
-工程结构与训练复现：
+从零开始的新实验：
 
-- [系统架构](project/architecture.md)
-- [训练与复现指南](project/training_guide.md)
+- [实验执行跟踪](experiments/restart_2026-09-09/experiment_tracker.md)
+- [实验结果事实源](experiments/restart_2026-09-09/experiment_results.md)
+
+## Archived experiments
+
+重启前旧记录，仅供排查历史问题：
+
+- [旧实验执行与进展](experiments/archive_pre_restart_2026-09-09/thesis_experiment_tracker.md)
+- [旧实验结果](experiments/archive_pre_restart_2026-09-09/thesis_experiment_results.md)
+
+实验输出与文档采用相同边界：旧输出位于 `outputs/archive_pre_restart_2026-09-09/`，新实验只能写入 `outputs/restart_2026-09-09/`。
 
 ## Submission
 

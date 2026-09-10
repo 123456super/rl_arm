@@ -15,6 +15,7 @@ class CapsuleSpec:
     parent_link_name: str
     child_link_name: str
     radius: float
+    parent_offset: np.ndarray
     child_offset: np.ndarray
 
 
@@ -53,6 +54,7 @@ class UR5CapsuleModel:
                     parent_link_name=str(spec["parent_link_name"]),
                     child_link_name=str(spec["child_link_name"]),
                     radius=float(spec["radius"]),
+                    parent_offset=np.asarray(spec.get("parent_offset", [0.0, 0.0, 0.0]), dtype=np.float32),
                     child_offset=np.asarray(spec.get("child_offset", [0.0, 0.0, 0.0]), dtype=np.float32),
                 )
             )
@@ -72,11 +74,20 @@ class UR5CapsuleModel:
             # base 在 PyBullet 中没有普通 link id，这里用 -1 表示机器人基座。
             parent_link = self._resolve_link_id(spec.parent_link_name)
             child_link = self._resolve_link_id(spec.child_link_name)
-            if parent_link < 0:
-                start = base
-            else:
-                start = self._link_world_position(robot_id, parent_link, physics_client_id)
-            end = self._link_world_position(robot_id, child_link, physics_client_id) + spec.child_offset
+            start = self._link_world_point(
+                robot_id,
+                parent_link,
+                spec.parent_offset,
+                physics_client_id,
+                base_position=base,
+            )
+            end = self._link_world_point(
+                robot_id,
+                child_link,
+                spec.child_offset,
+                physics_client_id,
+                base_position=base,
+            )
             states.append(CapsuleState(start=start, end=end, radius=spec.radius, name=spec.name))
         return states
 
@@ -87,14 +98,25 @@ class UR5CapsuleModel:
         return self.link_name_to_id[link_name]
 
     @staticmethod
-    def _link_world_position(robot_id: int, link_id: int, physics_client_id: int) -> np.ndarray:
+    def _link_world_point(
+        robot_id: int,
+        link_id: int,
+        local_offset: np.ndarray,
+        physics_client_id: int,
+        *,
+        base_position: np.ndarray,
+    ) -> np.ndarray:
         if link_id < 0:
-            pos, _ = p.getBasePositionAndOrientation(robot_id, physicsClientId=physics_client_id)
-            return np.asarray(pos, dtype=np.float32)
-        state = p.getLinkState(
-            robot_id,
-            link_id,
-            computeForwardKinematics=True,
-            physicsClientId=physics_client_id,
-        )
-        return np.asarray(state[4], dtype=np.float32)
+            _, orientation = p.getBasePositionAndOrientation(robot_id, physicsClientId=physics_client_id)
+            position = base_position
+        else:
+            state = p.getLinkState(
+                robot_id,
+                link_id,
+                computeForwardKinematics=True,
+                physicsClientId=physics_client_id,
+            )
+            position = np.asarray(state[4], dtype=np.float32)
+            orientation = state[5]
+        rotation = np.asarray(p.getMatrixFromQuaternion(orientation), dtype=np.float32).reshape(3, 3)
+        return position + rotation @ np.asarray(local_offset, dtype=np.float32)

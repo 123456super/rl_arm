@@ -1,0 +1,98 @@
+{
+  "schema_version": "capsule_geometry_calibration_v1",
+  "config": "configs/restart_2026-09-09/r2a_penalty4_dev_seed11.yaml",
+  "seed": 71003,
+  "samples_per_link": 400,
+  "sample_count": 2400,
+  "safe_distance_m": 0.12,
+  "frozen_geometry_margin_m": 0.04,
+  "error_definition": "capsule_distance_minus_pybullet_collision_shape_distance",
+  "error_quantiles_m": {
+    "min": -0.07396186986378472,
+    "p50": -0.007798350964928407,
+    "p90": 0.0049502054789947285,
+    "p95": 0.009053403765024767,
+    "p99": 0.01617388977847453,
+    "max": 0.03512758761384954
+  },
+  "danger_false_negative_count": 15,
+  "danger_false_negative_rate": 0.00939261114589856,
+  "adjusted_danger_false_negative_count": 0,
+  "adjusted_danger_false_negative_rate": 0.0,
+  "collision_false_negative_count": 13,
+  "collision_false_negative_rate": 0.020440251572327043,
+  "per_target_capsule": {
+    "shoulder": {
+      "sample_count": 400,
+      "error_quantiles_m": {
+        "min": -0.07396186986378472,
+        "p50": -0.005123474016460766,
+        "p90": 0.0062913178023681834,
+        "p95": 0.0102961880438903,
+        "p99": 0.02286436254980785,
+        "max": 0.03512758761384954
+      },
+      "danger_false_negative_count": 3
+    },
+    "upper_arm": {
+      "sample_count": 400,
+      "error_quantiles_m": {
+        "min": -0.07323074592904714,
+        "p50": -0.002620180615215441,
+        "p90": 0.009967570543484329,
+        "p95": 0.011251262407256398,
+        "p99": 0.017425719008269825,
+        "max": 0.030597623080534708
+      },
+      "danger_false_negative_count": 5
+    },
+    "forearm": {
+      "sample_count": 400,
+      "error_quantiles_m": {
+        "min": -0.05895234003063622,
+        "p50": -0.00889759895475628,
+        "p90": 0.0038563794562300156,
+        "p95": 0.008051710033827228,
+        "p99": 0.012095940306673561,
+        "max": 0.02826120788608877
+      },
+      "danger_false_negative_count": 3
+    },
+    "wrist_1": {
+      "sample_count": 400,
+      "error_quantiles_m": {
+        "min": -0.058566683434109756,
+        "p50": -0.008187596519067357,
+        "p90": 0.0034555575871157264,
+        "p95": 0.006246914715302827,
+        "p99": 0.01084749438638375,
+        "max": 0.02694688479842916
+      },
+      "danger_false_negative_count": 1
+    },
+    "wrist_2": {
+      "sample_count": 400,
+      "error_quantiles_m": {
+        "min": -0.058497151243842416,
+        "p50": -0.012641637664422327,
+        "p90": 0.002871810664888413,
+        "p95": 0.004388702356572841,
+        "p99": 0.009867507186927457,
+        "max": 0.013351633993741403
+      },
+      "danger_false_negative_count": 1
+    },
+    "wrist_3": {
+      "sample_count": 400,
+      "error_quantiles_m": {
+        "min": -0.05888267740345643,
+        "p50": -0.011535614132106617,
+        "p90": 0.002786031884243688,
+        "p95": 0.006415901452333831,
+        "p99": 0.01133582631833182,
+        "max": 0.01688925348687148
+      },
+      "danger_false_negative_count": 2
+    }
+  }
+}

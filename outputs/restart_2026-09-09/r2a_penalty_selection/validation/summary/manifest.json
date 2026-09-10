@@ -1,0 +1,15 @@
+{
+  "schema_version": "restart_eval_summary_manifest_v1",
+  "plan_manifest": "outputs/restart_2026-09-09/r2a_penalty_selection/validation/evaluation_plan_manifest.json",
+  "plan_verified": true,
+  "plan_errors": [],
+  "expected_files": 360,
+  "found_files": 360,
+  "expected_rows": 10800,
+  "found_rows": 10800,
+  "duplicate_episode_units": 0,
+  "episode_seed_recorded": true,
+  "malformed_files": [],
+  "complete": true,
+  "missing": []
+}

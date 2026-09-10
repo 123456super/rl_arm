@@ -27,6 +27,7 @@ class RiskDetector(Protocol):
         capsules: list[CapsuleState],
         previous_capsules: list[CapsuleState] | None,
         obstacles: Sequence[ObstacleState],
+        dt: float | None = None,
     ) -> LinkRisk: ...
 
 
@@ -49,6 +50,7 @@ class LinkRiskDetector:
         capsules: list[CapsuleState],
         previous_capsules: list[CapsuleState] | None,
         obstacles: Sequence[ObstacleState],
+        dt: float | None = None,
     ) -> LinkRisk:
         active_obstacles = [obstacle for obstacle in obstacles if obstacle.enabled]
         if not active_obstacles:
@@ -63,7 +65,7 @@ class LinkRiskDetector:
                 obstacle_center=obstacle.center,
                 obstacle_velocity=obstacle.velocity,
                 obstacle_radius=self.obstacle_radius,
-                dt=self.dt,
+                dt=self.dt if dt is None else float(dt),
                 config=self.config,
                 use_end_effector_only=self.end_effector_only,
             )
@@ -84,8 +86,9 @@ class NullRiskDetector:
         capsules: list[CapsuleState],
         previous_capsules: list[CapsuleState] | None,
         obstacles: Sequence[ObstacleState],
+        dt: float | None = None,
     ) -> LinkRisk:
-        del previous_capsules, obstacles
+        del previous_capsules, obstacles, dt
         return _empty_risk(capsules, self.config, self.no_obstacle_distance)
 
 

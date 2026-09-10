@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shlex
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from rl_risk_sac.utils.provenance import _source_hashes, sha256_file
+
 
 ENV_SCENARIOS = {
+    "no_obstacle": None,
     "random_crossing": "random",
     "upper_arm_crossing": "upper_arm_crossing",
     "elbow_crossing": "elbow_crossing",
@@ -27,7 +31,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        default="outputs/current_results/minimal_qp_heldout_counterfactual_independent_seeds/commands.sh",
+        default=None,
+        help="Command file path (default: <matrix evaluation.output_root>/commands.sh)",
     )
     return parser.parse_args()
 
@@ -47,7 +52,12 @@ def write_scenario_config(base_config: Path, scenario: str, output: Path) -> Non
     output.parent.mkdir(parents=True, exist_ok=True)
     config = {
         "includes": [str(base_config.resolve())],
-        "env": {"obstacle": {"enabled": True, "scenario": ENV_SCENARIOS[scenario]}},
+        "env": {
+            "obstacle": {
+                "enabled": ENV_SCENARIOS[scenario] is not None,
+                "scenario": ENV_SCENARIOS[scenario] or "random",
+            }
+        },
     }
     with open(output, "w", encoding="utf-8") as file:
         yaml.safe_dump(config, file, sort_keys=False, allow_unicode=True)
@@ -60,7 +70,14 @@ def main() -> None:
     variants = matrix["variants"]
     evaluation = matrix["evaluation"]
     output_root = Path(evaluation["output_root"])
+    command_output = Path(args.output) if args.output is not None else output_root / "commands.sh"
     config_root = output_root / "configs"
+    command_prefix = [str(part) for part in evaluation.get(
+        "command_prefix",
+        ["conda", "run", "--no-capture-output", "-n", "rl", "python"],
+    )]
+    if not command_prefix:
+        raise ValueError("evaluation.command_prefix must not be empty")
 
     variant_settings: dict[str, tuple[str, dict[int, Path], Path]] = {}
     for variant, variant_cfg in variants.items():
@@ -111,13 +128,8 @@ def main() -> None:
                         / f"eval_seed_{int(eval_seed)}.csv"
                     )
                     command = shell_join(
-                        [
-                            "conda",
-                            "run",
-                            "--no-capture-output",
-                            "-n",
-                            "rl",
-                            "python",
+                        command_prefix
+                        + [
                             "scripts/evaluate.py",
                             "--config",
                             str(generated_config),
@@ -134,8 +146,11 @@ def main() -> None:
                         ]
                     )
                     quoted_output = shlex.quote(str(output))
+                    expected_lines = int(evaluation["episodes_per_seed"]) + 1
                     lines.append(
-                        f"if [[ -s {quoted_output} ]]; then echo 'skip: {output}'; else {command}; fi"
+                        f"if [[ -s {quoted_output} ]] && "
+                        f"[[ $(wc -l < {quoted_output}) -eq {expected_lines} ]]; "
+                        f"then echo 'skip: {output}'; else {command}; fi"
                     )
                     evaluation_command_count += 1
 
@@ -143,13 +158,8 @@ def main() -> None:
         [
             "",
             shell_join(
-                [
-                    "conda",
-                    "run",
-                    "--no-capture-output",
-                    "-n",
-                    "rl",
-                    "python",
+                command_prefix
+                + [
                     "scripts/summarize_fixed_actor_eval.py",
                     "--matrix",
                     str(matrix_path),
@@ -157,11 +167,34 @@ def main() -> None:
             ),
         ]
     )
-    output_path = Path(args.output)
+    output_path = command_output
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     output_path.chmod(0o755)
+    repo_root = Path(__file__).resolve().parents[1]
+    generated_configs = sorted(config_root.glob("*.yaml"))
+    checkpoint_paths = sorted(
+        {path for _, checkpoints, _ in variant_settings.values() for path in checkpoints.values()}
+    )
+    plan_manifest = {
+        "schema_version": "restart_eval_plan_v1",
+        "matrix": str(matrix_path),
+        "matrix_sha256": sha256_file(matrix_path),
+        "commands": str(output_path),
+        "commands_sha256": sha256_file(output_path),
+        "expected_commands": evaluation_command_count,
+        "source_files_sha256": _source_hashes(repo_root),
+        "generated_config_sha256": {
+            str(path): sha256_file(path) for path in generated_configs
+        },
+        "checkpoint_sha256": {
+            str(path): sha256_file(path) for path in checkpoint_paths
+        },
+    }
+    plan_path = output_root / "evaluation_plan_manifest.json"
+    plan_path.write_text(json.dumps(plan_manifest, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {evaluation_command_count} evaluation commands: {output_path}")
+    print(f"wrote evaluation plan manifest: {plan_path}")
 
 
 if __name__ == "__main__":

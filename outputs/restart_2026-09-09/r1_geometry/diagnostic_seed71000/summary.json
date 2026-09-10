@@ -1,0 +1,95 @@
+{
+  "schema_version": "capsule_geometry_calibration_v1",
+  "config": "configs/restart_2026-09-09/r2_instant_link_seed101.yaml",
+  "seed": 71000,
+  "samples_per_link": 100,
+  "sample_count": 600,
+  "safe_distance_m": 0.12,
+  "error_definition": "capsule_distance_minus_pybullet_collision_shape_distance",
+  "error_quantiles_m": {
+    "min": -0.11616327340435366,
+    "p50": -0.0012051589399234043,
+    "p90": 0.07598333972177733,
+    "p95": 0.11658059464334225,
+    "p99": 0.14565321698272962,
+    "max": 0.14633538425993178
+  },
+  "danger_false_negative_count": 38,
+  "danger_false_negative_rate": 0.09268292682926829,
+  "collision_false_negative_count": 57,
+  "collision_false_negative_rate": 0.30319148936170215,
+  "per_target_capsule": {
+    "shoulder": {
+      "sample_count": 100,
+      "error_quantiles_m": {
+        "min": -0.11616327340435366,
+        "p50": -0.0037049302997233247,
+        "p90": 0.08611644101577892,
+        "p95": 0.12677879101378742,
+        "p99": 0.1452410792917044,
+        "max": 0.14569650962151004
+      },
+      "danger_false_negative_count": 5
+    },
+    "upper_arm": {
+      "sample_count": 100,
+      "error_quantiles_m": {
+        "min": -0.09833696744358984,
+        "p50": -0.000298154382557321,
+        "p90": 0.11230718420661229,
+        "p95": 0.12309318856263128,
+        "p99": 0.14557150662411486,
+        "max": 0.14630885338799224
+      },
+      "danger_false_negative_count": 9
+    },
+    "forearm": {
+      "sample_count": 100,
+      "error_quantiles_m": {
+        "min": -0.09656902198301706,
+        "p50": 0.0038776402935957396,
+        "p90": 0.11801935453535864,
+        "p95": 0.1330234058694893,
+        "p99": 0.1462616794347455,
+        "max": 0.14633538425993178
+      },
+      "danger_false_negative_count": 5
+    },
+    "wrist_1": {
+      "sample_count": 100,
+      "error_quantiles_m": {
+        "min": -0.05101113353514099,
+        "p50": 0.001203335307680048,
+        "p90": 0.06430903700354712,
+        "p95": 0.07514560267207154,
+        "p99": 0.12271454897431738,
+        "max": 0.145652779683348
+      },
+      "danger_false_negative_count": 4
+    },
+    "wrist_2": {
+      "sample_count": 100,
+      "error_quantiles_m": {
+        "min": -0.04740969010946108,
+        "p50": -0.0026651005604982694,
+        "p90": 0.0637585150437271,
+        "p95": 0.0790431412763585,
+        "p99": 0.1174375780356739,
+        "max": 0.145590987382773
+      },
+      "danger_false_negative_count": 6
+    },
+    "wrist_3": {
+      "sample_count": 100,
+      "error_quantiles_m": {
+        "min": -0.04656070364940925,
+        "p50": -0.0033636243897170216,
+        "p90": 0.0595857184632984,
+        "p95": 0.08966227809264479,
+        "p99": 0.12697972239286345,
+        "max": 0.14617054638198876
+      },
+      "danger_false_negative_count": 9
+    }
+  }
+}

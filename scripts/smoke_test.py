@@ -46,7 +46,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     for _ in range(int(smoke_cfg["rollout_steps"])):
         action = env.action_space.sample()
         next_observation, reward, cost, terminated, truncated, info = env.step(action)
-        replay.add(observation, action, reward, cost, next_observation, terminated or truncated)
+        # Match the training Bellman semantics: a time-limit truncation resets
+        # the episode but still bootstraps from its final observation.
+        replay.add(observation, action, reward, cost, next_observation, terminated)
         observation = next_observation
         if terminated or truncated:
             observation, _ = env.reset()

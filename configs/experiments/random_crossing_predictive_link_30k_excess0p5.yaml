@@ -7,5 +7,5 @@ sac:
   predictive_risk_penalty_mode: excess
 
 train:
-  output_dir: outputs/current_results/p2_predictive_excess_shaping/train
+  output_dir: outputs/archive_pre_restart_2026-09-09/current_results/p2_predictive_excess_shaping/train
   run_name: predictive_h0p5_excess0p5_seed101_steps30000

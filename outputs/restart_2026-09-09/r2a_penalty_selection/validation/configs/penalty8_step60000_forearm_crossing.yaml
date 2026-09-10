@@ -1,0 +1,6 @@
+includes:
+- /home/c211/jxf/rl/configs/restart_2026-09-09/r2a_penalty8_dev_seed11.yaml
+env:
+  obstacle:
+    enabled: true
+    scenario: forearm_crossing

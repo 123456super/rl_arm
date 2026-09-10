@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import yaml
 
 
@@ -120,6 +121,21 @@ def validate_config(config: dict[str, Any]) -> None:
         if "parent_link_name" not in capsule or "child_link_name" not in capsule:
             raise KeyError("robot.capsules entries must define parent_link_name and child_link_name")
 
+    time_step = float(config["env"]["time_step"])
+    control_dt = float(config["env"]["control_dt"])
+    if time_step <= 0.0 or control_dt <= 0.0:
+        raise ValueError("env.time_step and env.control_dt must be positive")
+    substep_ratio = control_dt / time_step
+    if not np.isclose(substep_ratio, round(substep_ratio), rtol=0.0, atol=1e-6):
+        raise ValueError("env.control_dt must be an integer multiple of env.time_step")
+
+    risk_weights = config["risk"]["weights"]
+    weight_values = [float(risk_weights[key]) for key in ("distance", "velocity", "ttc")]
+    if any(value < 0.0 for value in weight_values):
+        raise ValueError("risk.weights must be non-negative")
+    if not np.isclose(sum(weight_values), 1.0, rtol=0.0, atol=1e-8):
+        raise ValueError("risk.weights must sum to 1")
+
     execution_cfg = config["env"]["execution"]
     fixed_smoothing_mode = str(execution_cfg["fixed_smoothing_mode"])
     # 固定方法目前只支持历史 EMA 和论文式 Butterworth+quintic RTB。
@@ -158,6 +174,9 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("env.obstacle.speed_range must contain two non-negative bounds")
     if int(obstacle_cfg.get("count", 1)) <= 0:
         raise ValueError("env.obstacle.count must be positive when provided")
+    episode_enable_probability = float(obstacle_cfg.get("episode_enable_probability", 1.0))
+    if not 0.0 <= episode_enable_probability <= 1.0:
+        raise ValueError("env.obstacle.episode_enable_probability must be in [0, 1]")
 
     predictive_risk_penalty = float(config["sac"].get("predictive_risk_penalty", 0.0))
     if predictive_risk_penalty < 0.0:
@@ -165,6 +184,8 @@ def validate_config(config: dict[str, Any]) -> None:
     predictive_penalty_mode = str(config["sac"].get("predictive_risk_penalty_mode", "raw"))
     if predictive_penalty_mode not in {"raw", "excess"}:
         raise ValueError("sac.predictive_risk_penalty_mode must be 'raw' or 'excess'")
+    if float(config["risk"].get("geometry_margin", 0.0)) < 0.0:
+        raise ValueError("risk.geometry_margin must be non-negative")
 
     weights = config.get("device_selection", {})
     memory_weight = float(weights.get("memory_weight", 0.7))

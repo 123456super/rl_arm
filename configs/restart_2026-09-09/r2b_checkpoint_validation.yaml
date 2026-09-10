@@ -1,0 +1,37 @@
+method: link_fixed
+
+variants:
+  penalty1_dropout20_step60000: &base
+    config: configs/restart_2026-09-09/r2b_penalty1_dropout20_dev_seed11.yaml
+    penalty: 1
+    checkpoint_step: 60000
+    checkpoints: {11: outputs/restart_2026-09-09/r2b_obstacle_dropout/train/penalty1_dropout20_dev_seed11_steps100000/actor_step_60000.pt}
+  penalty1_dropout20_step70000:
+    <<: *base
+    checkpoint_step: 70000
+    checkpoints: {11: outputs/restart_2026-09-09/r2b_obstacle_dropout/train/penalty1_dropout20_dev_seed11_steps100000/actor_step_70000.pt}
+  penalty1_dropout20_step80000:
+    <<: *base
+    checkpoint_step: 80000
+    checkpoints: {11: outputs/restart_2026-09-09/r2b_obstacle_dropout/train/penalty1_dropout20_dev_seed11_steps100000/actor_step_80000.pt}
+  penalty1_dropout20_step90000:
+    <<: *base
+    checkpoint_step: 90000
+    checkpoints: {11: outputs/restart_2026-09-09/r2b_obstacle_dropout/train/penalty1_dropout20_dev_seed11_steps100000/actor_step_90000.pt}
+  penalty1_dropout20_step100000:
+    <<: *base
+    checkpoint_step: 100000
+    checkpoints: {11: outputs/restart_2026-09-09/r2b_obstacle_dropout/train/penalty1_dropout20_dev_seed11_steps100000/actor_step_100000.pt}
+
+evaluation:
+  command_prefix: [python]
+  seeds: [1001, 1002, 1003]
+  episodes_per_seed: 30
+  scenarios:
+    - no_obstacle
+    - random_crossing
+    - upper_arm_crossing
+    - elbow_crossing
+    - forearm_crossing
+    - wrist_crossing
+  output_root: outputs/restart_2026-09-09/r2b_obstacle_dropout/validation

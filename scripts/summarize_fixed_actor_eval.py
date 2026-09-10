@@ -8,6 +8,8 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from rl_risk_sac.utils.provenance import _source_hashes, sha256_file
+
 
 METRICS = [
     "success",
@@ -22,16 +24,20 @@ METRICS = [
     "rms_jerk",
     "peak_acceleration",
     "peak_jerk",
+    "command_rms_acceleration",
+    "command_rms_jerk",
+    "command_peak_acceleration",
+    "command_peak_jerk",
+    "measured_rms_acceleration",
+    "measured_rms_jerk",
+    "measured_peak_acceleration",
+    "measured_peak_jerk",
     "safety_qp_intervention_rate",
     "safety_qp_infeasible_rate",
     "mean_safety_qp_correction_norm",
     "max_safety_qp_correction_norm",
     "mean_safety_qp_solve_time_ms",
     "max_safety_qp_solve_time_ms",
-    "physics_rms_acceleration",
-    "physics_rms_jerk",
-    "physics_peak_acceleration",
-    "physics_peak_jerk",
 ]
 
 
@@ -60,7 +66,8 @@ def flatten_columns(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def main() -> None:
-    matrix = load_yaml(Path(parse_args().matrix))
+    matrix_path = Path(parse_args().matrix)
+    matrix = load_yaml(matrix_path)
     evaluation = matrix["evaluation"]
     root = Path(evaluation["output_root"])
     expected = set()
@@ -84,11 +91,20 @@ def main() -> None:
 
     frames: list[pd.DataFrame] = []
     found: set[tuple[str, str, int, int]] = set()
+    malformed_files: list[str] = []
+    episodes_per_seed = int(evaluation["episodes_per_seed"])
     for scenario, variant, train_seed, eval_seed in sorted(expected):
         path = root / scenario / variant / f"train_seed_{train_seed}" / f"eval_seed_{eval_seed}.csv"
         if not path.is_file():
             continue
         frame = pd.read_csv(path)
+        required_columns = {"episode", "episode_seed"}
+        if len(frame) != episodes_per_seed or not required_columns.issubset(frame.columns):
+            malformed_files.append(str(path))
+            continue
+        if frame["episode"].nunique() != episodes_per_seed or frame["episode_seed"].nunique() != episodes_per_seed:
+            malformed_files.append(str(path))
+            continue
         frame.insert(0, "eval_seed", eval_seed)
         frame.insert(0, "train_seed", train_seed)
         frame.insert(0, "variant", variant)
@@ -104,15 +120,40 @@ def main() -> None:
         duplicate_episode_units = int(
             episodes.duplicated(["scenario", "variant", "train_seed", "episode_seed"]).sum()
         )
+    plan_path = root / "evaluation_plan_manifest.json"
+    plan_errors: list[str] = []
+    if not plan_path.is_file():
+        plan_errors.append(f"missing plan manifest: {plan_path}")
+        plan: dict[str, Any] = {}
+    else:
+        plan = json.loads(plan_path.read_text(encoding="utf-8"))
+        if plan.get("matrix_sha256") != sha256_file(matrix_path):
+            plan_errors.append("matrix hash changed after evaluation plan generation")
+        repo_root = Path(__file__).resolve().parents[1]
+        if plan.get("source_files_sha256") != _source_hashes(repo_root):
+            plan_errors.append("source/config snapshot changed after evaluation plan generation")
+        for section in ("generated_config_sha256", "checkpoint_sha256"):
+            for raw_path, expected_hash in plan.get(section, {}).items():
+                path = Path(raw_path)
+                if not path.is_file() or sha256_file(path) != expected_hash:
+                    plan_errors.append(f"hash mismatch in {section}: {path}")
+
     manifest = {
+        "schema_version": "restart_eval_summary_manifest_v1",
+        "plan_manifest": str(plan_path),
+        "plan_verified": not plan_errors,
+        "plan_errors": plan_errors,
         "expected_files": len(expected),
         "found_files": len(found),
         "expected_rows": expected_rows,
         "found_rows": len(episodes),
         "duplicate_episode_units": duplicate_episode_units,
         "episode_seed_recorded": "episode_seed" in episodes.columns,
+        "malformed_files": malformed_files,
         "complete": (
             not missing
+            and not malformed_files
+            and not plan_errors
             and len(episodes) == expected_rows
             and "episode_seed" in episodes.columns
             and duplicate_episode_units == 0

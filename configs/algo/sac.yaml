@@ -2,6 +2,10 @@
 risk:
   # 安全距离阈值，d_min 小于该值计为安全距离违反。
   d_safe: 0.12
+  # One-sided capsule-to-PyBullet geometry margin frozen by restarted R1
+  # calibration. It is reserved for predictive/QP constraints; d_safe remains
+  # the physical reporting threshold for the nominal actor.
+  geometry_margin: 0.04
   # 距离风险指数衰减尺度，越小表示距离接近 d_safe 时风险上升越陡。
   sigma_d: 0.12
   # 接近速度归一化上限，单位 m/s。

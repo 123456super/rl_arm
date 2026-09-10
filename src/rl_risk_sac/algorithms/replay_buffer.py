@@ -44,7 +44,7 @@ class ReplayBuffer:
         reward: float,
         cost: float,
         next_observation: np.ndarray,
-        done: bool,
+        terminal: bool,
     ) -> None:
         """Store one transition at the current circular-buffer position."""
         self.observations[self.ptr] = observation
@@ -52,7 +52,9 @@ class ReplayBuffer:
         self.rewards[self.ptr] = reward
         self.costs[self.ptr] = cost
         self.next_observations[self.ptr] = next_observation
-        self.dones[self.ptr] = float(done)
+        # ``dones`` is the Bellman terminal mask, not the environment-reset
+        # signal.  Gymnasium time-limit truncations must be stored as zero.
+        self.dones[self.ptr] = float(terminal)
         self.ptr = (self.ptr + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
 

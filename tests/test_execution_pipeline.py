@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from unittest.mock import Mock
 
 from rl_risk_sac.control import ExecutionPipeline, JointVelocityRateLimiter
 
@@ -29,6 +30,8 @@ def test_execution_pipeline_combines_rate_limit_and_rtb() -> None:
         lambda_beta=0.4,
     )
     pipeline.reset()
+    original_filter = pipeline.rtb.filter
+    pipeline.rtb.filter = Mock(wraps=original_filter)
 
     result = pipeline.process(
         normalized_action=np.ones(2, dtype=np.float32),
@@ -43,6 +46,7 @@ def test_execution_pipeline_combines_rate_limit_and_rtb() -> None:
     assert result.rate_limited
     assert result.trajectory.shape == (12, 2)
     assert np.all(np.diff(result.trajectory[:, 0]) >= 0.0)
+    assert pipeline.rtb.filter.call_count == 1
 
 
 def test_execution_pipeline_can_smooth_a_safety_adjusted_target() -> None:

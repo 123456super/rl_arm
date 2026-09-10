@@ -3,9 +3,9 @@
 method: link_fixed
 
 checkpoints:
-  101: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_101/link_fixed_seed101_steps100000/actor_step_100000.pt
-  202: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_202/link_fixed_seed202_steps100000/actor_step_50000.pt
-  303: outputs/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_303/link_fixed_seed303_steps100000/actor_step_100000.pt
+  101: outputs/archive_pre_restart_2026-09-09/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_101/link_fixed_seed101_steps100000/actor_step_100000.pt
+  202: outputs/archive_pre_restart_2026-09-09/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_202/link_fixed_seed202_steps100000/actor_step_50000.pt
+  303: outputs/archive_pre_restart_2026-09-09/archive_old/link_fixed_penalty1_legacy/train/link_fixed/seed_303/link_fixed_seed303_steps100000/actor_step_100000.pt
 
 variants:
   minimal_qp_endpoint:
@@ -28,4 +28,4 @@ evaluation:
     - elbow_crossing
     - forearm_crossing
     - wrist_crossing
-  output_root: outputs/current_results/p5_motion_bounds_validation
+  output_root: outputs/archive_pre_restart_2026-09-09/current_results/p5_motion_bounds_validation
