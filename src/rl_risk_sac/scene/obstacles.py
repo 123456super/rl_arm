@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 import numpy as np
+
+from rl_risk_sac.utils.runtime_config import ObstacleRuntimeConfig
 
 
 @dataclass(frozen=True)
@@ -30,12 +32,12 @@ class SphericalObstacleProvider:
     同步到可视化/碰撞球上。
     """
 
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(self, config: ObstacleRuntimeConfig) -> None:
         self.config = config
-        self.enabled = bool(config.get("enabled", True))
-        self.episode_enable_probability = float(config.get("episode_enable_probability", 1.0))
-        self.scenario = str(config.get("scenario", "random"))
-        self.count = max(1, int(config.get("count", 1)))
+        self.enabled = config.enabled
+        self.episode_enable_probability = config.episode_enable_probability
+        self.scenario = config.scenario
+        self.count = config.count
         self._states = tuple(self._disabled_state() for _ in range(self.count))
 
     def reset(self, rng: np.random.Generator) -> tuple[ObstacleState, ...]:
@@ -69,7 +71,7 @@ class SphericalObstacleProvider:
             return self._states
 
         next_states = []
-        bounds = self.config["bounds"]
+        bounds = self.config.bounds
         for state in self._states:
             if not state.enabled:
                 next_states.append(state)
@@ -87,21 +89,21 @@ class SphericalObstacleProvider:
 
     def _sample_random(self, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
         """Sample a crossing path from one side of the workspace to the other."""
-        random_cfg = self.config["random"]
+        random_cfg = self.config.random
         side = -1.0 if rng.random() < 0.5 else 1.0
         center = np.array(
             [
-                rng.uniform(*random_cfg["x_range"]),
-                side * rng.uniform(*random_cfg["start_y_abs_range"]),
-                rng.uniform(*random_cfg["z_range"]),
+                rng.uniform(*random_cfg.x_range),
+                side * rng.uniform(*random_cfg.start_y_abs_range),
+                rng.uniform(*random_cfg.z_range),
             ],
             dtype=np.float32,
         )
         target = np.array(
             [
-                rng.uniform(*random_cfg["x_range"]),
-                -side * rng.uniform(*random_cfg["target_y_abs_range"]),
-                rng.uniform(*random_cfg["z_range"]),
+                rng.uniform(*random_cfg.x_range),
+                -side * rng.uniform(*random_cfg.target_y_abs_range),
+                rng.uniform(*random_cfg.z_range),
             ],
             dtype=np.float32,
         )
@@ -109,20 +111,20 @@ class SphericalObstacleProvider:
 
     def _sample_named(self, rng: np.random.Generator, scenario: str) -> tuple[np.ndarray, np.ndarray]:
         """Sample a controlled crossing path near a named robot-link region."""
-        scenarios = self.config["scenarios"]
+        scenarios = self.config.scenarios
         if scenario not in scenarios:
             raise ValueError(f"Unknown obstacle scenario {scenario!r}; expected random or one of {sorted(scenarios)}")
 
         scenario_cfg = scenarios[scenario]
         side = -1.0 if rng.random() < 0.5 else 1.0
-        x_center = rng.uniform(*scenario_cfg["x_range"])
-        z_range = scenario_cfg["z_range"]
+        x_center = rng.uniform(*scenario_cfg.x_range)
+        z_range = scenario_cfg.z_range
         center = np.array(
-            [x_center, side * float(scenario_cfg["start_y_abs"]), rng.uniform(*z_range)],
+            [x_center, side * scenario_cfg.start_y_abs, rng.uniform(*z_range)],
             dtype=np.float32,
         )
         target = np.array(
-            [x_center, -side * float(scenario_cfg["target_y_abs"]), rng.uniform(*z_range)],
+            [x_center, -side * scenario_cfg.target_y_abs, rng.uniform(*z_range)],
             dtype=np.float32,
         )
         return center, self._velocity_toward(rng, center, target)
@@ -136,12 +138,12 @@ class SphericalObstacleProvider:
         """Choose a random speed and point the velocity from center to target."""
         direction = target - center
         direction = direction / (np.linalg.norm(direction) + 1e-8)
-        speed = rng.uniform(*self.config["speed_range"])
+        speed = rng.uniform(*self.config.speed_range)
         return (direction * speed).astype(np.float32)
 
     def _disabled_state(self) -> ObstacleState:
         return ObstacleState(
-            center=np.asarray(self.config["disabled_position"], dtype=np.float32).copy(),
+            center=np.asarray(self.config.disabled_position, dtype=np.float32).copy(),
             velocity=np.zeros(3, dtype=np.float32),
             enabled=False,
         )

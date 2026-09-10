@@ -6,13 +6,7 @@ from time import perf_counter
 import numpy as np
 
 from rl_risk_sac.utils.trajectory_blending import quintic_smoothstep
-
-
-@dataclass(frozen=True)
-class SafetyQPConfig:
-    max_iterations: int = 8
-    eps: float = 1e-8
-    violation_tolerance: float = 1e-6
+from rl_risk_sac.utils.runtime_config import SafetyQPConfig
 
 
 @dataclass(frozen=True)
@@ -43,8 +37,8 @@ class SafetyQP:
     violation is reported as slack so callers can log infeasibility.
     """
 
-    def __init__(self, config: SafetyQPConfig | None = None) -> None:
-        self.config = config or SafetyQPConfig()
+    def __init__(self, config: SafetyQPConfig) -> None:
+        self.config = config
 
     def solve(
         self,

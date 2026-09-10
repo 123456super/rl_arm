@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 from rl_risk_sac.algorithms.networks import GaussianActor, QNetwork, hard_update, soft_update
 from rl_risk_sac.algorithms.replay_buffer import Batch
+from rl_risk_sac.utils.runtime_config import RuntimeConfig
 
 
 class SACAgent:
@@ -28,21 +29,22 @@ class SACAgent:
     ) -> None:
         self.method = method
         self.constrained = method.startswith("ldrc")
-        self.device = torch.device(config.get("device", "cpu"))
-        sac_cfg = config["sac"]
-        hidden_dims = [int(v) for v in sac_cfg["hidden_dims"]]
+        runtime = RuntimeConfig.from_mapping(config)
+        self.device = torch.device(runtime.device)
+        sac_cfg = runtime.sac
+        hidden_dims = list(sac_cfg.hidden_dims)
 
-        self.gamma = float(sac_cfg["gamma"])
-        self.tau = float(sac_cfg["tau"])
-        self.batch_size = int(sac_cfg["batch_size"])
+        self.gamma = sac_cfg.gamma
+        self.tau = sac_cfg.tau
+        self.batch_size = sac_cfg.batch_size
         self.target_entropy = -float(action_dim)
         # c_safe 是期望 episode 平均 cost 上限；约束方法会根据 cost_ema
         # 自动调大/调小 lagrange_multiplier。
-        self.cost_safe = float(config["risk"]["cost"]["c_safe"])
-        self.lambda_lr = float(sac_cfg["lambda_lr"])
-        self.cost_ema_rho = float(sac_cfg["cost_ema_rho"])
+        self.cost_safe = runtime.risk_cost.c_safe
+        self.lambda_lr = sac_cfg.lambda_lr
+        self.cost_ema_rho = sac_cfg.cost_ema_rho
         self.cost_ema = self.cost_safe
-        self.lagrange_multiplier = float(sac_cfg["initial_lambda"]) if self.constrained else 0.0
+        self.lagrange_multiplier = sac_cfg.initial_lambda if self.constrained else 0.0
 
         self.actor = GaussianActor(obs_dim, action_dim, hidden_dims).to(self.device)
         # SAC 使用 twin Q 减小过估计。这里 reward 和 cost 各有一套 twin Q。
@@ -60,22 +62,22 @@ class SACAgent:
         hard_update(self.cost_q1, self.cost_target_q1)
         hard_update(self.cost_q2, self.cost_target_q2)
 
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=float(sac_cfg["actor_lr"]))
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=sac_cfg.actor_lr)
         self.reward_q_optimizer = torch.optim.Adam(
             list(self.reward_q1.parameters()) + list(self.reward_q2.parameters()),
-            lr=float(sac_cfg["critic_lr"]),
+            lr=sac_cfg.critic_lr,
         )
         self.cost_q_optimizer = torch.optim.Adam(
             list(self.cost_q1.parameters()) + list(self.cost_q2.parameters()),
-            lr=float(sac_cfg["critic_lr"]),
+            lr=sac_cfg.critic_lr,
         )
         self.log_alpha = torch.tensor(
-            np.log(float(sac_cfg["initial_alpha"])),
+            np.log(sac_cfg.initial_alpha),
             dtype=torch.float32,
             device=self.device,
             requires_grad=True,
         )
-        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=float(sac_cfg["alpha_lr"]))
+        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=sac_cfg.alpha_lr)
 
     @property
     def alpha(self) -> torch.Tensor:

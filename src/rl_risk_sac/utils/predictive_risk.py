@@ -6,26 +6,7 @@ import numpy as np
 
 from rl_risk_sac.robots.ur5_capsules import CapsuleState
 from rl_risk_sac.utils.risk import RiskConfig, closest_point_on_segment
-
-
-@dataclass
-class PredictiveRiskConfig:
-    """预测式连杆风险的参数。
-
-    与 current risk 不同，这里不是只看当前帧，而是在 horizon 时间窗内
-    离散外推障碍物和连杆运动，估计未来最危险的距离和进入安全区时间。
-    """
-
-    horizon: float = 1.0
-    step: float = 0.05
-    d_safe: float = 0.12
-    sigma_d: float = 0.12
-    tau_enter: float = 0.5
-    v_max: float = 0.7
-    eps: float = 1e-8
-    w_min_distance: float = 0.55
-    w_enter_time: float = 0.30
-    w_approach: float = 0.15
+from rl_risk_sac.utils.runtime_config import PredictiveRiskConfig
 
 
 @dataclass
@@ -46,12 +27,16 @@ class PredictiveLinkRisk:
     closest_points_pred: np.ndarray
     closest_times: np.ndarray
     approach_velocities: np.ndarray
+    d_pred_raw: np.ndarray | None = None
 
 
 def config_from_current_risk(
     config: RiskConfig,
-    horizon: float = 1.0,
-    step: float = 0.05,
+    horizon: float,
+    step: float,
+    w_min_distance: float,
+    w_enter_time: float,
+    w_approach: float,
 ) -> PredictiveRiskConfig:
     """从当前帧风险配置派生预测风险配置。
 
@@ -62,10 +47,14 @@ def config_from_current_risk(
         horizon=horizon,
         step=step,
         d_safe=config.d_safe,
+        geometry_margin=config.geometry_margin,
         sigma_d=config.sigma_d,
         tau_enter=config.tau,
         v_max=config.v_max,
         eps=config.eps,
+        w_min_distance=w_min_distance,
+        w_enter_time=w_enter_time,
+        w_approach=w_approach,
     )
 
 
@@ -101,6 +90,7 @@ def compute_predictive_link_risk(
     active_indices = {count - 1} if use_end_effector_only else set(range(count))
 
     d_pred = np.full(count, np.inf, dtype=np.float32)
+    d_pred_raw = np.full(count, np.inf, dtype=np.float32)
     t_enter = np.full(count, np.inf, dtype=np.float32)
     closest_points_pred = np.zeros((count, 3), dtype=np.float32)
     closest_times = np.zeros(count, dtype=np.float32)
@@ -119,11 +109,13 @@ def compute_predictive_link_risk(
             closest, _ = closest_point_on_segment(obstacle_t, start_t, end_t)
             delta = obstacle_t - closest
             center_distance = float(np.linalg.norm(delta))
-            surface_distance = center_distance - capsule.radius - obstacle_radius
+            raw_surface_distance = center_distance - capsule.radius - obstacle_radius
+            surface_distance = raw_surface_distance - config.geometry_margin
 
             if surface_distance < d_pred[i]:
                 # 记录预测窗内最近的一次距离和对应最近点，用于诊断/画图。
                 d_pred[i] = surface_distance
+                d_pred_raw[i] = raw_surface_distance
                 closest_points_pred[i] = closest
                 closest_times[i] = t
 
@@ -164,6 +156,7 @@ def compute_predictive_link_risk(
         closest_points_pred=closest_points_pred,
         closest_times=closest_times,
         approach_velocities=approach_velocities,
+        d_pred_raw=d_pred_raw,
     )
 
 

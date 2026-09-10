@@ -1,1 +1,0 @@
-outputs/rechecks/link_fixed_penalty1/train/link_fixed/seed_101/link_fixed_seed101_steps100000

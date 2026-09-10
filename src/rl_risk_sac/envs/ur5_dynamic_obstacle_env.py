@@ -318,17 +318,17 @@ import pybullet as p
 from gymnasium import spaces
 
 from rl_risk_sac.collision import LinkRiskDetector, NullRiskDetector, RiskDetector
-from rl_risk_sac.control import ExecutionPipeline, SafetyQP, SafetyQPConfig, quintic_endpoint_bounds
-from rl_risk_sac.robots.ur5_capsules import CapsuleState, UR5CapsuleModel
+from rl_risk_sac.control import ExecutionPipeline, SafetyQP, quintic_endpoint_bounds
+from rl_risk_sac.envs.pybullet_scene import PyBulletScene
+from rl_risk_sac.robots.pybullet_robot import PyBulletRobot
+from rl_risk_sac.robots.ur5_capsules import CapsuleState
 from rl_risk_sac.scene import ObstacleState, SphericalObstacleProvider
 from rl_risk_sac.tasks import ReachingObservationBuilder, ReachingObjective, WorkspaceTargetProvider
 from rl_risk_sac.utils.predictive_risk import (
     PredictiveLinkRisk,
-    PredictiveRiskConfig,
     compute_predictive_link_risk,
 )
-from rl_risk_sac.utils.risk import RiskConfig
-from rl_risk_sac.utils.risk import closest_point_on_segment
+from rl_risk_sac.utils.runtime_config import RuntimeConfig, resolve_robot_urdf
 
 
 METHODS = {"ee_fixed", "link_fixed", "predictive_link", "ldrc_fixed", "ldrc_adaptive"}
@@ -344,117 +344,87 @@ class UR5DynamicObstacleEnv(gym.Env):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 20}
 
-    def __init__(self, config: dict[str, Any], method: str = "ldrc_adaptive", render_mode: str | None = None):
+    def __init__(self, config: dict[str, Any], method: str, render_mode: str | None = None):
         if method not in METHODS:
             raise ValueError(f"Unknown method {method!r}; expected one of {sorted(METHODS)}")
-        self.config = config
+        runtime = RuntimeConfig.from_mapping(config)
+        self.runtime_config = runtime
         self.method = method
         self.render_mode = render_mode
 
-        env_cfg = config["env"]
-        risk_cfg = config["risk"]
-        smoothing_cfg = config["smoothing"]
-        self.reward_cfg = config["reward"]
+        env_cfg = runtime.env
+        smoothing_cfg = runtime.smoothing
+        self.reward_cfg = runtime.reward
 
-        self.time_step = float(env_cfg["time_step"])
-        self.control_dt = float(env_cfg["control_dt"])
+        self.time_step = env_cfg.time_step
+        self.control_dt = env_cfg.control_dt
         # SAC 策略按 control_dt 输出一次动作；PyBullet 用更小的 time_step
         # 积分，所以一次 env.step 会包含多个物理子步。
         self.sim_substeps = max(1, int(round(self.control_dt / self.time_step)))
-        self.max_episode_steps = int(env_cfg["max_episode_steps"])
-        self.action_scale = float(env_cfg["action_scale"])
-        self.fixed_beta = float(env_cfg["fixed_beta"])
-        self.success_tolerance = float(env_cfg["success_tolerance"])
-        self.workspace = env_cfg["workspace"]
-        self.obstacle_cfg = env_cfg["obstacle"]
-        self.goal_cfg = env_cfg["goal"]
-        self.robot_cfg = config.get("robot", {})
-        self.observation_cfg = env_cfg.get("observation", {})
-        self.visual_cfg = env_cfg.get("visual", {})
-        self.execution_cfg = env_cfg.get("execution", {})
-        self.fixed_smoothing_mode = str(self.execution_cfg["fixed_smoothing_mode"])
-        self.safety_qp_cfg = self.execution_cfg.get("safety_qp", {})
-        self.safety_qp_enabled = bool(self.safety_qp_cfg.get("enabled", False))
-        self.safety_qp_gain = float(self.safety_qp_cfg.get("gain", 3.0))
-        self.safety_qp_activation_distance = float(self.safety_qp_cfg.get("activation_distance", 0.24))
-        self.safety_qp_fd_epsilon = float(self.safety_qp_cfg.get("fd_epsilon", 1e-3))
-        self.safety_qp_trajectory_mode = str(self.safety_qp_cfg.get("trajectory_mode", "post_qp_rtb"))
-        motion_bounds_cfg = self.safety_qp_cfg.get("motion_bounds", {})
-        self.safety_qp_max_acceleration = motion_bounds_cfg.get("max_acceleration")
-        self.safety_qp_max_jerk = motion_bounds_cfg.get("max_jerk")
-        self.safety_qp_max_acceleration = (
-            None if self.safety_qp_max_acceleration is None else float(self.safety_qp_max_acceleration)
-        )
-        self.safety_qp_max_jerk = None if self.safety_qp_max_jerk is None else float(self.safety_qp_max_jerk)
-        self.obstacle_enabled = bool(self.obstacle_cfg.get("enabled", True))
+        self.max_episode_steps = env_cfg.max_episode_steps
+        self.action_scale = env_cfg.action_scale
+        self.fixed_beta = env_cfg.fixed_beta
+        self.success_tolerance = env_cfg.success_tolerance
+        self.workspace = env_cfg.workspace
+        self.obstacle_cfg = env_cfg.obstacle
+        self.goal_cfg = env_cfg.goal
+        self.robot_cfg = runtime.robot
+        self.observation_cfg = env_cfg.observation
+        self.visual_cfg = env_cfg.visual
+        self.execution_cfg = env_cfg.execution
+        self.fixed_smoothing_mode = self.execution_cfg.fixed_smoothing_mode
+        self.safety_qp_cfg = self.execution_cfg.safety_qp
+        self.safety_qp_enabled = self.safety_qp_cfg.enabled
+        self.safety_qp_gain = self.safety_qp_cfg.gain
+        self.safety_qp_activation_distance = self.safety_qp_cfg.activation_distance
+        self.safety_qp_fd_epsilon = self.safety_qp_cfg.fd_epsilon
+        self.safety_qp_trajectory_mode = self.safety_qp_cfg.trajectory_mode
+        self.safety_qp_max_acceleration = self.safety_qp_cfg.motion_bounds.max_acceleration
+        self.safety_qp_max_jerk = self.safety_qp_cfg.motion_bounds.max_jerk
+        self.obstacle_enabled = self.obstacle_cfg.enabled
 
-        self.beta_min = float(smoothing_cfg["beta_min"])
-        self.beta_max = float(smoothing_cfg["beta_max"])
-        self.risk_high = float(smoothing_cfg["risk_high"])
-        self.lambda_beta = float(smoothing_cfg["lambda_beta"])
+        self.beta_min = smoothing_cfg.beta_min
+        self.beta_max = smoothing_cfg.beta_max
+        self.risk_high = smoothing_cfg.risk_high
+        self.lambda_beta = smoothing_cfg.lambda_beta
 
-        weights = risk_cfg["weights"]
-        self.risk_config = RiskConfig(
-            d_safe=float(risk_cfg["d_safe"]),
-            sigma_d=float(risk_cfg["sigma_d"]),
-            v_max=float(risk_cfg["v_max"]),
-            ttc_max=float(risk_cfg["ttc_max"]),
-            tau=float(risk_cfg["tau"]),
-            eps=float(risk_cfg["eps"]),
-            eps_v=float(risk_cfg["eps_v"]),
-            w_distance=float(weights["distance"]),
-            w_velocity=float(weights["velocity"]),
-            w_ttc=float(weights["ttc"]),
-        )
-        self.cost_cfg = risk_cfg["cost"]
+        self.risk_config = runtime.risk
+        self.cost_cfg = runtime.risk_cost
 
         # 每个环境实例自己持有随机数生成器，保证 reset(seed=...) 可复现实验。
-        self.rng = np.random.default_rng(int(config.get("seed", 42)))
-        self.physics_client_id = p.connect(p.GUI if render_mode == "human" or env_cfg.get("gui") else p.DIRECT)
+        self.rng = np.random.default_rng(runtime.seed)
+        self.physics_client_id = p.connect(p.GUI if render_mode == "human" or env_cfg.gui else p.DIRECT)
         p.setTimeStep(self.time_step, physicsClientId=self.physics_client_id)
-        p.setGravity(*env_cfg["gravity"], physicsClientId=self.physics_client_id)
+        p.setGravity(*env_cfg.gravity, physicsClientId=self.physics_client_id)
 
         self.repo_root = Path(__file__).resolve().parents[3]
-        robot_urdf = Path(self.robot_cfg["urdf"])
-        self.robot_urdf = robot_urdf if robot_urdf.is_absolute() else self.repo_root / robot_urdf
-        self.capsule_model = UR5CapsuleModel(self.robot_cfg.get("capsules"))
+        self.robot_urdf = resolve_robot_urdf(self.repo_root, self.robot_cfg)
+        self.robot = PyBulletRobot(self.robot_cfg, self.robot_urdf, self.physics_client_id)
+        self.capsule_model = self.robot.capsule_model
+        self.scene = PyBulletScene(self.physics_client_id, self.obstacle_cfg, self.visual_cfg)
         self.joint_ids: list[int] = []
         self.tool_link_id = -1
-        self.joint_count = len(self.robot_cfg["joint_names"])
+        self.joint_count = len(self.robot_cfg.joint_names)
         self.execution_pipeline = ExecutionPipeline(
             joint_count=self.joint_count,
             action_scale=self.action_scale,
             control_dt=self.control_dt,
             smoothing_mode=self.fixed_smoothing_mode,
             fixed_beta=self.fixed_beta,
-            cutoff_angular_frequency=float(self.execution_cfg["rtb"]["cutoff_angular_frequency"]),
-            max_policy_velocity_delta=self.execution_cfg.get("max_policy_velocity_delta"),
+            cutoff_angular_frequency=self.execution_cfg.cutoff_angular_frequency,
+            max_policy_velocity_delta=self.execution_cfg.max_policy_velocity_delta,
             beta_min=self.beta_min,
             beta_max=self.beta_max,
             risk_high=self.risk_high,
             lambda_beta=self.lambda_beta,
         )
-        self.safety_qp = SafetyQP(
-            SafetyQPConfig(max_iterations=int(self.safety_qp_cfg.get("max_iterations", 8)))
-        )
+        self.safety_qp = SafetyQP(self.safety_qp_cfg.solver)
         # Kept as a compatibility alias for analysis scripts that inspected the
         # RTB filter state directly before the execution pipeline was extracted.
         self.fixed_rtb = self.execution_pipeline.rtb
-        distance_clip = self.observation_cfg["distance_clip"]
-        self.observation_schema = str(self.observation_cfg["schema_version"])
-        pred_cfg = self.observation_cfg.get("predictive_risk", {})
-        self.predictive_risk_config = PredictiveRiskConfig(
-            horizon=float(pred_cfg.get("horizon", 1.0)),
-            step=float(pred_cfg.get("step", self.control_dt)),
-            d_safe=self.risk_config.d_safe,
-            sigma_d=self.risk_config.sigma_d,
-            tau_enter=self.risk_config.tau,
-            v_max=self.risk_config.v_max,
-            eps=self.risk_config.eps,
-            w_min_distance=float(pred_cfg.get("w_min_distance", 0.55)),
-            w_enter_time=float(pred_cfg.get("w_enter_time", 0.30)),
-            w_approach=float(pred_cfg.get("w_approach", 0.15)),
-        )
+        distance_clip = self.observation_cfg.distance_clip
+        self.observation_schema = self.observation_cfg.schema_version
+        self.predictive_risk_config = self.observation_cfg.predictive_risk
         self.observation_builder = ReachingObservationBuilder(
             action_scale=self.action_scale,
             distance_clip=(float(distance_clip[0]), float(distance_clip[1])),
@@ -462,7 +432,7 @@ class UR5DynamicObstacleEnv(gym.Env):
             ttc_max=self.risk_config.ttc_max,
             schema_version=self.observation_schema,
             prediction_horizon=self.predictive_risk_config.horizon,
-            include_predictive_per_link_score=bool(pred_cfg.get("include_per_link_score", True)),
+            include_predictive_per_link_score=self.observation_cfg.include_predictive_per_link_score,
         )
         self.objective = ReachingObjective(self.reward_cfg, self.cost_cfg, self.risk_config.d_safe)
         self.target_provider = WorkspaceTargetProvider(self.goal_cfg, self.workspace)
@@ -471,17 +441,17 @@ class UR5DynamicObstacleEnv(gym.Env):
         # ee_fixed 在检测器内部把非末端连杆风险置零，用作论文中的末端基线。
         detector_args = {
             "config": self.risk_config,
-            "obstacle_radius": float(self.obstacle_cfg["radius"]),
+            "obstacle_radius": self.obstacle_cfg.radius,
             "dt": self.control_dt,
             "end_effector_only": self.method == "ee_fixed",
-            "no_obstacle_distance": float(self.observation_cfg["no_obstacle_distance"]),
+            "no_obstacle_distance": self.observation_cfg.no_obstacle_distance,
         }
         self.risk_detector: RiskDetector = (
             LinkRiskDetector(**detector_args)
             if self.obstacle_enabled
             else NullRiskDetector(
                 config=self.risk_config,
-                no_obstacle_distance=float(self.observation_cfg["no_obstacle_distance"]),
+                no_obstacle_distance=self.observation_cfg.no_obstacle_distance,
             )
         )
 
@@ -508,7 +478,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         self.last_info: dict[str, Any] = {}
 
         obs_dim = self.observation_builder.dimension(self.joint_count, self.capsule_model.count)
-        obs_bound = float(self.observation_cfg["space_bound"])
+        obs_bound = self.observation_cfg.space_bound
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(self.joint_count,), dtype=np.float32)
         self.observation_space = spaces.Box(low=-obs_bound, high=obs_bound, shape=(obs_dim,), dtype=np.float32)
 
@@ -525,29 +495,21 @@ class UR5DynamicObstacleEnv(gym.Env):
 
         p.resetSimulation(physicsClientId=self.physics_client_id)
         p.setTimeStep(self.time_step, physicsClientId=self.physics_client_id)
-        p.setGravity(*self.config["env"]["gravity"], physicsClientId=self.physics_client_id)
-        self._create_floor()
-        self.robot_id = p.loadURDF(
-            str(self.robot_urdf),
-            basePosition=self.robot_cfg["base_position"],
-            useFixedBase=True,
-            physicsClientId=self.physics_client_id,
-        )
-        self._resolve_robot_references()
-        self._reset_robot()
+        p.setGravity(*self.runtime_config.env.gravity, physicsClientId=self.physics_client_id)
+        self.scene.create_floor()
+        self.robot_id = self.robot.load(self.rng)
+        self.joint_ids = self.robot.joint_ids
+        self.tool_link_id = self.robot.tool_link_id
         # 目标和障碍物由 provider 管理，环境只负责把它们同步到 PyBullet 可视物体。
         target_state = self.target_provider.reset(self.rng)
         self.goal = target_state.position
         self.goal_velocity = target_state.velocity
         self.obstacle_states = self.obstacle_provider.reset(self.rng)
         self._sync_legacy_obstacle_state()
-        self.obstacle_ids = (
-            [self._create_obstacle(obstacle.center) for obstacle in self.obstacle_states if obstacle.enabled]
-            if self.obstacle_enabled
-            else []
-        )
+        self.scene.populate(self.obstacle_states if self.obstacle_enabled else (), self.goal)
+        self.obstacle_ids = self.scene.obstacle_ids
         self.obstacle_id = self.obstacle_ids[0] if self.obstacle_ids else None
-        self.goal_marker_id = self._create_goal_marker(self.goal)
+        self.goal_marker_id = self.scene.goal_marker_id
 
         self.prev_qdot_cmd = np.zeros(self.joint_count, dtype=np.float32)
         self.prev_joint_acc = np.zeros(self.joint_count, dtype=np.float32)
@@ -615,6 +577,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         measured_accelerations = []
         measured_jerks = []
         substep_distances = []
+        substep_raw_distances = []
         substep_risks = []
         substep_contacts = []
         previous_substep_capsules = self._capsules()
@@ -628,7 +591,7 @@ class UR5DynamicObstacleEnv(gym.Env):
                 self.joint_ids,
                 p.VELOCITY_CONTROL,
                 targetVelocities=qdot_substep.tolist(),
-                forces=[float(self.execution_cfg["joint_motor_force"])] * self.joint_count,
+                forces=[self.execution_cfg.joint_motor_force] * self.joint_count,
                 physicsClientId=self.physics_client_id,
             )
             p.stepSimulation(physicsClientId=self.physics_client_id)
@@ -660,6 +623,7 @@ class UR5DynamicObstacleEnv(gym.Env):
             measured_accelerations.append(measured_acc.copy())
             measured_jerks.append(measured_jerk.copy())
             substep_distances.append(float(substep_risk.d_min))
+            substep_raw_distances.append(float(substep_risk.d_min_raw))
             substep_risks.append(float(substep_risk.risk_global))
             substep_contacts.append(bool(contact))
             self.prev_measured_qdot = measured_qdot.copy()
@@ -671,6 +635,9 @@ class UR5DynamicObstacleEnv(gym.Env):
         risk = self.last_risk
         # 碰撞和成功是 episode 的两个正常终止原因；步数耗尽是 truncated。
         control_min_distance = min(substep_distances) if substep_distances else float(risk.d_min)
+        control_min_distance_raw = (
+            min(substep_raw_distances) if substep_raw_distances else float(risk.d_min_raw)
+        )
         control_max_risk = max(substep_risks) if substep_risks else float(risk.risk_global)
         # Collision truth comes from PyBullet contact.  Capsule overlap is an
         # approximate geometry signal and is already represented by the safety
@@ -704,19 +671,17 @@ class UR5DynamicObstacleEnv(gym.Env):
         if self.method in {"ee_fixed", "link_fixed", "predictive_link"}:
             # 固定惩罚方法把风险代价直接扣进 reward；LDRC 方法把 cost
             # 单独交给 SACAgent 的 cost critic 和拉格朗日乘子处理。
-            reward -= float(self.config["sac"]["fixed_risk_penalty"]) * cost
+            reward -= self.runtime_config.sac.fixed_risk_penalty * cost
         if self.method == "predictive_link":
             # Observation-only predictive SAC did not learn to exploit its early
             # warning reliably. Keep this shaping term opt-in so all historical
             # checkpoints and link_fixed baselines retain their exact objective.
             predictive_signal = float(info.get("risk_pred_body", 0.0))
-            if self.config["sac"].get("predictive_risk_penalty_mode", "raw") == "excess":
+            if self.runtime_config.sac.predictive_risk_penalty_mode == "excess":
                 # Isolate early-warning information instead of paying twice for
                 # risk already represented by the current-risk cost.
                 predictive_signal = max(predictive_signal - float(info["risk_global"]), 0.0)
-            predictive_reward_penalty = float(
-                self.config["sac"].get("predictive_risk_penalty", 0.0)
-            ) * predictive_signal
+            predictive_reward_penalty = self.runtime_config.sac.predictive_risk_penalty * predictive_signal
             reward -= predictive_reward_penalty
 
         # policy 频率导数、240 Hz 命令导数和 240 Hz 反馈导数分开记录；
@@ -736,17 +701,19 @@ class UR5DynamicObstacleEnv(gym.Env):
                 "predictive_reward_penalty": float(predictive_reward_penalty),
                 "predictive_reward_signal": float(
                     predictive_reward_penalty
-                    / max(float(self.config["sac"].get("predictive_risk_penalty", 0.0)), 1e-12)
+                    / max(self.runtime_config.sac.predictive_risk_penalty, 1e-12)
                 )
                 if self.method == "predictive_link"
                 else 0.0,
                 "collision": bool(collision),
                 "success": bool(success),
                 "control_min_distance": float(control_min_distance),
+                "control_min_distance_raw": float(control_min_distance_raw),
                 "control_max_risk": float(control_max_risk),
                 "control_safety_violation": bool(control_safety_violation),
                 "control_collision": bool(collision),
                 "substep_distance": np.asarray(substep_distances, dtype=np.float32),
+                "substep_distance_raw": np.asarray(substep_raw_distances, dtype=np.float32),
                 "substep_risk": np.asarray(substep_risks, dtype=np.float32),
                 "substep_contact": np.asarray(substep_contacts, dtype=np.bool_),
                 "qdot_cmd": qdot_cmd.copy(),
@@ -864,47 +831,12 @@ class UR5DynamicObstacleEnv(gym.Env):
         }
 
     def _surface_distance_jacobian(self, capsule_index: int, obstacle_center: np.ndarray) -> np.ndarray:
-        q, q_dot = self._joint_state()
-        base_capsule = self._capsules()[capsule_index]
-        closest, _ = closest_point_on_segment(obstacle_center, base_capsule.start, base_capsule.end)
-        delta = obstacle_center - closest
-        distance = float(np.linalg.norm(delta))
-        direction = delta / (distance + self.risk_config.eps)
-        jacobian = np.zeros(self.joint_count, dtype=np.float32)
-
-        for joint_offset, joint_id in enumerate(self.joint_ids):
-            p.resetJointState(
-                self.robot_id,
-                joint_id,
-                float(q[joint_offset] + self.safety_qp_fd_epsilon),
-                targetVelocity=float(q_dot[joint_offset]),
-                physicsClientId=self.physics_client_id,
-            )
-            perturbed_capsule = self._capsules()[capsule_index]
-            perturbed_closest, _ = closest_point_on_segment(
-                obstacle_center,
-                perturbed_capsule.start,
-                perturbed_capsule.end,
-            )
-            point_jacobian = (perturbed_closest - closest) / self.safety_qp_fd_epsilon
-            jacobian[joint_offset] = -float(np.dot(direction, point_jacobian))
-            p.resetJointState(
-                self.robot_id,
-                joint_id,
-                float(q[joint_offset]),
-                targetVelocity=float(q_dot[joint_offset]),
-                physicsClientId=self.physics_client_id,
-            )
-
-        for joint_id, joint_value, joint_velocity in zip(self.joint_ids, q, q_dot):
-            p.resetJointState(
-                self.robot_id,
-                joint_id,
-                float(joint_value),
-                targetVelocity=float(joint_velocity),
-                physicsClientId=self.physics_client_id,
-            )
-        return jacobian
+        return self.robot.surface_distance_jacobian(
+            capsule_index,
+            obstacle_center,
+            self.safety_qp_fd_epsilon,
+            self.risk_config.eps,
+        )
 
     def close(self) -> None:
         if p.isConnected(self.physics_client_id):
@@ -953,6 +885,8 @@ class UR5DynamicObstacleEnv(gym.Env):
             "obstacle_count": int(sum(state.enabled for state in self.obstacle_states)),
             "risk_global": float(risk.risk_global),
             "d_min": float(risk.d_min),
+            "d_min_raw": float(risk.d_min_raw),
+            "geometry_margin": float(self.risk_config.geometry_margin),
             "closest_link": int(risk.closest_link),
             "safety_violation": bool(risk.d_min < self.risk_config.d_safe),
             "risk_body": risk.risks.copy(),
@@ -962,6 +896,11 @@ class UR5DynamicObstacleEnv(gym.Env):
                 {
                     "risk_pred_body": float(predictive_risk.risk_pred_body),
                     "d_pred": predictive_risk.d_pred.copy(),
+                    "d_pred_raw": (
+                        predictive_risk.d_pred.copy()
+                        if predictive_risk.d_pred_raw is None
+                        else predictive_risk.d_pred_raw.copy()
+                    ),
                     "t_enter_pred": predictive_risk.t_enter.copy(),
                     "risk_pred_per_link": predictive_risk.risk_pred_per_link.copy(),
                     "critical_link_pred": int(predictive_risk.critical_link),
@@ -983,7 +922,7 @@ class UR5DynamicObstacleEnv(gym.Env):
         if not active_obstacles:
             count = len(capsules)
             return PredictiveLinkRisk(
-                d_pred=np.full(count, float(self.observation_cfg["no_obstacle_distance"]), dtype=np.float32),
+                d_pred=np.full(count, self.observation_cfg.no_obstacle_distance, dtype=np.float32),
                 t_enter=np.full(count, np.inf, dtype=np.float32),
                 risk_pred_per_link=np.zeros(count, dtype=np.float32),
                 risk_pred_body=0.0,
@@ -991,6 +930,7 @@ class UR5DynamicObstacleEnv(gym.Env):
                 closest_points_pred=np.zeros((count, 3), dtype=np.float32),
                 closest_times=np.zeros(count, dtype=np.float32),
                 approach_velocities=np.zeros(count, dtype=np.float32),
+                d_pred_raw=np.full(count, self.observation_cfg.no_obstacle_distance, dtype=np.float32),
             )
 
         risks = [
@@ -999,7 +939,7 @@ class UR5DynamicObstacleEnv(gym.Env):
                 prev_capsules=self.prev_capsules,
                 obstacle_center=obstacle.center,
                 obstacle_velocity=obstacle.velocity,
-                obstacle_radius=float(self.obstacle_cfg["radius"]),
+                obstacle_radius=self.obstacle_cfg.radius,
                 dt=self.control_dt,
                 config=self.predictive_risk_config,
                 use_end_effector_only=self.method == "ee_fixed",
@@ -1014,6 +954,9 @@ class UR5DynamicObstacleEnv(gym.Env):
             return risks[0]
 
         d_stack = np.stack([risk.d_pred for risk in risks])
+        raw_d_stack = np.stack(
+            [risk.d_pred if risk.d_pred_raw is None else risk.d_pred_raw for risk in risks]
+        )
         nearest_obstacle_indices = np.argmin(d_stack, axis=0)
         link_indices = np.arange(d_stack.shape[1])
         per_link_risk = np.max(np.stack([risk.risk_pred_per_link for risk in risks]), axis=0)
@@ -1032,23 +975,14 @@ class UR5DynamicObstacleEnv(gym.Env):
             approach_velocities=np.max(np.stack([risk.approach_velocities for risk in risks]), axis=0).astype(
                 np.float32
             ),
+            d_pred_raw=raw_d_stack[nearest_obstacle_indices, link_indices].astype(np.float32),
         )
 
     def _joint_state(self) -> tuple[np.ndarray, np.ndarray]:
-        states = p.getJointStates(self.robot_id, self.joint_ids, physicsClientId=self.physics_client_id)
-        q = np.asarray([s[0] for s in states], dtype=np.float32)
-        q_dot = np.asarray([s[1] for s in states], dtype=np.float32)
-        return q, q_dot
+        return self.robot.joint_state()
 
     def _end_effector_state(self) -> tuple[np.ndarray, np.ndarray]:
-        state = p.getLinkState(
-            self.robot_id,
-            self.tool_link_id,
-            computeLinkVelocity=True,
-            computeForwardKinematics=True,
-            physicsClientId=self.physics_client_id,
-        )
-        return np.asarray(state[4], dtype=np.float32), np.asarray(state[6], dtype=np.float32)
+        return self.robot.end_effector_state()
 
     def _goal_error(self) -> np.ndarray:
         ee_pos, _ = self._end_effector_state()
@@ -1056,137 +990,31 @@ class UR5DynamicObstacleEnv(gym.Env):
 
     def _capsules(self) -> list[CapsuleState]:
         """Return the current world-space capsule approximation of the arm."""
-        return self.capsule_model.states(self.robot_id, self.physics_client_id)
+        return self.robot.capsules()
 
     def _has_contact(self) -> bool:
         """Return whether robot-obstacle contact exists at the current physics substep."""
         if not self.obstacle_enabled or not self.obstacle_ids:
             return False
-        return any(
-            p.getContactPoints(
-                bodyA=self.robot_id,
-                bodyB=obstacle_id,
-                physicsClientId=self.physics_client_id,
-            )
-            for obstacle_id in self.obstacle_ids
-        )
-
-    def _reset_robot(self) -> None:
-        reset_cfg = self.robot_cfg["reset"]
-        default = np.asarray(reset_cfg["default_joint_positions"], dtype=np.float32)
-        noise_range = float(reset_cfg["joint_noise_range"])
-        noise = self.rng.uniform(-noise_range, noise_range, size=self.joint_count).astype(np.float32)
-        q0 = default + noise
-        for joint_id, joint_value in zip(self.joint_ids, q0):
-            p.resetJointState(
-                self.robot_id,
-                joint_id,
-                float(joint_value),
-                targetVelocity=0.0,
-                physicsClientId=self.physics_client_id,
-            )
-
-    def _resolve_robot_references(self) -> None:
-        """Map configured URDF joint/link names to PyBullet integer ids."""
-        joint_name_to_id, link_name_to_id = self._robot_name_maps()
-        self.joint_ids = [self._resolve_name(name, joint_name_to_id, "joint") for name in self.robot_cfg["joint_names"]]
-        self.tool_link_id = self._resolve_name(self.robot_cfg["tool_link_name"], link_name_to_id, "link")
-        self.joint_count = len(self.joint_ids)
-        self.capsule_model.resolve_link_names(link_name_to_id)
-
-    def _robot_name_maps(self) -> tuple[dict[str, int], dict[str, int]]:
-        joint_name_to_id: dict[str, int] = {}
-        link_name_to_id = {"base": -1}
-        for joint_id in range(p.getNumJoints(self.robot_id, physicsClientId=self.physics_client_id)):
-            info = p.getJointInfo(self.robot_id, joint_id, physicsClientId=self.physics_client_id)
-            joint_name_to_id[info[1].decode("utf-8")] = joint_id
-            link_name_to_id[info[12].decode("utf-8")] = joint_id
-        return joint_name_to_id, link_name_to_id
-
-    @staticmethod
-    def _resolve_name(name: str, name_to_id: dict[str, int], kind: str) -> int:
-        if name not in name_to_id:
-            available = ", ".join(sorted(name_to_id))
-            raise KeyError(f"Unknown {kind} name {name!r}; available {kind}s: {available}")
-        return name_to_id[name]
+        return self.scene.has_robot_contact(self.robot_id)
 
     def _move_target(self, dt: float) -> None:
         target_state = self.target_provider.advance(dt)
         self.goal = target_state.position
         self.goal_velocity = target_state.velocity
-        if self.goal_marker_id is not None:
-            p.resetBasePositionAndOrientation(
-                self.goal_marker_id,
-                self.goal.tolist(),
-                [0, 0, 0, 1],
-                physicsClientId=self.physics_client_id,
-            )
+        self.scene.sync_goal(self.goal)
 
     def _advance_obstacle(self, dt: float) -> None:
         self.obstacle_states = self.obstacle_provider.advance(dt)
         self._sync_legacy_obstacle_state()
         if not self.obstacle_enabled or not self.obstacle_ids:
             return
-        active_states = [state for state in self.obstacle_states if state.enabled]
-        for obstacle_id, obstacle_state in zip(self.obstacle_ids, active_states):
-            p.resetBasePositionAndOrientation(
-                obstacle_id,
-                obstacle_state.center.tolist(),
-                [0, 0, 0, 1],
-                physicsClientId=self.physics_client_id,
-            )
+        self.scene.sync_obstacles(self.obstacle_states)
 
     def _sync_legacy_obstacle_state(self) -> None:
         if not self.obstacle_states:
-            self.obstacle_center = np.asarray(self.obstacle_cfg["disabled_position"], dtype=np.float32)
+            self.obstacle_center = np.asarray(self.obstacle_cfg.disabled_position, dtype=np.float32)
             self.obstacle_velocity = np.zeros(3, dtype=np.float32)
             return
         self.obstacle_center = self.obstacle_states[0].center
         self.obstacle_velocity = self.obstacle_states[0].velocity
-
-    def _create_floor(self) -> None:
-        collision = p.createCollisionShape(p.GEOM_PLANE, physicsClientId=self.physics_client_id)
-        visual = p.createVisualShape(
-            p.GEOM_PLANE,
-            rgbaColor=self.visual_cfg["floor_rgba"],
-            physicsClientId=self.physics_client_id,
-        )
-        p.createMultiBody(
-            0,
-            collision,
-            visual,
-            self.visual_cfg["floor_position"],
-            physicsClientId=self.physics_client_id,
-        )
-
-    def _create_obstacle(self, center: np.ndarray) -> int:
-        radius = float(self.obstacle_cfg["radius"])
-        collision = p.createCollisionShape(p.GEOM_SPHERE, radius=radius, physicsClientId=self.physics_client_id)
-        visual = p.createVisualShape(
-            p.GEOM_SPHERE,
-            radius=radius,
-            rgbaColor=self.visual_cfg["obstacle_rgba"],
-            physicsClientId=self.physics_client_id,
-        )
-        return p.createMultiBody(
-            baseMass=0.0,
-            baseCollisionShapeIndex=collision,
-            baseVisualShapeIndex=visual,
-            basePosition=center.tolist(),
-            physicsClientId=self.physics_client_id,
-        )
-
-    def _create_goal_marker(self, goal: np.ndarray) -> int:
-        visual = p.createVisualShape(
-            p.GEOM_SPHERE,
-            radius=float(self.visual_cfg["goal_marker_radius"]),
-            rgbaColor=self.visual_cfg["goal_rgba"],
-            physicsClientId=self.physics_client_id,
-        )
-        return p.createMultiBody(
-            baseMass=0.0,
-            baseCollisionShapeIndex=-1,
-            baseVisualShapeIndex=visual,
-            basePosition=goal.tolist(),
-            physicsClientId=self.physics_client_id,
-        )

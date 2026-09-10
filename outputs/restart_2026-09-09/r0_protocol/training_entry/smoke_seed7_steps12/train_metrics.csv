@@ -1,1 +1,0 @@
-episode,step,episode_reward,episode_cost,episode_length,success,collision,safety_violation_rate,min_distance,mean_risk,lambda,alpha

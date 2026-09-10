@@ -1,22 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from collections.abc import Sequence
 
 import numpy as np
 import pybullet as p
 
-
-@dataclass(frozen=True)
-class CapsuleSpec:
-    """Configured capsule endpoint links and radius for one robot body segment."""
-
-    name: str
-    parent_link_name: str
-    child_link_name: str
-    radius: float
-    parent_offset: np.ndarray
-    child_offset: np.ndarray
+from rl_risk_sac.utils.runtime_config import CapsuleSpec
 
 
 @dataclass
@@ -36,29 +26,13 @@ class UR5CapsuleModel:
     所以这里用“父 link 世界坐标 -> 子 link 世界坐标 + 半径”的胶囊近似。
     """
 
-    def __init__(self, specs: list[dict[str, Any]]) -> None:
-        self.specs = self._load_specs(specs)
+    def __init__(self, specs: Sequence[CapsuleSpec]) -> None:
+        self.specs = list(specs)
         self.link_name_to_id: dict[str, int] = {}
 
     @property
     def count(self) -> int:
         return len(self.specs)
-
-    @staticmethod
-    def _load_specs(specs: list[dict[str, Any]]) -> list[CapsuleSpec]:
-        capsule_specs = []
-        for spec in specs:
-            capsule_specs.append(
-                CapsuleSpec(
-                    name=str(spec["name"]),
-                    parent_link_name=str(spec["parent_link_name"]),
-                    child_link_name=str(spec["child_link_name"]),
-                    radius=float(spec["radius"]),
-                    parent_offset=np.asarray(spec.get("parent_offset", [0.0, 0.0, 0.0]), dtype=np.float32),
-                    child_offset=np.asarray(spec.get("child_offset", [0.0, 0.0, 0.0]), dtype=np.float32),
-                )
-            )
-        return capsule_specs
 
     def resolve_link_names(self, link_name_to_id: dict[str, int]) -> None:
         """Cache the mapping from URDF link names to PyBullet link ids."""
@@ -88,6 +62,11 @@ class UR5CapsuleModel:
                 physics_client_id,
                 base_position=base,
             )
+            if float(np.linalg.norm(end - start)) <= 1e-6 and not spec.allow_degenerate:
+                raise ValueError(
+                    f"Capsule {spec.name!r} is degenerate; set allow_degenerate=true "
+                    "only for an intentional sphere approximation"
+                )
             states.append(CapsuleState(start=start, end=end, radius=spec.radius, name=spec.name))
         return states
 

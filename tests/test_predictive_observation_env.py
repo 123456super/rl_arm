@@ -11,14 +11,15 @@ from rl_risk_sac.utils.config import load_config
 def _predictive_config():
     config = load_config("configs/default.yaml")
     config["env"]["observation"]["schema_version"] = "link_risk_pred_v1"
-    config["env"]["observation"]["predictive_risk"] = {"horizon": 1.0, "step": 0.05}
+    config["env"]["observation"]["predictive_risk"].update({"horizon": 1.0, "step": 0.05})
     config["env"]["max_episode_steps"] = 4
     config["device"] = "cpu"
     return config
 
 
 def test_predictive_observation_env_outputs_finite_schema_fields() -> None:
-    env = UR5DynamicObstacleEnv(_predictive_config(), method="predictive_link")
+    config = _predictive_config()
+    env = UR5DynamicObstacleEnv(config, method="predictive_link")
     observation, info = env.reset(seed=101)
 
     assert info["observation_schema"] == "link_risk_pred_v1"
@@ -26,6 +27,12 @@ def test_predictive_observation_env_outputs_finite_schema_fields() -> None:
     assert np.isfinite(observation).all()
     assert "risk_pred_body" in info
     assert "d_pred" in info
+    assert "d_pred_raw" in info
+    np.testing.assert_allclose(
+        info["d_pred_raw"] - info["d_pred"],
+        config["risk"]["geometry_margin"],
+        atol=1e-6,
+    )
     assert "t_enter_pred" in info
     assert "risk_pred_per_link" in info
 

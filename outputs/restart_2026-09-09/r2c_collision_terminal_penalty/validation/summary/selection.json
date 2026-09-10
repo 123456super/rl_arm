@@ -1,5 +1,0 @@
-{
-  "status": "gate_failed",
-  "reason": "Checkpoint gate failed: no candidate meets both preregistered success thresholds",
-  "eligible_candidates": 0
-}

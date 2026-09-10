@@ -40,7 +40,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         env.observation_space.shape[0],
         env.action_space.shape[0],
         capacity=int(smoke_cfg["replay_capacity"]),
-        device=config.get("device", "cpu"),
+        device=config["device"],
     )
 
     for _ in range(int(smoke_cfg["rollout_steps"])):

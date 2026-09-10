@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Mapping, Protocol
 
 import numpy as np
+
+from rl_risk_sac.utils.runtime_config import FloatRange, GoalRuntimeConfig
 
 
 @dataclass(frozen=True)
@@ -29,17 +31,17 @@ class WorkspaceTargetProvider:
     环境再把可视化 marker 移到同一个位置。
     """
 
-    def __init__(self, config: dict[str, Any], workspace: dict[str, list[float]]) -> None:
+    def __init__(self, config: GoalRuntimeConfig, workspace: Mapping[str, FloatRange]) -> None:
         self.config = config
         self.workspace = workspace
-        self.mode = str(config.get("mode", "static"))
+        self.mode = config.mode
         self._position = np.zeros(3, dtype=np.float32)
         self._velocity = np.zeros(3, dtype=np.float32)
 
     def reset(self, rng: np.random.Generator) -> TargetState:
         """为新 episode 采样或设置目标初始位置和速度。"""
-        if self.config.get("fixed", False):
-            self._position = np.asarray(self.config["position"], dtype=np.float32).copy()
+        if self.config.fixed:
+            self._position = np.asarray(self.config.position, dtype=np.float32).copy()
         else:
             self._position = np.asarray(
                 [rng.uniform(*self.workspace[axis]) for axis in ("x", "y", "z")],
@@ -52,7 +54,7 @@ class WorkspaceTargetProvider:
             # 动态目标从随机方向和随机速度开始，在 workspace 边界反弹。
             direction = rng.normal(size=3).astype(np.float32)
             direction /= np.linalg.norm(direction) + 1e-8
-            speed = rng.uniform(*self.config["speed_range"])
+            speed = rng.uniform(*self.config.speed_range)
             self._velocity = (direction * speed).astype(np.float32)
         else:
             raise ValueError(f"Unknown goal mode: {self.mode}")

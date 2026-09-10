@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
-
 import numpy as np
 
+from rl_risk_sac.utils.runtime_config import RewardRuntimeConfig, RiskCostConfig
 from rl_risk_sac.utils.predictive_risk import PredictiveLinkRisk
 from rl_risk_sac.utils.risk import LinkRisk
 
@@ -20,9 +19,9 @@ class ReachingObservationBuilder:
     distance_clip: tuple[float, float]
     v_max: float
     ttc_max: float
-    schema_version: str = "link_risk_v1"
-    prediction_horizon: float = 1.0
-    include_predictive_per_link_score: bool = True
+    schema_version: str
+    prediction_horizon: float
+    include_predictive_per_link_score: bool
 
     def dimension(self, joint_count: int, link_count: int) -> int:
         # q, qdot, previous command, goal position/velocity errors,
@@ -109,8 +108,8 @@ class ReachingObservationBuilder:
 @dataclass(frozen=True)
 class ReachingObjective:
     """Reward/cost definition for the reaching-with-obstacle task."""
-    reward_config: dict[str, Any]
-    cost_config: dict[str, Any]
+    reward_config: RewardRuntimeConfig
+    cost_config: RiskCostConfig
     safe_distance: float
 
     def reward(
@@ -127,14 +126,14 @@ class ReachingObjective:
         progress = previous_goal_error_norm - goal_error_norm
         smooth = float(np.sum(np.square(command - previous_command)))
         value = (
-            -float(self.reward_config["w_position"]) * goal_error_norm**2
-            + float(self.reward_config["w_progress"]) * progress
-            - float(self.reward_config["w_smooth"]) * smooth
+            -self.reward_config.w_position * goal_error_norm**2
+            + self.reward_config.w_progress * progress
+            - self.reward_config.w_smooth * smooth
         )
         if success:
-            value += float(self.reward_config["success_bonus"])
+            value += self.reward_config.success_bonus
         if collision:
-            value -= float(self.reward_config["collision_penalty"])
+            value -= self.reward_config.collision_penalty
         return float(value)
 
     def cost(
@@ -154,7 +153,7 @@ class ReachingObjective:
         effective_distance = risk.d_min if d_min is None else float(d_min)
         violation = float(effective_distance < self.safe_distance)
         return float(
-            float(self.cost_config["k_risk"]) * effective_risk
-            + float(self.cost_config["k_violation"]) * violation
-            + float(self.cost_config["k_collision"]) * float(collision)
+            self.cost_config.k_risk * effective_risk
+            + self.cost_config.k_violation * violation
+            + self.cost_config.k_collision * float(collision)
         )

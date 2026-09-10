@@ -111,7 +111,7 @@ Soft Actor-Critic（SAC）适合机械臂关节速度连续控制，但单纯依
 | --- | --- | --- |
 | 末端风险或当前全局最小距离 | 易遗漏非末端风险及未来接近趋势 | 逐连杆有限时域风险预测 |
 | `max_i Risk_i` 硬聚合 | 最危险连杆切换时可能不连续 | Softmax 聚合并保留 Top-k 风险信息 |
-| 预测风险直接进入 SAC 状态/奖励 | 高维相关噪声与误报可能降低样本效率并诱发保守策略 | 当前风险 SAC 名义控制 + 动作条件预测安全层 |
+| 预测风险直接进入 SAC 状态/奖励 | 高维相关噪声与误报可能降低样本效率并诱发保守策略 | 经 R2 Gate 冻结的名义 SAC + 动作条件预测安全层 |
 | 仅在碰撞后给予惩罚 | 信号稀疏且缺少提前量 | 未来最小间隙和首次越界时间 |
 | 安全修正与平滑串联 | 后级滤波或插值可能改变安全动作 | 将实际子步轨迹参数化嵌入同一 QP |
 
@@ -121,7 +121,7 @@ Soft Actor-Critic（SAC）适合机械臂关节速度连续控制，但单纯依
 flowchart LR
     A[机器人、目标与障碍物状态] --> B[整臂胶囊体与最近点]
     B --> C[当前连杆动态风险]
-    C --> F[Instant-Link-SAC 策略动作]
+    C --> F[R2-D 冻结名义 SAC 动作]
     F --> G[rate limit + Butterworth 名义 endpoint]
     G --> D[候选 endpoint 与障碍物联合外推]
     D --> E[逐连杆逐子步预测间隙]
@@ -211,7 +211,7 @@ Risk_i^now = clip(w_d R_d_i + w_v R_v_i + w_t R_t_i, 0, 1)
 
 ### 6.3 动作条件的预测性连杆风险表征
 
-设控制周期为 `T_c=M Delta t_phys`，预测采样时刻为 `tau_k in (0,T_h]`。先将 Instant-Link-SAC 输出依次经过已有 rate limiter 和 Butterworth 滤波，得到候选名义 endpoint `q_dot_nom`；该有状态滤波每个控制周期只调用一次并缓存结果，预测、QP 与日志共用同一 endpoint。当前控制周期内按与执行器一致的 quintic `s(z)=6z^5-15z^4+10z^3` 从上一实际下发速度过渡到候选 endpoint。由于执行器在每个 240 Hz 物理子步下发一次速度命令，主模型采用与下发语义一致的离散零阶保持形式，而不是另用连续积分近似：
+设控制周期为 `T_c=M Delta t_phys`，预测采样时刻为 `tau_k in (0,T_h]`。先将 R2-D 冻结的名义 SAC 输出依次经过已有 rate limiter 和 Butterworth 滤波，得到候选名义 endpoint `q_dot_nom`；该有状态滤波每个控制周期只调用一次并缓存结果，预测、QP 与日志共用同一 endpoint。当前控制周期内按与执行器一致的 quintic `s(z)=6z^5-15z^4+10z^3` 从上一实际下发速度过渡到候选 endpoint。由于执行器在每个 240 Hz 物理子步下发一次速度命令，主模型采用与下发语义一致的离散零阶保持形式，而不是另用连续积分近似：
 
 ```text
 s_k = s(k/M),  k=1,...,M,  s_0=0
@@ -313,7 +313,7 @@ R2 的补正顺序先在无障碍下保持相同 `link_risk_v1` 维度并写入�
 
 完整方法简称 `VG-PTQP`（Verification-Guided Predictive-Trajectory-QP）。
 
-安全层输入 Instant-Link-SAC 名义终点速度 `q_dot_nom`、当前机器人/障碍物状态和前一周期实际执行状态。优化变量为安全终点速度 `u` 与逐约束松弛 `xi_(i,k)`。对一个控制周期内的 `M` 个物理子步，固定 quintic 基函数 `s_k` 给出：
+安全层输入 R2-D 冻结名义 SAC 的终点速度 `q_dot_nom`、当前机器人/障碍物状态和前一周期实际执行状态。优化变量为安全终点速度 `u` 与逐约束松弛 `xi_(i,k)`。对一个控制周期内的 `M` 个物理子步，固定 quintic 基函数 `s_k` 给出：
 
 ```text
 q_dot_k(u) = q_dot_prev + s_k (u - q_dot_prev)
@@ -407,7 +407,7 @@ u_ref^(r+1) = u_*^(r)
 QP 的安全终点速度 `u` 唯一确定其优化时已经检查的 quintic 子步轨迹。执行器必须原样执行该轨迹，不得再附加会改变轨迹的滤波或插值：
 
 ```text
-Instant-Link-SAC 名义终点速度
+R2-D 冻结名义 SAC 终点速度
 -> 动作条件预测与初始约束生成
 -> 轨迹嵌入式安全 QP
 -> 全身非线性验收与反例细化
@@ -454,20 +454,21 @@ Instant-Link-SAC 名义终点速度
 
 ### 7.2 主比较与消融矩阵
 
-下表以 Instant-Link 路线通过 R2-C 为当前候选写法；方法名前缀在 R2-D 前属于预注册候选而非已完成事实。若 R2 证据要求改为任务 SAC nominal actor，必须在 R3 前把所有 QP 组统一替换为同一冻结 actor，并保留从头重跑的 Instant-Link-SAC 作为独立策略基线，不能在不同 QP 组之间混用 actor。
+下表使用路线无关的 `Nominal-SAC` 指代 R2-D 最终冻结的 actor；其 observation 和训练职责由 R2-C 证据决定。Instant-Link-SAC 必须从头重跑为独立策略基线；若它在 R2-D 被选为名义 actor，则两者可共享 checkpoint，但表中仍须区分“策略基线”和“同 actor 的安全层消融”，不能在不同 QP 组之间混用 actor。
 
 | 方法 | 风险信息 | 名义策略安全处理 | 执行期指令整形 | 目的 |
 | --- | --- | --- | --- | --- |
 | `EE-SAC` | 末端当前风险 | 固定惩罚 | 无 | 末端风险基线 |
 | `Instant-Link-SAC` | 当前连杆风险 | 固定惩罚 | 与部署相同的 rate limit + Butterworth + quintic RTB | 从头建立的连杆级名义基线 |
 | `Predictive-Link-SAC`（可选非核心消融） | 预测风险直接进入状态/奖励 | 固定惩罚 | 无 | 检查预测直接耦合策略的影响 |
-| `Instant-Link-SAC+Reactive-Projection` | 当前连杆风险 | 固定惩罚 | 单时刻迭代投影 | 反应式工程基线 |
-| `Instant-Link-SAC+One-Step-QP` | 当前连杆风险 | 固定 Instant-Link actor | 标准 QP、当前时刻安全约束、quintic 运动边界 | 隔离求解器与运动边界作用 |
-| `Predictive-Trajectory-QP`（固定筛选消融） | 动作条件逐连杆间隙 | 固定 Instant-Link actor | 固定 Top-k 多时刻预测约束 + 同一 quintic 运动边界 | 隔离动作条件预测增益 |
-| `Proposed: VG-Predictive-Trajectory-QP` | 动作条件逐连杆间隙 | 固定 Instant-Link actor | 多时刻预测约束 + 全身非线性验收/反例增广 + 同一 quintic 运动边界 | 验证反例细化增益 |
+| `Nominal-SAC+RTB` | 由 R2-D 路线冻结 | 固定 R2-D actor | rate limit + Butterworth + quintic RTB | 所有安全层组的共同名义基准 |
+| `Nominal-SAC+Reactive-Projection` | 当前几何状态 | 固定 R2-D actor | 单时刻迭代投影 | 反应式工程基线 |
+| `Nominal-SAC+One-Step-QP` | 当前几何状态 | 固定 R2-D actor | 标准 QP、当前时刻安全约束、quintic 运动边界 | 隔离求解器与运动边界作用 |
+| `Predictive-Trajectory-QP`（固定筛选消融） | 动作条件逐连杆间隙 | 固定 R2-D actor | 固定 Top-k 多时刻预测约束 + 同一 quintic 运动边界 | 隔离动作条件预测增益 |
+| `Proposed: VG-Predictive-Trajectory-QP` | 动作条件逐连杆间隙 | 固定 R2-D actor | 多时刻预测约束 + 全身非线性验收/反例增广 + 同一 quintic 运动边界 | 验证反例细化增益 |
 | `LDRC-SAC`（次要） | 当前连杆风险 | 约束 SAC | 与主比较相同的 RTB；自适应 EMA 只能另列执行器消融 | 保留已有安全处理比较 |
 
-正式主结论最低完成 `Instant-Link-SAC+RTB`、`Reactive-Projection`、`One-Step-QP`、固定 Top-k `Predictive-Trajectory-QP` 和完整 `VG-Predictive-Trajectory-QP` 五组，并使用相同冻结 actors、相同 RTB 和相同 episode seeds 做配对反事实。`One-Step-QP` 与固定 Top-k 预测 QP 隔离未来动作条件几何的作用；固定 Top-k 预测 QP 与完整方法隔离验证驱动约束增广的作用。其他策略基线只有按新协议重跑后才能进入正式表。
+正式主结论最低完成 `Nominal-SAC+RTB`、`Nominal-SAC+Reactive-Projection`、`Nominal-SAC+One-Step-QP`、固定 Top-k `Predictive-Trajectory-QP` 和完整 `VG-Predictive-Trajectory-QP` 五组，并使用相同冻结 actors、相同 RTB 和相同 episode seeds 做配对反事实。`One-Step-QP` 与固定 Top-k 预测 QP 隔离未来动作条件几何的作用；固定 Top-k 预测 QP 与完整方法隔离验证驱动约束增广的作用。其他策略基线只有按新协议重跑后才能进入正式表。
 
 ### 7.3 新证据准入规则
 
@@ -514,7 +515,7 @@ RefinementRecoveryRate = 经细化后通过验收的控制周期数
 
 ### 7.5 核心实验一：预测与动作条件有效性
 
-固定重训后的 Instant-Link-SAC 动作，在相同离线/在线轨迹上比较当前风险、当前运动趋势预测与候选动作条件预测；Predictive-Link-SAC 若从头重跑，只作为非核心策略耦合消融，不承担核心正结论。预测精度的主真值采用开环反事实协议：从相同机器人和障碍物状态出发，对各方法输入同一个缓存的候选 endpoint，在仿真副本中执行与预测一致的本周期 quintic 子步和周期外 endpoint 保持，不允许后续 SAC 动作改变真值轨迹。另以闭环滚动的一周期预测误差作为部署相关指标；超过一周期的真实闭环误差单独报告，因为其中包含后续策略重规划影响。
+固定 R2-D 名义 SAC 的动作，在相同离线/在线轨迹上比较当前风险、当前运动趋势预测与候选动作条件预测；Predictive-Link-SAC 若从头重跑，只作为非核心策略耦合消融，不承担核心正结论。预测精度的主真值采用开环反事实协议：从相同机器人和障碍物状态出发，对各方法输入同一个缓存的候选 endpoint，在仿真副本中执行与预测一致的本周期 quintic 子步和周期外 endpoint 保持，不允许后续 SAC 动作改变真值轨迹。另以闭环滚动的一周期预测误差作为部署相关指标；超过一周期的真实闭环误差单独报告，因为其中包含后续策略重规划影响。
 
 场景包括：
 
@@ -527,7 +528,7 @@ RefinementRecoveryRate = 经细化后通过验收的控制周期数
 
 ### 7.6 核心实验二：预测轨迹嵌入式安全 QP 有效性
 
-在相同固定 Instant-Link-SAC actors 上成对比较无安全层、现有 Reactive-Projection、标准 One-Step-QP、固定 Top-k Predictive-Trajectory-QP 与完整 VG-Predictive-Trajectory-QP。除任务和碰撞指标外，重点报告：
+在相同的 R2-D 冻结名义 SAC actors 上成对比较无安全层、现有 Reactive-Projection、标准 One-Step-QP、固定 Top-k Predictive-Trajectory-QP 与完整 VG-Predictive-Trajectory-QP。除任务和碰撞指标外，重点报告：
 
 - 指令整形器介入次数与持续时间；
 - 每次介入的活跃连杆和动作修正幅度；

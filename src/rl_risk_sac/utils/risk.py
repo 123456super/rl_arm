@@ -5,21 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from rl_risk_sac.robots.ur5_capsules import CapsuleState
-
-
-@dataclass
-class RiskConfig:
-    """Parameters for converting link-obstacle geometry into normalized risk."""
-    d_safe: float = 0.12
-    sigma_d: float = 0.12
-    v_max: float = 0.7
-    ttc_max: float = 3.0
-    tau: float = 1.0
-    eps: float = 1e-8
-    eps_v: float = 1e-4
-    w_distance: float = 0.5
-    w_velocity: float = 0.2
-    w_ttc: float = 0.3
+from rl_risk_sac.utils.runtime_config import RiskConfig
 
 
 @dataclass
@@ -30,7 +16,10 @@ class LinkRisk:
     risk_global 是本时刻用于控制/训练的全局最大风险。
     """
     closest_points: np.ndarray
+    # distances are conservative capsule gaps used by control and learning.
+    # raw_distances retain the uncalibrated capsule gaps for diagnostics.
     distances: np.ndarray
+    raw_distances: np.ndarray
     directions: np.ndarray
     link_velocities: np.ndarray
     approach_velocities: np.ndarray
@@ -38,6 +27,7 @@ class LinkRisk:
     risks: np.ndarray
     risk_global: float
     d_min: float
+    d_min_raw: float
     closest_link: int
 
 
@@ -72,6 +62,7 @@ def compute_link_risk(
     count = len(capsules)
     closest_points = np.zeros((count, 3), dtype=np.float32)
     distances = np.zeros(count, dtype=np.float32)
+    raw_distances = np.zeros(count, dtype=np.float32)
     directions = np.zeros((count, 3), dtype=np.float32)
     link_velocities = np.zeros((count, 3), dtype=np.float32)
     approach_velocities = np.zeros(count, dtype=np.float32)
@@ -87,7 +78,8 @@ def compute_link_risk(
         delta = obstacle_center - closest
         center_distance = float(np.linalg.norm(delta))
         direction = delta / (center_distance + config.eps)
-        surface_distance = center_distance - capsule.radius - obstacle_radius
+        raw_surface_distance = center_distance - capsule.radius - obstacle_radius
+        surface_distance = raw_surface_distance - config.geometry_margin
 
         if prev_capsules is not None and i < len(prev_capsules):
             prev = prev_capsules[i]
@@ -125,6 +117,7 @@ def compute_link_risk(
 
         closest_points[i] = closest
         distances[i] = surface_distance
+        raw_distances[i] = raw_surface_distance
         directions[i] = direction
         link_velocities[i] = link_velocity
         approach_velocities[i] = approach_velocity
@@ -137,6 +130,7 @@ def compute_link_risk(
     return LinkRisk(
         closest_points=closest_points,
         distances=distances,
+        raw_distances=raw_distances,
         directions=directions,
         link_velocities=link_velocities,
         approach_velocities=approach_velocities,
@@ -144,5 +138,6 @@ def compute_link_risk(
         risks=risks,
         risk_global=risk_global,
         d_min=d_min,
+        d_min_raw=float(np.min(raw_distances)),
         closest_link=closest_link,
     )

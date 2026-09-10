@@ -42,8 +42,8 @@ class LinkRiskDetector:
     config: RiskConfig
     obstacle_radius: float
     dt: float
-    end_effector_only: bool = False
-    no_obstacle_distance: float = 1.5
+    end_effector_only: bool
+    no_obstacle_distance: float
 
     def detect(
         self,
@@ -100,11 +100,13 @@ def _aggregate_link_risks(risks: list[LinkRisk]) -> LinkRisk:
     # distance_stack 的形状是 [障碍物数量, 连杆数量]。对每根连杆取最近
     # 的那个障碍物，用它的 closest point/direction/TTC 等几何量。
     distance_stack = np.stack([risk.distances for risk in risks])
+    raw_distance_stack = np.stack([risk.raw_distances for risk in risks])
     nearest_obstacle_indices = np.argmin(distance_stack, axis=0)
     link_indices = np.arange(distance_stack.shape[1])
 
     closest_points = np.stack([risk.closest_points for risk in risks])[nearest_obstacle_indices, link_indices]
     distances = distance_stack[nearest_obstacle_indices, link_indices]
+    raw_distances = raw_distance_stack[nearest_obstacle_indices, link_indices]
     directions = np.stack([risk.directions for risk in risks])[nearest_obstacle_indices, link_indices]
     link_velocities = np.stack([risk.link_velocities for risk in risks])[nearest_obstacle_indices, link_indices]
     approach_velocities = np.stack([risk.approach_velocities for risk in risks])[nearest_obstacle_indices, link_indices]
@@ -116,6 +118,7 @@ def _aggregate_link_risks(risks: list[LinkRisk]) -> LinkRisk:
     return LinkRisk(
         closest_points=closest_points.astype(np.float32),
         distances=distances.astype(np.float32),
+        raw_distances=raw_distances.astype(np.float32),
         directions=directions.astype(np.float32),
         link_velocities=link_velocities.astype(np.float32),
         approach_velocities=approach_velocities.astype(np.float32),
@@ -123,6 +126,7 @@ def _aggregate_link_risks(risks: list[LinkRisk]) -> LinkRisk:
         risks=per_link_risk.astype(np.float32),
         risk_global=float(np.max(per_link_risk)),
         d_min=float(np.min(distance_stack)),
+        d_min_raw=float(np.min(raw_distance_stack)),
         closest_link=int(np.argmin(distances)),
     )
 
@@ -133,6 +137,7 @@ def _empty_risk(capsules: list[CapsuleState], config: RiskConfig, no_obstacle_di
     return LinkRisk(
         closest_points=np.zeros((count, 3), dtype=np.float32),
         distances=np.full(count, no_obstacle_distance, dtype=np.float32),
+        raw_distances=np.full(count, no_obstacle_distance, dtype=np.float32),
         directions=np.zeros((count, 3), dtype=np.float32),
         link_velocities=np.zeros((count, 3), dtype=np.float32),
         approach_velocities=np.zeros(count, dtype=np.float32),
@@ -140,5 +145,6 @@ def _empty_risk(capsules: list[CapsuleState], config: RiskConfig, no_obstacle_di
         risks=np.zeros(count, dtype=np.float32),
         risk_global=0.0,
         d_min=no_obstacle_distance,
+        d_min_raw=no_obstacle_distance,
         closest_link=0,
     )

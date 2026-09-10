@@ -74,7 +74,7 @@ def main() -> None:
     config["device"] = resolve_device(config)
     set_seed(int(config["seed"]))
     repo_root = Path(__file__).resolve().parents[1]
-    run_dir = build_run_dir(config, method, config["train"].get("run_name"))
+    run_dir = build_run_dir(config, method, config["train"]["run_name"])
     if run_dir.exists() and any(run_dir.iterdir()):
         raise FileExistsError(f"Refusing to overwrite non-empty training directory: {run_dir}")
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -110,7 +110,7 @@ def main() -> None:
         obs_dim=obs_dim,
         action_dim=action_dim,
         capacity=int(config["sac"]["replay_size"]),
-        device=config.get("device", "cpu"),
+        device=config["device"],
     )
 
     # 每次训练都落一个完整 config.json，保证之后评估/画图能复现实验条件。
@@ -133,6 +133,7 @@ def main() -> None:
         "obstacle_enabled",
         "safety_violation_rate",
         "min_distance",
+        "min_distance_raw",
         "mean_risk",
         "lambda",
         "alpha",
@@ -154,6 +155,7 @@ def main() -> None:
         "episode_cost",
         "risk_global",
         "d_min",
+        "d_min_raw",
         "success",
         "collision",
         "lambda",
@@ -172,7 +174,7 @@ def main() -> None:
     update_every = int(config["sac"]["update_every"])
     save_interval = int(config["train"]["save_interval"])
     log_interval = int(config["train"]["log_interval"])
-    progress_interval = max(1, int(config["train"].get("progress_interval", 100)))
+    progress_interval = max(1, int(config["train"]["progress_interval"]))
 
     observation, _ = env.reset(seed=int(config["seed"]))
     episode = 0
@@ -184,6 +186,7 @@ def main() -> None:
     episode_costs: list[float] = []
     episode_risks: list[float] = []
     episode_distances: list[float] = []
+    episode_raw_distances: list[float] = []
     episode_violations = 0
     recent_rewards: deque[float] = deque(maxlen=20)
     update_info: dict[str, float] = {"alpha": float(agent.alpha.detach().cpu()), "lambda": agent.lagrange_multiplier}
@@ -219,6 +222,7 @@ def main() -> None:
         episode_costs.append(cost)
         episode_risks.append(float(info["control_max_risk"]))
         episode_distances.append(float(info["control_min_distance"]))
+        episode_raw_distances.append(float(info["control_min_distance_raw"]))
         episode_violations += int(info["control_safety_violation"])
 
         if step >= update_after and len(replay) >= agent.batch_size and step % update_every == 0:
@@ -240,6 +244,7 @@ def main() -> None:
                 "episode_cost": episode_cost,
                 "risk_global": float(info["control_max_risk"]),
                 "d_min": float(info["control_min_distance"]),
+                "d_min_raw": float(info["control_min_distance_raw"]),
                 "success": int(info["success"]),
                 "collision": int(info["collision"]),
                 "lambda": agent.lagrange_multiplier,
@@ -282,6 +287,7 @@ def main() -> None:
                     "obstacle_enabled": int(info["obstacle_enabled"]),
                     "safety_violation_rate": episode_violations / max(episode_length, 1),
                     "min_distance": min(episode_distances) if episode_distances else 0.0,
+                    "min_distance_raw": min(episode_raw_distances) if episode_raw_distances else 0.0,
                     "mean_risk": float(np.mean(episode_risks)) if episode_risks else 0.0,
                     "lambda": agent.lagrange_multiplier,
                     "alpha": float(agent.alpha.detach().cpu()),
@@ -308,6 +314,7 @@ def main() -> None:
             episode_costs = []
             episode_risks = []
             episode_distances = []
+            episode_raw_distances = []
             episode_violations = 0
 
         if step % save_interval == 0:

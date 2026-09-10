@@ -15,10 +15,10 @@ from rl_risk_sac.utils.risk import closest_point_on_segment
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compare capsule gaps with PyBullet collision-shape gaps.")
-    parser.add_argument("--config", default="configs/restart_2026-09-09/r2a_penalty4_dev_seed11.yaml")
+    parser.add_argument("--config", default="configs/default.yaml")
     parser.add_argument("--samples-per-link", type=int, default=400)
     parser.add_argument("--seed", type=int, default=71001)
-    parser.add_argument("--geometry-margin", type=float, default=0.04)
+    parser.add_argument("--geometry-margin", type=float, default=None)
     parser.add_argument(
         "--output-dir",
         default="outputs/restart_2026-09-09/r1_geometry/calibration_seed71001",
@@ -30,9 +30,14 @@ def main() -> None:
     args = parse_args()
     if args.samples_per_link < 20:
         raise ValueError("--samples-per-link must be at least 20")
-    if args.geometry_margin < 0.0:
-        raise ValueError("--geometry-margin must be non-negative")
     config = load_config(args.config)
+    geometry_margin = (
+        float(config["risk"]["geometry_margin"])
+        if args.geometry_margin is None
+        else float(args.geometry_margin)
+    )
+    if geometry_margin < 0.0:
+        raise ValueError("--geometry-margin must be non-negative")
     config["device"] = "cpu"
     env = UR5DynamicObstacleEnv(config, method="link_fixed")
     output_dir = Path(args.output_dir)
@@ -71,7 +76,7 @@ def main() -> None:
                 direction /= max(float(np.linalg.norm(direction)), 1e-12)
                 intended_gap = rng.uniform(-0.03, 0.30)
                 obstacle_center = centerline_point + direction * (
-                    target.radius + float(env.obstacle_cfg["radius"]) + intended_gap
+                    target.radius + env.obstacle_cfg.radius + intended_gap
                 )
                 p.resetBasePositionAndOrientation(
                     env.obstacle_id,
@@ -87,7 +92,7 @@ def main() -> None:
                     capsule_gaps.append(
                         float(np.linalg.norm(obstacle_center - closest))
                         - capsule.radius
-                        - float(env.obstacle_cfg["radius"])
+                        - env.obstacle_cfg.radius
                     )
                 capsule_distance = float(np.min(capsule_gaps))
                 capsule_closest = int(np.argmin(capsule_gaps))
@@ -130,7 +135,7 @@ def main() -> None:
         bullet_collision = np.asarray([bool(row["bullet_collision"]) for row in rows])
         capsule_collision = np.asarray([bool(row["capsule_collision"]) for row in rows])
         adjusted_capsule_violation = np.asarray(
-            [float(row["capsule_distance_m"]) - args.geometry_margin < env.risk_config.d_safe for row in rows]
+            [float(row["capsule_distance_m"]) - geometry_margin < env.risk_config.d_safe for row in rows]
         )
         summary = {
             "schema_version": "capsule_geometry_calibration_v1",
@@ -139,7 +144,7 @@ def main() -> None:
             "samples_per_link": args.samples_per_link,
             "sample_count": len(rows),
             "safe_distance_m": env.risk_config.d_safe,
-            "frozen_geometry_margin_m": args.geometry_margin,
+            "frozen_geometry_margin_m": geometry_margin,
             "error_definition": "capsule_distance_minus_pybullet_collision_shape_distance",
             "error_quantiles_m": _quantiles(errors),
             "danger_false_negative_count": int(np.sum(bullet_violation & ~capsule_violation)),

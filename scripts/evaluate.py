@@ -32,15 +32,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
-    eval_cfg = config.get("eval", {})
+    eval_cfg = config["eval"]
     method = args.method or eval_cfg["method"]
     checkpoint = args.checkpoint or eval_cfg["checkpoint"]
     if not checkpoint:
         raise ValueError("checkpoint must be provided by --checkpoint or eval.checkpoint")
-    episodes = int(args.episodes if args.episodes is not None else eval_cfg.get("episodes", 20))
-    seed = int(args.seed if args.seed is not None else eval_cfg.get("seed", 123))
-    output_arg = args.output if args.output is not None else eval_cfg.get("output")
-    trace_output_arg = args.trace_output if args.trace_output is not None else eval_cfg.get("trace_output")
+    episodes = int(args.episodes if args.episodes is not None else eval_cfg["episodes"])
+    seed = int(args.seed if args.seed is not None else eval_cfg["seed"])
+    output_arg = args.output if args.output is not None else eval_cfg["output"]
+    trace_output_arg = args.trace_output if args.trace_output is not None else eval_cfg["trace_output"]
     config["seed"] = seed
     config["device"] = resolve_device(config)
     set_seed(seed)
@@ -61,6 +61,7 @@ def main() -> None:
         total_cost = 0.0
         risks = []
         distances = []
+        raw_distances = []
         violations = 0
         accelerations = []
         jerks = []
@@ -77,6 +78,7 @@ def main() -> None:
         success = False
         collision = False
         final_position_error = 0.0
+        min_position_error = float("inf")
         closest_link = -1
         prev_qdot_cmd = np.zeros(env.action_space.shape[0], dtype=np.float32)
         trace_rows = []
@@ -88,6 +90,7 @@ def main() -> None:
             total_cost += cost
             risks.append(float(info["control_max_risk"]))
             distances.append(float(info["control_min_distance"]))
+            raw_distances.append(float(info["control_min_distance_raw"]))
             violations += int(info["control_safety_violation"])
             accelerations.append(info["joint_acc"])
             jerks.append(info["joint_jerk"])
@@ -104,6 +107,7 @@ def main() -> None:
             success = bool(info["success"])
             collision = bool(info["collision"])
             final_position_error = float(info["goal_error_norm"])
+            min_position_error = min(min_position_error, final_position_error)
             closest_link = int(info["closest_link"])
             if trace_dir is not None:
                 trace_rows.append(
@@ -114,8 +118,10 @@ def main() -> None:
                         "cost": float(cost),
                         "goal_error_norm": final_position_error,
                         "d_min": float(info["d_min"]),
+                        "d_min_raw": float(info["d_min_raw"]),
                         "risk_global": float(info["risk_global"]),
                         "control_min_distance": float(info["control_min_distance"]),
+                        "control_min_distance_raw": float(info["control_min_distance_raw"]),
                         "control_max_risk": float(info["control_max_risk"]),
                         "beta": float(info["beta"]),
                         "closest_link": closest_link,
@@ -149,6 +155,7 @@ def main() -> None:
                     measured_acc,
                     measured_jerk,
                     substep_distance,
+                    substep_distance_raw,
                     substep_risk,
                     substep_contact,
                 ) in enumerate(
@@ -160,6 +167,7 @@ def main() -> None:
                         info["measured_acc_substeps"],
                         info["measured_jerk_substeps"],
                         info["substep_distance"],
+                        info["substep_distance_raw"],
                         info["substep_risk"],
                         info["substep_contact"],
                     )
@@ -176,6 +184,7 @@ def main() -> None:
                         "measured_acc_norm": float(np.linalg.norm(measured_acc)),
                         "measured_jerk_norm": float(np.linalg.norm(measured_jerk)),
                         "distance_m": float(substep_distance),
+                        "distance_raw_m": float(substep_distance_raw),
                         "risk": float(substep_risk),
                         "contact": int(substep_contact),
                     }
@@ -210,8 +219,10 @@ def main() -> None:
                 "collision": int(collision),
                 "non_end_link_collision": int(non_end_link_collision),
                 "final_position_error": final_position_error,
+                "min_position_error": min_position_error,
                 "completion_time": (step + 1) * float(config["env"]["control_dt"]),
                 "min_distance": min(distances) if distances else 0.0,
+                "min_distance_raw": min(raw_distances) if raw_distances else 0.0,
                 "mean_risk": float(np.mean(risks)) if risks else 0.0,
                 "max_risk": float(np.max(risks)) if risks else 0.0,
                 "safety_violation_count": violations,
@@ -272,6 +283,7 @@ def main() -> None:
         "collision_rate": float(np.mean([r["collision"] for r in rows])),
         "non_end_link_collision_rate": float(np.mean([r["non_end_link_collision"] for r in rows])),
         "mean_final_position_error": float(np.mean([r["final_position_error"] for r in rows])),
+        "mean_min_position_error": float(np.mean([r["min_position_error"] for r in rows])),
         "mean_min_distance": float(np.mean([r["min_distance"] for r in rows])),
         "mean_reward": float(np.mean([r["reward"] for r in rows])),
         "mean_cost": float(np.mean([r["cost"] for r in rows])),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from dataclasses import replace
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -50,14 +51,10 @@ def main() -> None:
     agent = SACAgent(env.observation_space.shape[0], env.action_space.shape[0], config, method=args.method)
     agent.load_actor(args.checkpoint)
 
-    pred_config = PredictiveRiskConfig(
+    pred_config = replace(
+        env.predictive_risk_config,
         horizon=float(args.horizon),
         step=float(args.prediction_step),
-        d_safe=env.risk_config.d_safe,
-        sigma_d=env.risk_config.sigma_d,
-        tau_enter=env.risk_config.tau,
-        v_max=env.risk_config.v_max,
-        eps=env.risk_config.eps,
     )
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -120,7 +117,7 @@ def _compute_scene_predictive_risk(env: UR5DynamicObstacleEnv, config: Predictiv
     if not active_obstacles:
         count = len(capsules)
         return PredictiveLinkRisk(
-            d_pred=np.full(count, float(env.observation_cfg["no_obstacle_distance"]), dtype=np.float32),
+            d_pred=np.full(count, env.observation_cfg.no_obstacle_distance, dtype=np.float32),
             t_enter=np.full(count, np.inf, dtype=np.float32),
             risk_pred_per_link=np.zeros(count, dtype=np.float32),
             risk_pred_body=0.0,
@@ -128,6 +125,7 @@ def _compute_scene_predictive_risk(env: UR5DynamicObstacleEnv, config: Predictiv
             closest_points_pred=np.zeros((count, 3), dtype=np.float32),
             closest_times=np.zeros(count, dtype=np.float32),
             approach_velocities=np.zeros(count, dtype=np.float32),
+            d_pred_raw=np.full(count, env.observation_cfg.no_obstacle_distance, dtype=np.float32),
         )
 
     risks = [
@@ -136,7 +134,7 @@ def _compute_scene_predictive_risk(env: UR5DynamicObstacleEnv, config: Predictiv
             prev_capsules=env.prev_capsules,
             obstacle_center=obstacle.center,
             obstacle_velocity=obstacle.velocity,
-            obstacle_radius=float(env.obstacle_cfg["radius"]),
+            obstacle_radius=env.obstacle_cfg.radius,
             dt=env.control_dt,
             config=config,
             use_end_effector_only=env.method == "ee_fixed",
@@ -151,6 +149,9 @@ def _aggregate_predictive_risks(risks: list[PredictiveLinkRisk]) -> PredictiveLi
         return risks[0]
 
     d_stack = np.stack([risk.d_pred for risk in risks])
+    raw_d_stack = np.stack(
+        [risk.d_pred if risk.d_pred_raw is None else risk.d_pred_raw for risk in risks]
+    )
     nearest_obstacle_indices = np.argmin(d_stack, axis=0)
     link_indices = np.arange(d_stack.shape[1])
     risk_stack = np.stack([risk.risk_pred_per_link for risk in risks])
@@ -168,6 +169,7 @@ def _aggregate_predictive_risks(risks: list[PredictiveLinkRisk]) -> PredictiveLi
             np.float32
         ),
         approach_velocities=np.max(np.stack([risk.approach_velocities for risk in risks]), axis=0).astype(np.float32),
+        d_pred_raw=raw_d_stack[nearest_obstacle_indices, link_indices].astype(np.float32),
     )
 
 

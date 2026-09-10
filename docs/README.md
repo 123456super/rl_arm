@@ -14,6 +14,7 @@
 
 - [实验执行跟踪](experiments/restart_2026-09-09/experiment_tracker.md)
 - [实验结果事实源](experiments/restart_2026-09-09/experiment_results.md)
+- [R0--R6 Gate 执行指南](experiments/restart_2026-09-09/r0_r6_gate_execution_guide.md)
 
 ## Archived experiments
 

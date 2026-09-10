@@ -4,6 +4,8 @@ from typing import Any
 
 import torch
 
+from rl_risk_sac.utils.runtime_config import RuntimeConfig
+
 
 def resolve_device(config: dict[str, Any]) -> str:
     """解析训练设备，支持 CPU、指定 cuda:id 和自动选择 CUDA。
@@ -11,25 +13,26 @@ def resolve_device(config: dict[str, Any]) -> str:
     配置里的 `device: cuda:auto` 会在候选 GPU 中按空闲显存和算力打分；
     如果 CUDA 不可用且允许 fallback，就返回 cpu，避免训练脚本直接崩溃。
     """
-    requested = str(config.get("device", "cpu"))
-    selection_cfg = config.get("device_selection", {})
+    runtime = RuntimeConfig.from_mapping(config)
+    requested = runtime.device
+    selection_cfg = runtime.device_selection
     auto_values = {"cuda", "cuda:auto", "auto"}
 
     if requested not in auto_values:
         # 用户明确指定 cpu 或 cuda:0 等设备时，尽量尊重请求。
         if requested.startswith("cuda") and not torch.cuda.is_available():
-            if bool(selection_cfg.get("fallback_to_cpu", True)):
+            if selection_cfg.fallback_to_cpu:
                 return "cpu"
             raise RuntimeError(f"Requested device {requested!r}, but CUDA is not available")
         return requested
 
     if not torch.cuda.is_available():
-        if bool(selection_cfg.get("fallback_to_cpu", True)):
+        if selection_cfg.fallback_to_cpu:
             return "cpu"
         raise RuntimeError("Auto CUDA device selection requested, but CUDA is not available")
 
     device_count = torch.cuda.device_count()
-    candidates = selection_cfg.get("candidate_ids")
+    candidates = selection_cfg.candidate_ids
     if candidates is None:
         candidate_ids = list(range(device_count))
     else:
@@ -43,9 +46,9 @@ def resolve_device(config: dict[str, Any]) -> str:
         raise ValueError(f"Invalid CUDA device ids {invalid}; available ids are 0..{device_count - 1}")
 
     # 自动选择分数 = 空闲显存比例 * memory_weight + 相对算力 * compute_weight。
-    min_free_memory_gb = float(selection_cfg.get("min_free_memory_gb", 0.0))
-    memory_weight = float(selection_cfg.get("memory_weight", 0.7))
-    compute_weight = float(selection_cfg.get("compute_weight", 0.3))
+    min_free_memory_gb = selection_cfg.min_free_memory_gb
+    memory_weight = selection_cfg.memory_weight
+    compute_weight = selection_cfg.compute_weight
 
     summaries = []
     for device_id in candidate_ids:
@@ -79,13 +82,13 @@ def resolve_device(config: dict[str, Any]) -> str:
             best = (item["score"], item["id"])
 
     if best is None:
-        if bool(selection_cfg.get("fallback_to_cpu", True)):
+        if selection_cfg.fallback_to_cpu:
             print(f"CUDA auto selection found no GPU with >= {min_free_memory_gb:.2f} GB free memory; using cpu")
             return "cpu"
         raise RuntimeError(f"No CUDA device satisfies min_free_memory_gb={min_free_memory_gb}")
 
     selected = best[1]
-    if bool(selection_cfg.get("print_summary", True)):
+    if selection_cfg.print_summary:
         # 打印每张候选卡的分数，方便复现实验时知道为什么选中了某张 GPU。
         for item in summaries:
             marker = "*" if item["id"] == selected else " "

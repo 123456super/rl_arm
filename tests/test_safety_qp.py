@@ -11,8 +11,12 @@ from rl_risk_sac.control import (
 from rl_risk_sac.utils.trajectory_blending import ButterworthQuinticRTB
 
 
+def qp_config(max_iterations: int = 8) -> SafetyQPConfig:
+    return SafetyQPConfig(max_iterations=max_iterations, eps=1e-8, violation_tolerance=1e-6)
+
+
 def test_safety_qp_passes_through_safe_nominal_command() -> None:
-    qp = SafetyQP()
+    qp = SafetyQP(qp_config())
     result = qp.solve(
         nominal_command=np.asarray([-0.2, 0.0], dtype=np.float32),
         constraint_matrix=np.asarray([[1.0, 0.0]], dtype=np.float32),
@@ -28,7 +32,7 @@ def test_safety_qp_passes_through_safe_nominal_command() -> None:
 
 
 def test_safety_qp_modifies_dangerous_approaching_command() -> None:
-    qp = SafetyQP()
+    qp = SafetyQP(qp_config())
     result = qp.solve(
         nominal_command=np.asarray([0.5, 0.0], dtype=np.float32),
         constraint_matrix=np.asarray([[1.0, 0.0]], dtype=np.float32),
@@ -44,7 +48,7 @@ def test_safety_qp_modifies_dangerous_approaching_command() -> None:
 
 
 def test_safety_qp_reports_slack_when_constraint_conflicts_with_velocity_bounds() -> None:
-    qp = SafetyQP(SafetyQPConfig(max_iterations=4))
+    qp = SafetyQP(qp_config(max_iterations=4))
     result = qp.solve(
         nominal_command=np.asarray([0.0], dtype=np.float32),
         constraint_matrix=np.asarray([[1.0]], dtype=np.float32),

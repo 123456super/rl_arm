@@ -1,6 +1,0 @@
-includes:
-- /home/c211/jxf/rl/configs/restart_2026-09-09/r2d_collision100_steps150k_dev_seed11.yaml
-env:
-  obstacle:
-    enabled: false
-    scenario: random

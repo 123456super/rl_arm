@@ -1,6 +1,0 @@
-includes:
-- /home/c211/jxf/rl/configs/experiments/random_crossing_link_fixed_penalty1_qp_acceleration_jerk.yaml
-env:
-  obstacle:
-    enabled: true
-    scenario: forearm_crossing

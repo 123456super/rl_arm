@@ -21,6 +21,11 @@ def test_safety_qp_env_adds_finite_diagnostics_without_changing_schema() -> None
         assert np.isfinite(info["safety_qp_solve_time_ms"])
         assert info["qdot_policy_safe_target"].shape == info["qdot_policy_limited"].shape
         assert np.max(np.abs(info["qdot_cmd"])) <= config["env"]["action_scale"] + 1e-6
+        np.testing.assert_allclose(
+            info["substep_distance_raw"] - info["substep_distance"],
+            config["risk"]["geometry_margin"],
+            atol=1e-6,
+        )
     finally:
         env.close()
 

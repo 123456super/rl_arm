@@ -1,1 +1,0 @@
-outputs/formal/train/link_fixed/seed_202/link_fixed_seed202_steps100000

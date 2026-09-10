@@ -1,6 +1,0 @@
-includes:
-- /home/c211/jxf/rl/configs/experiments/random_crossing_predictive_link_30k_reward0p25.yaml
-env:
-  obstacle:
-    enabled: true
-    scenario: random

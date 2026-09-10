@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from rl_risk_sac.envs import UR5DynamicObstacleEnv
 from rl_risk_sac.utils.config import load_config
@@ -35,7 +36,7 @@ def test_fixed_method_runs_with_butterworth_quintic_rtb() -> None:
 
 
 def test_rtb_substep_feedback_is_deterministic_for_seed_and_actions() -> None:
-    config = load_config("configs/restart_2026-09-09/r2a_penalty4_dev_seed11.yaml")
+    config = load_config("configs/default.yaml")
     config["device"] = "cpu"
     first = UR5DynamicObstacleEnv(config, method="link_fixed")
     second = UR5DynamicObstacleEnv(config, method="link_fixed")
@@ -66,7 +67,7 @@ def test_rtb_substep_feedback_is_deterministic_for_seed_and_actions() -> None:
 
 
 def test_corrected_main_link_capsules_have_physical_spans() -> None:
-    config = load_config("configs/restart_2026-09-09/r2a_penalty4_dev_seed11.yaml")
+    config = load_config("configs/default.yaml")
     config["device"] = "cpu"
     env = UR5DynamicObstacleEnv(config, method="link_fixed")
     try:
@@ -76,5 +77,20 @@ def test_corrected_main_link_capsules_have_physical_spans() -> None:
         assert lengths["forearm"] > 0.38
         assert lengths["wrist_1"] > 0.09
         assert lengths["wrist_2"] > 0.08
+        assert lengths["wrist_3"] <= 1e-6
+        wrist_3 = next(capsule for capsule in env._capsules() if capsule.name == "wrist_3")
+        assert wrist_3.radius >= 0.052
+    finally:
+        env.close()
+
+
+def test_unmarked_degenerate_capsule_is_rejected() -> None:
+    config = load_config("configs/default.yaml")
+    config["device"] = "cpu"
+    config["robot"]["capsules"][-1]["allow_degenerate"] = False
+    env = UR5DynamicObstacleEnv(config, method="link_fixed")
+    try:
+        with pytest.raises(ValueError, match="allow_degenerate=true"):
+            env.reset(seed=19)
     finally:
         env.close()

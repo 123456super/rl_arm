@@ -33,13 +33,16 @@ robot:
   # parent_link_name/child_link_name 使用 URDF link 名称，代码会在 PyBullet 加载后自动解析成 link id。
   # radius 是保守近似半径，并非厂家精确碰撞包络；正式实验前建议结合 PyBullet collision mesh 复核。
   capsules:
-    - {name: shoulder, parent_link_name: base_link_inertia, child_link_name: shoulder_link, radius: 0.075, child_offset: [0.0, 0.0, 0.0]}
+    - {name: shoulder, parent_link_name: base_link_inertia, child_link_name: shoulder_link, radius: 0.075, parent_offset: [0.0, 0.0, 0.0], child_offset: [0.0, 0.0, 0.0], allow_degenerate: false}
     # Revolute-joint child frames mark the start of the corresponding physical
     # link.  Each long capsule therefore runs from that link frame to the next
     # joint's child frame.  The former mapping was shifted by one link and made
     # upper_arm nearly zero-length in this URDF.
-    - {name: upper_arm, parent_link_name: upper_arm_link, child_link_name: forearm_link, radius: 0.07, parent_offset: [0.0, 0.0, 0.13585], child_offset: [0.0, 0.0, 0.13585]}
-    - {name: forearm, parent_link_name: forearm_link, child_link_name: wrist_1_link, radius: 0.06, parent_offset: [0.0, 0.0, 0.0165], child_offset: [0.0, 0.0, -0.09265]}
-    - {name: wrist_1, parent_link_name: wrist_1_link, child_link_name: wrist_2_link, radius: 0.06, parent_offset: [0.0, 0.0, 0.0], child_offset: [0.0, 0.0, 0.0]}
-    - {name: wrist_2, parent_link_name: wrist_2_link, child_link_name: wrist_3_link, radius: 0.06, parent_offset: [0.0, 0.0, 0.0], child_offset: [0.0, 0.0, 0.0]}
-    - {name: wrist_3, parent_link_name: wrist_3_link, child_link_name: tool0, radius: 0.05, parent_offset: [0.0, 0.0, 0.0], child_offset: [0.0, 0.0, 0.0]}
+    - {name: upper_arm, parent_link_name: upper_arm_link, child_link_name: forearm_link, radius: 0.07, parent_offset: [0.0, 0.0, 0.13585], child_offset: [0.0, 0.0, 0.13585], allow_degenerate: false}
+    - {name: forearm, parent_link_name: forearm_link, child_link_name: wrist_1_link, radius: 0.06, parent_offset: [0.0, 0.0, 0.0165], child_offset: [0.0, 0.0, -0.09265], allow_degenerate: false}
+    - {name: wrist_1, parent_link_name: wrist_1_link, child_link_name: wrist_2_link, radius: 0.06, parent_offset: [0.0, 0.0, 0.0], child_offset: [0.0, 0.0, 0.0], allow_degenerate: false}
+    - {name: wrist_2, parent_link_name: wrist_2_link, child_link_name: wrist_3_link, radius: 0.06, parent_offset: [0.0, 0.0, 0.0], child_offset: [0.0, 0.0, 0.0], allow_degenerate: false}
+    # wrist_3_link、flange 和 tool0 的原点重合；这里有意使用零长度胶囊
+    # （即球）覆盖紧凑的末端腕部。0.055 m 大于碰撞 STL 顶点最大半径
+    # 约 0.0511 m，并保留少量网格裕量。
+    - {name: wrist_3, parent_link_name: wrist_3_link, child_link_name: tool0, radius: 0.055, parent_offset: [0.0, 0.0, 0.0], child_offset: [0.0, 0.0, 0.0], allow_degenerate: true}

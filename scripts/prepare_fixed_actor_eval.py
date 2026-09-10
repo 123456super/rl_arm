@@ -107,7 +107,7 @@ def main() -> None:
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         "",
-        "# Fixed-actor held-out counterfactual evaluation with independent episode seeds.",
+        "# Fixed-actor evaluation with independent episode seeds.",
         "# No training commands. Completed non-empty CSV files are skipped on resume.",
     ]
     evaluation_command_count = 0

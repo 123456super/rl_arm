@@ -1,10 +1,25 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from rl_risk_sac.robots.ur5_capsules import CapsuleState
 from rl_risk_sac.utils.predictive_risk import PredictiveRiskConfig, compute_predictive_link_risk
 from rl_risk_sac.utils.risk import RiskConfig, compute_link_risk
+from rl_risk_sac.utils.config import load_config
+from rl_risk_sac.utils.runtime_config import RuntimeConfig
+
+
+RUNTIME_CONFIG = RuntimeConfig.from_mapping(load_config("configs/default.yaml"))
+
+
+def risk_config(**updates) -> RiskConfig:
+    return replace(RUNTIME_CONFIG.risk, **updates)
+
+
+def predictive_config(**updates) -> PredictiveRiskConfig:
+    return replace(RUNTIME_CONFIG.env.observation.predictive_risk, **updates)
 
 
 def capsule(name: str, start: list[float], end: list[float], radius: float = 0.05) -> CapsuleState:
@@ -28,7 +43,7 @@ def test_static_obstacle_and_static_link_matches_current_distance() -> None:
         obstacle_velocity=obstacle_velocity,
         obstacle_radius=0.05,
         dt=0.05,
-        config=RiskConfig(d_safe=0.12),
+        config=risk_config(d_safe=0.12),
     )
     predicted = compute_predictive_link_risk(
         capsules=[link],
@@ -37,7 +52,7 @@ def test_static_obstacle_and_static_link_matches_current_distance() -> None:
         obstacle_velocity=obstacle_velocity,
         obstacle_radius=0.05,
         dt=0.05,
-        config=PredictiveRiskConfig(horizon=1.0, step=0.05, d_safe=0.12),
+        config=predictive_config(horizon=1.0, step=0.05, d_safe=0.12),
     )
 
     np.testing.assert_allclose(predicted.d_pred, current.distances, atol=1e-6)
@@ -54,7 +69,7 @@ def test_approaching_obstacle_has_smaller_predicted_distance_and_finite_enter_ti
         obstacle_velocity=np.asarray([0.0, -0.4, 0.0], dtype=np.float32),
         obstacle_radius=0.05,
         dt=0.05,
-        config=PredictiveRiskConfig(horizon=1.0, step=0.02, d_safe=0.12),
+        config=predictive_config(horizon=1.0, step=0.02, d_safe=0.12),
     )
 
     assert predicted.d_pred[0] <= 0.3
@@ -65,7 +80,7 @@ def test_approaching_obstacle_has_smaller_predicted_distance_and_finite_enter_ti
 
 def test_receding_obstacle_has_lower_risk_than_approaching_obstacle() -> None:
     link = capsule("link", [0.0, 0.0, 0.0], [1.0, 0.0, 0.0])
-    config = PredictiveRiskConfig(horizon=1.0, step=0.05, d_safe=0.12)
+    config = predictive_config(horizon=1.0, step=0.05, d_safe=0.12)
     kwargs = dict(
         capsules=[link],
         prev_capsules=None,
@@ -90,7 +105,7 @@ def test_receding_obstacle_has_lower_risk_than_approaching_obstacle() -> None:
 
 def test_same_current_distance_different_approach_speed_changes_risk() -> None:
     link = capsule("link", [0.0, 0.0, 0.0], [1.0, 0.0, 0.0])
-    config = PredictiveRiskConfig(horizon=0.5, step=0.05, d_safe=0.12)
+    config = predictive_config(horizon=0.5, step=0.05, d_safe=0.12)
     kwargs = dict(
         capsules=[link],
         prev_capsules=None,
@@ -124,10 +139,32 @@ def test_end_effector_only_masks_non_end_link_predictive_risk() -> None:
         obstacle_velocity=np.asarray([0.0, -0.2, 0.0], dtype=np.float32),
         obstacle_radius=0.05,
         dt=0.05,
-        config=PredictiveRiskConfig(horizon=1.0, step=0.05, d_safe=0.12),
+        config=predictive_config(horizon=1.0, step=0.05, d_safe=0.12),
         use_end_effector_only=True,
     )
 
     assert predicted.critical_link == 1
     assert predicted.risk_pred_per_link[0] == 0.0
     assert predicted.risk_pred_body == predicted.risk_pred_per_link[1]
+
+
+def test_predictive_geometry_margin_preserves_raw_distance() -> None:
+    kwargs = dict(
+        capsules=[capsule("link", [0.0, 0.0, 0.0], [1.0, 0.0, 0.0])],
+        prev_capsules=None,
+        obstacle_center=np.asarray([0.5, 0.4, 0.0], dtype=np.float32),
+        obstacle_velocity=np.zeros(3, dtype=np.float32),
+        obstacle_radius=0.05,
+        dt=0.05,
+    )
+    nominal = compute_predictive_link_risk(
+        config=predictive_config(horizon=0.0, geometry_margin=0.0), **kwargs
+    )
+    conservative = compute_predictive_link_risk(
+        config=predictive_config(horizon=0.0, geometry_margin=0.04), **kwargs
+    )
+
+    assert conservative.d_pred_raw is not None
+    np.testing.assert_allclose(conservative.d_pred_raw, nominal.d_pred, atol=1e-7)
+    np.testing.assert_allclose(conservative.d_pred, nominal.d_pred - 0.04, atol=1e-7)
+    assert conservative.risk_pred_body >= nominal.risk_pred_body

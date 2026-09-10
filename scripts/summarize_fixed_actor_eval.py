@@ -16,6 +16,7 @@ METRICS = [
     "collision",
     "non_end_link_collision",
     "final_position_error",
+    "min_position_error",
     "completion_time",
     "min_distance",
     "safety_violation_rate",
