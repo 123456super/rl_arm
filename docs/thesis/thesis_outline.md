@@ -1,652 +1,546 @@
-# 面向动态障碍物的机械臂动作条件全身间隙预测与轨迹一致安全强化学习控制
+# SAC 名义控制与独立安全层实验说明
 
-> 文档状态：唯一论文方案与写作架构。2026-09-09 起旧实验整体封存，本文所有算法与实验结论均须由新实验重新验证。
-> 新实验状态见 [从零实验跟踪](../experiments/restart_2026-09-09/experiment_tracker.md)；新数据见 [新实验结果事实源](../experiments/restart_2026-09-09/experiment_results.md)。旧记录仅供追溯，不作为论文证据。
+## 1. 实验目的与边界
 
-## 目录
+### 1.1 实验目的
 
-- [一、研究背景与意义](#一研究背景与意义)
-- [二、研究目标](#二研究目标)
-- [三、拟创新点与论文定位](#三拟创新点与论文定位)
-- [四、研究范围与关键问题](#四研究范围与关键问题)
-- [五、文献综述与总体技术路线](#五文献综述与总体技术路线)
-- [六、主要研究内容](#六主要研究内容)
-- [七、实验设计](#七实验设计)
-- [八、论文章节安排](#八论文章节安排)
-- [九、实施优先级与完成判据](#九实施优先级与完成判据)
+本实验采用“任务策略训练—独立安全增强”的两阶段路线。第一阶段通过无障碍、静态障碍物和动态障碍物三级 curriculum 训练 SAC，使其能够独立输出完成目标位姿到达和基础避障的关节速度命令。无障碍策略首次进入一种新障碍物场景时，采用“到达优先—安全渐强—严格收尾”的安全同伦课程：初期保留完整到达奖励，以很低的障碍物风险和碰撞惩罚继续训练，并允许任务球碰撞后继续执行，从而先保住新场景中的到达能力；随后只提高安全惩罚，不降低到达奖励；最终恢复碰撞真终止，并在与正式评价一致的严格 MDP 中完成收尾训练。第二阶段冻结 SAC actor，仅在其输出后增加危险预测、动作修正和执行异常处理，不再训练或微调 SAC。
 
-## 一、研究背景与意义
+因此，SAC 是完整的名义任务控制器，安全层是独立的执行保护模块。安全层不学习任务策略，也不替代 SAC 进行全局轨迹规划。
 
-随着机械臂逐渐进入人机协作、柔性制造和非结构化作业环境，其控制系统不仅需要完成目标到达任务，还需要对运动障碍物形成实时、整臂和具有提前量的安全响应。机械臂碰撞可能发生在上臂、肘部、前臂和腕部等任意部位，仅使用末端执行器距离或整臂单一最小距离，容易遗漏碰撞部位及局部运动趋势。
+最终需要回答三个实验问题：
 
-动态避障风险不仅由当前距离决定，还取决于障碍物和连杆的相对速度、运动方向及未来一段时间内的距离变化。一个当前距离较远但快速接近的障碍物，可能比一个距离较近但正在远离的障碍物更危险。因此，仅依据当前时刻的距离、接近速度或径向近似 TTC 进行反应式避障，仍可能出现预警不足和动作修正滞后的问题。
+1. SAC 能否在单个动态球形障碍物条件下独立、稳定地完成静态目标位姿到达和基础避障？
+2. 冻结 SAC 后加入安全层，能否进一步降低碰撞和安全距离违反？
+3. 安全层实现上述安全收益时，是否仍能保留可接受的到达成功率、运动平滑性和实时性？
 
-Soft Actor-Critic（SAC）适合机械臂关节速度连续控制，但单纯依靠奖励惩罚学习安全行为存在两方面局限：一是安全性依赖奖励权重和训练数据覆盖；二是策略在未见状态下仍可能输出危险动作。约束强化学习能够分离任务奖励与风险代价，但其安全效果仍受约束阈值、代价建模和训练稳定性影响，不能直接等同于部署阶段的动作安全保证。
+### 1.2 实验边界
 
-基于以上问题，本文固定一条不依赖某一种风险 SAC 训练方案成功的主线：“冻结的 SAC 名义策略—动作条件全身间隙预测—验证驱动的轨迹一致预测安全 QP—逐子步监测”。首先，以胶囊体表示机械臂主要连杆，并由通过 R2 分层 Gate 的 SAC actor 生成名义关节速度；其次，对候选动作诱导的短时机器人运动和障碍物运动进行联合外推，形成逐连杆、逐时刻预测间隙；然后，将本周期实际下发的 quintic 子步速度轨迹作为安全终点速度的仿射参数化，以稀疏约束启动低维凸 QP，并通过全身非线性回放发现和增广动作修正后的遗漏危险；最后，只执行通过模型内验收的子步命令，并使用仿真状态或机器人反馈进行逐子步监测和异常降级。Instant-Link-SAC 是当前优先候选和必须重跑的算法基线，但在 R2-A 基础 reaching 与 R2-C 风险耦合 Gate 完成前，不预先宣称它已成为最终主方法 actor。
+| 项目 | 统一定义 |
+| --- | --- |
+| 机器人 | 固定基座 UR5，控制 6 个旋转关节；URDF 为 `assets/robots/universal_robots/ur_models/ur5.urdf` |
+| 任务 | 到达静态目标位姿，不研究动态目标跟踪 |
+| 末端参考系 | 受控运动链最后一个实体连杆 `wrist_3_link` 的 URDF link frame；不使用 `flange`、`tool0`、外接工具或额外 TCP 变换 |
+| 障碍物 | 单个球体，半径 `0.075 m`；S1 静止，S2 以 `0.1 m/s` 匀速运动并在工作空间边界反射 |
+| 几何模型 | 六个主要连杆胶囊体；定义和顺序取自 [`configs/robot/ur5.yaml` 的 `robot.capsules`](../../configs/robot/ur5.yaml#L35) |
+| 状态来源 | 关节状态、障碍物状态和 contact 均直接读取仿真真值；不加入感知噪声、估计误差或通信延迟 |
+| 动作接口 | SAC 输出 6 维归一化动作，经固定缩放和速度限幅后直接作为关节速度目标 |
+| 安全事实源 | 胶囊表面间隙用于风险计算，PyBullet contact 用于判定实际碰撞 |
+| 数据隔离 | training、validation 和 held-out 的目标、初始关节状态及障碍物轨迹互不重叠 |
 
-本文与“强化学习 + 实时碰撞检测 + 事后轨迹融合”的一般框架保持明确区别：quintic 轨迹不是安全 QP 之后的独立滤波，而是进入优化模型的确定性仿射基函数；安全约束检查的是实际将执行的每个子步。研究重点不是动态目标视觉跟踪，而是运动障碍物条件下候选动作对全身不同连杆未来间隙的影响，以及安全与运动连续性在同一低维在线优化中的耦合。
+第 3 章给出的数值是当前正式配置。开发阶段允许依据 training 和 validation 建立新配置版本，但必须记录修改原因、配置及相关文件哈希；held-out 仅用于冻结模型的最终评价，不得用于调参、阶段切换或模型选择。
 
-## 二、研究目标
-
-本文面向固定基座 UR5 机械臂在单动态球形障碍物环境下的静态目标位置到达任务，研究具有短时预测能力的整臂安全强化学习控制方法。主要目标如下：
-
-1. 建立 UR5 主要连杆胶囊体模型，准确计算连杆—障碍物表面距离、最近点、相对接近速度和碰撞趋势。
-2. 提出动作条件的预测性连杆风险表征方法，对 SAC 候选动作下的机器人子步运动与障碍物运动联合外推，获得未来最小间隙、首次越界时间和危险连杆集合。
-3. 提出验证驱动的轨迹一致 jerk 约束安全 QP：以名义终点速度参数化完整 quintic 子步命令，由稀疏危险约束启动凸 QP，并对候选解执行“全连杆 × 全验证时刻”的模型内非线性几何验收；若发现遗漏危险，则增广反例约束、重新线性化并求解。在同一终点变量上施加逐连杆预测安全、关节速度与位置、acceleration 和 jerk 约束，并分别验证下发命令与关节反馈。
-4. 主方法固定目标权重、验证网格、每轮最大新增约束数、最大细化轮数和时间预算；Top-k 只用于初始化约束集，不再作为最终安全覆盖假设。风险自适应权重仅作为可选消融，只有 validation 显示稳定收益时才进入最终方法。
-5. 在 PyBullet 中完成任务、安全、提前预警、干预程度、命令平滑性和鲁棒性验证；具备硬件与安全签核条件时，再做低速真实 UR5 可执行性验证。
-
-## 三、拟创新点与论文定位
-
-### 3.1 核心创新点
-
-1. **面向候选动作的全身连杆短时安全间隙预测。** 在已有连杆距离和当前运动趋势之外，显式评价 SAC 名义动作诱导的机器人轨迹与障碍物局部运动，计算逐连杆、逐时刻间隙及其对候选安全终点速度的局部梯度。方法核心输出是可验证的物理间隙约束，不依赖人为加权的单一风险分数。
-
-2. **验证驱动、轨迹一致的全身预测安全 QP。** SAC 负责生成名义终点速度；quintic 子步命令对安全终点速度是已知仿射映射，在线 QP 因而能够在同一变量上约束实际下发的逐子步速度、位置、加速度、jerk，以及短时预测连杆间隙。Top-k 仅生成初始稀疏约束；每轮求解后，对候选安全 endpoint 进行全连杆、全验证时刻的模型内精确几何回放，将遗漏的危险“连杆—时刻”作为反例增广，并在新参考点重新线性化。该设计同时避免“安全层输出一个速度、后级插值又改变它”的接口漏洞，以及“QP 修正后危险连杆发生迁移却未被初始 Top-k 覆盖”的筛选漏洞。每一细化轮的活跃集和线性化点固定，因此子问题保持为凸 QP；整个在线滤波器是受最大轮数和控制周期时间预算约束的有限迭代算法。
-
-### 3.2 验证性贡献
-
-3. **面向预测与干预机制的分层评价体系。** 构建随机穿越、重点连杆压迫、速度突变、观测噪声和预测误差等场景，除成功率和碰撞率外，引入首次预警提前量、安全层介入率、动作修正幅度、风险连杆识别率等指标，区分“是否感知到风险”“是否及时干预”和“是否完成任务”。该部分属于实验与评价贡献，不表述为独立算法创新。
-
-### 3.3 非创新内容与结论边界
-
-- SAC、预测安全滤波、凸 QP、quintic 时间标度、距离线性化以及 acceleration/jerk 限制均有相关工作；本文不主张发明这些组件。创新主张限定为：面向整臂胶囊体的动作条件多时刻间隙约束，与实际下发 quintic 子步命令在同一 6 维终点速度 QP 中的一致耦合，以及针对动作修正后危险连杆/最近特征迁移的“稀疏求解—全身非线性验收—反例约束增广”机制。该主张能否成立最终取决于文献对比和重启实验 R3--R7 的预注册消融，而不是由方案描述自动成立。
-- `Predictive-Link-SAC`、约束 SAC 和风险自适应平滑只作为非核心候选对照，不依据封存的旧实验预先判定其优劣；是否纳入论文结果由新实验协议和资源预算决定。
-- 固定风险惩罚 SAC 与约束 SAC 的比较属于算法基线，不构成本文核心创新。主方法不依赖预测 observation/reward 重新训练成功，也不依赖风险自适应权重。
-- 在感知误差、离散控制、几何近似和软约束存在时，本文不宣称“绝对无碰撞”。安全层只能在所列模型假设和可行域条件下提供显式动作约束。
-
-## 四、研究范围与关键问题
-
-### 4.1 研究范围
-
-| 类别 | 本文范围 | 不作为重点的内容 |
-| --- | --- | --- |
-| 机械臂 | 固定基座 UR5，主要连杆整臂避障 | 移动基座、自碰撞、末端姿态精确控制 |
-| 任务 | 静态目标点到达 | 动态目标视觉伺服与复杂操作任务 |
-| 障碍物 | 单个动态球形障碍物；低到中等速度 | 多障碍物、非规则物体、复杂遮挡 |
-| 感知 | 仿真真值；实机 RGB-D 位置与速度估计 | 复杂目标检测和多传感器融合 |
-| 控制 | SAC 名义策略、预测风险、jerk 约束安全 QP 指令整形 | 在线真实机器人强化学习 |
-| 验证 | PyBullet 主验证，真实 UR5 低速部署验证 | 高速或接触式安全认证实验 |
-
-多障碍物可作为附加泛化实验：对每个障碍物分别计算连杆风险和安全约束，再统一求解动作修正，但不扩展为论文主问题。
-
-### 4.2 拟解决的关键问题
-
-- **如何稳定表示整臂局部风险。** 最近连杆编号和硬最大风险可能在相邻连杆间跳变，需要在保留最危险部位信息的同时降低风险聚合不连续性。
-- **如何获得有意义的短时预测。** 需要明确当前状态外推、候选动作外推和感知速度误差的适用边界，避免将匀速预测夸大为精确轨迹预测。
-- **如何最小化安全干预对任务的影响。** 安全层既要阻止高风险动作，也要避免频繁介入导致机械臂停滞、绕行过度或动作震荡。
-- **如何避免稀疏筛选遗漏修正后的新危险。** 名义轨迹上的 Top-k 只反映修正前风险；QP 输出可能使危险连杆、最近点或临界时刻迁移。需要在每轮候选解上检查全部连杆和验证时刻，并将模型内反例增广回下一轮 QP，在计算预算与覆盖完整性之间建立可审计的折中。
-- **如何统一安全修正与实际执行轨迹。** 独立的后级滤波或插值可能改变已经满足安全约束的动作，因此本文将确定性 quintic 子步映射嵌入安全 QP，使优化变量唯一确定完整执行轨迹，并在相同模型内约束安全、加速度与 jerk。
-- **如何通过消融验证新增方法。** 实验必须分别验证预测风险和安全修正层，不能只比较完整方法与末端风险基线。
-
-## 五、文献综述与总体技术路线
-
-### 5.1 文献综述安排
-
-文献综述围绕以下五条线索展开：
-
-1. 机械臂动态避障：人工势场、采样规划、速度阻尼、MPC 和 CBF-QP 的实时性与安全边界。
-2. 整臂几何建模：胶囊体、最近点距离、距离梯度和连杆雅可比。
-3. 碰撞趋势预测：相对速度、TTC、有限时域最小距离和不确定性条件下的风险度量。
-4. 强化学习机械臂控制：DDPG、TD3、SAC，以及奖励惩罚和约束强化学习的安全性局限。
-5. 学习控制与安全指令整形：名义策略、安全盾、动作投影、jerk 约束和风险自适应控制之间的接口设计。
-
-近邻工作及本文边界在论文中统一按下表组织，详细题录和引用在正式写作时直接进入本节，不再维护独立的原创性文档：
-
-| 近邻方向 | 已有代表能力 | 本文必须承认的继承关系 | 本文拟验证的差异 |
-| --- | --- | --- | --- |
-| RL + Butterworth + quintic 机械臂控制 | SAC 名义控制、当前碰撞信息和平滑执行 | SAC、滤波和 quintic 均非本文创新 | 将动作条件预测间隙和实际子步映射纳入同一安全 QP |
-| Predictive Safety Filter / Predictive CBF | 学习控制器外置多步安全滤波、软约束和恢复机制 | “冻结学习器 + 预测安全层”不是首次提出 | 单一 6 维 endpoint、逐连杆胶囊间隙和实际 RTB 接口 |
-| 动态障碍机械臂 MPC/CBF | 障碍运动预测、多时刻约束和滚动优化 | 动态预测避障与距离线性化不是本文首创 | 以低维 endpoint 而非完整控制序列耦合冻结 RL actor |
-| 全臂参数化轨迹与可达集方法 | 低维轨迹参数、全臂扫掠体和制动备份 | 参数化全臂安全轨迹不是本文首创 | 动态球障碍、局部凸 QP及验证驱动反例增广 |
-| jerk-safe / acceleration-level QP | 碰撞、关节运动和高阶导数约束 | jerk 与安全统一考虑不是本文首创 | 对实际下发 quintic 子步同时施加间隙与运动边界 |
-| 整臂实时 CBF/QP | 大量全身碰撞与关节约束的实时求解 | RL+QP、整臂 QP 均非本文首创 | 动作修正后危险连杆迁移的全身验收与反例回灌 |
-
-因此不能主张“首次使用 SAC 避障”“首次将 RL 与 QP 结合”“首次预测动态障碍”“首次整臂避障”或“首次同时约束碰撞与 jerk”。本文当前可辩护但仍待重启实验 R3--R7 确认的主张，仅限于：动作条件逐连杆多时刻间隙、单 endpoint 对实际 quintic 子步的轨迹一致参数化，以及针对修正后危险特征迁移的“稀疏求解—全身非线性验收—反例增广”耦合。若相对 One-Step-QP 和固定 Top-k PTQP 的预注册消融未获得净收益，该组合只能作为工程实现，不能写成已证实核心创新。
-
-文献缺口拟归纳为：现有学习型机械臂避障常关注末端或当前最小距离；部分方法虽然加入实时碰撞检测，却没有同时显式建模候选 endpoint 对不同连杆未来间隙的影响和后续 quintic 子步执行接口；仅依靠奖励学习也难以处理策略输出中的偶发危险动作。该缺口是近邻方法“完整组合未覆盖”的判断，不表示其中任何单项组件此前不存在。
-
-| 常见做法 | 局限 | 本文拟改进 |
-| --- | --- | --- |
-| 末端风险或当前全局最小距离 | 易遗漏非末端风险及未来接近趋势 | 逐连杆有限时域风险预测 |
-| `max_i Risk_i` 硬聚合 | 最危险连杆切换时可能不连续 | Softmax 聚合并保留 Top-k 风险信息 |
-| 预测风险直接进入 SAC 状态/奖励 | 高维相关噪声与误报可能降低样本效率并诱发保守策略 | 经 R2 Gate 冻结的名义 SAC + 动作条件预测安全层 |
-| 仅在碰撞后给予惩罚 | 信号稀疏且缺少提前量 | 未来最小间隙和首次越界时间 |
-| 安全修正与平滑串联 | 后级滤波或插值可能改变安全动作 | 将实际子步轨迹参数化嵌入同一 QP |
-
-### 5.2 总体技术路线
-
-```mermaid
-flowchart LR
-    A[机器人、目标与障碍物状态] --> B[整臂胶囊体与最近点]
-    B --> C[当前连杆动态风险]
-    C --> F[R2-D 冻结名义 SAC 动作]
-    F --> G[rate limit + Butterworth 名义 endpoint]
-    G --> D[候选 endpoint 与障碍物联合外推]
-    D --> E[逐连杆逐子步预测间隙]
-    E --> H[初始稀疏预测约束]
-    G --> I[轨迹嵌入式 jerk 约束安全 QP]
-    H --> I
-    I --> K[全连杆全验证时刻非线性验收]
-    K -->|发现反例并增广| I
-    K -->|验收通过| J[安全指令、子步监测与执行]
-    J --> A
-```
-
-总体流程如下：
-
-1. 获取关节状态、目标位置、障碍物位置与速度。
-2. 计算各连杆胶囊体、最近点、表面距离和对应点速度。
-3. SAC 生成策略速度，经重启实验 R0 冻结的 policy rate limit 和 Butterworth 滤波得到名义 endpoint；滤波器只位于 QP 前，不得在 QP 后再次改变安全 endpoint。
-4. 将该名义 endpoint 对应的 quintic 子步轨迹与障碍物运动联合外推，形成逐连杆、逐子步预测间隙。
-5. 使用当前近阈值集合、名义预测 Top-k 和首次越界时刻生成初始稀疏约束集，并在当前参考 endpoint 处线性化。
-6. 在同一 QP 中优化终点速度；quintic 仿射映射使该变量唯一确定完整子步速度、加速度和 jerk，并允许直接施加物理硬边界。
-7. 对候选解执行全连杆、全验证时刻的模型内非线性几何验收；若发现遗漏危险，则每轮加入最严重的有限个反例，在新候选 endpoint 处重新线性化并求解，直至验收通过或达到轮数/时间上限。
-8. 只有通过验收且 solver/slack 正常的轨迹才进入正常执行；否则优先采用预先构造并验收的 jerk-limited 制动轨迹，制动轨迹也未通过时执行硬件急停并记录未验证降级。严格执行 QP 已建模的子步轨迹，不再附加改变轨迹的滤波。
-9. 在物理子步持续监测真实/仿真最小距离、跟踪误差和感知状态，异常时按同一降级协议处理；不把“停止”本身解释为对继续逼近障碍物的避碰保证。
-
-## 六、主要研究内容
-
-### 6.1 机械臂整臂几何建模
-
-第 `i` 个主要连杆采用胶囊体近似，球形障碍物由中心、速度和半径描述：
+## 2. 总体控制结构
 
 ```text
-L_i(q) = {p_i^a(q), p_i^b(q), r_i}
-O_t = {c_t, v_t, R}
+仿真关节状态、目标位姿误差、障碍物位置与速度、逐胶囊相对向量、间隙、TTC、存在标志
+        |
+        v
+SAC actor
+        |
+        | a_t：六维归一化动作
+        v
+逐关节固定比例缩放与速度限幅
+        |
+        | qdot_actor：SAC 输出对应的关节速度命令
+        v
+仿真器关节速度控制接口
 ```
 
-障碍物中心到连杆轴线的最近点和表面间隙为：
+第一阶段的执行链止于 `qdot_actor`。该命令在一个 SAC 控制周期 `Delta_T` 内保持不变，由仿真器完成物理子步。除固定动作缩放和速度限幅外，不使用 rate limiter、滤波器、轨迹插值或 Safety-QP，因而不存在 observation 之外的外部控制器状态。
+
+## 3. 第一阶段：训练并冻结任务 SAC
+
+### 3.1 训练原则
+
+S0 从随机初始化的 actor、critic 和 replay buffer 开始；S1、S2 必须从上一阶段通过 Gate 的完整 checkpoint 继续。机器人、目标分布、observation、动作接口和执行链在各阶段保持不变；新场景的任务球碰撞终止语义和安全惩罚系数仅按第 3.4 节的确定性课程变化。后续阶段继续采样已经掌握的简单场景，以减轻能力遗忘。
+
+该课程借鉴 [`Adaptive Reward Shaping`](../references/1-s2.0-S0952197626005658-main.pdf) 根据安全违反逐渐增强避障目标的思想，但不照搬其削弱到达权重的做法：本文的到达误差、进展、平滑和成功奖励在 S0/S1/S2 始终固定，只对新引入场景的风险、距离违反和任务球碰撞惩罚作有界递增。训练期间始终关闭间隙预测器和 Safety-QP，安全层不参与 observation 或动作生成。自碰撞、环境碰撞和关节越界在所有阶段始终是硬失败；只有任务球碰撞在新场景课程初期允许继续。具体奖励、终止语义、阶段比例和 Gate 统一在第 3.4 节定义。
+
+### 3.2 SAC 输入量
+
+SAC 使用 MLP，不使用 LSTM 或固定长度历史。每个控制周期将机器人状态、目标误差、障碍物状态、逐胶囊相对几何和 TTC 拼接为 55 维 observation。除关节量外，所有向量均在机器人基坐标系 `{B}` 中表示。
+
+六个受控关节按以下固定顺序排列：
 
 ```text
-u_i = p_i^b - p_i^a
-if u_i^T u_i > epsilon_seg:
-    rho_i = clip(((c - p_i^a)^T u_i) / (u_i^T u_i), 0, 1)
+[shoulder_pan_joint, shoulder_lift_joint, elbow_joint,
+ wrist_1_joint, wrist_2_joint, wrist_3_joint]
+```
+
+observation 中的 `q`、`qdot`，actor 输出动作，逐关节动作尺度、速度上限、位置上下限以及所有运动学 Jacobian 的关节维度均严格采用该顺序。关节通过 URDF 名称解析为 PyBullet joint ID，不依赖 URDF 加载后的整数编号。
+
+| 索引 | 变量（维度） | 定义与单位 | 固定归一化 | 无障碍填充值 |
+| --- | --- | --- | --- | --- |
+| `0:6` | `q`（6） | 六个受控关节的仿真位置真值，`rad` | 按各关节上下限仿射映射至 `[-1,1]` | 正常计算 |
+| `6:12` | `qdot`（6） | 六个关节的仿真实际速度，`rad/s` | 除以各关节速度上限并裁剪至 `[-1,1]` | 正常计算 |
+| `12:15` | `e_p`（3） | `p_goal^B-p_ee^B`，`m` | 除以 `p_error_scale` 并逐分量裁剪至 `[-1,1]` | 正常计算 |
+| `15:18` | `e_R`（3） | `Log(R_goal^B (R_ee^B)^T)^vee`，`rad` | 除以 `pi` | 正常计算 |
+| `18:36` | `r_1,...,r_6`（18） | `r_i=p_obs^B-c_i^B`，每个向量占连续 3 维，`m` | 除以 `relative_position_scale` 并逐分量裁剪至 `[-1,1]` | 全零 |
+| `36:39` | `p_obs^B`（3） | 障碍物球心位置真值，`m` | 按下文固定边界逐轴映射并裁剪至 `[-1,1]` | 全零 |
+| `39:42` | `v_obs^B`（3） | 障碍物球心线速度真值，`m/s` | 除以 `obstacle_speed_scale` | 全零 |
+| `42:48` | `d_1,...,d_6`（6） | `d_i=||r_i||_2-r_capsule,i-r_obs`，`m` | 在 `[-0.20,0.80] m` 裁剪后映射至 `[-1,1]` | 全部为 `1` |
+| `48:54` | `TTC_1,...,TTC_6`（6） | 到达安全边界 `d_safe` 的估计时间，`s` | `clip(TTC_i,0,TTC_max)/TTC_max` | 全部为 `1` |
+| `54` | `H`（1） | 障碍物存在标志，无量纲 | 不变 | `0` |
+
+总维度为：
+
+```text
+6 + 6 + 3 + 3 + (6 x 3) + 3 + 3 + 6 + 6 + 1 = 55
+```
+
+#### 坐标系与位置归一化
+
+当前实验中世界坐标系 `{W}` 与机器人基坐标系 `{B}` 完全重合，即 `T_WB=T_BW=I_4`；因此世界系与基坐标系之间不存在平移或旋转偏置。
+
+目标位姿和当前末端位姿统一表示在 `{B}` 中。末端参考系 `{E}` 固定为 `wrist_3_link` 的 URDF link frame，`p_ee^B` 和 `R_ee^B` 均由该 frame 的正运动学得到。目标生成、observation、reward、成功判定及全部评价使用同一参考系；`flange`、`tool0` 和额外 TCP/工具变换均不参与任务位姿定义。
+
+障碍物球心位置归一化采用覆盖静态和动态障碍物分布的固定边界：
+
+```text
+p_obs_low^B  = [ 0.22, -0.62, 0.18] m
+p_obs_high^B = [ 0.72,  0.62, 0.62] m
+
+p_obs_norm,k = clip(2 (p_obs,k^B - p_obs_low,k^B)
+                         / (p_obs_high,k^B - p_obs_low,k^B) - 1,
+                    -1, 1)
+```
+
+公式逐轴应用于 `k in {x,y,z}`。该边界包含 S1 的静态球采样范围，并与 S2 的反射边界一致；所有数据 split 共用同一组常数。超出边界的值仅在 observation 中裁剪，原始位置仍用于仿真推进、几何计算和日志。无障碍场景直接写入表中填充值，由 `H=0` 标识，不对占位值作反归一化。
+
+#### 相对几何量的来源
+
+六个胶囊的编号、所属连杆、局部端点偏移、半径、碰撞 link 对应关系和顺序固定取自 [`configs/robot/ur5.yaml` 的 `robot.capsules`](../../configs/robot/ur5.yaml#L35)。本引用仅绑定该配置段，不自动采用同一 YAML 的其他字段。训练和全部评价必须使用同一解析结果，并在 run manifest 中记录源文件及规范化序列化后胶囊表的 SHA-256。
+
+设第 `i` 个胶囊的中轴线端点为 `a_i^B(q)` 和 `b_i^B(q)`，球心为 `p_obs^B`，球半径为 `r_obs=0.075 m`。令 `ell_i=b_i-a_i`，最近点、相对向量和表面间隙定义为：
+
+```text
+lambda_i = 0                                                        if ||ell_i||2^2 <= eps_seg
+lambda_i = clip(((p_obs - a_i)^T ell_i) / ||ell_i||2^2, 0, 1)      otherwise
+c_i      = a_i + lambda_i ell_i
+r_i      = p_obs - c_i
+d_i      = ||r_i||2 - r_capsule,i - r_obs
+```
+
+其中 `eps_seg=1e-12 m^2`；零长度胶囊按以 `a_i` 为球心的球体处理。`p_obs^B` 保留完整空间位置，`r_i` 提供逐胶囊避障方向，`d_i` 提供扣除双方半径后的安全裕度。三者有意保留物理冗余，以减少 MLP 学习正运动学和最近点几何的负担；无需再输入各最近点的绝对位置。
+
+#### 障碍物位置与速度的来源
+
+仿真训练时直接读取球心在世界坐标系中的位置 `p_obs^W` 和线速度 `v_obs^W`。使用机器人基坐标系相对世界坐标系的齐次变换 `T_BW=[R_BW,t_BW;0,1]`，统一转换为：
+
+```text
+p_obs^B = R_BW p_obs^W + t_BW
+v_obs^B = R_BW v_obs^W
+```
+
+球心位置和线速度直接读取仿真真值，不通过逐帧差分估计。S2 中 `||v_obs^B||_2=0.1 m/s`，但 observation 必须保留随轨迹变化的三个方向分量。障碍物转移仅依赖当前 `p_obs^B`、`v_obs^B` 和公开边界，不使用隐藏 waypoint 编号或轨迹相位。
+
+#### TTC 的来源
+
+TTC 不再由多帧距离历史拟合。令 `n_i=r_i/||r_i||2`，最近点速度近似为 `v_c,i^B=J_c,i(q) qdot`，其中 `J_c,i` 是胶囊最近点的线速度雅可比。当前间隙变化率和接近速度定义为：
+
+```text
+d_dot_i        = n_i^T (v_obs^B - v_c,i^B)
+v_approach_i   = max(-d_dot_i, 0)
+
+TTC_i = 0                                  if d_i <= d_safe
+TTC_i = (d_i - d_safe) / v_approach_i     if v_approach_i > eps_v
+TTC_i = TTC_max                            otherwise
+
+TTC_obs_i = clip(TTC_i, 0, TTC_max) / TTC_max
+```
+
+`TTC_obs_i=0` 表示胶囊已经进入安全边界，数值越小表示风险越紧迫，`TTC_obs_i=1` 表示按当前相对速度在预测时域内不会进入安全边界。`eps_norm=1e-8 m` 只用于判断 `||r_i||` 是否能够安全归一化；若 `||r_i||<=eps_norm`，则直接按已进入安全边界处理。`eps_v=1e-4 m/s` 只用于判断接近速度是否足以计算 TTC；当 `v_approach_i<=eps_v` 时统一取 `TTC_i=TTC_max`。二者不得混用。
+
+TTC 补充相对运动的时间紧迫性。主方案固定使用完整 55 维输入；删除 `p_obs^B`、`d_i` 或 TTC 的版本仅用于消融，不得与主方案共用 checkpoint。
+
+### 3.3 SAC 输出与动作执行
+
+SAC actor 输出六个受控关节的归一化目标速度，不输出关节角度或角度增量。动作及其执行命令定义为：
+
+```text
+a_t in [-1,1]^6
+qdot_actor,t[j] = clip(a_t[j] * qdot_scale[j], -qdot_limit[j], qdot_limit[j])
+```
+
+其中 `0<qdot_scale[j]<=qdot_limit[j]`。同一 run 的 training、validation 和 held-out 共用动作缩放、速度上限和控制周期，实际值写入 run manifest。
+
+在时刻 `t`，环境先由当前仿真状态构造 `o_t`，actor 产生 `a_t`，随后将 `qdot_actor,t` 直接设置为六个关节的速度控制目标，并让仿真器推进一个 SAC 控制周期：
+
+```text
+o_t -> a_t -> qdot_actor,t -> simulator.step(N_substeps) -> o_t+1
+Delta_T = N_substeps * delta_t_physics
+```
+
+`qdot_actor,t` 在 `N_substeps` 个物理子步内保持不变。仿真推进后读取新的机器人状态、障碍物状态、胶囊间隙和 contact，据此计算 reward、终止标志及下一 observation。
+
+replay buffer 保存标准 transition，并附带第 3.4.2 节规定的奖励重算与 episode 结构字段：
+
+```text
+(o_t, a_t, r_t, o_{t+1}, terminated_t, truncated_t)
+```
+
+replay 中保存实际送入缩放器的 `a_t`，而不是仿真反馈速度；`a_t=0` 表示请求零关节速度。元组中的 `r_t` 是采集时日志值，gradient update 必须从原始分项按当前 `xi_scene` 重算 reward；episode 终止、截断、宽容期规范化和失败优先级按第 3.4.1、3.4.2 节处理。
+
+### 3.4 训练配置与选择协议
+
+本节是第一阶段的唯一配置事实源。一个 run 内，障碍物场景、curriculum 采样比例以及新场景的安全课程状态按下文规则变化，其余定义保持不变。动态奖励调度器属于训练算法状态而不是安全层；其状态必须进入 checkpoint。actor 仅依据严格碰撞终止语义下的 validation Gate 选择并冻结，held-out 不参与训练或选择。
+
+#### 3.4.1 MDP 与奖励
+
+| 项目 | 当前定义 |
+| --- | --- |
+| observation | 使用第 3.2 节定义的 55 维 `o_t`；只使用固定尺度，不做在线均值方差归一化 |
+| 模型与几何 | URDF、末端参考系和胶囊配置按第 1.2、3.2 节定义；run manifest 记录 URDF、胶囊源文件及解析结果哈希。当前 URDF SHA-256 为 `5263b9a27eacc55fadf33abf5c4d8ac95a83f9b6593990c9f290d03c2050d62a` |
+| 控制与物理步长 | `delta_t_physics=1/240 s`，`N_substeps=12`，`Delta_T=0.05 s`；每个控制周期动作保持不变 |
+| 仿真动力学 | 固定基座、重力 `[0,0,0] m/s^2`、PyBullet velocity control、逐关节最大驱动力 `90 N*m`；关闭命令 rate limit、EMA、Butterworth、quintic 和 Safety-QP |
+| 动作尺度 | `qdot_scale=[0.7,...,0.7] rad/s`；URDF 六关节速度硬上限均为 `pi rad/s`，动作执行仍按 3.3 节逐关节裁剪 |
+| observation 尺度 | `p_error_scale=1.0 m`，`relative_position_scale=1.0 m`，`obstacle_speed_scale=0.1 m/s`；`p_obs^B` 使用第 3.2 节边界；间隙在 `[-0.20,0.80] m` 裁剪后映射至 `[-1,1]`；`d_safe=0.12 m`，`TTC_max=3.0 s`，`eps_seg=1e-12 m^2`，`eps_norm=1e-8 m`，`eps_v=1e-4 m/s` |
+| episode horizon | 最多 `240` 个 SAC 控制周期，即 `12 s` |
+| 到达判定 | 若本控制周期未提前触发硬失败，则执行当前动作；当推进后的状态满足 `||e_p,t+1||_2 <= 0.055 m` 且 `||e_R,t+1||_2 <= 0.10 rad` 时置 `I_task_reached=1`。不要求连续保持，不维护 observation 之外的保持计数 |
+| 到达终止 | `I_task_reached=1` 时置 `terminated=true`。宽容期允许此前或当前 transition 出现任务球碰撞，因此另记 `collision_assisted_reach`；严格期只有 episode 从未发生任何失败事件时才记 `safe_success` |
+| 始终硬终止 | 任一物理子步触发自碰撞或环境碰撞，或任一关节满足 `q_j<q_min,j-eps_q` 或 `q_j>q_max,j+eps_q`，立即停止剩余物理子步，以该子步后状态作为 `o_{t+1}` 并置 `terminated=true`；其中 `eps_q=1e-6 rad`。硬失败始终优先于到达 |
+| 任务球碰撞终止 | 对当前正在学习的新障碍场景，当安全课程 `xi_scene<1` 时，任务球 contact 只锁存事件、不中断子步且不终止 episode；当 `xi_scene=1` 时，首次任务球 contact 立即停止剩余子步并真终止，且优先于到达。validation、held-out 和 Gate 始终采用 `xi_scene=1` 的严格语义 |
+| 时间截断 | 达到 `240` 步但未真终止时置 `truncated=true`；Bellman target 只用 `terminated` 屏蔽，必须在 `truncated` transition 上继续 bootstrap |
+| transition 时序 | 逐子步执行 `a_t`：正常情况及宽容期任务球 contact 均推进全部 `N_substeps`；发生硬失败或严格期任务球 contact 时，在首次事件子步后提前结束。随后用 `o_t`、本 transition 实际执行的全部子步遥测和 `o_{t+1}` 计算奖励原始分项；风险取已执行子步最大值，间隙取已执行子步最小值 |
+
+每个物理子步读取 PyBullet contact。过滤后仅将 `contactDistance<=0 m` 视为有效 contact，并在当前 transition 内锁存。
+
+| 事件 | 判定范围 |
+| --- | --- |
+| `obstacle_collision` | 任一机器人碰撞 link 与任务球体发生有效 contact |
+| `self_collision` | `base_link_inertia`、`shoulder_link`、`upper_arm_link`、`forearm_link`、`wrist_1_link`、`wrist_2_link`、`wrist_3_link` 之间的有效 contact，但排除该有序列表中相邻的 link 对；reset 使用相同规则 |
+| `environment_collision` | 任一机器人碰撞 link 与球体以外的外部碰撞体发生有效 contact；固定安装基座自身除外，所有外部 body 写入 run manifest |
+| `joint_limit` | 任一关节越过第 3.4.1 节定义的位置边界 |
+
+定义 `I_hard=max(I_self_collision,I_environment_collision,I_joint_limit)`，并定义 `I_obstacle_only=I_obstacle_collision(1-I_hard)`。一个 transition 可以锁存多个事件。宽容期分别报告 `task_reached`、`collision_assisted_reach` 和 `safe_success`，其中 `collision_assisted_reach=1` 当且仅当到达目标且 episode 曾发生任务球 contact，`safe_success=1` 当且仅当到达目标且 episode 从未发生任何碰撞或关节越界。严格训练、validation、held-out 和 Gate 的 episode 主结果统一按 `obstacle_collision > self_collision > environment_collision > joint_limit > safe_success > timeout` 排序；此时报告中的 `success rate` 专指 `safe_success rate`。`collision rate` 不包含 joint limit；所有 rate 的分母均为对应 seed、对应场景层的 episode 总数。
+
+令 `rho_p,t=||e_p,t||_2`、`rho_R,t=||e_R,t||_2`。使用当前 transition 的实际关节速度变化定义 `s_vel,t=||(qdot_t+1-qdot_t)/qdot_scale||_2^2`，因此平滑项只依赖 `(o_t,a_t,o_t+1)`，不依赖未观测的上一条命令。姿态角通过 SO(3) 对数映射取得，目标生成器拒绝初始姿态误差 `rho_R,0>=pi-1e-3` 的数值奇异样本。
+
+逐胶囊风险与全身风险定义为：
+
+```text
+R_d,i   = clip(exp(-(d_i-d_safe)/0.12), 0, 1)
+R_v,i   = clip(v_approach_i/0.7, 0, 1)
+R_ttc,i = exp(-TTC_i/1.0)
+R_i     = clip(0.5 R_d,i + 0.2 R_v,i + 0.3 R_ttc,i, 0, 1)
+R_max,t = max over all physics substeps and all six capsules of R_i
+d_min,t = min over all physics substeps and all six capsules of d_i
+```
+
+无障碍 episode 中固定 `R_max,t=0`、安全距离违反标志为 `0`。定义不随课程变化的到达奖励：
+
+```text
+r_goal,t = -2.0 rho_p,t+1^2
+           -0.5 rho_R,t+1^2
+           +18.0 (rho_p,t-rho_p,t+1)
+           +4.0  (rho_R,t-rho_R,t+1)
+           -0.04 s_vel,t
+           +20.0 I_task_reached
+
+c_proximity,t = 1.0 R_max,t
+                +3.0 I[d_min,t < d_safe]
+```
+
+为避免有限时域任务中“主动触发真终止以逃避后续持续误差代价”的奖励捷径，定义固定折扣时域和终止失败吸收态补偿：
+
+```text
+Z_H = sum_{k=0}^{H-1} gamma^k
+    = (1-gamma^H)/(1-gamma),  gamma=0.99, H=240
+
+c_state,t = 2.0 rho_p,t+1^2 + 0.5 rho_R,t+1^2
+
+I_terminal_failure = I_hard
+                     OR I_strict_obstacle_collision
+
+c_terminal,t = Z_H c_state,t I_terminal_failure
+```
+
+该补偿等价于在失败后附加一个保持当前位姿误差的有限时域吸收态：真终止不能再通过删除未来误差项取得更高回报。采用固定完整 `Z_H` 而不使用剩余步数，使同一失败状态在 episode 不同时间具有相同失败代价，也无需把时间索引加入 observation。它是保守补偿，只作用于自碰撞、环境碰撞、关节越界和严格期任务球碰撞；宽容期任务球接触既不终止，也不产生该项。
+
+每种障碍场景具有独立课程系数 `xi_scene in [0.02,1]`。该系数是训练进度状态，不进入 SAC observation；给定 checkpoint、replay 和调度器状态后，其演化完全确定。S0 无障碍场景不使用该系数；S1 中静态场景从 `0.02` 递增到 `1`；S2 开始时静态场景保持 `xi_static=1`，仅动态场景重新从 `xi_dynamic=0.02` 递增。训练 reward 为：
+
+```text
+r_t = r_goal,t
+      -34.0 I_hard
+      -xi_scene [4.0 c_proximity,t + 34.0 I_obstacle_only]
+      -c_terminal,t
+```
+
+对无障碍 transition 固定安全同伦项为零。`34.0=2.0+4.0x8.0`；当 `xi_scene=0.02` 时，宽容期任务球接触惩罚仍仅为 `0.68`，风险与安全距离违反惩罚也同步缩小，到达奖励完全不变，且 `c_terminal=0`。当 `xi_scene=1` 且任务球接触成为真终止时，才额外启用吸收态补偿。若硬失败与任务球 contact 同时出现，只施加一次硬失败基础惩罚和一次吸收态补偿，不重复叠加任务球基础失败惩罚；当前 transition 的接近风险仍按对应 `xi_scene` 计入。
+
+`I_task_reached` 仅在首次到达且未触发硬失败的终止 transition 上取 `1`；在 `xi_scene<1` 的宽容期，即使 episode 已经或正在与任务球接触，仍可获得到达奖励并终止为 `task_reached`。当 `xi_scene=1` 时任务球碰撞恢复为真终止，失败优先，因此最终严格 MDP 中 `I_task_reached` 与任务球碰撞不会在同一 transition 同时取 `1`。
+
+日志保存三类 contact、joint-limit、`task_reached`、`collision_assisted_reach`、`safe_success`、`xi_scene`、`r_goal`、`c_proximity`、`c_terminal`、各惩罚分项和总 reward。本阶段只训练普通 SAC 的 reward critic，不训练 cost critic 或拉格朗日乘子；jerk 仅作为评价指标，不进入 reward。
+
+#### 3.4.2 到达优先的安全同伦调度
+
+S1 和 S2 分别为新引入的静态、动态障碍场景维护独立调度器。调度器不冻结 actor、critic 或温度，也不降低任何到达奖励；它只在训练表明策略已经能够在新场景中到达后，逐渐增加该场景的安全惩罚。对最近 `100` 个已完成的新场景训练 episode 维护滑动窗口任务到达率 `S_task,100`，碰撞后到达也计为任务到达，硬失败和 timeout 计为未到达。窗口未满时不得推进课程。
+
+令 `K_scene` 为安全课程的合格推进步数，进入新场景时初始化为 `0`。每个新场景 episode 开始时固定本 episode 的 `xi_scene`，中途不得改变。episode 结束 transition 先按该固定系数写入 replay 并完成本步 UTD 更新，然后更新 100-episode 窗口及以下调度器；新系数从下一次 gradient update 和下一新场景 episode 起生效：
+
+```text
+S1 static:  S_floor = 0.90
+S2 dynamic: S_floor = 0.80
+K_ramp = 50000 new-scene control transitions
+
+if the 100-episode window is full and S_task,100 >= S_floor:
+    K_scene <- K_scene + number of control transitions in this completed episode
 else:
-    rho_i = 0
-x_i = p_i^a + rho_i u_i
-d_i = ||c - x_i|| - r_i - R
-if ||c - x_i|| > epsilon_n:
-    n_i = (c - x_i) / ||c - x_i||
-else:
-    n_i = n_i^fallback
+    K_scene <- K_scene
+
+xi_scene <- min(1.0, 0.02 + 0.98 K_scene / K_ramp)
 ```
 
-连杆对应点速度优先由雅可比计算：
+因此，只要新场景到达能力低于门槛，安全权重就保持在当前值，不会继续挤压到达行为；到达能力恢复后，安全惩罚才按累计 `50000` 个合格的新场景 transition 从 `2%` 平滑提高到最终值。`xi_scene` 只增不减，以免同一 run 在不同目标之间来回振荡。S1 中无障碍 transition 不推进 `K_static`；S2 中无障碍和静态 transition 均不推进 `K_dynamic`，并且静态 transition 始终使用已经冻结的 `xi_static=1` 和严格碰撞终止。
+
+当一次宽容期 episode 结束后首次使 `xi_scene=1` 时，在下一次环境交互和 gradient update 前原子进入严格期，并规范化该场景 replay：对每个历史 episode 保留首次任务球 contact 之前的 transition，把首次 contact transition 重标为 `terminated=true, truncated=false, I_task_reached=0`，删除其后的 transition；没有任务球 contact 的 episode 原样保留。每条 transition 额外保存执行前的 episode 级 `obstacle_contact_seen` 锁存值，因此即使 FIFO 已覆盖某个 episode 的前缀，也能识别并删除残留的碰撞后 transition。随后重建分区插入顺序、长度和写指针。严格期的新 episode 在首次任务球 contact 后立即终止。该转换只执行一次，过程及转换前后 replay SHA-256 写入 manifest。
+
+严格期至少再收集并训练 `N_strict=25000` 个对应新场景 transition，之后 checkpoint 才有资格参加本阶段 Gate。课程系数达到 `1` 并不自动表示阶段通过；最终选择仍完全依据严格 validation Gate。
+
+为避免非平稳权重与历史标量 reward 冲突，replay 除标准 transition 外必须保存足以重算奖励的原始分项：`rho_p,t`、`rho_p,t+1`、`rho_R,t`、`rho_R,t+1`、`s_vel,t`、`R_max,t`、`d_min,t`、三类 contact、joint-limit、`I_task_reached`、执行前 `obstacle_contact_seen`、场景标签、episode ID 和 episode 内步号。每次抽样均用该场景当前 `xi_scene` 重算 `r_t`；不得直接使用采集时的旧总 reward。`xi_scene`、`K_scene`、滑动窗口内容、宽容/严格状态、严格期步数和 replay 规范化标志均属于必须恢复的学习状态。
+
+#### 3.4.3 SAC 超参数
+
+| 项目 | 当前值或规则 |
+| --- | --- |
+| 策略 | tanh-squashed diagonal Gaussian policy；actor 输出 6 维 `mu` 和 6 维 `log_std`，`log_std` 裁剪到 `[-20,2]`；tanh log-probability 修正使用 `eps_log=1e-6` |
+| 训练动作 | `u=mu+exp(log_std)*epsilon`，`epsilon~N(0,I)`，`a=tanh(u)`；使用重参数化采样，并在 `log pi(a|o)` 中包含 tanh Jacobian 修正 |
+| 评估动作 | validation、held-out 和 Gate 一律使用确定性动作 `a=tanh(mu)`；不采样、不附加探索噪声 |
+| actor 网络 | `55 -> 256 -> 256 -> (mu,log_std)`，隐藏层 ReLU，无 LayerNorm；线性层使用当前实验所记录 PyTorch 版本的默认初始化 |
+| critic 网络 | 两个独立 Q 网络，均为 `(55+6) -> 256 -> 256 -> 1`，隐藏层 ReLU；各自具有 target network，使用 `min(Q1,Q2)` 构造 target |
+| 数值与设备 | PyTorch float32；不使用 AMP；训练 run manifest 记录 Python、PyTorch、CUDA、PyBullet、URDF 和配置文件版本及哈希。需要精确续训的 run 启用 PyTorch deterministic algorithms，并记录所有确定性相关环境变量和 backend 开关；若当前硬件或算子无法保证确定性，必须在 manifest 中标记为仅“状态等价恢复”，不能声称逐步复现 |
+| discount / target | `gamma=0.99`，Polyak `tau=0.005`；S0 初始化时把两个 online critic 硬复制到对应 target critic，此后每个 gradient update 最后各软更新一次；不存在 target actor |
+| optimizer | actor、两个 critic 的联合 optimizer、temperature 均使用 Adam；`actor_lr=critic_lr=alpha_lr=3e-4`，其余 Adam 参数采用当前实验所记录 PyTorch 版本的默认值 |
+| entropy | 自动温度调节，`alpha_initial=0.2`，`target_entropy=-6`；S0/S1/S2 均继续继承 `log_alpha` 和 optimizer 状态 |
+| replay | 总容量 `300000` transitions；按场景标签建立 FIFO 分区，容量为无障碍 `60000`、静态 `90000`、动态 `150000` |
+| batch | `batch_size=256`；S0 从无障碍区抽取 256，S1 按无障碍/静态 `64/192` 抽取，S2 按无障碍/静态/动态 `51/77/128` 抽取；不足的分区只在该阶段初始填充期按其余可用分区比例重分配，并记录实际比例 |
+| 探索与更新 | S0 开始的前 `3000` 个环境步执行均匀随机动作；replay 达到 `1000` 且不少于一个 batch 后开始更新；每个环境步执行一次 critic、actor、alpha 和 target 更新，UTD=`1` |
+| 梯度处理 | 不裁剪梯度，不做 reward normalization，不使用学习率调度、PER、n-step return 或 HER |
+
+#### 3.4.4 检查点与恢复
+
+| 内容 | 保存与校验规则 |
+| --- | --- |
+| 学习状态 | actor、两个 critic、两个 target critic 的完整 `state_dict`；actor/critic/alpha optimizer 的参数组、动量和步数；`log_alpha`；后续若增加 scheduler 或 scaler，也保存完整状态 |
+| replay 与计数器 | 三个 replay 分区的数组、奖励重算字段、episode ID/步号、有效长度、容量、写指针、场景标签和插入顺序；全局及阶段环境步数、更新次数、episode 数、block、checkpoint 序号、随机探索剩余步数、当前阶段和 minibatch 重分配计数；另保存 `xi_static/xi_dynamic`、`K_scene`、最近 100 个新场景 episode 结果、宽容/严格状态、严格期步数和 replay 规范化标志 |
+| 随机状态 | Python、NumPy、PyTorch CPU、全部 CUDA device RNG，以及环境 reset、目标、障碍物、场景选择、动作探索和 replay 抽样的每条独立 RNG 流；同时保存 RNG 名称与派生 seed 的映射 |
+| 活动 episode | episode ID/seed、场景、步数、该 episode 固定的 `xi_scene`、目标、初始关节状态、球体参数和反射边界，以及当前 `q`、`qdot`、动作、observation、任务球 contact 锁存、终止状态和累计指标；同时保存 schema 版本 |
+| 仿真状态 | PyBullet 可持久化快照，以及所有 body 的逻辑名称、pose、速度、关节状态、动力学参数、碰撞过滤、velocity-control 设置、physics engine 参数和仿真步数；恢复后重新施加配置并逐项校验 |
+| 写入完整性 | 仅在 transition 写入 replay、本步全部 UTD 更新以及可能的 episode 结束课程更新/replay 规范化全部完成后保存；先写临时目录和各文件 SHA-256，再写包含 schema、配置、URDF、Git commit、dirty 状态及 diff 哈希的 manifest，最后原子重命名 |
+| 加载校验 | 加载前核对 schema、配置、URDF、代码和依赖版本；加载后重算 observation，float32 逐元素绝对误差不得超过 `1e-7`，并核对 replay 指针、计数器、optimizer step 和 RNG 摘要；失败时中止，不允许部分加载或静默 reset |
+
+#### 3.4.5 SAC 更新顺序
+
+从按场景分层抽样得到的 batch `B={(o_t,a_t,raw_reward_fields_t,o_{t+1},terminated_t,truncated_t)}` 中进行一次 gradient update，`|B|=256`。先按每条 transition 的场景标签和该场景当前 `xi_scene` 由第 3.4.1 节公式重算 `r_t`，再进行以下更新。所有 observation 和 action 均为送入网络的归一化值。定义：
 
 ```text
-v_i^link = J_i(q, rho_i) q_dot
-dot_d_i = n_i^T (v - v_i^link)
-v_i^app = max(0, -dot_d_i)
+m_t = 1 - terminated_t
 ```
 
-其中退化线段按球体处理；中心重合时距离法向不可定义，`n_i^fallback` 仅使用上一有效法向维持诊断量连续，同时将当前梯度标记为无效并触发降级，不能把任意方向解释为保守安全梯度。若胶囊轴线端点雅可比分别为 `J_i^a/J_i^b`，则固定投影区段内 `J_i(q,rho_i)=(1-rho_i)J_i^a+rho_i J_i^b`。有限差分实现必须固定当前投影系数 `rho_i`，避免将最近点沿连杆滑动误认为连杆自身速度；在投影落到端点或投影区段切换处，距离仅分段可微，必须由梯度误差测试和第 6.6 节非线性验收处理。
+`terminated_t` 对到达、硬失败以及严格期任务球 contact 均为 `1`；宽容期任务球 contact 本身不改变 `terminated_t`。单纯因 240 步时间上限结束时 `terminated_t=0, truncated_t=1`，因此仍然 bootstrap。若真实终止与时间上限在同一步发生，按真实终止处理，即 `terminated_t=1, truncated_t=0`。进入严格期时，旧任务球碰撞 episode 必须已经按第 3.4.2 节规范化，batch 中不得出现严格 MDP 不可达的碰撞后 transition。
 
-胶囊体仅代表“全部建模连杆”，不自动等于 URDF 的完整碰撞几何。实验须用 PyBullet collision shape/contact 对胶囊距离进行独立标定，报告距离误差、保守误报和危险漏检，并明确未建模的基座、法兰与夹具范围。
-
-### 6.2 当前连杆动态风险基线
-
-当前时刻径向近似 TTC 定义为：
+对任意 observation `o`，actor 输出 `mu_theta(o)` 和裁剪后的 `log_std_theta(o)`。训练动作及其 log probability 定义为：
 
 ```text
-if d_i <= d_safe:
-    TTC_i = 0
-elif v_i^app <= epsilon_v:
-    TTC_i = TTC_max
-else:
-    TTC_i = min((d_i - d_safe) / v_i^app, TTC_max)
+sigma_theta(o) = exp(log_std_theta(o))
+epsilon ~ N(0,I)
+u = mu_theta(o) + sigma_theta(o) * epsilon
+a = tanh(u)
+
+log pi_theta(a|o)
+  = sum_j [log N(u_j; mu_theta,j(o), sigma_theta,j(o))
+             - log(1 - tanh(u_j)^2 + eps_log)]
 ```
 
-基线连杆风险为：
+求和覆盖 6 个动作维度。概率和熵均在归一化动作空间 `[-1,1]^6` 中计算，不把后续 `qdot_scale` 的常数 Jacobian 加入 `log pi`。实现时可使用与上式等价的数值稳定 softplus 形式，但必须通过单元测试证明结果一致。
+
+首先在 `no_grad` 下，从当前 actor 为每个 `o_{t+1}` 重新采样 `a'` 并计算 `log pi_theta(a'|o_{t+1})`。使用本次更新开始时的 `alpha=exp(log_alpha)` 和两个 target critic 构造：
 
 ```text
-R_d_i = clip(exp(-(d_i - d_safe) / sigma_d), 0, 1)
-R_v_i = clip(v_i^app / v_max, 0, 1)
-R_t_i = exp(-TTC_i / tau_ttc)
-Risk_i^now = clip(w_d R_d_i + w_v R_v_i + w_t R_t_i, 0, 1)
+y_t = r_t + gamma * m_t *
+      (min(Qbar_phi1(o_{t+1},a'), Qbar_phi2(o_{t+1},a'))
+       - alpha * log pi_theta(a'|o_{t+1}))
+
+J_Q = mean_B[(Q_phi1(o_t,a_t)-y_t)^2]
+      + mean_B[(Q_phi2(o_t,a_t)-y_t)^2]
 ```
 
-其中 `w_d,w_v,w_t` 非负且和为 1。该风险作为已有 `Instant-Link-SAC` 方法和后续预测风险消融的统一基线。这里的 TTC 只是沿当前距离法向、相对速度恒定时的径向近似，不解释为真实首次碰撞时间。
+`y_t` 必须停止梯度。两个 online critic 的参数放在同一个 Adam optimizer 中，对 `J_Q` 执行一次 `zero_grad(set_to_none=true) -> backward -> step`；target critic 不接收梯度。
 
-### 6.3 动作条件的预测性连杆风险表征
-
-设控制周期为 `T_c=M Delta t_phys`，预测采样时刻为 `tau_k in (0,T_h]`。先将 R2-D 冻结的名义 SAC 输出依次经过已有 rate limiter 和 Butterworth 滤波，得到候选名义 endpoint `q_dot_nom`；该有状态滤波每个控制周期只调用一次并缓存结果，预测、QP 与日志共用同一 endpoint。当前控制周期内按与执行器一致的 quintic `s(z)=6z^5-15z^4+10z^3` 从上一实际下发速度过渡到候选 endpoint。由于执行器在每个 240 Hz 物理子步下发一次速度命令，主模型采用与下发语义一致的离散零阶保持形式，而不是另用连续积分近似：
+critic 更新完成后，在 `o_t` 上从当前 actor 重新进行一次独立的重参数化采样，得到 `a_pi` 和 `log pi_theta(a_pi|o_t)`：
 
 ```text
-s_k = s(k/M),  k=1,...,M,  s_0=0
-S_k = sum_(r=1)^k s_r
-q_dot_hat_k(u) = (1-s_k) q_dot_prev + s_k u
-q_hat_k(u) = q_t + Delta t_phys [(k-S_k) q_dot_prev + S_k u]
-
-q_dot_hat(tau;u) = u,                                      tau > T_c
-q_hat(tau;u) = q_hat_M(u) + (tau-T_c)u,                    tau > T_c
-c_hat(tau) = c_t + tau v_t
-```
-
-因此任意预测时刻的机器人关节状态仍是候选终点速度 `u` 的仿射函数，同时避免假设未知的未来 SAC 动作。上述 `q_hat` 是“命令轨迹在理想速度跟踪下”的运动学预测，实际反馈偏差由时变裕量和逐子步监测覆盖。作为推导核对，连续 quintic 的积分系数为 `B(tau)=T_c[z^6-3z^5+(5/2)z^4]`、`z=tau/T_c`，且 `B(T_c)=T_c/2`；但优化、验收和执行统一使用上面的离散子步模型。控制器在下一周期使用新观测滚动重规划。实际实现使用本周期全部 240 Hz 子步，周期外使用 validation 冻结的较稀疏采样。
-
-障碍物采用局部匀速近似，机器人预测则显式依赖候选动作。对每个预测时刻重新计算表面间隙 `d_hat_i(tau_k; q_dot_nom)`，定义：
-
-```text
-d_i^pred(q_dot_nom) = min_k d_hat_i(tau_k; q_dot_nom)
-k_i^crit = argmin_k d_hat_i(tau_k)
-T_i^enter = min {tau_k | d_hat_i(tau_k) <= d_safe}
-```
-
-若预测时域内未进入安全边界，则令 `T_i^enter = +infinity`。预测风险分量为：
-
-```text
-R_pred_d_i = clip(exp(-(d_i^pred - d_safe) / sigma_pred), 0, 1)
-R_enter_i = I[T_i^enter <= T_h] exp(-T_i^enter / tau_pred)
-R_horizon_i = sum_k omega_k phi(d_hat_i(tau_k)) / sum_k omega_k
-omega_k = exp(-eta tau_k)
-phi(d) = clip(exp(-(d-d_safe) / sigma_h), 0, 1)
-```
-
-最终预测性连杆风险定义为：
-
-```text
-Risk_i^pred = clip(
-    w_now Risk_i^now
-    + w_min R_pred_d_i
-    + w_enter R_enter_i
-    + w_h R_horizon_i,
-    0, 1
-)
-```
-
-各权重非负且和为 1。主方法直接用预测间隙与首次越界时间选择 QP 约束；该复合风险只用于诊断、排序 tie-break 或可选调度，不扩展 SAC observation，也不决定硬安全边界。正式参数仅在 validation 选择，随后对 held-out 固定。
-
-### 6.4 初始约束筛选与诊断风险聚合
-
-硬最大值 `max_i Risk_i` 作为基线。拟采用等权、温度可控的 Softmax 聚合：
-
-```text
-z_i = tau_s Risk_i^pred
-alpha_i = exp(z_i-max_j z_j) / sum_j exp(z_j-max_l z_l)
-Risk_body = sum_i alpha_i Risk_i^pred
-```
-
-该聚合值保持在各连杆风险值的范围内；`tau_s=0` 时为算术平均，`tau_s` 越大越接近硬最大值。主方法不使用未经论证的非等连杆权重；若将来引入连杆重要性，必须重新定义被聚合量和归一化范围，不能沿用“趋近硬最大风险”的表述。风险分数只用于日志、排序或可选调度，不进入安全约束本身。主方法按预测间隙、首次越界时间和当前近阈值集合生成初始约束集；最终候选动作必须经过第 6.6 节的全身非线性验收，不能因未进入初始 Top-k 而免检。SAC 保持已验证的 `link_risk_v1` observation。Softmax 与 hard max 仅为次要消融，不是论文成立的必要条件。
-
-### 6.5 SAC 名义策略
-
-SAC 先输出策略关节速度，随后按已有执行管线得到 QP 的名义 endpoint：
-
-```text
-a_t in [-1, 1]^6
-q_dot_policy = q_dot_max * a_t
-q_dot_limited = rate_limit(q_dot_policy)
-q_dot_nom = Butterworth(q_dot_limited)
-```
-
-`q_dot_nom` 是预测线性化参考和 QP 跟踪目标。QP 输出安全 endpoint 后只进行确定性 quintic 展开，不再经过 Butterworth 或其他滤波。
-
-Instant-Link 候选名义策略采用当前连杆风险状态，并在重启实验中按与部署一致的 RTB 执行管线重新训练、验证和冻结：
-
-```text
-s_t = [
-    q_t, q_dot_t, e_p_t,
-    D_t, N_t, V_app_t, TTC_t,
-    Risk_body_now_t, closest_link_t,
-    q_dot_cmd(t-1)
+J_actor = mean_B[
+    stopgrad(alpha) * log pi_theta(a_pi|o_t)
+    - min(Q_phi1(o_t,a_pi), Q_phi2(o_t,a_pi))
 ]
 ```
 
-任务奖励保持简洁：
+计算 actor loss 时暂时关闭两个 critic 参数的梯度，但不能 detach critic 对 `a_pi` 的输入梯度；梯度必须通过 Q 对动作的导数回传到 actor。actor optimizer 对 `J_actor` 执行一次更新，critic optimizer 不在此步骤执行。
+
+自动温度使用无约束标量 `log_alpha`，初始化为 `log(0.2)`，并令 `alpha=exp(log_alpha)`。复用本次 actor loss 前向计算得到、但已经停止梯度的 log probability：
 
 ```text
-r_task = -w_p ||p_ee - p_g||^2
-r_progress = w_prog (||e_p(t-1)|| - ||e_p(t)||)
-r_smooth = -w_c ||q_dot_cmd(t) - q_dot_cmd(t-1)||^2
-r_success = R_s I[success]
-r_collision = -R_c I[collision]
-r_t = r_task + r_progress + r_smooth + r_success + r_collision
+H_target = -6
+
+J_alpha = -mean_B[
+    log_alpha * stopgrad(log pi_theta(a_pi|o_t) + H_target)
+]
 ```
 
-碰撞会立即终止 episode，因此 `R_c` 不只是一般的安全 shaping：它必须覆盖提前终止所规避的剩余逐步负回报，防止策略把碰撞学成优于困难超时的 terminal shortcut。重启实验 R2b 已观察到该缺陷，R2c 在保持 observation、current-risk cost、训练分布和其余任务奖励不变时单独校正 `R_c`；这属于任务 MDP 正确性修复，不作为论文创新。任务奖励和 current-risk 固定惩罚的其余形式在 R0 预注册，权重只由新 validation 数据选择。预测 observation/reward 不作为主方法前置条件；若资源允许，可作为非核心敏感性消融从头重跑。部署安全由动作条件预测 QP 独立承担。
-
-R2 的补正顺序先在无障碍下保持相同 `link_risk_v1` 维度并写入零风险占位量，只隔离 SAC 的基础 reaching 容量；该诊断 actor 不直接冻结。只有基础容量通过后，才在新预注册协议中验证 current-risk observation/cost 的课程训练。若风险耦合持续系统性破坏 reaching，则最终名义 actor 可改为只负责任务的 SAC，而 Instant-Link-SAC 保留为风险策略基线；任何路线变更必须在 R3 前同步冻结 observation、训练分布、方法命名和 actor 哈希。
-
-### 6.6 动作条件、验证驱动的轨迹嵌入式安全 QP
-
-完整方法简称 `VG-PTQP`（Verification-Guided Predictive-Trajectory-QP）。
-
-安全层输入 R2-D 冻结名义 SAC 的终点速度 `q_dot_nom`、当前机器人/障碍物状态和前一周期实际执行状态。优化变量为安全终点速度 `u` 与逐约束松弛 `xi_(i,k)`。对一个控制周期内的 `M` 个物理子步，固定 quintic 基函数 `s_k` 给出：
+alpha optimizer 对 `J_alpha` 执行一次更新，不对 actor 反向传播。最后软更新两个 target critic：
 
 ```text
-q_dot_k(u) = q_dot_prev + s_k (u - q_dot_prev)
-q_k(u) = q_t + Delta t_phys sum_(r=1)^k q_dot_r(u)
-a_k(u) = [q_dot_k(u) - q_dot_(k-1)(u)] / Delta t_phys
-j_k(u) = [a_k(u) - a_(k-1)(u)] / Delta t_phys
+Qbar_phi1 <- (1-tau) Qbar_phi1 + tau Q_phi1
+Qbar_phi2 <- (1-tau) Qbar_phi2 + tau Q_phi2
 ```
 
-其中 `q_dot_0=q_dot_prev`，`a_0=a_prev` 使用上一周期最后两个实际下发子步得到的命令加速度；episode 初始化时按静止或实测历史明确初始化。于是第一子步 jerk 为 `j_1=(a_1-a_prev)/Delta t_phys`，不会遗漏跨控制周期边界。等价地，令 `S_k=sum_(r=1)^k s_r`，则 `q_k=q_t+Delta t_phys[(k-S_k)q_dot_prev+S_k u]`，从而这些量对 `u` 均为仿射函数。运动边界约束覆盖本周期实际下发的全部 `M` 个子步；周期外仅进行安全间隙预测，并采用 endpoint 保持假设。
-
-记第 `r` 轮参考 endpoint 为 `u_ref^(r)`、累计约束索引集为 `A_r`。初始令 `u_ref^(0)=q_dot_nom`。先在名义 rollout 上计算全部 `(link,time)` 间隙，再令 `A_0` 为三类索引的并集：名义间隙低于激活阈值的近阈值索引、未来最小间隙 Top-k 连杆各自的临界时刻索引、各连杆首次越界时刻索引；临界/越界时刻可按冻结规则加入相邻时间索引。这里的 Top-k 按连杆选择，进入 QP 的基本约束键仍是 `(link_id,time_index)`。对 `A_r` 中的约束在本轮参考轨迹处构造：
+每个环境步在满足 replay warm-up 条件后严格执行以下顺序一次，UTD=`1`，不延迟 actor 或 alpha 更新：
 
 ```text
-d_hat_(i,k)(u) ~= d_ref_(i,k) + G_(i,k) (u - u_ref^(r))
-d_hat_(i,k)(u) >= d_safe + m_unc(k) - xi_(i,k)
+1. 按阶段比例抽取并固定一个 replay batch，按当前课程系数重算 reward
+2. 采样 next-state action，计算 y_t，更新两个 critic
+3. 独立采样 current-state action，更新 actor
+4. 使用第 3 步的 detached log probability 更新 log_alpha
+5. 软更新两个 target critic
+6. 记录 batch 索引、各 loss、alpha、Q 均值和 target 均值
 ```
 
-`d_ref_(i,k)` 同时外推障碍物和候选机器人子步。令 `Q_k=partial q_hat_k/partial u`，则本轮固定的距离—终点速度梯度为：
+上述顺序也规定了随机数的消费顺序。每一步更新前仅清零该步骤对应 optimizer 的梯度；loss 均按 batch mean 归约。S1、S2 继承全部 online/target 网络、optimizer、`log_alpha`、replay 和更新计数，不重新执行 target 硬复制。
 
-```text
-G_(i,k) = [partial d_i(q,c_hat_k) / partial q]_(q=q_ref_k) Q_k
-```
+训练时从高斯策略采样动作，只有评价使用确定性 `tanh(mu)`。S1、S2 禁止仅加载 actor 后重置 critic、温度或 replay。
 
-其中胶囊最近点投影区段在单次局部求导中固定，解析或有限差分梯度都必须在 validation 信赖域内与中心差分方向导数核对。第 `r` 轮 QP 为：
+同阶段中断恢复时继续保存的活动 episode。若 Gate 选中较早 checkpoint 用于阶段切换，则先恢复其全部学习状态和 RNG，再结束旧阶段活动 episode且不追加 transition，随后使用已恢复的场景 RNG 创建新阶段首个 episode。validation/Gate 在独立进程或 checkpoint 副本上运行，不得消费训练 RNG 或改写训练状态。
 
-```text
-min_(u,xi) ||u-q_dot_nom||_W^2
-            + lambda_a sum_k ||a_k(u)||^2
-            + lambda_j sum_k ||j_k(u)||^2
-            + sum_(i,k) rho_(i,k) xi_(i,k)^2
-```
+E1 需要执行一次恢复等价性测试：从同一 checkpoint 独立恢复两次，在相同硬件和软件环境中各继续至少 `100` 个环境步，逐步比较场景 ID、observation、采样动作、reward、终止标志、replay 抽样索引、loss 和网络参数。确定性模式下要求完全一致；若只能达到状态等价而非逐步一致，必须记录首个分歧位置与原因，并相应降低复现性表述。
 
-约束为：
+#### 3.4.6 场景生成与数据划分
 
-```text
-d_hat_(i,k)(u) >= d_safe + m_unc(k) - xi_(i,k)
-q_dot_min <= q_dot_k(u) <= q_dot_max
-q_min <= q_k(u) <= q_max
--a_max <= a_k(u) <= a_max
--j_max <= j_k(u) <= j_max
-0 <= xi_(i,k) <= xi_max
-||u-u_ref^(r)||_inf <= delta_ref
-||u-q_dot_nom||_inf <= delta_nom
-```
-
-其中 `delta_ref` 控制本轮线性化误差，`delta_nom` 限制对原始 SAC 动作的总修正。要求 `W` 为正定矩阵，`lambda_a,lambda_j >= 0` 且 `rho_(i,k)>0`；无穷范数约束实现为逐关节线性上下界。因此目标 Hessian 为正定、全部约束关于 `u,xi` 为仿射，每一轮子问题是严格凸 QP，并具有唯一最优解（若可行）。若实现允许某些二次权重为零，则至少保证 Hessian 半正定并单独讨论解的唯一性。多轮重新线性化与反例增广整体属于有限轮序列凸化算法，不表述为单个全局凸问题，也不据此宣称收敛到原非凸安全问题的全局解。
-
-保守裕量使用随预测时刻变化的可解释分解，而不是无依据的单一常数：
-
-```text
-m_unc(k) = m_geom + m_track + m_pos + tau_k m_vel
-           + m_linear(k) + m_grid(k)
-```
-
-分别覆盖胶囊近似、速度跟踪、障碍位置与速度估计、信赖域内线性化残差以及验证网格间隔。若距离随时间的 Lipschitz 上界为 `L_d(k)`、相邻验证点间隔为 `Delta tau_k`，可取 `m_grid(k) >= L_d(k) Delta tau_k / 2`；若无法给出可信上界，则只能声称离散网格上的模型内验收。各裕量只在 validation 估计并冻结，鲁棒性实验检查其覆盖失效。`W/lambda/rho`、预测/验证时刻、初始 Top-k、信赖域、每轮最大新增反例数 `B_add`、最大细化轮数 `R_max`、控制周期时间预算和保守裕量均只在 validation 冻结。
-
-QP 候选解 `u_*^(r)` 不直接下发，而是在固定的全身验证集合
-
-```text
-V = {(i,k) | i 为全部建模连杆，k 为全部验证时刻}
-```
-
-上重新执行模型内非线性 rollout：由 `u_*^(r)` 生成完整 quintic/终端保持轨迹，对每个 `(i,k)` 重新计算胶囊体最近点和精确表面间隙 `d_exact_(i,k)(u_*^(r))`。这里“精确”仅指不使用本轮距离一阶近似，仍受机器人几何、障碍物匀速外推和状态观测误差限制。定义反例违反量：
-
-```text
-nu_(i,k) = d_safe + m_unc(k) - d_exact_(i,k)(u_*^(r))
-C_r = {(i,k) in V | nu_(i,k) > epsilon_verify}
-```
-
-若 `C_r` 为空、最大 safety slack 不超过验收阈值且 solver 状态正常，则候选轨迹通过验收。否则按 `nu_(i,k)` 从大到小加入至多 `B_add` 个尚未覆盖的反例，并更新：
-
-```text
-A_(r+1) = A_r union Worst-B_add(C_r)
-u_ref^(r+1) = u_*^(r)
-```
-
-下一轮对累计约束在新参考轨迹处全部重新计算 `d_ref/G`，避免沿用失效的旧线性化。最近连杆、胶囊体投影区段或临界时刻的切换由非线性验收自然暴露，不依赖初始风险排序。为避免反例已经在 `A_r` 中却因线性化偏差持续违反时算法停滞，即使没有新索引，只要 `C_r` 非空且仍有预算，也必须在当前候选点重新线性化；若连续两轮改进低于容差，则提前进入降级。
-
-在线终止规则为：验收通过则正常执行；达到 `R_max`、时间预算不足以安全完成下一轮、solver 失败、slack 超阈、数值无效或连续细化无进展，则不执行未通过验收的候选解。每周期在进入细化循环前先构造满足关节位置/速度/acceleration/jerk 硬边界的 jerk-limited braking fallback，并预先完成同一集合 `V` 上的非线性验收；异常时优先执行已通过验收的制动轨迹。若制动轨迹也未通过，则执行硬件级紧急停止并显式记录 `fallback_unverified`，承认动态障碍物继续逼近时“停止”本身不保证避免碰撞。不得将未验收的限速命令笼统称为安全后备。
-
-该方法没有终端安全集或递归可行性证明；上一周期验收通过不意味着下一周期 QP 必然可行。时间预算判断应预留 fallback 验收、指令通信和子步执行余量，不能等控制周期超时后才降级。初始 Top-k 影响初始问题规模、收敛速度和有限预算下的降级概率，但最终验收范围始终是固定的全身集合 `V`，不把 Top-k 当作最终覆盖范围。
-
-由于每轮最多加入 `B_add` 个新索引，有 `|A_r| <= min(|V|, |A_0| + r B_add)`，且求解轮数不超过 `R_max`，算法由配置强制有限终止。该结论只表示求解尝试次数和计算规模有界，不表示算法必然收敛、QP 必然可行或最终候选必然通过验收。核心决策维数始终为 6，只有 safety slack 随累计约束数增加；每轮全身验收的几何计算量与 `|V|` 线性相关。实验必须分别报告距离/Jacobian 构造、QP 求解、fallback 验收和全身验收开销，验证该有限上界在 20 Hz 周期内是否实际成立。
-
-约束优先级明确为：有限值与关节位置/速度/acceleration/jerk 边界最高；预测安全约束允许有界独立 slack，但 slack 只用于诊断可行性和触发降级，不能把模型内未通过安全验收的轨迹当作正常安全动作执行；参考点信赖域若与硬边界冲突可收缩或移除，总修正域保持配置上限。停止过程可能暂时不满足正常运行 jerk 指标，必须单独报告。风险自适应权重仅作为后续消融，不能成为主方法可行性的前提。
-
-该机制旨在发现并减少“固定 Top-k 对 QP 修正后风险迁移的模型内漏检”，并降低单次线性化误差直接传递到执行端的风险；受细化轮数、时间预算和降级策略限制时，仍须报告最终验收失败率。它不消除未建模连杆、验证时刻之间的连续时间碰撞、障碍物运动预测误差或感知/跟踪误差。安全结论仍限定于短时运动模型、验证网格、状态观测、QP 可行和降级及时等假设，不宣称形式化无碰撞保证。
-
-### 6.7 一致执行与子步监测
-
-QP 的安全终点速度 `u` 唯一确定其优化时已经检查的 quintic 子步轨迹。执行器必须原样执行该轨迹，不得再附加会改变轨迹的滤波或插值：
-
-```text
-R2-D 冻结名义 SAC 终点速度
--> 动作条件预测与初始约束生成
--> 轨迹嵌入式安全 QP
--> 全身非线性验收与反例细化
--> 已约束的 quintic 子步轨迹
--> 子步监测与执行
-```
-
-子步监测不重新塑形正常动作，只检查实测/仿真间隙、跟踪误差、感知状态、求解状态和 slack。任一量超出降级阈值时，优先切换到本周期已预验收的制动 fallback；若 fallback 未通过或反馈已超出其适用条件，则触发硬件级紧急停止并记录未验证降级。降级停止不纳入正常 jerk 连续性承诺，也不解释为对继续接近障碍物的避碰保证。
-
-### 6.8 训练与部署流程
-
-流程分为两个模块：
-
-1. **名义策略。** 按 R2-A 至 R2-D 顺序执行：R2-A 在无障碍且保持接口维度一致时验证 SAC 基础 reaching；R2-B 只做当前 `0.055 m` 阈值下的定位稳定性和失败类型分析，更小精度只有建立新协议后才测试；R2-C 在 R2-A 通过后验证预注册的 current-risk curriculum，或依据 R2-A/R2-C 证据正式改为任务 SAC actor；R2-D 才从头训练至少 3 个预注册随机种子并冻结最终路线。所有阶段使用与部署相同的 rate limit、Butterworth 和 quintic RTB，碰撞终止惩罚须通过 terminal-shortcut 检查。checkpoint 只按 validation 规则选择；冻结后记录哈希，R3 以后不得更新 actor。封存 EMA checkpoints 和 R2a--R2d 失败 actors 只允许用于诊断，不进入新主比较。
-2. **安全层。** 仅在新 validation seeds 上选择预测时域、验证网格、初始 Top-k、反例批大小、最大细化轮数、时间预算、裕量和固定 QP 参数，然后固定 actor 与参数进行独立 held-out 反事实评估。若未来研究安全层在环训练，必须作为独立扩展报告。
-
-部署阶段不进行在线强化学习更新。每个控制周期记录名义动作、安全动作、介入原因、活跃连杆、优化状态、风险和最终执行动作，以支持可解释性和失败分析。
-
-## 七、实验设计
-
-### 7.1 实验平台与公平性设置
-
-| 配置项 | 内容 |
+| 项目 | 当前值或生成规则 |
 | --- | --- |
-| 仿真平台 | PyBullet |
-| 机械臂 | UR5，固定基座 |
-| 控制方式 | 6 维关节速度 |
-| 任务 | 静态目标位置到达 |
-| 主障碍物 | 单个动态球体 |
-| 策略/物理频率 | 当前主实验固定 20 Hz / 240 Hz |
-| actor 随机种子 | R2-D 最终路线下至少 3 个从头训练且预注册的 SAC actors |
-| 测试随机种子 | 与训练和调参集合分离 |
-| Episode seed | 由 `(eval_seed, episode_index)` 一一映射并写入 CSV；跨 eval seed 禁止重复 |
+| 随机种子 | 训练 `[11001,22002,33003]`，validation `[41001,42002,43003]`，held-out `[91001,92002,93003]`；环境、网络、replay 和评价均从根 seed 派生独立 RNG 流 |
+| 初始关节状态 | `q_reset=[0,-1.25,1.35,-0.95,-1.10,0] rad + U(-0.22,0.22)^6`，`qdot_reset=0`；越过关节界限、按 3.4.1 节规则检测到初始自碰撞或其他有效 contact，或初始已满足目标的样本拒绝重采样 |
+| 静态目标位姿 | 先在 URDF 关节上下限向内收缩 `0.10 rad` 后逐关节均匀采样候选 `q_goal`，通过 FK 生成 `(p_goal,R_goal)`；仅接受位置处于 `x=[0.25,0.78] m`、`y=[-0.45,0.45] m`、`z=[0.18,0.78] m`，且目标构型无自碰撞、IK/FK 回代位置误差不超过 `0.01 m`、姿态误差不超过 `0.05 rad` 的样本 |
+| 目标姿态数值条件 | 拒绝初始姿态误差大于等于 `pi-1e-3 rad` 的样本，SO(3) `Log` 统一返回主值旋转向量 |
+| 无障碍 S0 | `H=0`，采用 3.2 节规定的无障碍 observation 填充值，不创建球体碰撞体 |
+| 静态球 S1 | 半径 `0.075 m`、速度零；球心从 `x=[0.22,0.72] m`、`y=[-0.48,0.48] m`、`z=[0.18,0.62] m` 逐轴均匀采样；拒绝按 3.4.1 节规则检测到有效初始 contact、初始 `d_min<d_safe`、球心距目标位置小于 `0.15 m` 的样本 |
+| 动态球 S2 | 半径 `0.075 m`、速度模长恒为 `0.1 m/s`；起点 `x~U(0.22,0.72)`、`z~U(0.18,0.62)`、`y=s U(0.42,0.62)`，其中 `s` 等概率取 `-1/+1`；对侧 waypoint 的 x/z 从相同区间独立采样，`y=-s U(0.24,0.48)`，初速度指向 waypoint |
+| 动态转移规则 | waypoint 只用于确定初始速度方向；episode 开始后球体按当前速度作匀速直线运动，并在固定边界 `x=[0.22,0.72] m`、`y=[-0.62,0.62] m`、`z=[0.18,0.62] m` 上作镜面反射，速度模长保持 `0.1 m/s`。球体作为运动学障碍物，不因 contact 改变轨迹；下一状态仅由当前 `p_obs`、`v_obs`、固定边界和公开转移规则决定，不使用隐藏 waypoint 编号、轨迹相位或中途随机改道 |
+| 场景可行性 | reset 时用静态几何检查排除初始碰撞，不用待评 actor 筛选 episode，也不按结果删除“困难但有效”的轨迹；若目标被障碍物长时间完全阻断，仍按 timeout/失败统计 |
+| 数据集合 | 每个 validation 和 held-out seed、每个场景分层固定生成 `100` 个 episode，即每层各 `300` 个 episode；训练采用对应 seed 的无限确定性 RNG 流，不复用 validation/held-out manifest |
+| 隔离与审计 | 三个 split 分别输出目标位姿、初始关节状态、障碍物参数、初始位置和初始速度 manifest；按量化后的完整场景元组检查无重复，并记录生成器版本及 SHA-256 |
 
-安全层主比较固定相同机械臂模型、动作范围、任务分布、R2-D 冻结的同一组 SAC actors、RTB 执行器和测试 episodes。Instant-Link-SAC 仍须按新协议从头运行作为风险策略基线；封存实验中的 EE/LDRC/Instant 结果均不进入新统计。参数筛选仅使用 validation seed，最终测试种子不得参与方法选择。
+静态与动态障碍物的采样必须覆盖 shoulder、upper-arm、forearm 和三个 wrist 胶囊附近区域。E1 使用分层计数验证每个胶囊至少占 validation 动态场景“预测最近胶囊”的 `10%`；若基础随机生成器不满足，只能在正式训练前采用按胶囊分层的拒绝采样并升级协议版本。
 
-进入主实验前先完成几何模型标定：从工作空间分层采样关节构型和障碍物位置，以 PyBullet collision shape 的最近距离/contact 为参照，报告各建模连杆的胶囊距离误差分位数、阈值分类混淆矩阵和危险漏检率。`m_geom` 只由该 validation 标定确定；若存在无法由裕量覆盖的系统性漏检，则必须修正胶囊定义，不能直接进入安全层比较。
+#### 3.4.7 Curriculum 与 Gate
 
-重启后的 R1 审计已经据此修订原设计：旧定义把 `upper_arm` 映射到 URDF 中几乎重合的两个 link 原点，后续胶囊也整体错位，并且局部 offset 未随 link 姿态旋转。当前实现改为 link-local offset 经世界姿态变换后的正确物理连杆跨度；该修订改变 observation 与风险语义，因此所有 actor 必须从头训练。`m_geom=0.04 m` 仅作为后续预测/QP 的单侧几何裕量，物理安全阈值仍为 `d_safe=0.12 m`，逐子步 PyBullet contact 仍是碰撞事实源。
+| 阶段 | replay minibatch 场景比例 | 到达优先安全课程 | 阶段 Gate |
+| --- | --- | --- | --- |
+| S0 无障碍 | 无障碍 `100%` | 无安全课程；每 block `100000` 步，最多 `3` blocks，每 `25000` 步保存 checkpoint | 无障碍 success rate `>=0.95`，collision rate `=0`，joint-limit rate `=0`，timeout rate `<=0.05` |
+| S1 静态 | 无障碍/静态 `25%/75%` | 从 S0 完整 checkpoint 继续；`xi_static=0.02` 起步，任务球碰撞不终止；到达率门控后逐渐增至 `1`，转换 replay，再以严格碰撞终止训练至少 `25000` 个静态 transition；block/checkpoint 预算同 S0 | 严格静态 success rate `>=0.90`、collision rate `<=0.03`、joint-limit rate `=0`、timeout rate `<=0.10`；同时 S0 retention success rate `>=0.95`、collision rate `=0` 且 joint-limit rate `=0` |
+| S2 动态 | 无障碍/静态/动态 `20%/30%/50%` | 从 S1 完整 checkpoint 继续；静态保持 `xi_static=1` 和严格终止；`xi_dynamic=0.02` 起步，按相同规则增至 `1`，转换动态 replay，再以严格碰撞终止训练至少 `25000` 个动态 transition；block/checkpoint 预算同 S0 | 严格动态 success rate `>=0.80`、collision rate `<=0.05`、joint-limit rate `=0`、timeout rate `<=0.20`；同时满足 S1 静态 Gate 和 S0 retention Gate |
 
-训练 transition 也遵循 Gymnasium 的终止语义：碰撞或安全到达为 `terminated`，达到 240 个控制步上限为 `truncated`。两者都会结束并重置 episode，但 SAC 的 Bellman target 只对 `terminated` 屏蔽 bootstrap，不能把人为时间上限误当成吸收态。
+每次 Gate 使用确定性动作和最终安全系数，在首次任务球 contact 时立即终止；宽容期训练语义绝不进入 validation。在三个 validation seed 上分别运行对应场景层的 `100` 个固定 episode。各 seed 单独计算指标，只有三者均满足全部阈值时 checkpoint 才通过。Gate 中的 success 一律指 `safe_success`。安全距离违反率、最小间隙、位置/姿态误差和运动学指标虽不作为硬阈值，仍须完整报告。
 
-评估汇总前必须由 manifest 同时检查文件数、总行数、`episode_seed` 字段和重复实验单元。禁止使用 `episode_seed = eval_seed + episode_index`，因为连续 eval seed 的 episode 区间会重叠。每个场景-方法-train seed 先合并三个 eval seed 的独立 episodes，再以 train seed 为统计单元报告 `mean +/- sample std`；同时报告相同 episode 的配对效应量和按 `train seed -> episode` 分层重采样的置信区间。episode 级配对检验只能作为辅助分析，不能替代 `n=3` train seeds 的不确定性说明；`n=3` 只支持方向与训练波动描述，不单独支撑广泛统计显著性结论。
+训练环境在每次 reset 时也按表中的阶段比例抽取 episode 场景；replay 再按同一比例分层抽取 transition，避免不同场景 episode 长度不同而改变实际 minibatch 组成。场景类型在一个 episode 内保持不变。
 
-### 7.2 主比较与消融矩阵
+阶段切换与停止规则固定如下：
 
-下表使用路线无关的 `Nominal-SAC` 指代 R2-D 最终冻结的 actor；其 observation 和训练职责由 R2-C 证据决定。Instant-Link-SAC 必须从头重跑为独立策略基线；若它在 R2-D 被选为名义 actor，则两者可共享 checkpoint，但表中仍须区分“策略基线”和“同 actor 的安全层消融”，不能在不同 QP 组之间混用 actor。
+1. 每个阶段至少训练一个 `100000` 步 block，每 `25000` 步保存 checkpoint。S0 在 block 结束时评价该 block 的四个 checkpoint；S1/S2 只有 `xi_scene=1` 且已完成至少 `25000` 个对应新场景严格 transition 的 checkpoint 才有资格运行 Gate。其他 checkpoint 只报告训练期 `task_reached`、`collision_assisted_reach`、`safe_success`、碰撞率和课程状态，不得被选择为阶段输出。
+2. 若存在多个通过者，先把三个 validation seed 聚合为保守指标：collision、joint-limit、timeout 和两类误差 p95 取跨 seed 最大值，success 取跨 seed 最小值；再按“较低 collision、较低 joint-limit、较高 success、较低 timeout、较低位置误差 p95、较低姿态误差 p95、较早 checkpoint”作字典序选择。
+3. 若没有通过者，在同一阶段从该 block 的最后一个 checkpoint 连续训练下一个 block，不得从某个未通过但 validation 较好的早期 checkpoint 分叉。累计三个 blocks 后若课程尚未进入合格严格期，或仍无 checkpoint 通过 Gate，则停止 curriculum，报告该阶段失败，不得提高难度或访问 held-out 集。
+4. S2 checkpoint 还必须在 S0、S1、S2 三个 validation 分层上同时通过。选出的 checkpoint 在任何 held-out 运行前冻结 actor、55 维输入处理、归一化常数和动作缩放器，并记录 SHA-256。
+5. 三个训练 seed 的 actor 全部冻结后，才允许统一访问 held-out：每个 actor 在三个 held-out seed、每层各 `100` 个 episode 上各执行一次。held-out 不得用于返回训练、调整 reward、改变 Gate 或重新选择 checkpoint。
+6. 三个训练 seed 独立执行完整 curriculum。最终结论要求三者均得到通过 S2 Gate 的 actor，且动态场景 validation success rate 的跨训练 seed 极差不超过 `0.10`。若第二阶段只使用一个主 actor，须在访问 held-out 前按第 2 条的保守聚合与字典序规则从三者中选定，之后不得因 held-out 表现更换。
 
-| 方法 | 风险信息 | 名义策略安全处理 | 执行期指令整形 | 目的 |
-| --- | --- | --- | --- | --- |
-| `EE-SAC` | 末端当前风险 | 固定惩罚 | 无 | 末端风险基线 |
-| `Instant-Link-SAC` | 当前连杆风险 | 固定惩罚 | 与部署相同的 rate limit + Butterworth + quintic RTB | 从头建立的连杆级名义基线 |
-| `Predictive-Link-SAC`（可选非核心消融） | 预测风险直接进入状态/奖励 | 固定惩罚 | 无 | 检查预测直接耦合策略的影响 |
-| `Nominal-SAC+RTB` | 由 R2-D 路线冻结 | 固定 R2-D actor | rate limit + Butterworth + quintic RTB | 所有安全层组的共同名义基准 |
-| `Nominal-SAC+Reactive-Projection` | 当前几何状态 | 固定 R2-D actor | 单时刻迭代投影 | 反应式工程基线 |
-| `Nominal-SAC+One-Step-QP` | 当前几何状态 | 固定 R2-D actor | 标准 QP、当前时刻安全约束、quintic 运动边界 | 隔离求解器与运动边界作用 |
-| `Predictive-Trajectory-QP`（固定筛选消融） | 动作条件逐连杆间隙 | 固定 R2-D actor | 固定 Top-k 多时刻预测约束 + 同一 quintic 运动边界 | 隔离动作条件预测增益 |
-| `Proposed: VG-Predictive-Trajectory-QP` | 动作条件逐连杆间隙 | 固定 R2-D actor | 多时刻预测约束 + 全身非线性验收/反例增广 + 同一 quintic 运动边界 | 验证反例细化增益 |
-| `LDRC-SAC`（次要） | 当前连杆风险 | 约束 SAC | 与主比较相同的 RTB；自适应 EMA 只能另列执行器消融 | 保留已有安全处理比较 |
-
-正式主结论最低完成 `Nominal-SAC+RTB`、`Nominal-SAC+Reactive-Projection`、`Nominal-SAC+One-Step-QP`、固定 Top-k `Predictive-Trajectory-QP` 和完整 `VG-Predictive-Trajectory-QP` 五组，并使用相同冻结 actors、相同 RTB 和相同 episode seeds 做配对反事实。`One-Step-QP` 与固定 Top-k 预测 QP 隔离未来动作条件几何的作用；固定 Top-k 预测 QP 与完整方法隔离验证驱动约束增广的作用。其他策略基线只有按新协议重跑后才能进入正式表。
-
-### 7.3 新证据准入规则
-
-2026-09-09 之前的全部实验表、checkpoint 比较、参数选择和正负结果已经封存，只用于定位历史代码与测量问题，不作为本论文的实验证据，也不复制进新结果事实源。所有表格从重启实验 R0 开始重新生成；只有具备冻结协议、代码与配置版本、checkpoint 哈希、唯一 episode seeds、逐 240 Hz 子步测量和 manifest 完整性检查的数据才能进入论文。
-
-旧结果不能用于跳过新 validation、缩小候选参数范围或预先判定某个方法为正/负结果。若新结果与历史方向一致，只报告新结果；若不一致，则从代码、执行器、采样口径和随机协议解释差异，不选择性保留更有利的一版。
-
-### 7.4 评价指标
-
-| 类别 | 指标 | 作用 |
-| --- | --- | --- |
-| 任务性能 | Success Rate、Final Position Error、Completion Time | 衡量到达能力与效率 |
-| 结果安全 | Collision Rate、Non-End-Link Collision Rate、Minimum Distance、Safety Violation Rate | 衡量最终安全结果 |
-| 预测能力 | Warning Lead Time、未来最小距离误差、风险连杆识别率 | 衡量是否提前且正确发现危险 |
-| 干预行为 | Intervention Rate、Intervention Duration、Action Correction Norm、Active/Slack Constraints、Solver Status | 衡量指令整形器是否克制和可行 |
-| 约束细化 | 初始/最终约束数、Counterexample Count、Refinement Rounds、Model-check Rejection Rate、Fallback Rate | 衡量固定筛选漏检、细化效率与验收结果 |
-| 平滑性 | 命令与反馈分别统计 RMS/Peak Joint Acceleration、RMS/Peak Jerk、Motion-Limit Violation Rate | 区分下发命令约束与机器人实际跟踪 |
-| 实时性 | Policy Inference Time、Risk Prediction Time、累计 QP Solve Time、Nonlinear Verification Time、End-to-End Filter Time、Cycle Overrun Rate | 衡量有限细化在部署中的可行性 |
-
-首次预警提前量定义为：
+### 3.5 执行流程与产物
 
 ```text
-LeadTime = t_first_violation_or_collision - t_first_warning
+E0  固定任务、observation、reward、数据划分和评价协议
+ -> E1  验证 IK/FK、胶囊距离、速度直控接口和 checkpoint 恢复等价性
+ -> S0  无障碍到达
+ -> S1a 静态球低安全惩罚、碰撞可继续，优先恢复到达
+ -> S1b 静态球到达率门控的安全惩罚渐增
+ -> S1c 静态球严格碰撞终止与收尾训练
+ -> S2a 动态球低安全惩罚、碰撞可继续，静态场景保持严格
+ -> S2b 动态球到达率门控的安全惩罚渐增
+ -> S2c 动态球严格碰撞终止与 S0/S1 能力保留
+ -> E2  按 validation Gate 选择并冻结 actor
+ -> E3  对冻结 actor 执行一次 held-out 评价
 ```
 
-该指标只在确实发生越界或碰撞的 episode 上作为事件条件提前量报告。未发生事件的 episode 不与其混算，而分别报告 warning false-positive rate、warning coverage，以及在预注册开环反事实轨迹上的 time-to-closest-approach；不得用预设穿越时刻替代真实安全事件后仍称为同一 LeadTime。动作修正幅度定义为：
+validation 和 held-out 均按无障碍、静态障碍物、动态障碍物三层分别报告，不使用 curriculum 混合平均值替代分层结果。每层至少报告：
+
+- success、timeout、joint-limit 和 collision rate，其中 collision 按 obstacle、self、environment 分类；
+- 安全距离违反率、episode 全身最小间隙；
+- 终点位置误差和姿态误差的 mean、p95、max；
+- command 与 measured velocity、acceleration、jerk；
+- 各评价 seed 的单独结果及跨 seed 汇总。
+
+训练期另按新障碍场景报告 `task_reached rate`、`collision_assisted_reach rate`、`safe_success rate`、最近 100 个 episode 的门控到达率、`xi_scene`、`K_scene` 和严格期累计步数，用于验证策略是否经历“带碰撞到达—减少碰撞—严格安全到达”的预期转变。这些训练期指标不能替代严格 validation 或 held-out 指标。
+
+第一阶段的最终产物包括：三个训练 seed 各自冻结的 actor、完整 checkpoint、训练配置和依赖 manifest、全部相关文件哈希、独立 validation 报告，以及一次性 held-out 报告。在实验完成前，不在本文预填模型路径、性能数值或通过结论。
+
+## 4. 第二阶段：单动态球形障碍物下的独立安全层
+
+第二阶段不再进行 SAC 训练。固定第一阶段选出的 actor，在静态目标和单个动态球形障碍物场景中，通过安全模块的逐项验证与组合实验判断系统能否在尽量保留到达能力的同时满足安全要求。
+
+### 4.1 动作条件间隙预测器
+
+预测器接收：
+
+- 当前关节位置和速度；
+- 上一周期的关节速度命令和关节加速度状态；
+- SAC 输出经连续性处理后得到的名义终点速度 `qdot_nom`；
+- 障碍物当前位置和速度；
+- 与实际执行一致的控制周期、物理子步和 quintic 参数。
+
+预测器对“如果执行当前候选动作会发生什么”进行短时外推，输出：
+
+- 每根胶囊连杆在每个验证时刻的预测表面间隙；
+- 每根连杆的未来最小间隙；
+- 首次进入安全边界的时刻；
+- 对应的危险连杆和危险时刻。
+
+预测器的作用只是为安全层提供动作后果，不改变 SAC，也不生成任务动作。
+
+### 4.2 轨迹一致 Safety-QP
+
+QP 的决策变量是 6 维安全终点关节速度 `qdot_safe`。其目标是在满足约束的前提下，尽量接近 SAC 的名义速度 `qdot_nom`：
 
 ```text
-CorrectionNorm = ||q_dot_cmd - q_dot_nom||_2
+minimize    ||qdot_safe - qdot_nom||_W^2
+subject to  预测连杆间隙约束
+            关节位置约束
+            关节速度约束
+            acceleration 约束
+            jerk 约束
 ```
 
-固定 Top-k 候选解的模型内拒绝率定义为：
+QP 不负责寻找一条新的全局路径。它只在当前控制周期内寻找对名义动作的最小安全修正。若障碍物完全阻断路径，局部 QP 可以减速或停止，但不能保证自行找到绕行方向；这种情况必须在实验中作为安全降级或任务失败报告，不能记为成功避障。
 
-```text
-ModelCheckRejectionRate = 未通过全身非线性验收的候选控制周期数
-                          / 产生固定Top-k QP候选解的控制周期数
-RefinementRecoveryRate = 经细化后通过验收的控制周期数
-                         / 首轮被全身非线性验收拒绝的控制周期数
-```
+quintic 轨迹不是 QP 后的独立平滑器。完整子步速度轨迹由同一个 `qdot_safe` 仿射参数化，因此 QP 中的速度、加速度和 jerk 边界对应随后真正下发的子步命令。
 
-两者均按控制周期统计，并同时报告首轮与最终最小模型间隙、反例所属连杆/时刻和 fallback 比例，避免把“全部降级”误写为细化成功。
+### 4.3 非线性几何验收与约束增广
 
-仅报告低碰撞率不足以证明指令整形器有效，还需同时报告介入率和修正幅度，避免方法通过长时间停止获得表面安全。
+QP 使用的是局部线性约束，候选解产生后还必须通过完整非线性模型回放：
 
-### 7.5 核心实验一：预测与动作条件有效性
+1. 用 `qdot_safe` 生成本周期全部 quintic 子步。
+2. 在预定验证网格上检查所有胶囊连杆与障碍物的间隙。
+3. 若发现线性 QP 遗漏的危险连杆或危险时刻，将其加入约束集。
+4. 重新线性化并求解，直到全部通过或达到细化次数与时间预算。
 
-固定 R2-D 名义 SAC 的动作，在相同离线/在线轨迹上比较当前风险、当前运动趋势预测与候选动作条件预测；Predictive-Link-SAC 若从头重跑，只作为非核心策略耦合消融，不承担核心正结论。预测精度的主真值采用开环反事实协议：从相同机器人和障碍物状态出发，对各方法输入同一个缓存的候选 endpoint，在仿真副本中执行与预测一致的本周期 quintic 子步和周期外 endpoint 保持，不允许后续 SAC 动作改变真值轨迹。另以闭环滚动的一周期预测误差作为部署相关指标；超过一周期的真实闭环误差单独报告，因为其中包含后续策略重规划影响。
+Top-k 只能用于初始化约束集，不能代替最终的“全连杆 x 全验证时刻”检查。
 
-场景包括：
+### 4.4 逐子步监测与异常降级
 
-- 障碍物以不同速度侧向穿越上臂、肘部、前臂和腕部；
-- 当前距离相同但接近速度不同；
-- 当前距离较近但正在远离；
-- 障碍物发生一次速度突变。
+模型内验收通过后，执行阶段仍需在每个物理子步读取仿真状态或机器人反馈，检查：
 
-危险连杆标签固定定义为开环真值时域内表面间隙最小的建模连杆；首次越界连杆和最终接触连杆作为不同标签另报。主要回答：预测风险能否增加事件条件预警提前量，候选动作条件预测能否提高未来间隙和危险连杆判断准确度，以及这些改进能否转化为更早干预、更低总修正量或更低安全违反。首次介入时间、介入周期占比和累计修正量分别报告，不预设“更早”和“更少介入”必然同时成立。
+- 实测关节位置、速度、加速度和 jerk；
+- 实测全身最小间隙；
+- PyBullet contact 或真实碰撞信号；
+- 命令与反馈偏差；
+- QP 不可行、求解超时和预测失配。
 
-### 7.6 核心实验二：预测轨迹嵌入式安全 QP 有效性
-
-在相同的 R2-D 冻结名义 SAC actors 上成对比较无安全层、现有 Reactive-Projection、标准 One-Step-QP、固定 Top-k Predictive-Trajectory-QP 与完整 VG-Predictive-Trajectory-QP。除任务和碰撞指标外，重点报告：
-
-- 指令整形器介入次数与持续时间；
-- 每次介入的活跃连杆和动作修正幅度；
-- 加速度、jerk 的均方根值、峰值及运动约束活跃率；
-- 标准 QP solver status、slack、求解时间、超时和停止次数；历史投影器另报迭代后残差失败率；
-- QP 候选动作在全身非线性回放中的拒绝率、遗漏连杆/时刻、每轮新增反例、细化轮数、最终约束数和降级原因；
-- 分别报告单轮 QP 时间、累计 QP 时间、非线性验收时间和端到端安全层时间，不能只报告最后一轮 solver time；
-- 启用指令整形器后成功率或完成时间的变化。
-
-该实验的理想结论不是“指令整形器从不介入”，而是“固定 Top-k 确实存在可测量的修正后模型内漏检，而验证驱动细化能以有限的约束数、轮数和时间开销消除或显著减少该漏检，并进一步降低碰撞与安全距离违反，同时保持可接受的任务完成能力”。若固定 Top-k 的模型内漏检接近零或细化不改善安全结果，则不得把约束增广包装为已证实的核心贡献。
-
-### 7.7 核心实验三：风险聚合与预测时域消融
-
-| 消融因素 | 候选设置 |
-| --- | --- |
-| 预测时域 `H Delta t_p` | 短、中、长三个时域 |
-| 预测模型 | 当前反应式；当前速度外推；候选动作条件外推 |
-| 全身聚合 | hard max；等权 Softmax 温度聚合 |
-| 约束覆盖机制 | 固定 Top-1；固定 Top-2；全部预警约束；初始 Top-k + 验证驱动增广 |
-| 反例细化预算 | `B_add`、`R_max` 与时间预算的冻结候选设置 |
-| 轨迹约束覆盖 | 仅 endpoint；全部下发子步命令并逐子步反馈监测 |
-| 加速度与 jerk 机制 | 无连续性项；仅硬边界；软代价 + 硬边界 |
-| 连续性权重 | 固定权重为主；风险自适应权重仅作可选消融 |
-
-分析安全性、任务效率、误报、jerk 和计算开销之间的变化。参数选择应基于验证集综合指标，不在最终测试集上反复选择。
-
-### 7.8 鲁棒性与泛化实验
-
-鲁棒性实验优先覆盖现实中最可能破坏预测模型的因素：
-
-| 因素 | 设置 |
-| --- | --- |
-| 位置噪声 | 对障碍物位置加入分级高斯噪声 |
-| 速度误差 | 速度缩放、方向扰动和估计延迟 |
-| 运动突变 | 障碍物中途改变速度或方向 |
-| 控制延迟 | 增加 1 至若干控制周期延迟 |
-| 未见速度 | 测试速度范围略超出训练分布 |
-
-多障碍物只作为附加泛化：使用两个球形障碍物验证风险计算和 QP 约束能否自然扩展，不以此作为主要创新结论。
-
-### 7.9 安全与平滑统一指令整形消融
-
-在相同 actor、RTB 和测试轨迹下比较：原始 SAC 动作、现有 Reactive-Projection、标准 One-Step-QP、固定 Top-k Predictive-Trajectory-QP，以及完整 VG-Predictive-Trajectory-QP。重点分析标准求解器、运动命令边界、未来间隙约束和验证驱动反例增广各自对碰撞率、成功率、模型内漏检率、动作修正幅度、峰值 jerk、slack 与端到端过滤时间的影响。
-
-名义 actors 按 R2-D 最终冻结路线、使用与部署相同的 RTB 管线从头训练；无障碍比例或 curriculum 若被采用，必须在正式多 seed 训练前冻结，不在 validation/held-out 中临时调整。本组公平性来自同 actor、同 RTB、同 episode 的成对反事实。风险自适应 QP 权重不是核心方法，只有固定权重主实验完成后才可作为附加消融。
-
-### 7.10 真实 UR5 低速验证
-
-真实实验使用单台 RGB-D 相机检测轻质球形障碍物，位置经外参转换到机器人基坐标系，速度由连续帧差分和低通滤波估计。机械臂采用限速、工作空间限制、感知丢失停止和人工急停。
-
-建议至少完成以下两组，每组 10 至 20 次：
-
-1. `Frozen-SAC nominal`：使用 R2-D 冻结的最终名义策略，保持保守速度上限。
-2. `Proposed`：相同策略启用动作条件、轨迹嵌入式安全 QP。
-
-真实实验不故意制造接触，使用安全距离违反、最小距离、介入率、动作修正幅度、任务成功率和执行稳定性进行比较。展示平台照片、关键帧序列、`d_min`、预测风险、活跃连杆、名义/修正速度和求解耗时曲线。
-
-真实实验只支持低速部署可行性和基本风险响应结论，不替代受控仿真消融，也不作为绝对安全证明。
-
-### 7.11 失败案例与适用边界
-
-| 失败场景 | 可能原因 | 应记录信息 |
-| --- | --- | --- |
-| 障碍物速度过快 | 机械臂速度与预测提前量不足 | `d_pred`、LeadTime、速度限幅、停止时刻 |
-| 障碍物突然转向 | 匀速模型失配 | 速度估计、预测误差、风险变化率 |
-| 目标与避障方向冲突 | 安全约束压缩可行动作空间 | QP 活跃约束、松弛量、最终误差 |
-| QP 频繁介入 | 风险阈值过低或名义策略依赖安全层 | Intervention Rate、CorrectionNorm |
-| 标准 QP 失败或高 slack | 多约束冲突、线性化失效或已进入危险区域 | solver status、primal/dual residual、slack、最小距离、降级状态 |
-| 最近点/连杆切换 | 初始筛选或局部线性化遗漏修正后的新危险 | 初始/最终约束集、反例索引、每轮精确间隙、线性化残差、细化轮数 |
-| 制动 fallback 未通过验收 | 动态障碍继续逼近或剩余制动距离不足 | braking trajectory、fallback 最小间隙、`fallback_unverified`、急停时刻 |
-| 感知丢失或延迟 | 真实观测不可用 | 检测状态、时间戳、停止延迟 |
-
-本文结论限定为：在主要连杆几何模型可用、动态球形障碍物状态可观测、短时局部线性化有效、QP 可行且执行器跟踪误差受监测的条件下，动作条件全身预测与轨迹嵌入式安全 QP 能否改善机械臂静态目标到达过程中的提前预警、整臂避障和平滑执行表现。
-
-## 八、论文章节安排
-
-### 第一章 绪论
-
-介绍研究背景、国内外现状、问题定义、研究内容、创新点和论文结构，明确与安全视觉伺服及一般实时碰撞检测框架的区别。
-
-### 第二章 理论基础与系统建模
-
-介绍 UR5 运动学、胶囊体距离、连杆对应点速度、SAC、距离变化率安全约束、离散加速度与 jerk 约束及凸 QP，为后续方法建立统一符号。
-
-### 第三章 预测性连杆动态风险建模
-
-给出当前风险基线、有限时域外推、未来最小距离、首次越界时间、时序风险聚合和全身软聚合方法，并分析计算复杂度和模型假设。
-
-### 第四章 动作条件预测与验证驱动的轨迹嵌入式安全强化学习控制
-
-给出 R2-D 冻结的 SAC 名义策略、候选动作条件预测模型、quintic 仿射轨迹参数化、初始稀疏子步安全约束、全身非线性验收与反例约束增广、时间预算终止、不可行降级和一致执行流程。
-
-### 第五章 仿真实验与分析
-
-依次报告已有当前连杆风险基线、预测风险有效性、安全 QP 指令整形有效性、交叉消融、参数敏感性、鲁棒性、实时性和失败案例。
-
-### 第六章 真实机械臂部署验证
-
-介绍 RGB-D 感知、坐标标定、控制接口、安全措施和低速实机结果，强调实验边界。
-
-### 第七章 总结与展望
-
-总结预测风险与安全 QP 指令整形的实验结论，讨论匀速预测、单障碍物、感知误差和软约束局限，展望多障碍物、不确定性预测和更严格的安全验证。
-
-## 九、实施优先级与完成判据
-
-全部实验状态已清零，详细顺序和门控只在 [从零实验跟踪](../experiments/restart_2026-09-09/experiment_tracker.md) 维护。总体顺序为：R0 预注册与环境冻结，R1 测量/执行/几何验证，R2 重新训练名义 actor，R3 动作条件预测，R4 One-Step-QP，R5 固定 Top-k PTQP，R6 VG-PTQP，R7 held-out 主比较，R8 鲁棒性，R9 条件性实机验证。
-
-论文核心方法达到可写结论的最低判据为：
-
-- 胶囊模型相对 PyBullet collision shape 的距离误差和危险漏检通过预注册阈值，或由冻结的 `m_geom` 保守覆盖；
-- 候选动作条件预测在预注册开环反事实真值上相较当前运动趋势预测具有可重复的间隙/危险连杆预测收益，并分别报告事件条件提前量、coverage 与误报率；
-- 固定 Top-k Predictive-Trajectory-QP 相较同求解器、同运动边界的 One-Step-QP 改善至少一项预注册预测安全主指标，且任务性能与干预代价保持在预注册容忍范围；否则不能把动作条件预测写成已证实核心贡献；
-- 完整方法相较无安全 QP 指令整形的方法降低碰撞率或安全距离违反率，且成功率没有超出预注册容忍范围的下降；
-- 完整方法相较无运动边界版本降低命令 Peak jerk，全部下发子步命令满足配置边界，并报告关节反馈的跟踪误差和边界违反；
-- 标准 QP 端到端安全层耗时满足控制周期要求，solver failure、高 slack、cycle overrun、制动 fallback 和长期停止率可解释；
-- 完整方法相较固定 Top-k 版本降低“QP 候选解在全身非线性回放中的漏检率”，并在更低最终安全违反、相同安全水平下更低 fallback/修正代价或其他预注册结果指标上体现净收益；仅通过增加降级次数消除漏检不视为细化成功；
-- 报告每周期细化轮数、反例数量、约束集规模、验收失败/超时降级率、`fallback_unverified` 和端到端过滤耗时；
-- 至少 3 个训练随机种子和独立测试种子得到方向一致的结果；
-- 所有创新结论均有对应消融，未完成模块不写成既成贡献。
-- QP 必须使用真正的凸优化求解并报告状态、slack、迭代/求解耗时；迭代半空间投影仅作为重启实验 R7 中的 Reactive-Projection 工程基线，并须按新协议重跑。
+逐子步监测是对建模误差和执行误差的最后防线，不参与 SAC 学习。触发异常后采用冻结的降级规则，并完整记录触发原因。

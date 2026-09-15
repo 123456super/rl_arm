@@ -1,0 +1,17 @@
+{
+  "samples": 100,
+  "strict_collision_better_than_timeout_rate": 0.0,
+  "hard_failure_better_than_timeout_rate": 0.0,
+  "desired_order_rate": 1.0,
+  "median_returns": {
+    "strict_collision_now": -285.7908828785632,
+    "tolerant_collision_step": -3.561910199186231,
+    "hard_failure_now": -269.7908828785632,
+    "stationary_timeout": -233.22897267937697,
+    "ideal_60_step_success": -20.743588808418735
+  },
+  "median_terminal_guard": {
+    "strict_collision": 233.22897267937697,
+    "hard_failure": 233.22897267937697
+  }
+}

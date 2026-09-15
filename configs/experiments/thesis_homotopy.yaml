@@ -1,0 +1,42 @@
+includes:
+  - ../default.yaml
+
+seed: 11001
+device: cuda:auto
+
+robot:
+  tool_link_name: wrist_3_link
+
+thesis:
+  protocol: task_first_safety_homotopy_v2
+  stage: s0
+  physics_dt: 0.004166666666666667
+  control_dt: 0.05
+  horizon: 240
+  action_scale: 0.7
+  joint_motor_force: 90.0
+  obstacle_radius: 0.075
+  obstacle_speed: 0.1
+  d_safe: 0.12
+  position_tolerance: 0.055
+  orientation_tolerance: 0.10
+  goal_sample_max_attempts: 10000
+  ramp_steps: 50000
+  strict_min_transitions: 25000
+
+train:
+  total_steps: 100000
+  save_interval: 25000
+  output_dir: outputs/thesis_homotopy
+
+sac:
+  gamma: 0.99
+  tau: 0.005
+  actor_lr: 0.0003
+  critic_lr: 0.0003
+  alpha_lr: 0.0003
+  batch_size: 256
+  warmup_steps: 3000
+  update_after: 1000
+  hidden_dims: [256, 256]
+  initial_alpha: 0.2

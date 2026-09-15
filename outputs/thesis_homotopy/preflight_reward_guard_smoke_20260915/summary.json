@@ -1,0 +1,20 @@
+{
+  "stage": "s0",
+  "global_step": 100,
+  "stage_step": 100,
+  "updates": 93,
+  "episodes": 0,
+  "block": 1,
+  "checkpoint_index": 1,
+  "random_steps_used": 100,
+  "replay_redistributions": 0,
+  "replay_size": 100,
+  "xi": {
+    "static": 0.02,
+    "dynamic": 0.02
+  },
+  "strict_steps": {
+    "static": 0,
+    "dynamic": 0
+  }
+}
