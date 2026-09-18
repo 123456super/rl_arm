@@ -21,6 +21,13 @@ class ThesisSACAgent:
         hidden = list(sac.get("hidden_dims", [256, 256]))
         self.gamma = float(sac.get("gamma", 0.99))
         self.tau = float(sac.get("tau", 0.005))
+        self.critic_gradient_clip = float(sac.get("critic_gradient_clip", 10.0))
+        self.actor_gradient_clip = float(sac.get("actor_gradient_clip", 10.0))
+        self.actor_update_interval = int(sac.get("actor_update_interval", 1))
+        if self.actor_update_interval < 1:
+            raise ValueError("actor_update_interval must be positive")
+        self.update_steps = 0
+        self.last_actor_metrics = {"actor_loss": 0.0, "alpha_loss": 0.0}
         self.target_entropy = -float(action_dim)
         self.actor = GaussianActor(obs_dim, action_dim, hidden).to(self.device)
         self.q1 = QNetwork(obs_dim, action_dim, hidden).to(self.device)
@@ -59,31 +66,56 @@ class ThesisSACAgent:
             target = batch.rewards + self.gamma * (1.0 - batch.dones) * (
                 next_q - self.alpha.detach() * next_log_prob
             )
-        q_loss = F.mse_loss(self.q1(batch.observations, batch.actions), target)
-        q_loss = q_loss + F.mse_loss(self.q2(batch.observations, batch.actions), target)
+        q_loss = F.smooth_l1_loss(self.q1(batch.observations, batch.actions), target)
+        q_loss = q_loss + F.smooth_l1_loss(self.q2(batch.observations, batch.actions), target)
         self.q_optimizer.zero_grad(set_to_none=True)
         q_loss.backward()
+        critic_gradient_norm = torch.nn.utils.clip_grad_norm_(
+            list(self.q1.parameters()) + list(self.q2.parameters()),
+            self.critic_gradient_clip,
+        )
         self.q_optimizer.step()
 
-        action, log_prob = self.actor.sample(batch.observations)
-        actor_loss = (self.alpha.detach() * log_prob - torch.min(
-            self.q1(batch.observations, action), self.q2(batch.observations, action)
-        )).mean()
-        self.actor_optimizer.zero_grad(set_to_none=True)
-        actor_loss.backward()
-        self.actor_optimizer.step()
+        self.update_steps += 1
+        actor_updated = self.update_steps % self.actor_update_interval == 0
+        actor_gradient_norm = 0.0
+        if actor_updated:
+            action, log_prob = self.actor.sample(batch.observations)
+            q1 = self.q1(batch.observations, action)
+            q2 = self.q2(batch.observations, action)
+            actor_loss = (self.alpha.detach() * log_prob - torch.min(q1, q2)).mean()
+            self.actor_optimizer.zero_grad(set_to_none=True)
+            actor_loss.backward()
+            actor_gradient_norm = torch.nn.utils.clip_grad_norm_(
+                self.actor.parameters(), self.actor_gradient_clip
+            )
+            self.actor_optimizer.step()
 
-        alpha_loss = -(self.log_alpha * (log_prob.detach() + self.target_entropy)).mean()
-        self.alpha_optimizer.zero_grad(set_to_none=True)
-        alpha_loss.backward()
-        self.alpha_optimizer.step()
+            alpha_loss = -(self.log_alpha * (log_prob.detach() + self.target_entropy)).mean()
+            self.alpha_optimizer.zero_grad(set_to_none=True)
+            alpha_loss.backward()
+            self.alpha_optimizer.step()
+            self.last_actor_metrics = {
+                "actor_loss": float(actor_loss.detach().cpu()),
+                "alpha_loss": float(alpha_loss.detach().cpu()),
+            }
+        else:
+            with torch.no_grad():
+                action = self.actor.deterministic(batch.observations)
+                q1 = self.q1(batch.observations, action)
+                q2 = self.q2(batch.observations, action)
         soft_update(self.q1, self.target_q1, self.tau)
         soft_update(self.q2, self.target_q2, self.tau)
         return {
             "critic_loss": float(q_loss.detach().cpu()),
-            "actor_loss": float(actor_loss.detach().cpu()),
-            "alpha_loss": float(alpha_loss.detach().cpu()),
+            **self.last_actor_metrics,
             "alpha": float(self.alpha.detach().cpu()),
+            "q1_mean": float(q1.detach().mean().cpu()),
+            "q2_mean": float(q2.detach().mean().cpu()),
+            "target_mean": float(target.detach().mean().cpu()),
+            "critic_gradient_norm": float(critic_gradient_norm),
+            "actor_gradient_norm": float(actor_gradient_norm),
+            "actor_updated": float(actor_updated),
         }
 
     def state_dict(self) -> dict[str, Any]:
@@ -91,6 +123,8 @@ class ThesisSACAgent:
             "actor": self.actor.state_dict(), "q1": self.q1.state_dict(), "q2": self.q2.state_dict(),
             "target_q1": self.target_q1.state_dict(), "target_q2": self.target_q2.state_dict(),
             "log_alpha": self.log_alpha.detach().cpu(),
+            "update_steps": self.update_steps,
+            "last_actor_metrics": self.last_actor_metrics,
             "actor_optimizer": self.actor_optimizer.state_dict(),
             "q_optimizer": self.q_optimizer.state_dict(), "alpha_optimizer": self.alpha_optimizer.state_dict(),
         }
@@ -102,6 +136,8 @@ class ThesisSACAgent:
         for key, module in (("q1", self.q1), ("q2", self.q2), ("target_q1", self.target_q1), ("target_q2", self.target_q2)):
             module.load_state_dict(state[key])
         self.log_alpha.data.copy_(state["log_alpha"].to(self.device))
+        self.update_steps = int(state["update_steps"])
+        self.last_actor_metrics = dict(state["last_actor_metrics"])
         for key, optimizer in (("actor_optimizer", self.actor_optimizer), ("q_optimizer", self.q_optimizer), ("alpha_optimizer", self.alpha_optimizer)):
             optimizer.load_state_dict(state[key])
             for values in optimizer.state.values():

@@ -1,4 +1,12 @@
-# SAC 名义控制与独立安全层实验说明
+# SAC 名义控制与独立安全层实验说明（V11）
+
+更新日期：2026-09-18
+
+当前协议：`task_first_persistent_eta_replay_homotopy_v11`
+
+状态：v8/v9 已失败；V10 完成 600k 但在 `eta=0.75` 硬预算停止。V11 保留 122 维 observation 与 mesh self-clearance，修复持久 eta replay，必须从随机初始化开始，正式 S0 尚未启动。
+
+v8/v9/V10 历史、论文审查和 V11 当前进展统一记录在 [`docs/experiments_9/`](../experiments_9/README.md)；本文件第 1～3 章是当前 V11 方法与正式实验协议的唯一事实源。
 
 ## 1. 实验目的与边界
 
@@ -22,10 +30,10 @@
 | 任务 | 到达静态目标位姿，不研究动态目标跟踪 |
 | 末端参考系 | 受控运动链最后一个实体连杆 `wrist_3_link` 的 URDF link frame；不使用 `flange`、`tool0`、外接工具或额外 TCP 变换 |
 | 障碍物 | 单个球体，半径 `0.075 m`；S1 静止，S2 以 `0.1 m/s` 匀速运动并在工作空间边界反射 |
-| 几何模型 | 六个主要连杆胶囊体；定义和顺序取自 [`configs/robot/ur5.yaml` 的 `robot.capsules`](../../configs/robot/ur5.yaml#L35) |
+| 几何模型 | 外部障碍使用六个主要连杆胶囊体；自碰撞连续几何使用 URDF collision mesh 的非相邻 link 最近点 |
 | 状态来源 | 关节状态、障碍物状态和 contact 均直接读取仿真真值；不加入感知噪声、估计误差或通信延迟 |
 | 动作接口 | SAC 输出 6 维归一化动作，经固定缩放和速度限幅后直接作为关节速度目标 |
-| 安全事实源 | 胶囊表面间隙用于风险计算，PyBullet contact 用于判定实际碰撞 |
+| 安全事实源 | 外部障碍使用胶囊间隙；自碰撞间隙与实际 contact 均来自同一套 PyBullet collision mesh |
 | 数据隔离 | training、validation 和 held-out 的目标、初始关节状态及障碍物轨迹互不重叠 |
 
 第 3 章给出的数值是当前正式配置。开发阶段允许依据 training 和 validation 建立新配置版本，但必须记录修改原因、配置及相关文件哈希；held-out 仅用于冻结模型的最终评价，不得用于调参、阶段切换或模型选择。
@@ -33,7 +41,9 @@
 ## 2. 总体控制结构
 
 ```text
-仿真关节状态、目标位姿误差、障碍物位置与速度、逐胶囊相对向量、间隙、TTC、存在标志
+关节状态、末端/目标旋转 6D、相对旋转 6D、末端 twist、
+障碍物位置与速度、逐胶囊相对向量、间隙、TTC、接近速度、风险及存在标志，
+逐可控连杆 self-clearance、self-TTC、self-approach 和 self-risk
         |
         v
 SAC actor
@@ -53,13 +63,15 @@ SAC actor
 
 ### 3.1 训练原则
 
-S0 从随机初始化的 actor、critic 和 replay buffer 开始；S1、S2 必须从上一阶段通过 Gate 的完整 checkpoint 继续。机器人、目标分布、observation、动作接口和执行链在各阶段保持不变；新场景的任务球碰撞终止语义和安全惩罚系数仅按第 3.4 节的确定性课程变化。后续阶段继续采样已经掌握的简单场景，以减轻能力遗忘。
+S0 从随机初始化的 actor、critic 和 replay buffer 开始；S1、S2 必须从上一阶段通过 Gate 的完整 checkpoint 继续。S0 使用第 3.4.2 节定义的两级任务课程：先从局部目标逐步恢复完整目标范围并只要求位置到达，再逐步加入姿态目标。S1、S2 固定使用完整目标范围和完整位姿任务。机器人、动作接口和执行链在各阶段保持不变；会改变奖励与成功条件的姿态课程系数 `eta` 作为一维 observation 显式输入，目标范围系数 `g` 只改变已显式给出的目标位姿分布。新场景的任务球碰撞终止语义和安全惩罚系数仅按第 3.4 节的确定性课程变化。后续阶段继续采样已经掌握的简单场景，以减轻能力遗忘。
 
-该课程借鉴 [`Adaptive Reward Shaping`](../references/1-s2.0-S0952197626005658-main.pdf) 根据安全违反逐渐增强避障目标的思想，但不照搬其削弱到达权重的做法：本文的到达误差、进展、平滑和成功奖励在 S0/S1/S2 始终固定，只对新引入场景的风险、距离违反和任务球碰撞惩罚作有界递增。训练期间始终关闭间隙预测器和 Safety-QP，安全层不参与 observation 或动作生成。自碰撞、环境碰撞和关节越界在所有阶段始终是硬失败；只有任务球碰撞在新场景课程初期允许继续。具体奖励、终止语义、阶段比例和 Gate 统一在第 3.4 节定义。
+安全课程借鉴 [`Adaptive Reward Shaping`](../references/1-s2.0-S0952197626005658-main.pdf) 根据安全违反逐渐增强避障目标的思想，但不削弱已经建立的位置到达项：S0 的任务课程只把姿态项从零逐渐加入；S1/S2 的安全课程只对新引入场景的风险和距离违反作有界递增。训练期间始终关闭间隙预测器和 Safety-QP，安全层不参与 observation 或动作生成。自碰撞、环境碰撞和关节越界在所有阶段始终是硬失败；只有任务球碰撞在新场景课程初期允许继续。具体奖励、终止语义、阶段比例和 Gate 统一在第 3.4 节定义。
+
+Yoo 等的动态惩罚研究进一步支持“低约束权重起步、值函数稳定后逐步增强”的方向，但本实验不用其历史最大 critic loss 比例作为触发器：SAC 的 loss 尺度受熵温度、target network、replay 分布与 reward 重标影响，直接任务保持率更可解释。Al Ali 等针对自由漂浮六自由度机械臂的研究支持四元数姿态表达和关节速度平方惩罚；本协议已使用无奇异的连续旋转表示、`SO(3)` 误差、速度与速度变化代价。其自由漂浮基座耦合和未标定乘性白噪声不适用于当前固定基座 nominal 实验。完整逐项审查见 [`reward_literature_analysis.md`](../experiments_9/reward_literature_analysis.md)。
 
 ### 3.2 SAC 输入量
 
-SAC 使用 MLP，不使用 LSTM 或固定长度历史。每个控制周期将机器人状态、目标误差、障碍物状态、逐胶囊相对几何和 TTC 拼接为 55 维 observation。除关节量外，所有向量均在机器人基坐标系 `{B}` 中表示。
+SAC 使用 MLP，不使用 LSTM 或固定长度历史。每个控制周期将机器人状态、当前末端与目标的绝对位姿、目标误差、末端 twist、姿态任务系数、剩余时域、外部障碍几何以及逐可控连杆自碰撞几何拼接为 122 维 observation。世界坐标系 `{W}` 与机器人基坐标系 `{B}` 在本实验中重合。
 
 六个受控关节按以下固定顺序排列：
 
@@ -73,21 +85,41 @@ observation 中的 `q`、`qdot`，actor 输出动作，逐关节动作尺度、�
 | 索引 | 变量（维度） | 定义与单位 | 固定归一化 | 无障碍填充值 |
 | --- | --- | --- | --- | --- |
 | `0:6` | `q`（6） | 六个受控关节的仿真位置真值，`rad` | 按各关节上下限仿射映射至 `[-1,1]` | 正常计算 |
-| `6:12` | `qdot`（6） | 六个关节的仿真实际速度，`rad/s` | 除以各关节速度上限并裁剪至 `[-1,1]` | 正常计算 |
-| `12:15` | `e_p`（3） | `p_goal^B-p_ee^B`，`m` | 除以 `p_error_scale` 并逐分量裁剪至 `[-1,1]` | 正常计算 |
-| `15:18` | `e_R`（3） | `Log(R_goal^B (R_ee^B)^T)^vee`，`rad` | 除以 `pi` | 正常计算 |
-| `18:36` | `r_1,...,r_6`（18） | `r_i=p_obs^B-c_i^B`，每个向量占连续 3 维，`m` | 除以 `relative_position_scale` 并逐分量裁剪至 `[-1,1]` | 全零 |
-| `36:39` | `p_obs^B`（3） | 障碍物球心位置真值，`m` | 按下文固定边界逐轴映射并裁剪至 `[-1,1]` | 全零 |
-| `39:42` | `v_obs^B`（3） | 障碍物球心线速度真值，`m/s` | 除以 `obstacle_speed_scale` | 全零 |
-| `42:48` | `d_1,...,d_6`（6） | `d_i=||r_i||_2-r_capsule,i-r_obs`，`m` | 在 `[-0.20,0.80] m` 裁剪后映射至 `[-1,1]` | 全部为 `1` |
-| `48:54` | `TTC_1,...,TTC_6`（6） | 到达安全边界 `d_safe` 的估计时间，`s` | `clip(TTC_i,0,TTC_max)/TTC_max` | 全部为 `1` |
-| `54` | `H`（1） | 障碍物存在标志，无量纲 | 不变 | `0` |
+| `6:12` | `qdot`（6） | 六个关节的仿真实际速度，`rad/s` | 除以动作速度尺度 `0.7 rad/s` 并裁剪至 `[-1,1]`，与奖励一致 | 正常计算 |
+| `12:15` | `p_ee^W`（3） | 当前末端世界坐标位置，`m` | 除以 `1 m` 并逐分量裁剪至 `[-1,1]` | 正常计算 |
+| `15:21` | `C_ee^W`（6） | 当前末端旋转矩阵的前两列，按列展开 | 旋转矩阵元素天然位于 `[-1,1]` | 正常计算 |
+| `21:24` | `p_goal^W`（3） | 目标世界坐标位置，`m` | 除以 `1 m` 并逐分量裁剪至 `[-1,1]` | 正常计算 |
+| `24:30` | `C_goal^W`（6） | 目标旋转矩阵的前两列，按列展开 | 旋转矩阵元素天然位于 `[-1,1]` | 正常计算 |
+| `30:33` | `e_p`（3） | `p_goal^B-p_ee^B`，`m` | 逐分量裁剪至 `[-1,1]` | 正常计算 |
+| `33:39` | `C_rel`（6） | `R_goal^B (R_ee^B)^T` 的前两列，按列展开 | 旋转矩阵元素天然位于 `[-1,1]` | 正常计算 |
+| `39` | `rho_p`（1） | `||e_p||_2`，`m` | 除以 `1 m` 并裁剪至 `[0,1]` | 正常计算 |
+| `40` | `rho_R`（1） | `SO(3)` 测地角，`rad` | 除以 `pi` 并裁剪至 `[0,1]` | 正常计算 |
+| `41:44` | `v_ee^W`（3） | 末端线速度，`m/s` | 除以 `1 m/s` 并裁剪至 `[-1,1]` | 正常计算 |
+| `44:47` | `omega_ee^W`（3） | 末端角速度，`rad/s` | 除以 `4.2 rad/s` 并裁剪至 `[-1,1]` | 正常计算 |
+| `47` | `eta`（1） | 当前 episode 固定的姿态任务课程系数 | `2 eta-1` 映射至 `[-1,1]` | 正常计算 |
+| `48` | `h_remain`（1） | episode 剩余控制步比例 | 从 `[0,1]` 仿射映射至 `[-1,1]` | 正常计算 |
+| `49:67` | `r_1,...,r_6`（18） | `r_i=p_obs^B-c_i^B`，每个向量占连续 3 维，`m` | 逐分量裁剪至 `[-1,1]` | 全零 |
+| `67:70` | `p_obs^B`（3） | 障碍物球心位置真值，`m` | 按下文固定边界逐轴映射并裁剪至 `[-1,1]` | 全零 |
+| `70:73` | `v_obs^B`（3） | 障碍物球心线速度真值，`m/s` | 除以 `0.1 m/s` | 全零 |
+| `73:79` | `d_1,...,d_6`（6） | `d_i=||r_i||_2-r_capsule,i-r_obs`，`m` | 在 `[-0.20,0.80] m` 裁剪后映射至 `[-1,1]` | 全部为 `1` |
+| `79:85` | `TTC_1,...,TTC_6`（6） | 到达安全边界 `d_safe` 的估计时间，`s` | `clip(TTC_i,0,TTC_max)/TTC_max` | 全部为 `1` |
+| `85:91` | `v_approach,1,...,v_approach,6`（6） | 各胶囊到障碍物的接近速度，`m/s` | 除以 `1 m/s` 并裁剪至 `[0,1]` | 全零 |
+| `91:97` | `R_1,...,R_6`（6） | 各胶囊有界风险 | 裁剪至 `[0,1]` | 全零 |
+| `97` | `H`（1） | 障碍物存在标志，无量纲 | 不变 | `0` |
+| `98:104` | `d_self,1,...,d_self,6`（6） | 各可控 link 与非相邻 link 的最小 collision-mesh 表面间隙，`m` | 在 `[-0.02,0.25] m` 裁剪后映射至 `[-1,1]` | 正常计算 |
+| `104:110` | `TTC_self,1,...,TTC_self,6`（6） | 到达 `d_self_safe` 的最短估计时间，`s` | 除以 `3 s` 并裁剪至 `[0,1]` | 正常计算 |
+| `110:116` | `v_self,approach,1,...,6`（6） | 各可控 link 的最大自接近速度，`m/s` | 除以 `1 m/s` 并裁剪至 `[0,1]` | 正常计算 |
+| `116:122` | `R_self,1,...,R_self,6`（6） | 各可控 link 的最大有界自碰撞风险 | 裁剪至 `[0,1]` | 正常计算 |
 
 总维度为：
 
 ```text
-6 + 6 + 3 + 3 + (6 x 3) + 3 + 3 + 6 + 6 + 1 = 55
+6 + 6 + 3 + 6 + 3 + 6 + 3 + 6 + 1 + 1 + 3 + 3 + 1 + 1
++ (6 x 3) + 3 + 3 + 6 + 6 + 6 + 6 + 1
++ 6 + 6 + 6 + 6 = 122
 ```
+
+旋转 6D 表示记为 `C(R)=[R[:,0],R[:,1]]`。它对四元数的 `q/-q` 双覆盖天然不变，并避免把存在分支切换的三维 `SO(3)` 对数向量直接交给策略。三维对数映射仍用于计算测地角 `rho_R=||Log(R_goal R_ee^T)^vee||_2`，但只作为标量误差、奖励和成功判定，不再作为策略的姿态坐标。
 
 #### 坐标系与位置归一化
 
@@ -124,6 +156,23 @@ d_i      = ||r_i||2 - r_capsule,i - r_obs
 
 其中 `eps_seg=1e-12 m^2`；零长度胶囊按以 `a_i` 为球心的球体处理。`p_obs^B` 保留完整空间位置，`r_i` 提供逐胶囊避障方向，`d_i` 提供扣除双方半径后的安全裕度。三者有意保留物理冗余，以减少 MLP 学习正运动学和最近点几何的负担；无需再输入各最近点的绝对位置。
 
+自碰撞连续几何不使用上述胶囊。校准发现合法 UR5 构型中的腕部胶囊会结构性重叠，若直接作为 self-clearance 会产生永久假惩罚。v9 改为对 `base_link_inertia` 至 `wrist_3_link` 的 7 个 collision link 一次查询 PyBullet collision mesh 最近点，排除有序运动链中的 6 个相邻 pair，保留 15 个非相邻 pair。每个 pair 的表面间隙直接取 `getClosestPoints` 的有符号 `contactDistance`；正值为分离、零或负值为接触。最近点速度由 link 质心线速度与角速度计算，接近速度和 TTC 为：
+
+```text
+d_dot_self,ij      = n_ij^T (v_j-v_i)
+v_self,approach,ij = max(-d_dot_self,ij,0)
+
+TTC_self,ij = 0                                             if d_self,ij <= 0.005 m
+TTC_self,ij = (d_self,ij-0.005)/v_self,approach,ij           if v_self,approach,ij > 1e-4 m/s
+TTC_self,ij = 3 s                                           otherwise
+
+v_self,ij = clip((0.005-d_self,ij)/0.005,0,1)
+R_self,ij = max(v_self,ij,
+                clip(v_self,approach,ij/0.7,0,1) exp(-TTC_self,ij/1 s))
+```
+
+静止且仍有正间隙的结构性近邻风险为零；正在接近安全边界的 pair 通过 TTC 在接触前产生连续风险。pair 指标按最小距离、最小 TTC、最大接近速度和最大风险分别聚合到六个可控 link 槽；固定基座没有独立 observation 槽，但基座与移动 link 的 pair 指标会进入移动端槽及全局奖励。reset 和目标生成还要求全局 self-clearance 不小于 `0.005 m`，真实 contact 仍由同一非相邻 pair 集合的 PyBullet contact 判定并立即硬终止。
+
 #### 障碍物位置与速度的来源
 
 仿真训练时直接读取球心在世界坐标系中的位置 `p_obs^W` 和线速度 `v_obs^W`。使用机器人基坐标系相对世界坐标系的齐次变换 `T_BW=[R_BW,t_BW;0,1]`，统一转换为：
@@ -152,7 +201,7 @@ TTC_obs_i = clip(TTC_i, 0, TTC_max) / TTC_max
 
 `TTC_obs_i=0` 表示胶囊已经进入安全边界，数值越小表示风险越紧迫，`TTC_obs_i=1` 表示按当前相对速度在预测时域内不会进入安全边界。`eps_norm=1e-8 m` 只用于判断 `||r_i||` 是否能够安全归一化；若 `||r_i||<=eps_norm`，则直接按已进入安全边界处理。`eps_v=1e-4 m/s` 只用于判断接近速度是否足以计算 TTC；当 `v_approach_i<=eps_v` 时统一取 `TTC_i=TTC_max`。二者不得混用。
 
-TTC 补充相对运动的时间紧迫性。主方案固定使用完整 55 维输入；删除 `p_obs^B`、`d_i` 或 TTC 的版本仅用于消融，不得与主方案共用 checkpoint。
+TTC 补充相对运动的时间紧迫性；逐连杆接近速度与风险让策略能够区分“距离相同但正在靠近/远离”的状态，并定位风险来自哪一段连杆。`eta` 会同时改变姿态奖励和成功终止条件，剩余时域会改变 timeout 转移；若不输入策略，二者都会形成隐状态。因此主方案显式加入这些量，并在 timeout 时停止 Bellman bootstrap。V10 固定使用完整 122 维输入；v8 的 98 维网络以及 V8/V9 的 actor、critic、optimizer 和 replay 均与本协议不兼容。普通 `--resume` 只允许协议一致的 V10 checkpoint。
 
 ### 3.3 SAC 输出与动作执行
 
@@ -177,31 +226,35 @@ Delta_T = N_substeps * delta_t_physics
 replay buffer 保存标准 transition，并附带第 3.4.2 节规定的奖励重算与 episode 结构字段：
 
 ```text
-(o_t, a_t, r_t, o_{t+1}, terminated_t, truncated_t)
+(o_t, a_t, r_t, o_(t+1), done_t)
 ```
 
-replay 中保存实际送入缩放器的 `a_t`，而不是仿真反馈速度；`a_t=0` 表示请求零关节速度。元组中的 `r_t` 是采集时日志值，gradient update 必须从原始分项按当前 `xi_scene` 重算 reward；episode 终止、截断、宽容期规范化和失败优先级按第 3.4.1、3.4.2 节处理。
+replay 中保存实际送入缩放器的 `a_t`，而不是仿真反馈速度；`a_t=0` 表示请求零关节速度。`done_t=terminated_t or truncated_t`，因此真终止和 timeout 都停止 bootstrap。元组中的 `r_t` 是采集时日志值，gradient update 必须从原始分项按 transition 自身的 `eta` 和当前 `xi_scene` 重算 reward；宽容期规范化和失败优先级按第 3.4.1、3.4.2 节处理。
 
 ### 3.4 训练配置与选择协议
 
 本节是第一阶段的唯一配置事实源。一个 run 内，障碍物场景、curriculum 采样比例以及新场景的安全课程状态按下文规则变化，其余定义保持不变。动态奖励调度器属于训练算法状态而不是安全层；其状态必须进入 checkpoint。actor 仅依据严格碰撞终止语义下的 validation Gate 选择并冻结，held-out 不参与训练或选择。
 
+当前正式协议标识为 `task_first_persistent_eta_replay_homotopy_v11`，正式输出根目录为 `outputs/experiments_9/v11/`。v2～V10 均为已终止的旧奖励、输入、课程或 replay 契约，只保留诊断，不允许恢复。正式 V11 的 S0 必须从随机初始化开始；普通 `--resume` 必须通过协议标识、seed、输入结构和 replay storage version 校验。
+
+V10 的 600k S0 训练最终停在 `eta=0.75` 并记为 `hard_budget_stop`。其无障碍 60000 FIFO 在长时间困难档训练后覆盖了所有中间 eta 数据，导致“历史分层采样”没有持久历史支撑。V11 因此把无障碍 replay 物理拆成 anchor FIFO、current eta FIFO 和按 eta 冻结的 historical snapshots；默认容量为 `15000/30000/3000`，历史池只读并随 checkpoint 一起恢复。该 replay storage 改变使 V10 checkpoint 不兼容。
+
 #### 3.4.1 MDP 与奖励
 
 | 项目 | 当前定义 |
 | --- | --- |
-| observation | 使用第 3.2 节定义的 55 维 `o_t`；只使用固定尺度，不做在线均值方差归一化 |
-| 模型与几何 | URDF、末端参考系和胶囊配置按第 1.2、3.2 节定义；run manifest 记录 URDF、胶囊源文件及解析结果哈希。当前 URDF SHA-256 为 `5263b9a27eacc55fadf33abf5c4d8ac95a83f9b6593990c9f290d03c2050d62a` |
+| observation | 使用第 3.2 节定义的 122 维 `o_t`；只使用固定尺度，不做在线均值方差归一化 |
+| 模型与几何 | 外部障碍胶囊和自碰撞 collision mesh 按第 1.2、3.2 节定义；run manifest 至少记录 URDF SHA-256、受控关节顺序、末端 link、observation/action 维数和外部碰撞体。当前 URDF SHA-256 为 `5263b9a27eacc55fadf33abf5c4d8ac95a83f9b6593990c9f290d03c2050d62a` |
 | 控制与物理步长 | `delta_t_physics=1/240 s`，`N_substeps=12`，`Delta_T=0.05 s`；每个控制周期动作保持不变 |
 | 仿真动力学 | 固定基座、重力 `[0,0,0] m/s^2`、PyBullet velocity control、逐关节最大驱动力 `90 N*m`；关闭命令 rate limit、EMA、Butterworth、quintic 和 Safety-QP |
 | 动作尺度 | `qdot_scale=[0.7,...,0.7] rad/s`；URDF 六关节速度硬上限均为 `pi rad/s`，动作执行仍按 3.3 节逐关节裁剪 |
-| observation 尺度 | `p_error_scale=1.0 m`，`relative_position_scale=1.0 m`，`obstacle_speed_scale=0.1 m/s`；`p_obs^B` 使用第 3.2 节边界；间隙在 `[-0.20,0.80] m` 裁剪后映射至 `[-1,1]`；`d_safe=0.12 m`，`TTC_max=3.0 s`，`eps_seg=1e-12 m^2`，`eps_norm=1e-8 m`，`eps_v=1e-4 m/s` |
+| observation 尺度 | `qdot_scale=0.7 rad/s`（与动作和奖励相同），`p_error_scale=1.0 m`，`v_ee_scale=1.0 m/s`，`omega_ee_scale=4.2 rad/s`，`relative_position_scale=1.0 m`，`obstacle_speed_scale=0.1 m/s`，`v_approach_scale=1.0 m/s`；`p_obs^B` 使用第 3.2 节边界；间隙在 `[-0.20,0.80] m` 裁剪后映射至 `[-1,1]`；`d_safe=0.12 m`，`TTC_max=3.0 s`，`eps_seg=1e-12 m^2`，`eps_norm=1e-8 m`，`eps_v=1e-4 m/s` |
 | episode horizon | 最多 `240` 个 SAC 控制周期，即 `12 s` |
-| 到达判定 | 若本控制周期未提前触发硬失败，则执行当前动作；当推进后的状态满足 `||e_p,t+1||_2 <= 0.055 m` 且 `||e_R,t+1||_2 <= 0.10 rad` 时置 `I_task_reached=1`。不要求连续保持，不维护 observation 之外的保持计数 |
+| 到达判定 | 若本控制周期未提前触发硬失败，则执行当前动作；当推进后的状态满足 `||e_p,t+1||_2 <= 0.055 m` 且 `||e_R,t+1||_2 <= theta(eta)` 时置 `I_task_reached=1`，其中 S0 的 `theta(eta)=pi+eta(0.10-pi)`，validation、S1、S2 固定 `eta=1`。不要求连续保持，不维护 observation 之外的保持计数 |
 | 到达终止 | `I_task_reached=1` 时置 `terminated=true`。宽容期允许此前或当前 transition 出现任务球碰撞，因此另记 `collision_assisted_reach`；严格期只有 episode 从未发生任何失败事件时才记 `safe_success` |
 | 始终硬终止 | 任一物理子步触发自碰撞或环境碰撞，或任一关节满足 `q_j<q_min,j-eps_q` 或 `q_j>q_max,j+eps_q`，立即停止剩余物理子步，以该子步后状态作为 `o_{t+1}` 并置 `terminated=true`；其中 `eps_q=1e-6 rad`。硬失败始终优先于到达 |
 | 任务球碰撞终止 | 对当前正在学习的新障碍场景，当安全课程 `xi_scene<1` 时，任务球 contact 只锁存事件、不中断子步且不终止 episode；当 `xi_scene=1` 时，首次任务球 contact 立即停止剩余子步并真终止，且优先于到达。validation、held-out 和 Gate 始终采用 `xi_scene=1` 的严格语义 |
-| 时间截断 | 达到 `240` 步但未真终止时置 `truncated=true`；Bellman target 只用 `terminated` 屏蔽，必须在 `truncated` transition 上继续 bootstrap |
+| 时间截断 | 达到 `240` 步但未真终止时置 `truncated=true`；该 transition 以 `done=1` 写入 replay 并停止 Bellman bootstrap。剩余时域已显式进入 observation，因此有限时域 MDP 保持 Markov 性 |
 | transition 时序 | 逐子步执行 `a_t`：正常情况及宽容期任务球 contact 均推进全部 `N_substeps`；发生硬失败或严格期任务球 contact 时，在首次事件子步后提前结束。随后用 `o_t`、本 transition 实际执行的全部子步遥测和 `o_{t+1}` 计算奖励原始分项；风险取已执行子步最大值，间隙取已执行子步最小值 |
 
 每个物理子步读取 PyBullet contact。过滤后仅将 `contactDistance<=0 m` 视为有效 contact，并在当前 transition 内锁存。
@@ -215,7 +268,7 @@ replay 中保存实际送入缩放器的 `a_t`，而不是仿真反馈速度；`
 
 定义 `I_hard=max(I_self_collision,I_environment_collision,I_joint_limit)`，并定义 `I_obstacle_only=I_obstacle_collision(1-I_hard)`。一个 transition 可以锁存多个事件。宽容期分别报告 `task_reached`、`collision_assisted_reach` 和 `safe_success`，其中 `collision_assisted_reach=1` 当且仅当到达目标且 episode 曾发生任务球 contact，`safe_success=1` 当且仅当到达目标且 episode 从未发生任何碰撞或关节越界。严格训练、validation、held-out 和 Gate 的 episode 主结果统一按 `obstacle_collision > self_collision > environment_collision > joint_limit > safe_success > timeout` 排序；此时报告中的 `success rate` 专指 `safe_success rate`。`collision rate` 不包含 joint limit；所有 rate 的分母均为对应 seed、对应场景层的 episode 总数。
 
-令 `rho_p,t=||e_p,t||_2`、`rho_R,t=||e_R,t||_2`。使用当前 transition 的实际关节速度变化定义 `s_vel,t=||(qdot_t+1-qdot_t)/qdot_scale||_2^2`，因此平滑项只依赖 `(o_t,a_t,o_t+1)`，不依赖未观测的上一条命令。姿态角通过 SO(3) 对数映射取得，目标生成器拒绝初始姿态误差 `rho_R,0>=pi-1e-3` 的数值奇异样本。
+令 `rho_p,t=||e_p,t||_2`、`rho_R,t=||e_R,t||_2`。使用当前 transition 的实际关节速度定义 `m_vel,t=mean_j[(qdot_(t+1)[j]/qdot_scale[j])^2]`，使用速度变化定义 `s_vel,t=mean_j[((qdot_(t+1)[j]-qdot_t[j])/qdot_scale[j])^2]`；二者都只依赖 `(o_t,a_t,o_(t+1))`，不依赖未观测的上一条命令。姿态角通过 SO(3) 对数映射取得，目标生成器拒绝初始姿态误差 `rho_R,0>=pi-1e-3` 的数值奇异样本。
 
 逐胶囊风险与全身风险定义为：
 
@@ -228,52 +281,80 @@ R_max,t = max over all physics substeps and all six capsules of R_i
 d_min,t = min over all physics substeps and all six capsules of d_i
 ```
 
-无障碍 episode 中固定 `R_max,t=0`、安全距离违反标志为 `0`。定义不随课程变化的到达奖励：
+为使位置到达始终是姿态优化的基础，先把位置与姿态误差映射为有界质量，并用乘法耦合，而不再使用按位置区间分段的姿态奖励门：
 
 ```text
-r_goal,t = -2.0 rho_p,t+1^2
-           -0.5 rho_R,t+1^2
-           +18.0 (rho_p,t-rho_p,t+1)
-           +4.0  (rho_R,t-rho_R,t+1)
-           -0.04 s_vel,t
+u_p,t = exp(-rho_p,t/0.20)
+u_R,t = exp(-rho_R,t/1.00)
+H(u)  = 0.5 (u+u^4)
+Phi_t = H(u_p,t) [1+eta H(u_R,t)]
+
+m_bar,t = clip(mean_j[(qdot_(t+1)[j]/0.7)^2],0,1)
+s_bar,t = clip(mean_j[((qdot_(t+1)[j]-qdot_t[j])/0.7)^2],0,1)
+
+r_goal,t = 20.0 [gamma Phi_(t+1)-Phi_t]
+           -0.04 m_bar,t
+           -0.01 s_bar,t
            +20.0 I_task_reached
-
-c_proximity,t = 1.0 R_max,t
-                +3.0 I[d_min,t < d_safe]
 ```
 
-为避免有限时域任务中“主动触发真终止以逃避后续持续误差代价”的奖励捷径，定义固定折扣时域和终止失败吸收态补偿：
+其中 `gamma=0.99` 与 SAC 的 Bellman 折扣完全一致。`H` 保留远距离梯度并用四次项提高近目标分辨率；姿态质量只能通过位置质量 `H(u_p)` 的乘法调制进入势函数，因此远离目标时姿态贡献也会被同步衰减。课程系数 `eta in [0,1]` 仍为一个 episode 内固定的姿态难度并决定成功容差：`eta=0` 时势函数只含位置，随后连续增加姿态贡献。使用 `gamma Phi_(t+1)-Phi_t` 的折扣势函数差，避免未经折扣的进展奖励被往返运动循环利用；不再裁剪原始位置或姿态进展，也不再保留分段位置门。
+
+速度项与 observation 中的 `qdot` 使用同一个 `0.7 rad/s` 尺度。`m_bar` 衡量归一化关节速度的逐关节均方，`s_bar` 衡量归一化关节速度变化的逐关节均方；二者均在 `[0,1]` 有界。原平方和定义在旧短轨迹中有 97.2%～98.8% 的 transition 达到平滑代价上限，已经废止。修复后的独立 3500-transition 真实轨迹中，饱和率降至 warm-up `15.0%`、早期 actor `13.8%`，平滑代价中位数分别为 `0.00623/0.00610`；最大值仍为 `0.01`，因此不会改变到达优先和安全同伦的数量级关系。
+
+外部障碍与自碰撞分别使用连续的安全边界穿入深度和有界风险：
 
 ```text
-Z_H = sum_{k=0}^{H-1} gamma^k
-    = (1-gamma^H)/(1-gamma),  gamma=0.99, H=240
+R_bar,t = clip(R_max,t, 0, 1)
+v_clear,t = clip((d_safe-d_min,t)/d_safe, 0, 1)
+c_proximity,t = R_bar,t + v_clear,t
 
-c_state,t = 2.0 rho_p,t+1^2 + 0.5 rho_R,t+1^2
-
-I_terminal_failure = I_hard
-                     OR I_strict_obstacle_collision
-
-c_terminal,t = Z_H c_state,t I_terminal_failure
+R_self_bar,t = clip(max_ij R_self,ij,t, 0, 1)
+v_self_clear,t = clip((0.005-d_self_min,t)/0.005, 0, 1)
+c_self,t = R_self_bar,t + v_self_clear,t
 ```
 
-该补偿等价于在失败后附加一个保持当前位姿误差的有限时域吸收态：真终止不能再通过删除未来误差项取得更高回报。采用固定完整 `Z_H` 而不使用剩余步数，使同一失败状态在 episode 不同时间具有相同失败代价，也无需把时间索引加入 observation。它是保守补偿，只作用于自碰撞、环境碰撞、关节越界和严格期任务球碰撞；宽容期任务球接触既不终止，也不产生该项。
+两种 clearance violation 都在各自安全边界两侧连续，从边界处的 `0` 随穿入深度线性增加并在 `1` 饱和。真实 contact 和硬失败仍是离散事件；旧版按状态成本乘以约 `91` 的终止吸收态补偿已经删除。
 
 每种障碍场景具有独立课程系数 `xi_scene in [0.02,1]`。该系数是训练进度状态，不进入 SAC observation；给定 checkpoint、replay 和调度器状态后，其演化完全确定。S0 无障碍场景不使用该系数；S1 中静态场景从 `0.02` 递增到 `1`；S2 开始时静态场景保持 `xi_static=1`，仅动态场景重新从 `xi_dynamic=0.02` 递增。训练 reward 为：
 
 ```text
 r_t = r_goal,t
-      -34.0 I_hard
-      -xi_scene [4.0 c_proximity,t + 34.0 I_obstacle_only]
-      -c_terminal,t
+      -10.0 I_hard
+      -10.0 I_strict_obstacle_terminal
+      -xi_scene [2.0 R_bar,t + 8.0 v_clear,t] / 10
+      -lambda_self [2.0 R_self_bar,t + 8.0 v_self_clear,t] / 10
 ```
 
-对无障碍 transition 固定安全同伦项为零。`34.0=2.0+4.0x8.0`；当 `xi_scene=0.02` 时，宽容期任务球接触惩罚仍仅为 `0.68`，风险与安全距离违反惩罚也同步缩小，到达奖励完全不变，且 `c_terminal=0`。当 `xi_scene=1` 且任务球接触成为真终止时，才额外启用吸收态补偿。若硬失败与任务球 contact 同时出现，只施加一次硬失败基础惩罚和一次吸收态补偿，不重复叠加任务球基础失败惩罚；当前 transition 的接近风险仍按对应 `xi_scene` 计入。
+无障碍 transition 的外部障碍项为零。`xi_scene` 与 `lambda_self` 完全独立：前者只调度新引入的外部障碍场景，后者只调度自碰撞。两个加权平均各自位于 `[0,1]`；`2:8` 只表达预测风险与安全边界穿入的相对优先级。硬失败惩罚始终为 `10`；真实自碰撞在 `lambda_self=0` 时也会触发硬终止和硬失败惩罚。任务球 contact 在宽容阶段不增加离散惩罚；严格阶段首次 contact 真终止并一次性扣 `10`，防止策略通过提前碰撞规避更差的 timeout 回报。
 
-`I_task_reached` 仅在首次到达且未触发硬失败的终止 transition 上取 `1`；在 `xi_scene<1` 的宽容期，即使 episode 已经或正在与任务球接触，仍可获得到达奖励并终止为 `task_reached`。当 `xi_scene=1` 时任务球碰撞恢复为真终止，失败优先，因此最终严格 MDP 中 `I_task_reached` 与任务球碰撞不会在同一 transition 同时取 `1`。
+S0 中姿态成功容差由 `theta(eta)=pi+eta(0.10-pi)` 线性收紧；`I_task_reached` 要求 `rho_p<=0.055 m` 且 `rho_R<=theta(eta)`，并且未触发硬失败。因而 `eta=0` 时实际为位置到达，`eta=1` 时为完整位姿到达。在 `xi_scene<1` 的宽容期，即使 episode 已经或正在与任务球接触，仍可获得到达奖励并终止为 `task_reached`。当 `xi_scene=1` 时任务球碰撞恢复为真终止，失败优先，因此最终严格 MDP 中 `I_task_reached` 与任务球碰撞不会在同一 transition 同时取 `1`。
 
-日志保存三类 contact、joint-limit、`task_reached`、`collision_assisted_reach`、`safe_success`、`xi_scene`、`r_goal`、`c_proximity`、`c_terminal`、各惩罚分项和总 reward。本阶段只训练普通 SAC 的 reward critic，不训练 cost critic 或拉格朗日乘子；jerk 仅作为评价指标，不进入 reward。
+逐 transition 日志保存四类误差前后值、位置/姿态质量、`Phi_t/Phi_(t+1)`、折扣势函数进展、速度和平滑原始量及代价、三类 contact、joint-limit、`task_reached`、目标尺度、`xi_scene`、`lambda_self`、两套风险/间隙/安全惩罚和总 reward；逐 episode 另保存 `collision_assisted_reach`、`safe_success`、课程窗口及探针状态。实现必须能由日志分项重构总 reward。V10 的 200-transition 真实短轨迹中最大重构误差为 0。本阶段只训练普通 SAC 的 reward critic，不训练 cost critic 或拉格朗日乘子；jerk 仅作为评价指标，不进入 reward。
+
+正式训练前的 V10 检查结果为：停止分析器、训练器和 evaluator 的 39 项定向测试与 97 项全量回归测试通过；500 个随机关节构型的 collision mesh 距离符号与真实 contact 一致率为 100%；100 个可达目标中 99 个满足“理想到达 > 静止超时 > 立即碰撞/硬失败”，保留 1 个近目标有限时域排序例外；24-transition 保存和 12-transition 恢复冒烟使 replay 与 `stage_total_step` 从 24 连续增长到 36；V8/V9 checkpoint 会在加载网络前因协议不匹配被拒绝。以上预检只证明实现、几何、预算计数和恢复路径自洽，不证明策略能够收敛。
+
+正式 v9 S0 seed 11001 block1 的原始进程在 `stage_step=66646` 意外中断；从最后完整的 `step_0050000.pt` 恢复后，恢复 run 正常完成剩余 `50000` steps。两段日志按 `global_step` 去重合并后得到 `100000` transitions、`8945` episodes：position/task reached 和 safe success 均为 `99.575%`，self-collision 为 `0.0894%`（8 episodes），joint-limit 为 `0.0335%`，timeout 为 `0.3018%`，environment/obstacle collision 均为 0。最近 1000 episodes 达到率为 100%，且无 self-collision 或 timeout；alpha、Q 和 critic loss 后期稳定，无 NaN/Inf 或发散。
+
+该结果证明 V9 的连续 self-clearance observation 没有破坏位置学习，但不等于完整 S0 通过：Block1 结束时 `goal_scale=1` 的位置巩固仅完成 `K_position=21709/25000`，状态为 `eta=0`、`lambda_self=0.02`、`s0_goal_gate_eligible=false`。恢复 run 的内部 `block=2` 只是同阶段续训编号，不是 Gate 通过标志；当时随后执行的是 V9 Block2，而不是 S1/S2。
+
+随后从上述 checkpoint 完成了正式 V9 S0 Block2，累计达到 `global_step=200000`。位置巩固增至 `K_position=121709`，`lambda_self=1`、`K_self=96556`，姿态课程推进到 `eta=0.4`；最终姿态窗口为 `0.81`，位置锚点窗口为 `1.00`。两个固定位置 probe 分别为 success/collision/joint-limit/timeout=`0.88/0.02/0/0.10` 和 `0.98/0.02/0/0`，后者仍因 1/50 collision 失败，课程进入 recovery，`K_pose=0`、`s0_goal_gate_eligible=false`。Block2 的 `eta=0.4` 非锚点 episode 为 success/self-collision/timeout=`80.38%/5.65%/13.17%`；相较 V8 同档，self-collision 的全档比例下降但 timeout 增加，最后 100 episode 的 self-collision 均为 9%，所以不能宣称连续 self 信号已经解决自碰撞问题。SAC 数值稳定，当时瓶颈仍是姿态要求下的安全动作选择和困难位置泛化。
+
+V9 Block2 后，当前 probe 最早还需约 4654 个本档非锚点 transition 才能重试；之后 `eta=0.5` 至 `0.98` 的 11 档至少需要 55000 个非锚点 transition，`eta=1` 还需 25000 个非锚点巩固。计入 recovery 与正常 25% 锚点后，从该状态到 Gate 的总 transition 理论下界约为 116000，严格超过原三 Block 规则只剩的 100000。这不说明三 Block 上限从训练起点就数学不可达，而说明实际 V9 的学习速度与 probe 失败已使其无法在预先固定的 300k 预算内通过。V9 因而不再执行 Block3；V10 将硬预算改为每 stage 600k，并用同档两 Block 平台判据区分“停止学习”和“预算不足”。
+
+V8 的三 Block 结果与 V9 的两 Block 诊断统一保留在 [`docs/experiments_9/progress.md`](../experiments_9/progress.md)。上述段落均为历史证据，不构成当前续训指令。V9 不再运行 Block3，也不得把 V9 checkpoint 加载到 V10。
 
 #### 3.4.2 到达优先的安全同伦调度
+
+S0-P 执行离散目标范围课程，并固定 `eta=0`。每个 episode 先在完整关节范围内产生候选 `q_full`，再以当前 episode 固定尺度 `g` 构造 `q_goal=q_initial+g(q_full-q_initial)`，之后仍执行目标构型自碰撞、工作空间、IK 和 FK 回代检查。固定台阶为 `[0.03,0.04,0.05,0.065,0.08,0.10,0.125,0.16,0.20,0.25,0.32,0.40,0.50,0.65,0.82,1.0]`。每个台阶至少采集 `5000` 个非 warm-up transition，且该台阶独立的最近 `100` 个完整 episode 位置到达率达到 `0.80` 后，才前进一个台阶。换挡后立即清空成功窗口和台阶计数，旧难度成功不得推动新难度。包含任意均匀随机 warm-up 动作的 episode 不进入课程窗口，随机 transition 也不计入台阶步数。达到 `g=1.0` 后至少完成 `25000` 个完整目标、位置任务 transition，记为 `K_position`。
+
+S0-R 仅在 `g=1` 且 `K_position>=25000` 后开始，目标范围不再变化。`eta` 使用 `0,0.10,0.20,0.30,0.40,0.50,0.60,0.65,0.70,0.75,0.80,0.85,0.90,0.93,0.96,0.98,1.0` 共 17 个离散档位；每档至少采集 `5000` 个非锚点、非 warm-up transition，并且该档最近 `100` 个任务 episode 成功率达到 `0.80` 后才可前进。每次换档同时清空本档任务窗口和位置锚点窗口，禁止使用上一档的容易样本推动下一档。
+
+自碰撞裕量课程独立于 `eta` 和 `xi_scene`，但严格位于完整位姿任务之后。位置与姿态阶段固定 `lambda_self=0`；真实自碰撞仍始终硬终止并扣 `10`。只有 `eta=1`、`K_pose>=25000`、最近 100 个完整位姿 episode 成功率不低于 `0.80`、最近 100 个位置锚点成功率不低于 `0.95` 且最终确定性位置 probe 通过时，该完整 episode 的非 warm-up transition 才推进 `K_self`。episode 结束后按 `lambda_self=min(1,K_self/50000)` 更新；任一保持指标下降时冻结而不回退。达到 `lambda_self=1` 后还须在任务门槛持续满足时完成至少 `25000` 个满权重 transition，记为 `K_self_full`。S1/S2 固定 `lambda_self=1`。
+
+姿态课程进入 `eta>0` 后插入 `eta=0, theta=pi` 的纯位置锚点。正常模式的锚点 episode 概率为 `0.25`，S0 replay 按锚点/当前/历史 `25/50/25` 采样；锚点窗口至少有 20 个样本且成功率低于 `0.98` 时切换为 `0.40` 和 `40/40/20`，低于 `0.95` 或确定性探针失败时进入恢复模式，切换为 `0.50` 和 `50/35/15` 并冻结晋级。所有锚点均由当前策略在线生成，不设置永久专家池，也不蒸馏旧位置 actor。每一姿态档仍须重新收集 100 个姿态 episode、100 个锚点 episode并满足 `0.80/0.95`；随后还要通过 50 个私有固定目标的确定性位置探针，要求成功率不低于 `0.95` 且碰撞率、关节越界率均为 0。失败后至少再训练 5000 个当前档 transition 才重试。达到 `eta=1` 后再完成至少 `25000` 个非锚点完整位姿 transition，记为 `K_pose`。只有两类窗口、最终确定性探针和两次巩固都达标的 checkpoint 才有资格参加 S0 Gate。validation、S1 和 S2 始终固定 `g=1, eta=1`。
+
+两级任务课程解决 S0 的位置—姿态冲突；独立 `lambda_self` 只在完整位姿能力掌握后加入连续自碰撞裕量代价。S1/S2 不再改变 `g`、`eta` 或 `lambda_self`，而是在完整位姿任务上单独调度 `xi_scene`、碰撞终止语义和 replay 严格化。因此任务同伦、自碰撞课程与外部障碍安全同伦各自保存计数，不能互相覆盖。
 
 S1 和 S2 分别为新引入的静态、动态障碍场景维护独立调度器。调度器不冻结 actor、critic 或温度，也不降低任何到达奖励；它只在训练表明策略已经能够在新场景中到达后，逐渐增加该场景的安全惩罚。对最近 `100` 个已完成的新场景训练 episode 维护滑动窗口任务到达率 `S_task,100`，碰撞后到达也计为任务到达，硬失败和 timeout 计为未到达。窗口未满时不得推进课程。
 
@@ -298,7 +379,7 @@ xi_scene <- min(1.0, 0.02 + 0.98 K_scene / K_ramp)
 
 严格期至少再收集并训练 `N_strict=25000` 个对应新场景 transition，之后 checkpoint 才有资格参加本阶段 Gate。课程系数达到 `1` 并不自动表示阶段通过；最终选择仍完全依据严格 validation Gate。
 
-为避免非平稳权重与历史标量 reward 冲突，replay 除标准 transition 外必须保存足以重算奖励的原始分项：`rho_p,t`、`rho_p,t+1`、`rho_R,t`、`rho_R,t+1`、`s_vel,t`、`R_max,t`、`d_min,t`、三类 contact、joint-limit、`I_task_reached`、执行前 `obstacle_contact_seen`、场景标签、episode ID 和 episode 内步号。每次抽样均用该场景当前 `xi_scene` 重算 `r_t`；不得直接使用采集时的旧总 reward。`xi_scene`、`K_scene`、滑动窗口内容、宽容/严格状态、严格期步数和 replay 规范化标志均属于必须恢复的学习状态。
+为避免非平稳权重与历史标量 reward 冲突，replay 除标准 transition 外必须保存足以重算奖励的原始分项：`rho_p,t`、`rho_p,t+1`、`rho_R,t`、`rho_R,t+1`、`s_vel,t`、`m_vel,t`、采集时的 `eta`、外部 `R_max,t/d_min,t`、self `R_self,max,t/d_self,min,t/v_self_clear,t/v_self,approach,max,t/TTC_self,min,t`、三类 contact、joint-limit、`I_task_reached`、执行前后的 `obstacle_contact_seen`、场景标签、episode ID 和 episode 内步号。每次抽样均使用 transition 自身的 `eta`、当前 `lambda_self` 和该场景当前 `xi_scene` 重算 `r_t`；不得直接使用采集时的旧总 reward。两类安全课程及其计数、窗口、严格状态和 replay 规范化标志均属于必须恢复的学习状态。
 
 #### 3.4.3 SAC 超参数
 
@@ -307,38 +388,37 @@ xi_scene <- min(1.0, 0.02 + 0.98 K_scene / K_ramp)
 | 策略 | tanh-squashed diagonal Gaussian policy；actor 输出 6 维 `mu` 和 6 维 `log_std`，`log_std` 裁剪到 `[-20,2]`；tanh log-probability 修正使用 `eps_log=1e-6` |
 | 训练动作 | `u=mu+exp(log_std)*epsilon`，`epsilon~N(0,I)`，`a=tanh(u)`；使用重参数化采样，并在 `log pi(a|o)` 中包含 tanh Jacobian 修正 |
 | 评估动作 | validation、held-out 和 Gate 一律使用确定性动作 `a=tanh(mu)`；不采样、不附加探索噪声 |
-| actor 网络 | `55 -> 256 -> 256 -> (mu,log_std)`，隐藏层 ReLU，无 LayerNorm；线性层使用当前实验所记录 PyTorch 版本的默认初始化 |
-| critic 网络 | 两个独立 Q 网络，均为 `(55+6) -> 256 -> 256 -> 1`，隐藏层 ReLU；各自具有 target network，使用 `min(Q1,Q2)` 构造 target |
-| 数值与设备 | PyTorch float32；不使用 AMP；训练 run manifest 记录 Python、PyTorch、CUDA、PyBullet、URDF 和配置文件版本及哈希。需要精确续训的 run 启用 PyTorch deterministic algorithms，并记录所有确定性相关环境变量和 backend 开关；若当前硬件或算子无法保证确定性，必须在 manifest 中标记为仅“状态等价恢复”，不能声称逐步复现 |
+| actor 网络 | `122 -> 256 -> 256 -> (mu,log_std)`，隐藏层 ReLU，无 LayerNorm；每 2 次 critic 更新执行 1 次 actor/温度更新，actor 梯度范数裁剪到 10 |
+| critic 网络 | 两个独立 Q 网络，均为 `(122+6) -> 256 -> 256 -> 1`，隐藏层 ReLU；各自具有 target network，使用 `min(Q1,Q2)` 构造 target；损失改为 Huber，联合梯度范数裁剪到 10 |
+| 数值与设备 | PyTorch float32，不使用 AMP；`cuda:auto` 按空闲显存与算力选择设备，不可用时按配置回退 CPU。manifest 记录协议、阶段、seed、配置路径、URDF 哈希、关节/末端、输入输出维数、RNG 派生 seed 和是否为 validation mode。除非另行完成逐步恢复等价性审计，否则只声称“完整学习状态恢复”，不声称跨硬件逐 bit 复现 |
 | discount / target | `gamma=0.99`，Polyak `tau=0.005`；S0 初始化时把两个 online critic 硬复制到对应 target critic，此后每个 gradient update 最后各软更新一次；不存在 target actor |
-| optimizer | actor、两个 critic 的联合 optimizer、temperature 均使用 Adam；`actor_lr=critic_lr=alpha_lr=3e-4`，其余 Adam 参数采用当前实验所记录 PyTorch 版本的默认值 |
+| optimizer | actor、两个 critic 的联合 optimizer、temperature 均使用 Adam；`critic_lr=1e-4`，`actor_lr=alpha_lr=3e-4`，其余 Adam 参数采用当前实验所记录 PyTorch 版本的默认值 |
 | entropy | 自动温度调节，`alpha_initial=0.2`，`target_entropy=-6`；S0/S1/S2 均继续继承 `log_alpha` 和 optimizer 状态 |
-| replay | 总容量 `300000` transitions；按场景标签建立 FIFO 分区，容量为无障碍 `60000`、静态 `90000`、动态 `150000` |
+| replay | 总容量 `300000` transitions；按场景标签建立 FIFO 分区，容量为无障碍 `60000`、静态 `90000`、动态 `150000`；S0 姿态阶段按保持状态使用 `25/50/25`、`40/40/20` 或 `50/35/15` 的位置锚点/当前姿态/历史姿态比例，历史姿态再按离散档位均衡抽取；不设置永久专家池 |
 | batch | `batch_size=256`；S0 从无障碍区抽取 256，S1 按无障碍/静态 `64/192` 抽取，S2 按无障碍/静态/动态 `51/77/128` 抽取；不足的分区只在该阶段初始填充期按其余可用分区比例重分配，并记录实际比例 |
-| 探索与更新 | S0 开始的前 `3000` 个环境步执行均匀随机动作；replay 达到 `1000` 且不少于一个 batch 后开始更新；每个环境步执行一次 critic、actor、alpha 和 target 更新，UTD=`1` |
-| 梯度处理 | 不裁剪梯度，不做 reward normalization，不使用学习率调度、PER、n-step return 或 HER |
+| 探索与更新 | S0 开始的前 `3000` 个环境步执行均匀随机动作，但不允许其推进课程；replay 达到 `1000` 且不少于一个 batch 后开始更新；每个环境步更新 critic 和 target，每 2 步更新 actor 与 alpha，critic UTD=`1` |
+| 梯度处理 | actor 与联合 critic 梯度范数分别裁剪到 10；不做 reward normalization，不使用学习率调度、PER、n-step return 或 HER |
 
 #### 3.4.4 检查点与恢复
 
 | 内容 | 保存与校验规则 |
 | --- | --- |
-| 学习状态 | actor、两个 critic、两个 target critic 的完整 `state_dict`；actor/critic/alpha optimizer 的参数组、动量和步数；`log_alpha`；后续若增加 scheduler 或 scaler，也保存完整状态 |
-| replay 与计数器 | 三个 replay 分区的数组、奖励重算字段、episode ID/步号、有效长度、容量、写指针、场景标签和插入顺序；全局及阶段环境步数、更新次数、episode 数、block、checkpoint 序号、随机探索剩余步数、当前阶段和 minibatch 重分配计数；另保存 `xi_static/xi_dynamic`、`K_scene`、最近 100 个新场景 episode 结果、宽容/严格状态、严格期步数和 replay 规范化标志 |
-| 随机状态 | Python、NumPy、PyTorch CPU、全部 CUDA device RNG，以及环境 reset、目标、障碍物、场景选择、动作探索和 replay 抽样的每条独立 RNG 流；同时保存 RNG 名称与派生 seed 的映射 |
-| 活动 episode | episode ID/seed、场景、步数、该 episode 固定的 `xi_scene`、目标、初始关节状态、球体参数和反射边界，以及当前 `q`、`qdot`、动作、observation、任务球 contact 锁存、终止状态和累计指标；同时保存 schema 版本 |
-| 仿真状态 | PyBullet 可持久化快照，以及所有 body 的逻辑名称、pose、速度、关节状态、动力学参数、碰撞过滤、velocity-control 设置、physics engine 参数和仿真步数；恢复后重新施加配置并逐项校验 |
-| 写入完整性 | 仅在 transition 写入 replay、本步全部 UTD 更新以及可能的 episode 结束课程更新/replay 规范化全部完成后保存；先写临时目录和各文件 SHA-256，再写包含 schema、配置、URDF、Git commit、dirty 状态及 diff 哈希的 manifest，最后原子重命名 |
-| 加载校验 | 加载前核对 schema、配置、URDF、代码和依赖版本；加载后重算 observation，float32 逐元素绝对误差不得超过 `1e-7`，并核对 replay 指针、计数器、optimizer step 和 RNG 摘要；失败时中止，不允许部分加载或静默 reset |
+| 学习状态 | actor、两个 critic、两个 target critic；actor/critic/alpha optimizer；`log_alpha`、update 计数和最近一次 actor 指标 |
+| replay 与课程 | 三个场景分区的 observation、action、next observation、done、22 个奖励原子量、episode ID/步号、容量、长度和写指针；reward 参数与 RNG；S0 的 `g/eta/lambda_self`、课程窗口与计数、确定性探针状态，以及 S1/S2 的 `xi`、到达窗口、严格期和 replay 规范化状态 |
+| 全局计数与随机状态 | global step、当前 run 的 stage step、跨同一 stage 续训累计的 `stage_total_step`、update、episode、block、checkpoint、warm-up 使用量和 replay 重分配计数；Python、NumPy、PyTorch CPU、全部 CUDA RNG，以及环境、课程、replay、warm-up action 的独立 RNG 状态和派生 seed 映射 |
+| 活动 episode | 仅在完整 control transition 边界保存；包括场景、累计回报、长度、锚点/暖启动标志，以及 episode contract、精确 `q/qdot`、目标位姿与目标关节见证、IK 校验、球体位置/速度、step、contact 锁存、上一时刻两类误差和环境 RNG |
+| 恢复方式 | 不依赖 PyBullet 内部快照；重新创建世界、机器人和球体，恢复保存的逻辑状态与双精度关节状态，再重算 observation 后继续。v9 的 24→36 transition validation-mode 冒烟已验证 replay、网络、optimizer 与课程状态连续恢复 |
+| 加载校验 | 普通恢复要求协议和根 seed 完全一致，并要求 deterministic RNG stream 字段存在；S0→S1、S1→S2 还检查上一阶段和 S0 双巩固/双窗口/确定性探针资格。任何不匹配均中止，不允许 actor-only 或静默 reset |
 
 #### 3.4.5 SAC 更新顺序
 
-从按场景分层抽样得到的 batch `B={(o_t,a_t,raw_reward_fields_t,o_{t+1},terminated_t,truncated_t)}` 中进行一次 gradient update，`|B|=256`。先按每条 transition 的场景标签和该场景当前 `xi_scene` 由第 3.4.1 节公式重算 `r_t`，再进行以下更新。所有 observation 和 action 均为送入网络的归一化值。定义：
+从按场景分层抽样得到的 batch `B={(o_t,a_t,raw_reward_fields_t,o_(t+1),done_t)}` 中进行一次 critic update，`|B|=256`。先按每条 transition 的场景标签、采集时 `eta`、当前 `lambda_self` 和该场景当前 `xi_scene` 由第 3.4.1 节公式重算 `r_t`，再进行以下更新。所有 observation 和 action 均为送入网络的归一化值。定义：
 
 ```text
-m_t = 1 - terminated_t
+m_t = 1 - done_t
 ```
 
-`terminated_t` 对到达、硬失败以及严格期任务球 contact 均为 `1`；宽容期任务球 contact 本身不改变 `terminated_t`。单纯因 240 步时间上限结束时 `terminated_t=0, truncated_t=1`，因此仍然 bootstrap。若真实终止与时间上限在同一步发生，按真实终止处理，即 `terminated_t=1, truncated_t=0`。进入严格期时，旧任务球碰撞 episode 必须已经按第 3.4.2 节规范化，batch 中不得出现严格 MDP 不可达的碰撞后 transition。
+`done_t=1` 包含到达、硬失败、严格期任务球 contact 和 240 步 timeout；这些边界均停止 bootstrap。宽容期任务球 contact 本身不置 `done_t=1`，episode 可以继续。该定义与 observation 中显式剩余时域共同构成有限时域任务，禁止在其他章节把 timeout 写成可 bootstrap。进入严格期时，旧任务球碰撞 episode 必须已经按第 3.4.2 节规范化，batch 中不得出现严格 MDP 不可达的碰撞后 transition。
 
 对任意 observation `o`，actor 输出 `mu_theta(o)` 和裁剪后的 `log_std_theta(o)`。训练动作及其 log probability 定义为：
 
@@ -362,11 +442,11 @@ y_t = r_t + gamma * m_t *
       (min(Qbar_phi1(o_{t+1},a'), Qbar_phi2(o_{t+1},a'))
        - alpha * log pi_theta(a'|o_{t+1}))
 
-J_Q = mean_B[(Q_phi1(o_t,a_t)-y_t)^2]
-      + mean_B[(Q_phi2(o_t,a_t)-y_t)^2]
+J_Q = mean_B[Huber(Q_phi1(o_t,a_t)-y_t)]
+      + mean_B[Huber(Q_phi2(o_t,a_t)-y_t)]
 ```
 
-`y_t` 必须停止梯度。两个 online critic 的参数放在同一个 Adam optimizer 中，对 `J_Q` 执行一次 `zero_grad(set_to_none=true) -> backward -> step`；target critic 不接收梯度。
+`y_t` 必须停止梯度。Huber 使用 PyTorch `smooth_l1_loss` 的默认 `beta=1`。两个 online critic 的参数放在同一个 Adam optimizer 中，对 `J_Q` 执行一次 `zero_grad(set_to_none=true) -> backward -> clip_grad_norm(10) -> step`；target critic 不接收梯度。
 
 critic 更新完成后，在 `o_t` 上从当前 actor 重新进行一次独立的重参数化采样，得到 `a_pi` 和 `log pi_theta(a_pi|o_t)`：
 
@@ -377,7 +457,7 @@ J_actor = mean_B[
 ]
 ```
 
-计算 actor loss 时暂时关闭两个 critic 参数的梯度，但不能 detach critic 对 `a_pi` 的输入梯度；梯度必须通过 Q 对动作的导数回传到 actor。actor optimizer 对 `J_actor` 执行一次更新，critic optimizer 不在此步骤执行。
+actor loss 不能 detach critic 对 `a_pi` 的输入梯度；梯度必须通过 Q 对动作的导数回传到 actor。actor optimizer 执行 `zero_grad -> backward -> clip_grad_norm(10) -> step`，critic optimizer 不在此步骤执行。actor 和 temperature 只在 `update_index mod 2=0` 时更新；其余 critic update 只用确定性 actor 动作记录 Q 诊断值。
 
 自动温度使用无约束标量 `log_alpha`，初始化为 `log(0.2)`，并令 `alpha=exp(log_alpha)`。复用本次 actor loss 前向计算得到、但已经停止梯度的 log probability：
 
@@ -396,15 +476,15 @@ Qbar_phi1 <- (1-tau) Qbar_phi1 + tau Q_phi1
 Qbar_phi2 <- (1-tau) Qbar_phi2 + tau Q_phi2
 ```
 
-每个环境步在满足 replay warm-up 条件后严格执行以下顺序一次，UTD=`1`，不延迟 actor 或 alpha 更新：
+每个环境步在满足 replay warm-up 条件后严格执行一次 critic update，critic UTD=`1`；actor 和 alpha 的更新间隔为 2：
 
 ```text
 1. 按阶段比例抽取并固定一个 replay batch，按当前课程系数重算 reward
 2. 采样 next-state action，计算 y_t，更新两个 critic
-3. 独立采样 current-state action，更新 actor
-4. 使用第 3 步的 detached log probability 更新 log_alpha
-5. 软更新两个 target critic
-6. 记录 batch 索引、各 loss、alpha、Q 均值和 target 均值
+3. 若本次为偶数 critic update：独立采样 current-state action，更新 actor；再使用 detached log probability 更新 log_alpha
+4. 若本次为奇数 critic update：不更新 actor/alpha，只用确定性动作计算日志中的 Q 均值
+5. 每次 critic update 后均软更新两个 target critic
+6. 记录 loss、alpha、Q/target 均值、两类梯度范数、actor 是否更新及实际分层抽样计数
 ```
 
 上述顺序也规定了随机数的消费顺序。每一步更新前仅清零该步骤对应 optimizer 的梯度；loss 均按 batch mean 归约。S1、S2 继承全部 online/target 网络、optimizer、`log_alpha`、replay 和更新计数，不重新执行 target 硬复制。
@@ -437,7 +517,7 @@ E1 需要执行一次恢复等价性测试：从同一 checkpoint 独立恢复�
 
 | 阶段 | replay minibatch 场景比例 | 到达优先安全课程 | 阶段 Gate |
 | --- | --- | --- | --- |
-| S0 无障碍 | 无障碍 `100%` | 无安全课程；每 block `100000` 步，最多 `3` blocks，每 `25000` 步保存 checkpoint | 无障碍 success rate `>=0.95`，collision rate `=0`，joint-limit rate `=0`，timeout rate `<=0.05` |
+| S0 无障碍 | 无障碍 `100%` | 先完成位置，再完成完整位姿；两者期间 `lambda_self=0`。任务门槛通过后用 50k transition 将 `lambda_self` 升至 1，下降时冻结，再完成 `K_self_full>=25000`；每 block `100000` 步，每 `25000` 步保存 checkpoint | 前置资格为 `g=1`、`eta=1`、`lambda_self=1`、`K_position>=25000`、`K_pose>=25000`、`K_self_full>=25000`、姿态窗口 `>=0.80`、锚点窗口 `>=0.95` 且最终 probe 通过；之后无障碍 success rate `>=0.95`，collision rate `=0`，joint-limit rate `=0`，timeout rate `<=0.05` |
 | S1 静态 | 无障碍/静态 `25%/75%` | 从 S0 完整 checkpoint 继续；`xi_static=0.02` 起步，任务球碰撞不终止；到达率门控后逐渐增至 `1`，转换 replay，再以严格碰撞终止训练至少 `25000` 个静态 transition；block/checkpoint 预算同 S0 | 严格静态 success rate `>=0.90`、collision rate `<=0.03`、joint-limit rate `=0`、timeout rate `<=0.10`；同时 S0 retention success rate `>=0.95`、collision rate `=0` 且 joint-limit rate `=0` |
 | S2 动态 | 无障碍/静态/动态 `20%/30%/50%` | 从 S1 完整 checkpoint 继续；静态保持 `xi_static=1` 和严格终止；`xi_dynamic=0.02` 起步，按相同规则增至 `1`，转换动态 replay，再以严格碰撞终止训练至少 `25000` 个动态 transition；block/checkpoint 预算同 S0 | 严格动态 success rate `>=0.80`、collision rate `<=0.05`、joint-limit rate `=0`、timeout rate `<=0.20`；同时满足 S1 静态 Gate 和 S0 retention Gate |
 
@@ -447,18 +527,20 @@ E1 需要执行一次恢复等价性测试：从同一 checkpoint 独立恢复�
 
 阶段切换与停止规则固定如下：
 
-1. 每个阶段至少训练一个 `100000` 步 block，每 `25000` 步保存 checkpoint。S0 在 block 结束时评价该 block 的四个 checkpoint；S1/S2 只有 `xi_scene=1` 且已完成至少 `25000` 个对应新场景严格 transition 的 checkpoint 才有资格运行 Gate。其他 checkpoint 只报告训练期 `task_reached`、`collision_assisted_reach`、`safe_success`、碰撞率和课程状态，不得被选择为阶段输出。
+1. 每个阶段按 `100000` 步 block 执行，每 `25000` 步保存 checkpoint。S0 只有 `g=1`、`eta=1`、`lambda_self=1` 且 `K_position`、`K_pose`、`K_self_full` 均达到各自 `25000` transition 的 checkpoint 才有资格运行 Gate；训练器在 S0→S1 时重复执行同一前置检查。S1/S2 只有 `xi_scene=1` 且已完成至少 `25000` 个对应新场景严格 transition 的 checkpoint 才有资格运行 Gate。其他 checkpoint 只报告训练期指标，不得被选择为阶段输出。
 2. 若存在多个通过者，先把三个 validation seed 聚合为保守指标：collision、joint-limit、timeout 和两类误差 p95 取跨 seed 最大值，success 取跨 seed 最小值；再按“较低 collision、较低 joint-limit、较高 success、较低 timeout、较低位置误差 p95、较低姿态误差 p95、较早 checkpoint”作字典序选择。
-3. 若没有通过者，在同一阶段从该 block 的最后一个 checkpoint 连续训练下一个 block，不得从某个未通过但 validation 较好的早期 checkpoint 分叉。累计三个 blocks 后若课程尚未进入合格严格期，或仍无 checkpoint 通过 Gate，则停止 curriculum，报告该阶段失败，不得提高难度或访问 held-out 集。
-4. S2 checkpoint 还必须在 S0、S1、S2 三个 validation 分层上同时通过。选出的 checkpoint 在任何 held-out 运行前冻结 actor、55 维输入处理、归一化常数和动作缩放器，并记录 SHA-256。
-5. 三个训练 seed 的 actor 全部冻结后，才允许统一访问 held-out：每个 actor 在三个 held-out seed、每层各 `100` 个 episode 上各执行一次。held-out 不得用于返回训练、调整 reward、改变 Gate 或重新选择 checkpoint。
-6. 三个训练 seed 独立执行完整 curriculum。最终结论要求三者均得到通过 S2 Gate 的 actor，且动态场景 validation success rate 的跨训练 seed 极差不超过 `0.10`。若第二阶段只使用一个主 actor，须在访问 held-out 前按第 2 条的保守聚合与字典序规则从三者中选定，之后不得因 held-out 表现更换。
+3. 每个 stage、每个正式训练 seed 和每个消融统一使用 `600000` transitions 硬上限，由跨 run 恢复的 `stage_total_step` 审计。若没有通过者且累计预算未耗尽，在同一阶段从该 Block 的最后一个 checkpoint 连续训练下一个 Block，不得从某个未通过但 validation 较好的早期 checkpoint 分叉。达到 600k 仍未通过时记 `hard_budget_stop`，不得为个别 run 追加预算。该上限用于保证计算预算可比，不作为平台期定义。
+4. S0 平台期只比较两个相邻的完整 100k Block。两者 endpoint 必须处于同一 `orientation_level_index/eta`，且两个 Block 的合格非锚点 episode 均只来自该档；每个 Block 至少有 100 个当前档 episode、50 个位置锚点 episode和一次当前档固定 probe。只有 safe success 增量小于 `0.02`、self-collision 降幅小于 `0.01`、timeout 降幅小于 `0.02`、anchor success 增量小于 `0.01`，并且 probe success/collision/timeout 的改善分别小于 `0.02/0.01/0.02` 时，才记 `plateau_stop`。任一项达到阈值即继续；跨 `eta` 汇总率不能用于停止。
+5. 任一更新诊断出现 NaN/Inf 时记 `numerical_failure`。持续 Q 发散定义为当前 Block 尾部 `Q abs p95>1000` 且超过前一 Block 5 倍，同时 `critic loss p95>1000` 且超过前一 Block 5 倍；单次短窗口峰值不构成停止。`s0_goal_gate_eligible=true` 仅触发三个 validation seed，只有同一 checkpoint 三者全部通过才是阶段成功；任一失败且未触发平台、数值异常或硬预算时继续下一个 Block。
+6. S2 checkpoint 还必须在 S0、S1、S2 三个 validation 分层上同时通过。选出的 checkpoint 在任何 held-out 运行前冻结 actor、122 维输入处理、归一化常数和动作缩放器，并记录 SHA-256。
+7. 三个训练 seed 的 actor 全部冻结后，才允许统一访问 held-out：每个 actor 在三个 held-out seed、每层各 `100` 个 episode 上各执行一次。held-out 不得用于返回训练、调整 reward、改变 Gate 或重新选择 checkpoint。
+8. 三个训练 seed 独立执行完整 curriculum。最终结论要求三者均得到通过 S2 Gate 的 actor，且动态场景 validation success rate 的跨训练 seed 极差不超过 `0.10`。若第二阶段只使用一个主 actor，须在访问 held-out 前按第 2 条的保守聚合与字典序规则从三者中选定，之后不得因 held-out 表现更换。
 
 ### 3.5 执行流程与产物
 
 ```text
 E0  固定任务、observation、reward、数据划分和评价协议
- -> E1  验证 IK/FK、胶囊距离、速度直控接口和 checkpoint 恢复等价性
+ -> E1  验证 IK/FK、真实 PyBullet 浅接触与胶囊 distance/risk 一致性、速度直控接口和 checkpoint 恢复等价性
  -> S0  无障碍到达
  -> S1a 静态球低安全惩罚、碰撞可继续，优先恢复到达
  -> S1b 静态球到达率门控的安全惩罚渐增

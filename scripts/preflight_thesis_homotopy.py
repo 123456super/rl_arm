@@ -41,32 +41,40 @@ def reward_audit(config: dict, samples: int) -> tuple[dict, list[dict]]:
             strict_collision, strict_collision_fields = homotopy_reward(
                 rho_position=rho_p, next_rho_position=rho_p,
                 rho_orientation=rho_r, next_rho_orientation=rho_r,
-                smooth_velocity=0.0, task_reached=False, hard_failure=False,
+                smooth_velocity=0.0, velocity_magnitude=0.0, orientation_scale=1.0,
+                task_reached=False, hard_failure=False,
                 obstacle_collision=True, terminal_obstacle_collision=True,
                 risk_max=1.0, distance_min=0.0, xi=1.0,
                 gamma=gamma, horizon=horizon,
+                **env.reward_parameters,
             )
             tolerant_collision, tolerant_collision_fields = homotopy_reward(
                 rho_position=rho_p, next_rho_position=rho_p,
                 rho_orientation=rho_r, next_rho_orientation=rho_r,
-                smooth_velocity=0.0, task_reached=False, hard_failure=False,
+                smooth_velocity=0.0, velocity_magnitude=0.0, orientation_scale=1.0,
+                task_reached=False, hard_failure=False,
                 obstacle_collision=True, terminal_obstacle_collision=False,
                 risk_max=1.0, distance_min=0.0, xi=0.02,
                 gamma=gamma, horizon=horizon,
+                **env.reward_parameters,
             )
             hard_failure, hard_failure_fields = homotopy_reward(
                 rho_position=rho_p, next_rho_position=rho_p,
                 rho_orientation=rho_r, next_rho_orientation=rho_r,
-                smooth_velocity=0.0, task_reached=False, hard_failure=True,
+                smooth_velocity=0.0, velocity_magnitude=0.0, orientation_scale=1.0,
+                task_reached=False, hard_failure=True,
                 obstacle_collision=False, risk_max=0.0, distance_min=0.80, xi=1.0,
                 gamma=gamma, horizon=horizon,
+                **env.reward_parameters,
             )
             wait_step, _ = homotopy_reward(
                 rho_position=rho_p, next_rho_position=rho_p,
                 rho_orientation=rho_r, next_rho_orientation=rho_r,
-                smooth_velocity=0.0, task_reached=False, hard_failure=False,
+                smooth_velocity=0.0, velocity_magnitude=0.0, orientation_scale=1.0,
+                task_reached=False, hard_failure=False,
                 obstacle_collision=False, risk_max=0.0, distance_min=0.80, xi=1.0,
                 gamma=gamma, horizon=horizon,
+                **env.reward_parameters,
             )
             timeout = discounted([wait_step] * horizon, gamma)
             ideal_values: list[float] = []
@@ -78,10 +86,12 @@ def reward_audit(config: dict, samples: int) -> tuple[dict, list[dict]]:
                 reward, _ = homotopy_reward(
                     rho_position=previous_p, next_rho_position=next_p,
                     rho_orientation=previous_r, next_rho_orientation=next_r,
-                    smooth_velocity=0.0, task_reached=step == steps,
+                    smooth_velocity=0.0, velocity_magnitude=0.0, orientation_scale=1.0,
+                    task_reached=step == steps,
                     hard_failure=False, obstacle_collision=False,
                     risk_max=0.0, distance_min=0.80, xi=1.0,
                     gamma=gamma, horizon=horizon,
+                    **env.reward_parameters,
                 )
                 ideal_values.append(reward)
                 previous_p, previous_r = next_p, next_r
@@ -236,17 +246,179 @@ def goal_kinematics_audit(config: dict, samples: int) -> tuple[dict, list[dict]]
     return summary, rows
 
 
+def contact_geometry_audit(config: dict, samples: int) -> tuple[dict, list[dict]]:
+    """Cross-check shallow real contacts against the capsule safety geometry."""
+    env = ThesisHomotopyEnv(config)
+    rows: list[dict] = []
+    try:
+        for sample in range(samples):
+            env.configure_episode("static", xi=1.0, strict=True)
+            env.reset(seed=int(config["seed"]) + sample)
+            for capsule in env.robot.capsules():
+                center = 0.5 * (capsule.start + capsule.end)
+                axis = capsule.end - capsule.start
+                if float(np.linalg.norm(axis)) <= 1e-8:
+                    perpendicular = np.asarray([1.0, 0.0, 0.0], dtype=np.float32)
+                else:
+                    axis = axis / np.linalg.norm(axis)
+                    basis = np.eye(3, dtype=np.float32)[int(np.argmin(np.abs(axis)))]
+                    perpendicular = np.cross(axis, basis)
+                    perpendicular = perpendicular / np.linalg.norm(perpendicular)
+
+                def move_obstacle(position: np.ndarray) -> bool:
+                    env.obstacle_position = position.astype(np.float32)
+                    env.obstacle_velocity.fill(0.0)
+                    p.resetBasePositionAndOrientation(
+                        env.obstacle_id, position.tolist(), [0.0, 0.0, 0.0, 1.0],
+                        physicsClientId=env.client_id,
+                    )
+                    p.performCollisionDetection(physicsClientId=env.client_id)
+                    return bool(env._collision_events()["obstacle_collision"])
+
+                candidates = [
+                    perpendicular, -perpendicular,
+                    np.asarray([1.0, 0.0, 0.0]), np.asarray([-1.0, 0.0, 0.0]),
+                    np.asarray([0.0, 1.0, 0.0]), np.asarray([0.0, -1.0, 0.0]),
+                    np.asarray([0.0, 0.0, 1.0]), np.asarray([0.0, 0.0, -1.0]),
+                ]
+                directions = []
+                for direction in candidates:
+                    if any(np.allclose(direction, selected) for selected in directions):
+                        continue
+                    if not move_obstacle(center + 0.6 * direction):
+                        directions.append(direction)
+                    if len(directions) == 2:
+                        break
+                for direction_index, direction in enumerate(directions):
+                    center_contact = move_obstacle(center)
+                    low, high = 0.0, 0.6
+                    if center_contact:
+                        for _ in range(24):
+                            middle = 0.5 * (low + high)
+                            if move_obstacle(center + middle * direction):
+                                low = middle
+                            else:
+                                high = middle
+                        # Query just inside the contact boundary.  Re-querying
+                        # the exact bisection endpoint can flip to non-contact
+                        # because Bullet and the numpy pose use different
+                        # floating-point precision at a zero-depth boundary.
+                        contact_offset = max(0.0, low - 1e-4)
+                        contact = move_obstacle(center + contact_offset * direction)
+                    else:
+                        contact = False
+                    geometry = env._geometry()
+                    if geometry is None:
+                        raise RuntimeError("static contact audit requires obstacle geometry")
+                    consistent = bool(
+                        contact and geometry.distance_min < env.d_safe and geometry.risk_max >= 0.79
+                    )
+                    rows.append({
+                        "sample": sample,
+                        "capsule": capsule.name,
+                        "direction": direction_index,
+                        "pybullet_contact": contact,
+                        "contact_generated": contact,
+                        "distance_min_m": geometry.distance_min,
+                        "risk_max": geometry.risk_max,
+                        "consistent": consistent if contact else None,
+                    })
+                if len(directions) < 2:
+                    rows.append({
+                        "sample": sample, "capsule": capsule.name, "direction": -1,
+                        "pybullet_contact": False, "contact_generated": False,
+                        "distance_min_m": float("inf"), "risk_max": 0.0,
+                        "consistent": None,
+                    })
+    finally:
+        env.close()
+    contact_rows = [row for row in rows if row["contact_generated"]]
+    return {
+        "samples": samples,
+        "checks": len(rows),
+        "contact_witnesses": len(contact_rows),
+        "contact_generation_rate": float(len(contact_rows) / len(rows)),
+        "consistency_rate": float(np.mean([row["consistent"] for row in contact_rows])),
+        "maximum_distance_at_contact_m": float(
+            max(row["distance_min_m"] for row in contact_rows)
+        ),
+        "minimum_risk_at_contact": float(min(row["risk_max"] for row in contact_rows)),
+        "requirements": {"distance_min_m_max_exclusive": env.d_safe, "risk_min": 0.79},
+    }, rows
+
+
+def self_contact_geometry_audit(config: dict, samples: int) -> tuple[dict, list[dict]]:
+    """Cross-check exact self-contact events against mesh clearance and risk."""
+    env = ThesisHomotopyEnv(config)
+    rows: list[dict] = []
+    rng = np.random.default_rng(int(config["seed"]) + 917)
+    try:
+        env.configure_episode("none", xi=1.0, strict=True)
+        env.reset(seed=int(config["seed"]) + 917)
+        for sample in range(samples):
+            q = rng.uniform(
+                env.robot.joint_lower_limits + 0.1,
+                env.robot.joint_upper_limits - 0.1,
+            )
+            env._set_joint_state(q)
+            p.performCollisionDetection(physicsClientId=env.client_id)
+            contact = env._collision_events()["self_collision"]
+            geometry = env._self_geometry()
+            mesh_contact = geometry.distance_min <= 0.0
+            rows.append({
+                "sample": sample,
+                "pybullet_contact": contact,
+                "mesh_contact": mesh_contact,
+                "distance_min_m": geometry.distance_min,
+                "risk_max": geometry.risk_max,
+                "ttc_min_s": geometry.ttc_min,
+                "approach_max_mps": geometry.approach_max,
+                "closest_first_slot": geometry.closest_pair[0],
+                "closest_second_slot": geometry.closest_pair[1],
+                "consistent": bool(
+                    contact == mesh_contact
+                    and (not contact or np.isclose(geometry.risk_max, 1.0))
+                ),
+            })
+    finally:
+        env.close()
+    contacts = [row for row in rows if row["pybullet_contact"]]
+    safe = [row for row in rows if not row["pybullet_contact"]]
+    return {
+        "samples": samples,
+        "contacts": len(contacts),
+        "collision_free": len(safe),
+        "consistency_rate": float(np.mean([row["consistent"] for row in rows])),
+        "maximum_contact_distance_m": (
+            float(max(row["distance_min_m"] for row in contacts)) if contacts else None
+        ),
+        "minimum_collision_free_distance_m": (
+            float(min(row["distance_min_m"] for row in safe)) if safe else None
+        ),
+        "safe_distance_m": env.d_self_safe,
+        "query_distance_m": env.self_query_distance,
+    }, rows
+
+
 def checkpoint_audit(config: dict, checkpoint: Path, samples: int) -> tuple[dict, list[dict]]:
     state = torch.load(checkpoint, map_location="cpu", weights_only=False)
-    agent = ThesisSACAgent(55, 6, config)
+    if state.get("protocol") != config["thesis"]["protocol"]:
+        raise ValueError(
+            f"checkpoint protocol {state.get('protocol')!r} does not match "
+            f"configured protocol {config['thesis']['protocol']!r}"
+        )
+    env = ThesisHomotopyEnv(config)
+    obs_dim = int(env.observation_space.shape[0])
+    action_dim = int(env.action_space.shape[0])
+    agent = ThesisSACAgent(obs_dim, action_dim, config)
     agent.load_state_dict(state["agent"])
     replay = HomotopyReplayBuffer(
-        55, 6, str(agent.device), seed=int(config["seed"]),
+        obs_dim, action_dim, str(agent.device), seed=int(config["seed"]),
         reward_gamma=float(config["sac"]["gamma"]),
         reward_horizon=int(config["thesis"]["horizon"]),
+        reward_parameters=env.reward_parameters,
     )
     replay.load_state_dict(state["replay"])
-    env = ThesisHomotopyEnv(config)
     rows: list[dict] = []
     action_samples = 256
     try:
@@ -261,9 +433,19 @@ def checkpoint_audit(config: dict, checkpoint: Path, samples: int) -> tuple[dict
             )
             obs_none = build_thesis_observation(
                 q=q, qdot=qdot, joint_lower=env.robot.joint_lower_limits,
-                joint_upper=env.robot.joint_upper_limits, joint_velocity_limits=env.velocity_limits,
-                position_error=error_p, orientation_error=error_r, obstacle_present=False,
+                joint_upper=env.robot.joint_upper_limits, joint_velocity_scale=env.action_scale,
+                ee_position=info["ee_position"], ee_quaternion=info["ee_quaternion"],
+                ee_linear_velocity=info["ee_linear_velocity"],
+                ee_angular_velocity=info["ee_angular_velocity"],
+                ee_linear_velocity_scale=env.ee_linear_velocity_scale,
+                ee_angular_velocity_scale=env.ee_angular_velocity_scale,
+                goal_position=info["goal_position"], goal_quaternion=info["goal_quaternion"],
+                position_error=error_p, orientation_error=error_r,
+                orientation_scale=env.contract.orientation_scale,
+                remaining_time_fraction=max(0.0, (env.horizon - env.step_count) / env.horizon),
+                obstacle_present=False,
                 obstacle_position=np.zeros(3), obstacle_velocity=np.zeros(3), geometry=None,
+                self_geometry=env._self_geometry(),
             )
             action_none = agent.select_action(obs_none, deterministic=True)
             action_obstacle = agent.select_action(obs_obstacle, deterministic=True)
@@ -293,8 +475,14 @@ def checkpoint_audit(config: dict, checkpoint: Path, samples: int) -> tuple[dict
         "sampled_action_std_mean": float(np.mean([r["sampled_action_std_mean"] for r in rows])),
         "sampled_action_std_min": float(np.min([r["sampled_action_std_min"] for r in rows])),
     }
-    if replay.parts["none"].size >= 256:
-        batch = replay.sample("s0", {"static": .02, "dynamic": .02}, 256)
+    if replay.scene_size("none") >= 256:
+        self_safety = state["curriculum"].get("self_safety")
+        if self_safety is None:
+            raise ValueError("checkpoint lacks the self-safety curriculum state")
+        batch = replay.sample(
+            "s0", {"static": .02, "dynamic": .02}, 256,
+            lambda_self=float(self_safety.weight),
+        )
         with torch.no_grad():
             next_action, next_log_prob = agent.actor.sample(batch.next_observations)
             next_q = torch.min(
@@ -334,7 +522,10 @@ def write_results(output: Path, name: str, summary: dict, rows: list[dict]) -> N
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("reward", "goal", "feasibility", "checkpoint"))
+    parser.add_argument(
+        "mode",
+        choices=("reward", "goal", "contact", "self-contact", "feasibility", "checkpoint"),
+    )
     parser.add_argument("--config", default="configs/experiments/thesis_homotopy.yaml")
     parser.add_argument("--output", required=True)
     parser.add_argument("--checkpoint")
@@ -346,6 +537,10 @@ def main() -> None:
         summary, rows = reward_audit(config, args.samples)
     elif args.mode == "goal":
         summary, rows = goal_kinematics_audit(config, args.samples)
+    elif args.mode == "contact":
+        summary, rows = contact_geometry_audit(config, args.samples)
+    elif args.mode == "self-contact":
+        summary, rows = self_contact_geometry_audit(config, args.samples)
     elif args.mode == "feasibility":
         summary, rows = feasibility_audit(config, args.samples)
     else:

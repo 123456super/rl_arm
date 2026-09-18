@@ -30,3 +30,8 @@ checkpoints/
 .DS_Store
 .idea/
 .vscode/
+
+
+docs/references/
+docs/submission/
+outputs/

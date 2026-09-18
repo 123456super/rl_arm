@@ -1,7 +1,11 @@
 # 到达优先安全同伦：正式训练前有效验证
 
+> **已终止（2026-09-16）**：旧协议历史记录，仅用于失败追溯；不续训、不参与 v8 模型选择。
+
 日期：2026-09-15  
-协议：`task_first_safety_homotopy_v2`
+协议：`task_first_safety_homotopy_v2`（已被 v3 替代）
+
+> 本文记录的是 v2 历史预检。v2 随后的正式 S0 在三个 validation seed 上成功率均为 0；其 55 维输入、持续状态误差成本和终止吸收态补偿已由 `task_first_goal_curriculum_v3` 替代。本文中的奖励数值不得用于判断 v3。
 
 ## 当前结论
 
@@ -113,6 +117,23 @@ conda run -n rl python scripts/preflight_thesis_homotopy.py reward \
 | checkpoint 协议 | `task_first_safety_homotopy_v2` |
 
 判定：通过。该运行只验证环境、replay、奖励重算、SAC 更新、日志和 checkpoint 链路，不构成收敛或性能结果。
+
+训练器使用根 seed 派生并记录相互独立的环境、课程、replay、warm-up action、Python、NumPy 和 Torch RNG 流。warm-up action 不再调用未显式 seed 的 Gym action space。checkpoint 中的 `q/qdot` 使用 PyBullet 原始双精度保存。
+
+恢复等价性复测比较了“连续运行 120 step”和“运行 100 step、从活动 episode checkpoint 恢复后再运行 20 step”。两侧的 20 条 transition 日志、actor、两个 online/target critic、optimizer、温度、replay、全部 RNG 和活动 episode 状态逐项完全一致。
+
+有效恢复验证目录：
+
+- `outputs/thesis_homotopy/preflight_uninterrupted120_20260915/`
+- `outputs/thesis_homotopy/preflight_resume_from100_20260915/`
+
+## V4 S0 Gate 评价链路
+
+严格评价器现在以任务球、自碰撞和环境碰撞的并集计算 `collision_rate`，并分别保留各碰撞分项；Gate 不再遗漏自碰撞或环境碰撞。同时输出终态位置/姿态误差的 mean、p95 和整条轨迹的最小间隙。
+
+使用未训练的 100-step 冒烟 checkpoint 执行 2 个无障碍 episode，评价链路正常完成并正确判为 `gate_pass=false`。该数值不属于性能结果。
+
+有效评价器冒烟目录：`outputs/thesis_homotopy/preflight_s0_evaluator_smoke_20260915/`。
 
 ## 下一步顺序
 

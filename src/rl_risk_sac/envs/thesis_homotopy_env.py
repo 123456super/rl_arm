@@ -11,8 +11,11 @@ import pybullet as p
 
 from rl_risk_sac.robots.pybullet_robot import PyBulletRobot
 from rl_risk_sac.tasks.thesis_reaching import (
+    THESIS_OBSERVATION_DIM,
+    SelfCollisionGeometry,
     ThesisGeometry,
     build_thesis_observation,
+    compute_self_collision_geometry,
     compute_thesis_geometry,
     homotopy_reward,
     pose_error,
@@ -26,21 +29,27 @@ class EpisodeContract:
     scene: str = "none"
     xi: float = 1.0
     strict_obstacle_collision: bool = True
+    goal_scale: float = 1.0
+    orientation_scale: float = 1.0
+    orientation_tolerance: float = 0.10
+    lambda_self: float = 1.0
 
 
 class ThesisHomotopyEnv(gym.Env):
     """PyBullet environment implementing Chapters 1--3 of the thesis protocol.
 
     The legacy environment remains available for historical checkpoints.  This
-    class deliberately has a small, explicit state contract: 55 observations,
-    constant joint-velocity commands, pose targets, and the task-first collision
-    homotopy used by the new curriculum.
+    class uses continuous 6D rotation observations, explicit task-space twist,
+    constant joint-velocity commands, and the task-first collision homotopy.
     """
 
-    metadata = {"render_modes": []}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 20}
 
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(self, config: dict[str, Any], render_mode: str | None = None) -> None:
         super().__init__()
+        if render_mode not in {None, "human", "rgb_array"}:
+            raise ValueError("render_mode must be None, 'human', or 'rgb_array'")
+        self.render_mode = render_mode
         self.config = config
         self.runtime = RuntimeConfig.from_mapping(config)
         thesis = config["thesis"]
@@ -52,19 +61,67 @@ class ThesisHomotopyEnv(gym.Env):
         self.horizon = int(thesis.get("horizon", 240))
         self.action_scale = np.full(6, float(thesis.get("action_scale", 0.7)), dtype=np.float32)
         self.velocity_limits = np.full(6, np.pi, dtype=np.float32)
+        self.ee_linear_velocity_scale = float(thesis.get("ee_linear_velocity_scale", 1.0))
+        self.ee_angular_velocity_scale = float(thesis.get("ee_angular_velocity_scale", 4.2))
+        if self.ee_linear_velocity_scale <= 0.0 or self.ee_angular_velocity_scale <= 0.0:
+            raise ValueError("end-effector velocity scales must be positive")
         self.motor_force = float(thesis.get("joint_motor_force", 90.0))
         self.obstacle_radius = float(thesis.get("obstacle_radius", 0.075))
         self.obstacle_speed = float(thesis.get("obstacle_speed", 0.1))
         self.d_safe = float(thesis.get("d_safe", 0.12))
+        self_collision_config = thesis.get("self_collision", {})
+        self.d_self_safe = float(self_collision_config.get("safe_distance_m", 0.005))
+        self.self_query_distance = float(self_collision_config.get("query_distance_m", 0.25))
+        self.self_ttc_max = float(self_collision_config.get("ttc_max_s", 3.0))
+        self.self_approach_velocity_scale = float(
+            self_collision_config.get("approach_velocity_scale", 0.7)
+        )
+        self.self_ttc_tau = float(self_collision_config.get("ttc_tau_s", 1.0))
+        if not 0.0 < self.d_self_safe < self.self_query_distance:
+            raise ValueError("self collision distances must satisfy 0 < safe < query")
         self.position_tolerance = float(thesis.get("position_tolerance", 0.055))
         self.orientation_tolerance = float(thesis.get("orientation_tolerance", 0.10))
+        reward_config = thesis.get("reward", {})
+        self.reward_parameters = {
+            "d_safe": self.d_safe,
+            "d_self_safe": self.d_self_safe,
+            "position_sigma": float(reward_config.get("position_sigma_m", 0.20)),
+            "orientation_sigma": float(reward_config.get("orientation_sigma_rad", 1.0)),
+            "micro_power": float(reward_config.get("micro_power", 4.0)),
+            "orientation_priority_weight": float(
+                reward_config.get("orientation_priority_weight", 1.0)
+            ),
+            "potential_scale": float(reward_config.get("potential_scale", 20.0)),
+            "success_bonus": float(reward_config.get("success_bonus", 20.0)),
+            "velocity_cost_weight": float(reward_config.get("velocity_cost_weight", 0.04)),
+            "smooth_cost_weight": float(reward_config.get("smooth_cost_weight", 0.01)),
+            "hard_failure_penalty": float(
+                reward_config.get("hard_failure_penalty", 10.0)
+            ),
+            "safety_risk_weight": float(reward_config.get("safety_risk_weight", 2.0)),
+            "safety_clearance_weight": float(
+                reward_config.get("safety_clearance_weight", 8.0)
+            ),
+            "self_risk_weight": float(reward_config.get("self_risk_weight", 2.0)),
+            "self_clearance_weight": float(
+                reward_config.get("self_clearance_weight", 8.0)
+            ),
+            "external_safety_scale": float(
+                reward_config.get("external_safety_scale", 1.0)
+            ),
+            "self_safety_scale": float(reward_config.get("self_safety_scale", 1.0)),
+        }
         self.goal_sample_max_attempts = int(thesis.get("goal_sample_max_attempts", 10000))
         if self.goal_sample_max_attempts < 1:
             raise ValueError("goal_sample_max_attempts must be positive")
         self.contract = EpisodeContract()
         self.rng = np.random.default_rng(int(config["seed"]))
 
-        self.client_id = p.connect(p.DIRECT)
+        self.client_id = p.connect(p.GUI if render_mode == "human" else p.DIRECT)
+        if self.client_id < 0:
+            raise RuntimeError(
+                "failed to connect to PyBullet; human rendering requires an available display"
+            )
         self.robot = PyBulletRobot(
             self.runtime.robot,
             Path(config["robot"]["urdf"]),
@@ -86,16 +143,43 @@ class ThesisHomotopyEnv(gym.Env):
         self._link_name_to_id: dict[str, int] = {}
         self._collision_link_ids: set[int] = set()
         self._self_link_order: list[int] = []
+        self._self_pair_link_ids: list[tuple[int, int]] = []
+        self._self_pair_slots: list[tuple[int, int]] = []
 
-        self.observation_space = spaces.Box(-1.0, 1.0, shape=(55,), dtype=np.float32)
+        self.observation_space = spaces.Box(
+            -1.0, 1.0, shape=(THESIS_OBSERVATION_DIM,), dtype=np.float32
+        )
         self.action_space = spaces.Box(-1.0, 1.0, shape=(6,), dtype=np.float32)
 
-    def configure_episode(self, scene: str, *, xi: float, strict: bool) -> None:
+    def configure_episode(
+        self, scene: str, *, xi: float, strict: bool, goal_scale: float = 1.0,
+        orientation_scale: float = 1.0, orientation_tolerance: float | None = None,
+        lambda_self: float = 1.0,
+    ) -> None:
         if scene not in {"none", "static", "dynamic"}:
             raise ValueError(f"unknown thesis scene {scene!r}")
         if not 0.02 <= float(xi) <= 1.0:
             raise ValueError("xi must be in [0.02, 1]")
-        self.contract = EpisodeContract(scene=scene, xi=float(xi), strict_obstacle_collision=bool(strict))
+        if not 0.0 < float(goal_scale) <= 1.0:
+            raise ValueError("goal_scale must be in (0, 1]")
+        if not 0.0 <= float(orientation_scale) <= 1.0:
+            raise ValueError("orientation_scale must be in [0, 1]")
+        if not 0.0 <= float(lambda_self) <= 1.0:
+            raise ValueError("lambda_self must be in [0, 1]")
+        effective_orientation_tolerance = (
+            self.orientation_tolerance if orientation_tolerance is None else float(orientation_tolerance)
+        )
+        if not 0.0 < effective_orientation_tolerance <= np.pi:
+            raise ValueError("orientation_tolerance must be in (0, pi]")
+        self.contract = EpisodeContract(
+            scene=scene,
+            xi=float(xi),
+            strict_obstacle_collision=bool(strict),
+            goal_scale=float(goal_scale),
+            orientation_scale=float(orientation_scale),
+            orientation_tolerance=effective_orientation_tolerance,
+            lambda_self=float(lambda_self),
+        )
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         del options
@@ -111,11 +195,12 @@ class ThesisHomotopyEnv(gym.Env):
         self._create_obstacle()
         self.step_count = 0
         self.obstacle_contact_seen = False
-        observation, info, geometry, position_error, orientation_error = self._observe()
+        observation, info, geometry, self_geometry, position_error, orientation_error = self._observe()
         self.previous_rho_position = float(np.linalg.norm(position_error))
         self.previous_rho_orientation = float(np.linalg.norm(orientation_error))
         info.update(self._contract_info())
         info.update(self._geometry_info(geometry))
+        info.update(self._self_geometry_info(self_geometry))
         return observation, info
 
     def step(self, action: np.ndarray):
@@ -129,6 +214,10 @@ class ThesisHomotopyEnv(gym.Env):
         joint_limit = False
         max_risk = 0.0
         min_distance = float("inf")
+        self_max_risk = 0.0
+        self_min_distance = self.self_query_distance
+        self_min_ttc = self.self_ttc_max
+        self_max_approach = 0.0
         executed_substeps = 0
 
         for _ in range(self.substeps):
@@ -147,6 +236,11 @@ class ThesisHomotopyEnv(gym.Env):
             if geometry is not None:
                 max_risk = max(max_risk, geometry.risk_max)
                 min_distance = min(min_distance, geometry.distance_min)
+            self_geometry = self._self_geometry()
+            self_max_risk = max(self_max_risk, self_geometry.risk_max)
+            self_min_distance = min(self_min_distance, self_geometry.distance_min)
+            self_min_ttc = min(self_min_ttc, self_geometry.ttc_min)
+            self_max_approach = max(self_max_approach, self_geometry.approach_max)
             events = self._collision_events()
             obstacle_collision = obstacle_collision or events["obstacle_collision"]
             self_collision = self_collision or events["self_collision"]
@@ -161,33 +255,48 @@ class ThesisHomotopyEnv(gym.Env):
 
         self.obstacle_contact_seen = self.obstacle_contact_seen or obstacle_collision
         self.step_count += 1
-        observation, info, endpoint_geometry, position_error, orientation_error = self._observe()
+        observation, info, endpoint_geometry, endpoint_self_geometry, position_error, orientation_error = self._observe()
         next_rho_position = float(np.linalg.norm(position_error))
         next_rho_orientation = float(np.linalg.norm(orientation_error))
         hard_failure = bool(self_collision or environment_collision or joint_limit)
         obstacle_failure = bool(obstacle_collision and self.contract.strict_obstacle_collision and not hard_failure)
-        task_reached = bool(
+        position_reached = bool(
             not hard_failure
             and not obstacle_failure
             and next_rho_position <= self.position_tolerance
-            and next_rho_orientation <= self.orientation_tolerance
+        )
+        task_reached = bool(
+            position_reached
+            and next_rho_orientation <= self.contract.orientation_tolerance
         )
         terminated = bool(hard_failure or obstacle_failure or task_reached)
         truncated = bool(self.step_count >= self.horizon and not terminated)
         _, qdot_after = self.robot.joint_state()
-        smooth_velocity = float(np.sum(np.square((qdot_after - qdot_before) / self.action_scale)))
+        # Average across joints before the bounded reward mapping. Summing six
+        # normalized squared changes made the smoothness term saturate on
+        # nearly every transition.
+        smooth_velocity = float(
+            np.mean(np.square((qdot_after - qdot_before) / self.action_scale))
+        )
+        velocity_magnitude = float(np.mean(np.square(qdot_after / self.action_scale)))
         if endpoint_geometry is None:
             min_distance = 0.80
             max_risk = 0.0
         else:
             min_distance = min(min_distance, endpoint_geometry.distance_min)
             max_risk = max(max_risk, endpoint_geometry.risk_max)
+        self_min_distance = min(self_min_distance, endpoint_self_geometry.distance_min)
+        self_max_risk = max(self_max_risk, endpoint_self_geometry.risk_max)
+        self_min_ttc = min(self_min_ttc, endpoint_self_geometry.ttc_min)
+        self_max_approach = max(self_max_approach, endpoint_self_geometry.approach_max)
         reward, reward_fields = homotopy_reward(
             rho_position=self.previous_rho_position,
             next_rho_position=next_rho_position,
             rho_orientation=self.previous_rho_orientation,
             next_rho_orientation=next_rho_orientation,
             smooth_velocity=smooth_velocity,
+            velocity_magnitude=velocity_magnitude,
+            orientation_scale=self.contract.orientation_scale,
             task_reached=task_reached,
             hard_failure=hard_failure,
             obstacle_collision=obstacle_collision,
@@ -195,17 +304,27 @@ class ThesisHomotopyEnv(gym.Env):
             risk_max=max_risk,
             distance_min=min_distance,
             xi=self.contract.xi if self.contract.scene != "none" else 1.0,
-            d_safe=self.d_safe,
+            self_risk_max=self_max_risk,
+            self_distance_min=self_min_distance,
+            lambda_self=self.contract.lambda_self,
             gamma=float(self.config["sac"]["gamma"]),
             horizon=self.horizon,
+            **self.reward_parameters,
         )
         collision_assisted_reach = bool(task_reached and self.obstacle_contact_seen)
         safe_success = bool(task_reached and not self.obstacle_contact_seen and not hard_failure)
-        cost = float(max_risk + 3.0 * (min_distance < self.d_safe) + 8.0 * (obstacle_collision or hard_failure))
+        cost = float(
+            max_risk
+            + self_max_risk
+            + 3.0 * (min_distance < self.d_safe)
+            + 3.0 * (self_min_distance < self.d_self_safe)
+            + 8.0 * (obstacle_collision or hard_failure)
+        )
         info.update(
             {
                 **self._contract_info(),
                 **self._geometry_info(endpoint_geometry),
+                **self._self_geometry_info(endpoint_self_geometry),
                 **reward_fields,
                 "reward": reward,
                 "hard_penalty": reward_fields["hard_penalty"],
@@ -213,6 +332,7 @@ class ThesisHomotopyEnv(gym.Env):
                 "terminal_guard_penalty": reward_fields["terminal_guard_penalty"],
                 "cost": cost,
                 "task_reached": task_reached,
+                "position_reached": position_reached,
                 "collision_assisted_reach": collision_assisted_reach,
                 "safe_success": safe_success,
                 "success": safe_success,
@@ -227,10 +347,18 @@ class ThesisHomotopyEnv(gym.Env):
                 "control_max_risk": max_risk,
                 "control_min_distance": min_distance,
                 "control_safety_violation": bool(min_distance < self.d_safe),
+                "control_self_max_risk": self_max_risk,
+                "control_self_min_distance": self_min_distance,
+                "control_self_min_ttc": self_min_ttc,
+                "control_self_max_approach": self_max_approach,
+                "control_self_safety_violation": bool(
+                    self_min_distance < self.d_self_safe
+                ),
                 "executed_substeps": executed_substeps,
                 "qdot_cmd": command.copy(),
                 "qdot_measured": qdot_after.copy(),
                 "smooth_velocity": smooth_velocity,
+                "velocity_magnitude": velocity_magnitude,
                 "rho_position": self.previous_rho_position,
                 "next_rho_position": next_rho_position,
                 "rho_orientation": self.previous_rho_orientation,
@@ -246,8 +374,14 @@ class ThesisHomotopyEnv(gym.Env):
             self.robot.reset_joints(self.rng)
             p.performCollisionDetection(physicsClientId=self.client_id)
             events = self._collision_events()
+            self_geometry = self._self_geometry()
             q, _ = self.robot.joint_state()
-            if not events["self_collision"] and np.all(q >= self.robot.joint_lower_limits) and np.all(q <= self.robot.joint_upper_limits):
+            if (
+                not events["self_collision"]
+                and self_geometry.distance_min >= self.d_self_safe
+                and np.all(q >= self.robot.joint_lower_limits)
+                and np.all(q <= self.robot.joint_upper_limits)
+            ):
                 return
         raise RuntimeError("failed to sample a valid initial joint configuration in 100 attempts")
 
@@ -256,7 +390,8 @@ class ThesisHomotopyEnv(gym.Env):
         lower = self.robot.joint_lower_limits + 0.10
         upper = self.robot.joint_upper_limits - 0.10
         for attempt in range(1, self.goal_sample_max_attempts + 1):
-            candidate = self.rng.uniform(lower, upper).astype(np.float32)
+            full_candidate = self.rng.uniform(lower, upper).astype(np.float32)
+            candidate = initial_q + self.contract.goal_scale * (full_candidate - initial_q)
             self._set_joint_state(candidate)
             p.performCollisionDetection(physicsClientId=self.client_id)
             position, quaternion = self.robot.end_effector_pose()
@@ -266,6 +401,7 @@ class ThesisHomotopyEnv(gym.Env):
                 and 0.18 <= position[2] <= 0.78
             )
             target_self_collision = self._collision_events()["self_collision"]
+            target_self_clearance = self._self_geometry().distance_min
             ik_validation = self.robot.check_pose_ik(
                 position,
                 quaternion,
@@ -278,11 +414,12 @@ class ThesisHomotopyEnv(gym.Env):
             initial_position_error, initial_orientation_error = pose_error(position, quaternion, current_position, current_quaternion)
             already_reached = (
                 np.linalg.norm(initial_position_error) <= self.position_tolerance
-                and np.linalg.norm(initial_orientation_error) <= self.orientation_tolerance
+                and np.linalg.norm(initial_orientation_error) <= self.contract.orientation_tolerance
             )
             if (
                 within_workspace
                 and not target_self_collision
+                and target_self_clearance >= self.d_self_safe
                 and bool(ik_validation["reachable"])
                 and not already_reached
                 and np.linalg.norm(initial_orientation_error) < np.pi - 1e-3
@@ -363,7 +500,7 @@ class ThesisHomotopyEnv(gym.Env):
         )
 
     def episode_state_dict(self) -> dict[str, Any]:
-        q, qdot = self.robot.joint_state()
+        q, qdot = self.robot.joint_state_exact()
         return {
             "contract": self.contract, "q": q, "qdot": qdot,
             "goal_position": self.goal_position.copy(), "goal_quaternion": self.goal_quaternion.copy(),
@@ -433,23 +570,37 @@ class ThesisHomotopyEnv(gym.Env):
 
     def _observe(self):
         q, qdot = self.robot.joint_state()
-        ee_position, ee_quaternion = self.robot.end_effector_pose()
+        ee_position, ee_quaternion, ee_linear_velocity, ee_angular_velocity = (
+            self.robot.end_effector_kinematics()
+        )
         position_error, orientation_error = pose_error(
             self.goal_position, self.goal_quaternion, ee_position, ee_quaternion
         )
         geometry = self._geometry()
+        self_geometry = self._self_geometry()
         observation = build_thesis_observation(
             q=q,
             qdot=qdot,
             joint_lower=self.robot.joint_lower_limits,
             joint_upper=self.robot.joint_upper_limits,
-            joint_velocity_limits=self.velocity_limits,
+            joint_velocity_scale=self.action_scale,
+            ee_position=ee_position,
+            ee_quaternion=ee_quaternion,
+            ee_linear_velocity=ee_linear_velocity,
+            ee_angular_velocity=ee_angular_velocity,
+            ee_linear_velocity_scale=self.ee_linear_velocity_scale,
+            ee_angular_velocity_scale=self.ee_angular_velocity_scale,
+            goal_position=self.goal_position,
+            goal_quaternion=self.goal_quaternion,
             position_error=position_error,
             orientation_error=orientation_error,
+            orientation_scale=self.contract.orientation_scale,
+            remaining_time_fraction=max(0.0, (self.horizon - self.step_count) / self.horizon),
             obstacle_present=self.obstacle_id is not None,
             obstacle_position=self.obstacle_position,
             obstacle_velocity=self.obstacle_velocity,
             geometry=geometry,
+            self_geometry=self_geometry,
         )
         info = {
             "goal_position": self.goal_position.copy(),
@@ -459,10 +610,12 @@ class ThesisHomotopyEnv(gym.Env):
             "goal_sample_attempts": self.goal_sample_attempts_last,
             "ee_position": ee_position.copy(),
             "ee_quaternion": ee_quaternion.copy(),
+            "ee_linear_velocity": ee_linear_velocity.copy(),
+            "ee_angular_velocity": ee_angular_velocity.copy(),
             "goal_error_norm": float(np.linalg.norm(position_error)),
             "orientation_error_norm": float(np.linalg.norm(orientation_error)),
         }
-        return observation, info, geometry, position_error, orientation_error
+        return observation, info, geometry, self_geometry, position_error, orientation_error
 
     def _geometry(self) -> ThesisGeometry | None:
         if self.obstacle_id is None:
@@ -475,6 +628,71 @@ class ThesisHomotopyEnv(gym.Env):
             obstacle_radius=self.obstacle_radius,
             d_safe=self.d_safe,
         )
+
+    def _self_geometry(self) -> SelfCollisionGeometry:
+        pair_distances = np.full(
+            len(self._self_pair_link_ids), self.self_query_distance, dtype=np.float32
+        )
+        pair_approaches = np.zeros(len(self._self_pair_link_ids), dtype=np.float32)
+        pair_lookup = {
+            pair: index for index, pair in enumerate(self._self_pair_link_ids)
+        }
+        for point in p.getClosestPoints(
+            bodyA=self.robot_id,
+            bodyB=self.robot_id,
+            distance=self.self_query_distance,
+            physicsClientId=self.client_id,
+        ):
+            first, second = int(point[3]), int(point[4])
+            if first == second:
+                continue
+            if first < second:
+                pair = (first, second)
+                point_first = np.asarray(point[5], dtype=np.float32)
+                point_second = np.asarray(point[6], dtype=np.float32)
+            else:
+                pair = (second, first)
+                point_first = np.asarray(point[6], dtype=np.float32)
+                point_second = np.asarray(point[5], dtype=np.float32)
+            pair_index = pair_lookup.get(pair)
+            if pair_index is None or float(point[8]) >= pair_distances[pair_index]:
+                continue
+            vector = point_second - point_first
+            norm = float(np.linalg.norm(vector))
+            if norm > 1e-8:
+                normal = vector / norm
+            else:
+                normal = -np.asarray(point[7], dtype=np.float32)
+            velocity_first = self._link_world_point_velocity(first, point_first)
+            velocity_second = self._link_world_point_velocity(second, point_second)
+            distance_rate = float(np.dot(normal, velocity_second - velocity_first))
+            pair_distances[pair_index] = float(point[8])
+            pair_approaches[pair_index] = max(-distance_rate, 0.0)
+        return compute_self_collision_geometry(
+            pair_distances,
+            pair_approaches,
+            self._self_pair_slots,
+            d_safe=self.d_self_safe,
+            query_distance=self.self_query_distance,
+            ttc_max=self.self_ttc_max,
+            approach_velocity_scale=self.self_approach_velocity_scale,
+            ttc_tau=self.self_ttc_tau,
+        )
+
+    def _link_world_point_velocity(
+        self, link_id: int, world_point: np.ndarray
+    ) -> np.ndarray:
+        state = p.getLinkState(
+            self.robot_id,
+            link_id,
+            computeLinkVelocity=True,
+            computeForwardKinematics=True,
+            physicsClientId=self.client_id,
+        )
+        center_of_mass = np.asarray(state[0], dtype=np.float32)
+        linear = np.asarray(state[6], dtype=np.float32)
+        angular = np.asarray(state[7], dtype=np.float32)
+        return linear + np.cross(angular, np.asarray(world_point) - center_of_mass)
 
     def _closest_point_velocities(self, obstacle_position: np.ndarray) -> np.ndarray:
         capsules = self.robot.capsules()
@@ -508,15 +726,30 @@ class ThesisHomotopyEnv(gym.Env):
         for joint_id in range(p.getNumJoints(self.robot_id, physicsClientId=self.client_id)):
             info = p.getJointInfo(self.robot_id, joint_id, physicsClientId=self.client_id)
             self._link_name_to_id[info[12].decode("utf-8")] = joint_id
-        self._collision_link_ids = {
-            self._link_name_to_id[spec.collision_link_name]
+        collision_link_names = {
+            link_name
             for spec in self.robot.capsule_model.specs
+            for link_name in (spec.parent_link_name, spec.child_link_name)
+        }
+        self._collision_link_ids = {
+            self._link_name_to_id[link_name]
+            for link_name in collision_link_names
+            if self._link_name_to_id[link_name] >= 0
         }
         names = [
             "base_link_inertia", "shoulder_link", "upper_arm_link", "forearm_link",
             "wrist_1_link", "wrist_2_link", "wrist_3_link",
         ]
         self._self_link_order = [self._link_name_to_id[name] for name in names]
+        self._self_pair_link_ids = []
+        self._self_pair_slots = []
+        for first_index, first_link in enumerate(self._self_link_order):
+            for second_index in range(first_index + 2, len(self._self_link_order)):
+                second_link = self._self_link_order[second_index]
+                self._self_pair_link_ids.append(tuple(sorted((first_link, second_link))))
+                self._self_pair_slots.append(
+                    (first_index - 1, second_index - 1)
+                )
 
     def _collision_events(self) -> dict[str, bool]:
         obstacle_collision = False
@@ -545,7 +778,7 @@ class ThesisHomotopyEnv(gym.Env):
         }
 
     def _set_joint_state(self, q: np.ndarray, qdot: np.ndarray | None = None) -> None:
-        velocity = np.zeros(6, dtype=np.float32) if qdot is None else np.asarray(qdot, dtype=np.float32)
+        velocity = np.zeros(6, dtype=np.float64) if qdot is None else np.asarray(qdot, dtype=np.float64)
         for joint_id, position, speed in zip(self.robot.joint_ids, q, velocity):
             p.resetJointState(
                 self.robot_id,
@@ -560,6 +793,10 @@ class ThesisHomotopyEnv(gym.Env):
             "scene": self.contract.scene,
             "xi_scene": self.contract.xi,
             "strict_obstacle_collision": self.contract.strict_obstacle_collision,
+            "goal_scale": self.contract.goal_scale,
+            "orientation_scale": self.contract.orientation_scale,
+            "orientation_tolerance": self.contract.orientation_tolerance,
+            "lambda_self": self.contract.lambda_self,
             "obstacle_enabled": self.obstacle_id is not None,
         }
 
@@ -573,6 +810,20 @@ class ThesisHomotopyEnv(gym.Env):
             "ttc_body": geometry.ttc.copy(),
             "d_min": geometry.distance_min,
             "risk_global": geometry.risk_max,
+        }
+
+    @staticmethod
+    def _self_geometry_info(geometry: SelfCollisionGeometry) -> dict[str, Any]:
+        return {
+            "self_distance_body": geometry.distances.copy(),
+            "self_ttc_body": geometry.ttc.copy(),
+            "self_approach_body": geometry.approach_velocities.copy(),
+            "self_risk_body": geometry.risk_per_link.copy(),
+            "self_d_min": geometry.distance_min,
+            "self_risk_global": geometry.risk_max,
+            "self_ttc_min": geometry.ttc_min,
+            "self_approach_max": geometry.approach_max,
+            "self_closest_pair": geometry.closest_pair,
         }
 
     def close(self) -> None:

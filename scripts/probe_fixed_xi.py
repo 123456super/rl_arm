@@ -42,18 +42,26 @@ def main() -> None:
     random.seed(args.seed); np.random.seed(args.seed); torch.manual_seed(args.seed)
     if torch.cuda.is_available(): torch.cuda.manual_seed_all(args.seed)
     source = torch.load(ROOT / args.checkpoint, map_location="cpu", weights_only=False)
+    if source.get("protocol") != config["thesis"]["protocol"]:
+        raise ValueError(
+            f"checkpoint protocol {source.get('protocol')!r} does not match "
+            f"configured protocol {config['thesis']['protocol']!r}"
+        )
     output = ROOT / args.output
     output.mkdir(parents=True, exist_ok=False)
-    agent = ThesisSACAgent(55, 6, config)
+    env = ThesisHomotopyEnv(config)
+    obs_dim = int(env.observation_space.shape[0])
+    action_dim = int(env.action_space.shape[0])
+    agent = ThesisSACAgent(obs_dim, action_dim, config)
     agent.load_state_dict(source["agent"])
     replay = HomotopyReplayBuffer(
-        55, 6, str(agent.device), seed=args.seed,
+        obs_dim, action_dim, str(agent.device), seed=args.seed,
         reward_gamma=float(config["sac"]["gamma"]),
         reward_horizon=int(config["thesis"]["horizon"]),
+        reward_parameters=env.reward_parameters,
     )
     replay.load_state_dict(source["replay"])
     strictification = replay.strictify("static") if args.strictify else None
-    env = ThesisHomotopyEnv(config)
     rng = np.random.default_rng(args.seed + 77123)
     episode_rows: list[dict] = []
     update_rows: list[dict] = []

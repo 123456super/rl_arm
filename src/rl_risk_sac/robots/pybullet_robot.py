@@ -81,6 +81,13 @@ class PyBulletRobot:
         q_dot = np.asarray([state[1] for state in states], dtype=np.float32)
         return q, q_dot
 
+    def joint_state_exact(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return PyBullet joint state without float32 checkpoint quantization."""
+        states = p.getJointStates(self._require_loaded(), self.joint_ids, physicsClientId=self.physics_client_id)
+        q = np.asarray([state[0] for state in states], dtype=np.float64)
+        q_dot = np.asarray([state[1] for state in states], dtype=np.float64)
+        return q, q_dot
+
     def end_effector_state(self) -> tuple[np.ndarray, np.ndarray]:
         state = p.getLinkState(
             self._require_loaded(),
@@ -100,6 +107,29 @@ class PyBulletRobot:
             physicsClientId=self.physics_client_id,
         )
         return np.asarray(state[4], dtype=np.float32), np.asarray(state[5], dtype=np.float32)
+
+    def end_effector_kinematics(
+        self,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Return world-frame pose plus linear and angular velocity of the tool.
+
+        Keeping the task-space twist explicit avoids asking the policy to learn
+        the Jacobian mapping from ``(q, qdot)`` merely to recover quantities
+        that directly determine pose progress in the reward.
+        """
+        state = p.getLinkState(
+            self._require_loaded(),
+            self.tool_link_id,
+            computeLinkVelocity=True,
+            computeForwardKinematics=True,
+            physicsClientId=self.physics_client_id,
+        )
+        return (
+            np.asarray(state[4], dtype=np.float32),
+            np.asarray(state[5], dtype=np.float32),
+            np.asarray(state[6], dtype=np.float32),
+            np.asarray(state[7], dtype=np.float32),
+        )
 
     def capsules(self) -> list[CapsuleState]:
         return self.capsule_model.states(self._require_loaded(), self.physics_client_id)
