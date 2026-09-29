@@ -29,5 +29,3 @@ checkpoints/
 .DS_Store
 .idea/
 .vscode/
-
-outputs/
