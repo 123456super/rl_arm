@@ -16,6 +16,7 @@ class Batch:
     costs: torch.Tensor
     next_observations: torch.Tensor
     dones: torch.Tensor
+    protected_mask: torch.Tensor | None = None
 
 
 class ReplayBuffer:

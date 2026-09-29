@@ -1,9 +1,5 @@
-"""动作执行管线子包。
+"""V13.5 串行协议使用的安全控制工具。"""
 
-负责把 actor 输出的归一化动作转成受限、平滑后的关节速度轨迹。
-"""
-
-from rl_risk_sac.control.execution import ExecutionPipeline, ExecutionResult, JointVelocityRateLimiter
 from rl_risk_sac.control.safety_qp import (
     SafetyQP,
     SafetyQPConfig,
@@ -13,9 +9,6 @@ from rl_risk_sac.control.safety_qp import (
 )
 
 __all__ = [
-    "ExecutionPipeline",
-    "ExecutionResult",
-    "JointVelocityRateLimiter",
     "SafetyQP",
     "SafetyQPConfig",
     "SafetyQPResult",

@@ -131,6 +131,20 @@ class PyBulletRobot:
             np.asarray(state[7], dtype=np.float32),
         )
 
+    def end_effector_jacobian(self) -> np.ndarray:
+        """Return the world-frame geometric Jacobian of the configured tool link."""
+        q, _ = self.joint_state_exact()
+        zeros = np.zeros(self.joint_count, dtype=np.float64)
+        linear, angular = p.calculateJacobian(
+            self._require_loaded(), self.tool_link_id, [0.0, 0.0, 0.0],
+            q.tolist(), zeros.tolist(), zeros.tolist(),
+            physicsClientId=self.physics_client_id,
+        )
+        jacobian = np.vstack((linear, angular)).astype(np.float32)
+        if jacobian.shape != (6, self.joint_count) or not np.isfinite(jacobian).all():
+            raise RuntimeError(f"invalid end-effector Jacobian: {jacobian.shape}")
+        return jacobian
+
     def capsules(self) -> list[CapsuleState]:
         return self.capsule_model.states(self._require_loaded(), self.physics_client_id)
 

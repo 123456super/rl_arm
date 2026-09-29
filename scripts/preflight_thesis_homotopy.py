@@ -76,26 +76,64 @@ def reward_audit(config: dict, samples: int) -> tuple[dict, list[dict]]:
                 gamma=gamma, horizon=horizon,
                 **env.reward_parameters,
             )
-            timeout = discounted([wait_step] * horizon, gamma)
-            ideal_values: list[float] = []
-            steps = 60
-            previous_p, previous_r = rho_p, rho_r
-            for step in range(1, steps + 1):
-                next_p = rho_p * (1.0 - step / steps)
-                next_r = rho_r * (1.0 - step / steps)
-                reward, _ = homotopy_reward(
-                    rho_position=previous_p, next_rho_position=next_p,
-                    rho_orientation=previous_r, next_rho_orientation=next_r,
-                    smooth_velocity=0.0, velocity_magnitude=0.0, orientation_scale=1.0,
-                    task_reached=step == steps,
-                    hard_failure=False, obstacle_collision=False,
-                    risk_max=0.0, distance_min=0.80, xi=1.0,
-                    gamma=gamma, horizon=horizon,
-                    **env.reward_parameters,
+            timeout_step, _ = homotopy_reward(
+                rho_position=rho_p, next_rho_position=rho_p,
+                rho_orientation=rho_r, next_rho_orientation=rho_r,
+                smooth_velocity=0.0, velocity_magnitude=0.0, orientation_scale=1.0,
+                task_reached=False, hard_failure=False, timeout=True,
+                obstacle_collision=False, risk_max=0.0, distance_min=0.80, xi=1.0,
+                gamma=gamma, horizon=horizon,
+                **env.reward_parameters,
+            )
+            timeout = discounted([wait_step] * (horizon - 1) + [timeout_step], gamma)
+            def trajectory_return(
+                positions: list[float], orientations: list[float], *, success: bool,
+            ) -> float:
+                values: list[float] = []
+                previous_p, previous_r = rho_p, rho_r
+                for step, (next_p, next_r) in enumerate(
+                    zip(positions, orientations), start=1
+                ):
+                    final = step == len(positions)
+                    reward, _ = homotopy_reward(
+                        rho_position=previous_p, next_rho_position=next_p,
+                        rho_orientation=previous_r, next_rho_orientation=next_r,
+                        smooth_velocity=0.0, velocity_magnitude=0.0,
+                        orientation_scale=1.0,
+                        task_reached=bool(success and final),
+                        hard_failure=False, timeout=bool(not success and final),
+                        obstacle_collision=False, risk_max=0.0,
+                        distance_min=0.80, xi=1.0, gamma=gamma, horizon=horizon,
+                        **env.reward_parameters,
+                    )
+                    values.append(reward)
+                    previous_p, previous_r = next_p, next_r
+                return discounted(values, gamma)
+
+            ideal_returns = {}
+            for steps in (60, 120, 180, 239, 240):
+                fractions = [1.0 - step / steps for step in range(1, steps + 1)]
+                ideal_returns[steps] = trajectory_return(
+                    [rho_p * value for value in fractions],
+                    [rho_r * value for value in fractions], success=True,
                 )
-                ideal_values.append(reward)
-                previous_p, previous_r = next_p, next_r
-            ideal_success = discounted(ideal_values, gamma)
+            half = horizon // 2
+            retreat_fractions = (
+                [1.0 - .5 * step / half for step in range(1, half + 1)]
+                + [.5 + .5 * step / (horizon - half) for step in range(1, horizon - half + 1)]
+            )
+            approach_then_retreat = trajectory_return(
+                [rho_p * value for value in retreat_fractions],
+                [rho_r * value for value in retreat_fractions], success=False,
+            )
+            oscillation_fractions = [
+                .75 if step % 2 else 1.0 for step in range(1, horizon + 1)
+            ]
+            periodic_oscillation = trajectory_return(
+                [rho_p * value for value in oscillation_fractions],
+                [rho_r * value for value in oscillation_fractions], success=False,
+            )
+            ideal_success = ideal_returns[60]
             rows.append({
                 "sample": index, "rho_position": rho_p, "rho_orientation": rho_r,
                 "strict_collision_now": strict_collision,
@@ -104,9 +142,17 @@ def reward_audit(config: dict, samples: int) -> tuple[dict, list[dict]]:
                 "hard_failure_now": hard_failure,
                 "hard_failure_guard": hard_failure_fields["terminal_guard_penalty"],
                 "stationary_timeout": timeout, "ideal_60_step_success": ideal_success,
+                **{
+                    f"ideal_{steps}_step_success": value
+                    for steps, value in ideal_returns.items() if steps != 60
+                },
+                "approach_then_retreat_timeout": approach_then_retreat,
+                "periodic_oscillation_timeout": periodic_oscillation,
                 "strict_collision_better_than_timeout": strict_collision > timeout,
                 "hard_failure_better_than_timeout": hard_failure > timeout,
                 "desired_order": ideal_success > timeout > max(strict_collision, hard_failure),
+                "all_successes_beat_failure_loops": min(ideal_returns.values())
+                > max(approach_then_retreat, periodic_oscillation),
             })
     finally:
         env.close()
@@ -115,11 +161,17 @@ def reward_audit(config: dict, samples: int) -> tuple[dict, list[dict]]:
         "strict_collision_better_than_timeout_rate": float(np.mean([r["strict_collision_better_than_timeout"] for r in rows])),
         "hard_failure_better_than_timeout_rate": float(np.mean([r["hard_failure_better_than_timeout"] for r in rows])),
         "desired_order_rate": float(np.mean([r["desired_order"] for r in rows])),
+        "all_successes_beat_failure_loops_rate": float(np.mean([
+            r["all_successes_beat_failure_loops"] for r in rows
+        ])),
         "median_returns": {
             key: float(np.median([r[key] for r in rows]))
             for key in (
                 "strict_collision_now", "tolerant_collision_step", "hard_failure_now",
                 "stationary_timeout", "ideal_60_step_success",
+                "ideal_120_step_success", "ideal_180_step_success",
+                "ideal_239_step_success", "ideal_240_step_success",
+                "approach_then_retreat_timeout", "periodic_oscillation_timeout",
             )
         },
         "median_terminal_guard": {
@@ -198,32 +250,55 @@ def feasibility_audit(config: dict, samples_per_scene: int) -> tuple[dict, list[
 
 
 def goal_kinematics_audit(config: dict, samples: int) -> tuple[dict, list[dict]]:
-    """Audit the exact FK -> pose IK -> FK acceptance contract used by reset()."""
+    """Audit the configured task-space pose -> IK -> FK acceptance contract."""
     env = ThesisHomotopyEnv(config)
+    levels = config["thesis"].get("joint_pose_curriculum", {}).get("levels", [])
     rows: list[dict] = []
     failures = 0
     try:
         for sample in range(samples):
             try:
-                env.configure_episode("none", xi=1.0, strict=True)
+                level_index = sample % len(levels) if levels else 0
+                level = levels[level_index] if levels else {}
+                task_bounds = {
+                    key: level[key] for key in (
+                        "target_distance_min_m", "target_distance_max_m",
+                        "target_orientation_min_rad", "target_orientation_max_rad",
+                    ) if key in level
+                }
+                env.configure_episode(
+                    "none", xi=1.0, strict=True,
+                    goal_scale=float(level.get("goal_scale", 1.0)),
+                    position_tolerance=float(level.get(
+                        "position_tolerance_m", config["thesis"]["position_tolerance"]
+                    )),
+                    orientation_tolerance=float(level.get(
+                        "orientation_tolerance_rad", config["thesis"]["orientation_tolerance"]
+                    )),
+                    **task_bounds,
+                )
                 _, info = env.reset(seed=int(config["seed"]) + sample)
                 validation = info["goal_ik_validation"]
                 rows.append({
                     "sample": sample,
+                    "level": level_index,
                     "accepted": bool(validation["reachable"]),
                     "attempts": int(info["goal_sample_attempts"]),
                     "ik_finite": bool(validation["finite"]),
                     "ik_within_limits": bool(validation["within_limits"]),
                     "position_error_m": float(validation["position_error_m"]),
                     "orientation_error_rad": float(validation["orientation_error_rad"]),
+                    "target_distance_m": float(info.get("sampled_target_distance_m", 0.0)),
+                    "target_orientation_rad": float(info.get("sampled_target_orientation_rad", 0.0)),
                 })
             except RuntimeError:
                 failures += 1
                 rows.append({
-                    "sample": sample, "accepted": False,
+                    "sample": sample, "level": level_index, "accepted": False,
                     "attempts": int(config["thesis"].get("goal_sample_max_attempts", 10000)),
                     "ik_finite": False, "ik_within_limits": False,
                     "position_error_m": float("inf"), "orientation_error_rad": float("inf"),
+                    "target_distance_m": float("nan"), "target_orientation_rad": float("nan"),
                 })
     finally:
         env.close()
@@ -232,7 +307,10 @@ def goal_kinematics_audit(config: dict, samples: int) -> tuple[dict, list[dict]]
         "samples": samples,
         "reset_failures": failures,
         "acceptance_rate": float(len(accepted) / samples),
-        "thresholds": {"position_error_m": 0.01, "orientation_error_rad": 0.05},
+        "thresholds": {
+            "position_error_m": float(config["thesis"]["position_tolerance"]),
+            "orientation_error_rad": float(config["thesis"]["orientation_tolerance"]),
+        },
         "attempts": {
             "median": float(np.median([row["attempts"] for row in rows])),
             "p95": float(np.quantile([row["attempts"] for row in rows], 0.95)),
@@ -441,7 +519,9 @@ def checkpoint_audit(config: dict, checkpoint: Path, samples: int) -> tuple[dict
                 ee_angular_velocity_scale=env.ee_angular_velocity_scale,
                 goal_position=info["goal_position"], goal_quaternion=info["goal_quaternion"],
                 position_error=error_p, orientation_error=error_r,
-                orientation_scale=env.contract.orientation_scale,
+                goal_scale=env.contract.goal_scale,
+                position_tolerance=env.contract.position_tolerance,
+                orientation_tolerance=env.contract.orientation_tolerance,
                 remaining_time_fraction=max(0.0, (env.horizon - env.step_count) / env.horizon),
                 obstacle_present=False,
                 obstacle_position=np.zeros(3), obstacle_velocity=np.zeros(3), geometry=None,
@@ -526,7 +606,7 @@ def main() -> None:
         "mode",
         choices=("reward", "goal", "contact", "self-contact", "feasibility", "checkpoint"),
     )
-    parser.add_argument("--config", default="configs/experiments/thesis_homotopy.yaml")
+    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
     parser.add_argument("--output", required=True)
     parser.add_argument("--checkpoint")
     parser.add_argument("--samples", type=int, default=100)

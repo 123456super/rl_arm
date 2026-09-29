@@ -23,8 +23,7 @@ checkpoints/
 *.pth
 *.onnx
 *.whl
-!outputs/
-!outputs/**
+!artifacts/initialization/*.pt
 
 # OS/editor files
 .DS_Store

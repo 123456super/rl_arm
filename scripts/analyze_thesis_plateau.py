@@ -96,6 +96,10 @@ def _block_snapshot(run: Path, current_eta: float, block_steps: int) -> dict[str
         "stage_total_step": int(summary.get("stage_total_step", summary["global_step"])),
         "orientation_level_index": int(summary["orientation_level_index"]),
         "orientation_scale": float(summary["orientation_scale"]),
+        "s0_phase": str(summary["s0_phase"]),
+        "lambda_self": float(summary["lambda_self"]),
+        "self_safety_eligible_steps": int(summary["self_safety_eligible_steps"]),
+        "self_safety_full_weight_steps": int(summary["self_safety_full_weight_steps"]),
         "s0_goal_gate_eligible": bool(summary["s0_goal_gate_eligible"]),
         "pose_scales_seen": sorted(all_pose_scales),
         "current_episodes": len(eligible),
@@ -103,12 +107,22 @@ def _block_snapshot(run: Path, current_eta: float, block_steps: int) -> dict[str
         "safe_success_rate": _rate(eligible, "safe_success") if eligible else None,
         "self_collision_rate": _rate(eligible, "self_collision") if eligible else None,
         "timeout_rate": _rate(eligible, "timeout") if eligible else None,
+        "mean_position_error_m": _rate(eligible, "position_error_m") if eligible else None,
+        "mean_orientation_error_rad": (
+            _rate(eligible, "orientation_error_rad") if eligible else None
+        ),
         "anchor_success_rate": _rate(anchors, "position_reached") if anchors else None,
         "probe": (
             {
                 "success_rate": _number(probes[-1], "success_rate"),
                 "collision_rate": _number(probes[-1], "collision_rate"),
                 "timeout_rate": _number(probes[-1], "timeout_rate"),
+                "mean_position_error_m": _number(
+                    probes[-1], "mean_position_error_m"
+                ),
+                "mean_orientation_error_rad": _number(
+                    probes[-1], "mean_orientation_error_rad"
+                ),
                 "passed": bool(int(_number(probes[-1], "passed"))),
             }
             if probes else None
@@ -147,16 +161,24 @@ def decide_s0_stop(
         previous["orientation_level_index"] == current["orientation_level_index"]
         and np.isclose(previous["orientation_scale"], current["orientation_scale"], atol=1e-9)
     )
+    same_phase = previous["s0_phase"] == current["s0_phase"]
     no_level_progress = bool(
-        same_level
+        same_level and same_phase
         and previous["pose_scales_seen"] == [round(current["orientation_scale"], 9)]
         and current["pose_scales_seen"] == [round(current["orientation_scale"], 9)]
+    )
+    anchor_required = int(current["orientation_level_index"]) > 0
+    anchor_sufficient = bool(
+        not anchor_required
+        or (
+            previous["anchor_episodes"] >= int(criteria["min_anchor_episodes_per_block"])
+            and current["anchor_episodes"] >= int(criteria["min_anchor_episodes_per_block"])
+        )
     )
     sufficient = bool(
         previous["current_episodes"] >= int(criteria["min_current_episodes_per_block"])
         and current["current_episodes"] >= int(criteria["min_current_episodes_per_block"])
-        and previous["anchor_episodes"] >= int(criteria["min_anchor_episodes_per_block"])
-        and current["anchor_episodes"] >= int(criteria["min_anchor_episodes_per_block"])
+        and anchor_sufficient
         and previous["probe"] is not None
         and current["probe"] is not None
     )
@@ -169,16 +191,46 @@ def decide_s0_stop(
             >= float(criteria["self_collision_delta"]),
             "timeout": previous["timeout_rate"] - current["timeout_rate"]
             >= float(criteria["timeout_delta"]),
-            "anchor_success": current["anchor_success_rate"] - previous["anchor_success_rate"]
-            >= float(criteria["anchor_success_delta"]),
+            "anchor_success": bool(
+                anchor_required
+                and current["anchor_success_rate"] - previous["anchor_success_rate"]
+                >= float(criteria["anchor_success_delta"])
+            ),
+            "position_error": (
+                previous["mean_position_error_m"] - current["mean_position_error_m"]
+                >= float(criteria["position_error_delta_m"])
+            ),
+            "orientation_error": (
+                previous["mean_orientation_error_rad"]
+                - current["mean_orientation_error_rad"]
+                >= float(criteria["orientation_error_delta_rad"])
+            ),
             "probe_success": current["probe"]["success_rate"] - previous["probe"]["success_rate"]
             >= float(criteria["probe_success_delta"]),
             "probe_collision": previous["probe"]["collision_rate"] - current["probe"]["collision_rate"]
             >= float(criteria["probe_collision_delta"]),
             "probe_timeout": previous["probe"]["timeout_rate"] - current["probe"]["timeout_rate"]
             >= float(criteria["probe_timeout_delta"]),
+            "probe_position_error": (
+                previous["probe"]["mean_position_error_m"]
+                - current["probe"]["mean_position_error_m"]
+                >= float(criteria["probe_position_error_delta_m"])
+            ),
+            "probe_orientation_error": (
+                previous["probe"]["mean_orientation_error_rad"]
+                - current["probe"]["mean_orientation_error_rad"]
+                >= float(criteria["probe_orientation_error_delta_rad"])
+            ),
         }
-    plateau = bool(no_level_progress and sufficient and not any(improvements.values()))
+    self_curriculum_progress = bool(
+        current["self_safety_eligible_steps"] > previous["self_safety_eligible_steps"]
+        or current["self_safety_full_weight_steps"]
+        > previous["self_safety_full_weight_steps"]
+    )
+    plateau = bool(
+        no_level_progress and sufficient and not self_curriculum_progress
+        and not any(improvements.values())
+    )
     budget_exhausted = current["stage_total_step"] >= int(max_stage_steps)
 
     if numerical_failure:
@@ -195,7 +247,10 @@ def decide_s0_stop(
         "decision": decision,
         "consecutive_block_step_delta": step_delta,
         "no_level_progress_for_two_blocks": no_level_progress,
+        "same_s0_phase": same_phase,
         "comparison_data_sufficient": sufficient,
+        "anchor_data_required": anchor_required,
+        "self_curriculum_progress": self_curriculum_progress,
         "substantial_improvements": improvements,
         "plateau_detected": plateau,
         "numerical_failure": numerical_failure,
@@ -209,7 +264,7 @@ def decide_s0_stop(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Pre-registered S0 two-block stop analysis")
-    parser.add_argument("--config", default="configs/experiments/thesis_homotopy.yaml")
+    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
     parser.add_argument("--blocks", nargs=2, required=True, metavar=("PREVIOUS", "CURRENT"))
     parser.add_argument("--output", required=True)
     args = parser.parse_args()

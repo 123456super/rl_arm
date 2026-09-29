@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
@@ -62,12 +63,19 @@ class OrientationCurriculum:
     replay_anchor_normal: float = 0.25
     replay_current_normal: float = 0.50
     deterministic_probe_required: bool = False
+    deterministic_previous_success_floor: float = 0.0
+    deterministic_previous_collision_ceiling: float = 1.0
     deterministic_probe_passed: bool = False
     deterministic_probe_attempts: int = 0
     deterministic_probe_success_rate: float | None = None
     deterministic_probe_collision_rate: float | None = None
     deterministic_probe_joint_limit_rate: float | None = None
+    deterministic_probe_previous_success_rate: float | None = None
+    deterministic_probe_previous_collision_rate: float | None = None
+    deterministic_probe_previous_joint_limit_rate: float | None = None
+    deterministic_probe_confirmation_passed: bool = False
     deterministic_probe_level_steps: int = -1
+    retention_warning: bool = False
     recovery_mode: bool = False
 
 
@@ -119,11 +127,15 @@ class HomotopyCurriculum:
         orientation_replay_anchor_normal: float = 0.25,
         orientation_replay_current_normal: float = 0.50,
         orientation_deterministic_probe_required: bool = False,
+        orientation_deterministic_previous_success_floor: float = 0.0,
+        orientation_deterministic_previous_collision_ceiling: float = 1.0,
         orientation_full_scale_min_steps: int = 25000,
+        joint_pose_levels: list[dict[str, float]] | None = None,
         self_start_weight: float = 0.0,
         self_end_weight: float = 1.0,
         self_ramp_steps: int = 50000,
         self_full_weight_min_steps: int = 25000,
+        self_probe_collision_ceiling: float = 0.01,
     ) -> None:
         if stage not in {"s0", "s1", "s2"}:
             raise ValueError("stage must be s0, s1 or s2")
@@ -135,7 +147,10 @@ class HomotopyCurriculum:
             raise ValueError("self_ramp_steps must be positive")
         if self_full_weight_min_steps < 1:
             raise ValueError("self_full_weight_min_steps must be positive")
+        if not 0.0 <= self_probe_collision_ceiling <= 1.0:
+            raise ValueError("self_probe_collision_ceiling must be in [0, 1]")
         self.self_full_weight_min_steps = int(self_full_weight_min_steps)
+        self.self_probe_collision_ceiling = float(self_probe_collision_ceiling)
         self.self_safety = SelfSafetyCurriculum(
             weight=float(self_start_weight if stage == "s0" else self_end_weight),
             start=float(self_start_weight),
@@ -153,10 +168,17 @@ class HomotopyCurriculum:
         levels = tuple(float(value) for value in (
             goal_levels if goal_levels is not None else (goal_start_scale, goal_end_scale)
         ))
+        invalid_goal_order = any(
+            (right < left if joint_pose_levels is not None else right <= left)
+            for left, right in zip(levels, levels[1:])
+        )
         if (len(levels) < 2 or not np.isclose(levels[0], goal_start_scale)
                 or not np.isclose(levels[-1], goal_end_scale)
-                or any(right <= left for left, right in zip(levels, levels[1:]))):
-            raise ValueError("goal_levels must be strictly increasing from start_scale to end_scale")
+                or invalid_goal_order):
+            qualifier = "non-decreasing" if joint_pose_levels is not None else "strictly increasing"
+            raise ValueError(
+                f"goal_levels must be {qualifier} from start_scale to end_scale"
+            )
         if goal_min_transitions_per_level < 1:
             raise ValueError("goal_min_transitions_per_level must be positive")
         if not 0.0 <= orientation_start_scale <= orientation_end_scale <= 1.0:
@@ -186,8 +208,8 @@ class HomotopyCurriculum:
         if orientation_full_scale_min_steps < 1:
             raise ValueError("orientation_full_scale_min_steps must be positive")
         self.orientation_full_scale_min_steps = int(orientation_full_scale_min_steps)
-        if not 0.0 < orientation_anchor_probability < 1.0:
-            raise ValueError("orientation_anchor_probability must be in (0, 1)")
+        if not 0.0 <= orientation_anchor_probability < 1.0:
+            raise ValueError("orientation_anchor_probability must be in [0, 1)")
         if not 0.0 <= orientation_anchor_floor <= 1.0:
             raise ValueError("orientation_anchor_floor must be in [0, 1]")
         if orientation_anchor_window < 1:
@@ -250,7 +272,83 @@ class HomotopyCurriculum:
             replay_anchor_normal=float(orientation_replay_anchor_normal),
             replay_current_normal=float(orientation_replay_current_normal),
             deterministic_probe_required=bool(orientation_deterministic_probe_required),
+            deterministic_previous_success_floor=float(
+                orientation_deterministic_previous_success_floor
+            ),
+            deterministic_previous_collision_ceiling=float(
+                orientation_deterministic_previous_collision_ceiling
+            ),
         )
+        self.joint_pose_levels: tuple[dict[str, float], ...] = ()
+        self.precision_only_task_space = False
+        if joint_pose_levels is not None:
+            parsed = tuple(
+                {
+                    "goal_scale": float(level["goal_scale"]),
+                    "position_tolerance": float(level["position_tolerance_m"]),
+                    "orientation_tolerance": float(level["orientation_tolerance_rad"]),
+                    **({
+                        "target_distance_min_m": float(level["target_distance_min_m"]),
+                        "target_distance_max_m": float(level["target_distance_max_m"]),
+                        "target_orientation_min_rad": float(level["target_orientation_min_rad"]),
+                        "target_orientation_max_rad": float(level["target_orientation_max_rad"]),
+                    } if "target_distance_max_m" in level else {}),
+                }
+                for level in joint_pose_levels
+            )
+            if len(parsed) != len(self.orientation.levels):
+                raise ValueError("joint_pose_levels must match orientation_levels length")
+            goal_scales = [level["goal_scale"] for level in parsed]
+            position_tolerances = [level["position_tolerance"] for level in parsed]
+            orientation_tolerances = [level["orientation_tolerance"] for level in parsed]
+            if any(not 0.0 < value <= 1.0 for value in goal_scales):
+                raise ValueError("joint pose goal scales must be in (0, 1]")
+            if any(right < left for left, right in zip(goal_scales, goal_scales[1:])):
+                raise ValueError("joint pose goal scales must be non-decreasing")
+            if any(not 0.0 < value <= 0.20 for value in position_tolerances):
+                raise ValueError("joint pose position tolerances must be in (0, 0.20]")
+            if any(right > left for left, right in zip(
+                position_tolerances, position_tolerances[1:]
+            )):
+                raise ValueError("joint pose position tolerances must be non-increasing")
+            if any(not 0.0 < value <= np.pi for value in orientation_tolerances):
+                raise ValueError("joint pose orientation tolerances must be in (0, pi]")
+            if any(right > left for left, right in zip(
+                orientation_tolerances, orientation_tolerances[1:]
+            )):
+                raise ValueError("joint pose orientation tolerances must be non-increasing")
+            task_space = ["target_distance_max_m" in level for level in parsed]
+            if any(task_space) and not all(task_space):
+                raise ValueError("task-space curriculum bounds must be present at every level")
+            if all(task_space):
+                distance_maxima = [level["target_distance_max_m"] for level in parsed]
+                orientation_maxima = [level["target_orientation_max_rad"] for level in parsed]
+                if any(not 0.0 < level["target_distance_min_m"] < level["target_distance_max_m"] for level in parsed):
+                    raise ValueError("invalid task-space distance range")
+                if any(not 0.0 <= level["target_orientation_min_rad"] < level["target_orientation_max_rad"] <= np.pi for level in parsed):
+                    raise ValueError("invalid task-space orientation range")
+                task_bounds = [(
+                    level["target_distance_min_m"],
+                    level["target_distance_max_m"],
+                    level["target_orientation_min_rad"],
+                    level["target_orientation_max_rad"],
+                ) for level in parsed]
+                self.precision_only_task_space = all(
+                    np.allclose(bounds, task_bounds[0], rtol=0.0, atol=1e-12)
+                    for bounds in task_bounds[1:]
+                )
+                if not self.precision_only_task_space:
+                    if any(right <= left for left, right in zip(distance_maxima, distance_maxima[1:])):
+                        raise ValueError("task-space distance maxima must strictly increase")
+                    if any(right <= left for left, right in zip(orientation_maxima, orientation_maxima[1:])):
+                        raise ValueError("task-space orientation maxima must strictly increase")
+            self.joint_pose_levels = parsed
+            index = self.orientation.level_index
+            self.goal.levels = tuple(goal_scales)
+            self.goal.level_index = index
+            self.goal.start = goal_scales[0]
+            self.goal.end = goal_scales[-1]
+            self.goal.scale = goal_scales[index]
         self.probabilities = {"s0": [1, 0, 0], "s1": [.25, .75, 0], "s2": [.20, .30, .50]}[stage]
         self.states = {
             "static": SceneHomotopy(1.0 if stage == "s2" else .02, .90, strict=stage == "s2", replay_strictified=stage == "s2"),
@@ -261,7 +359,15 @@ class HomotopyCurriculum:
         return str(self.rng.choice(["none", "static", "dynamic"], p=self.probabilities))
 
     def choose_orientation_anchor(self) -> bool:
-        """Keep position-only episodes present throughout S0 pose learning."""
+        """Rehearse the previous joint-pose level while learning a harder one."""
+        if self.joint_pose_levels:
+            if "target_distance_max_m" in self.joint_pose_levels[0]:
+                return False
+            return bool(
+                self.stage == "s0"
+                and self.orientation.level_index > 0
+                and self.rng.random() < self.orientation_anchor_probability
+            )
         return bool(
             self.stage == "s0"
             and self.position_phase_complete
@@ -278,7 +384,9 @@ class HomotopyCurriculum:
             enough and rate is not None and rate < self.orientation.anchor_floor
         ):
             return "recovery"
-        if enough and rate is not None and rate < self.orientation.retention_target:
+        if self.orientation.retention_warning or (
+            enough and rate is not None and rate < self.orientation.retention_target
+        ):
             return "intermediate"
         return "normal"
 
@@ -320,6 +428,12 @@ class HomotopyCurriculum:
             "replay_anchor_normal": float(config["replay_anchor_fraction"]),
             "replay_current_normal": float(config["replay_current_fraction"]),
             "deterministic_probe_required": bool(config["deterministic_probe_required"]),
+            "deterministic_previous_success_floor": float(
+                config["deterministic_previous_success_floor"]
+            ),
+            "deterministic_previous_collision_ceiling": float(
+                config["deterministic_previous_collision_ceiling"]
+            ),
         }
         for name, value in values.items():
             setattr(self.orientation, name, value)
@@ -329,20 +443,35 @@ class HomotopyCurriculum:
             ("deterministic_probe_success_rate", None),
             ("deterministic_probe_collision_rate", None),
             ("deterministic_probe_joint_limit_rate", None),
+            ("deterministic_probe_previous_success_rate", None),
+            ("deterministic_probe_previous_collision_rate", None),
+            ("deterministic_probe_previous_joint_limit_rate", None),
+            ("deterministic_probe_confirmation_passed", False),
             ("deterministic_probe_level_steps", -1),
+            ("retention_warning", False),
             ("recovery_mode", False),
         ):
             if not hasattr(self.orientation, name):
                 setattr(self.orientation, name, default)
 
     def _orientation_online_ready(self) -> bool:
+        if self.joint_pose_levels and "target_distance_max_m" in self.joint_pose_levels[0]:
+            return bool(
+                self.orientation.current_level_steps
+                >= self.orientation.min_transitions_per_level
+            )
         rate = self.orientation_success_rate
         anchor_rate = self.orientation_anchor_success_rate
+        anchor_ready = bool(
+            self.joint_pose_levels and self.orientation.level_index == 0
+        ) or bool(
+            len(self.orientation.anchor_outcomes) == self.orientation.anchor_outcomes.maxlen
+            and anchor_rate is not None and anchor_rate >= self.orientation.anchor_floor
+        )
         return bool(
             len(self.orientation.outcomes) == self.orientation.outcomes.maxlen
             and rate is not None and rate >= self.orientation.floor
-            and len(self.orientation.anchor_outcomes) == self.orientation.anchor_outcomes.maxlen
-            and anchor_rate is not None and anchor_rate >= self.orientation.anchor_floor
+            and anchor_ready
             and self.orientation.current_level_steps >= self.orientation.min_transitions_per_level
         )
 
@@ -354,22 +483,61 @@ class HomotopyCurriculum:
         if (self.orientation_at_full_scale
                 and self.orientation.full_scale_steps < int(minimum_full_pose_steps)):
             return False
-        if not self._orientation_online_ready() or self.orientation.deterministic_probe_passed:
+        # The first probe cannot advance a level until the online and anchor
+        # windows pass, so running it earlier only burns evaluation episodes.
+        task_space_curriculum = bool(
+            self.joint_pose_levels
+            and "target_distance_max_m" in self.joint_pose_levels[0]
+        )
+        if (not task_space_curriculum
+                and self.orientation.deterministic_probe_attempts == 0
+                and not self._orientation_online_ready()):
             return False
         last = self.orientation.deterministic_probe_level_steps
-        return bool(last < 0 or self.orientation.current_level_steps - last >= int(interval_transitions))
+        minimum = max(int(interval_transitions), self.orientation.min_transitions_per_level)
+        return bool(
+            self.orientation.current_level_steps >= minimum
+            and (last < 0 or self.orientation.current_level_steps - last >= int(interval_transitions))
+        )
 
     def record_orientation_probe(
         self, *, success_rate: float, collision_rate: float, joint_limit_rate: float,
-        passed: bool,
+        passed: bool, previous_success_rate: float | None = None,
+        previous_collision_rate: float | None = None,
+        previous_joint_limit_rate: float | None = None,
+        confirmation_passed: bool = False,
+        retention_passed: bool | None = None,
+        recovery_required: bool | None = None,
     ) -> None:
         self.orientation.deterministic_probe_attempts += 1
         self.orientation.deterministic_probe_success_rate = float(success_rate)
         self.orientation.deterministic_probe_collision_rate = float(collision_rate)
         self.orientation.deterministic_probe_joint_limit_rate = float(joint_limit_rate)
+        self.orientation.deterministic_probe_previous_success_rate = (
+            None if previous_success_rate is None else float(previous_success_rate)
+        )
+        self.orientation.deterministic_probe_previous_collision_rate = (
+            None if previous_collision_rate is None else float(previous_collision_rate)
+        )
+        self.orientation.deterministic_probe_previous_joint_limit_rate = (
+            None if previous_joint_limit_rate is None else float(previous_joint_limit_rate)
+        )
+        self.orientation.deterministic_probe_confirmation_passed = bool(
+            confirmation_passed
+        )
         self.orientation.deterministic_probe_level_steps = self.orientation.current_level_steps
         self.orientation.deterministic_probe_passed = bool(passed)
-        self.orientation.recovery_mode = not bool(passed)
+        # Promotion and recovery have different thresholds. A small miss of
+        # the promotion contract freezes promotion without forcing half of
+        # collection and replay back to the previous level.
+        self.orientation.recovery_mode = bool(
+            retention_passed is False
+            if recovery_required is None
+            else recovery_required
+        )
+        self.orientation.retention_warning = bool(
+            retention_passed is False and not self.orientation.recovery_mode
+        )
 
     def advance_orientation_if_ready(self) -> bool:
         if self.orientation_at_full_scale or not self._orientation_online_ready():
@@ -380,6 +548,11 @@ class HomotopyCurriculum:
         self.orientation.eligible_steps += self.orientation.current_level_steps
         self.orientation.level_index += 1
         self.orientation.scale = self.orientation.levels[self.orientation.level_index]
+        if self.joint_pose_levels:
+            self.goal.level_index = self.orientation.level_index
+            self.goal.scale = self.joint_pose_levels[self.orientation.level_index]["goal_scale"]
+            self.goal.current_level_steps = 0
+            self.goal.outcomes.clear()
         self.orientation.current_level_steps = 0
         self.orientation.outcomes.clear()
         self.orientation.anchor_outcomes.clear()
@@ -387,9 +560,64 @@ class HomotopyCurriculum:
         self.orientation.deterministic_probe_success_rate = None
         self.orientation.deterministic_probe_collision_rate = None
         self.orientation.deterministic_probe_joint_limit_rate = None
+        self.orientation.deterministic_probe_previous_success_rate = None
+        self.orientation.deterministic_probe_previous_collision_rate = None
+        self.orientation.deterministic_probe_previous_joint_limit_rate = None
+        self.orientation.deterministic_probe_confirmation_passed = False
         self.orientation.deterministic_probe_level_steps = -1
+        self.orientation.retention_warning = False
         self.orientation.recovery_mode = False
         return True
+
+    def manually_advance_orientation_to(
+        self, target_level: int, *, allow_early: bool = False,
+    ) -> None:
+        """Activate a harder S0 pose level after an explicit human decision."""
+        target_level = int(target_level)
+        current_level = int(self.orientation.level_index)
+        if self.stage != "s0":
+            raise ValueError("manual pose promotion is only valid in S0")
+        if target_level <= current_level:
+            raise ValueError(
+                f"target level L{target_level} must be above current L{current_level}"
+            )
+        if target_level >= len(self.orientation.levels):
+            raise ValueError(
+                f"target level L{target_level} is outside L0--"
+                f"L{len(self.orientation.levels) - 1}"
+            )
+        if (
+            not allow_early
+            and self.orientation.current_level_steps
+            < self.orientation.min_transitions_per_level
+        ):
+            raise ValueError(
+                "manual promotion requires the full per-level transition budget: "
+                f"{self.orientation.current_level_steps}/"
+                f"{self.orientation.min_transitions_per_level}"
+            )
+        self.orientation.eligible_steps += self.orientation.current_level_steps
+        self.orientation.level_index = target_level
+        self.orientation.scale = self.orientation.levels[target_level]
+        if self.joint_pose_levels:
+            self.goal.level_index = target_level
+            self.goal.scale = self.joint_pose_levels[target_level]["goal_scale"]
+            self.goal.current_level_steps = 0
+            self.goal.outcomes.clear()
+        self.orientation.current_level_steps = 0
+        self.orientation.outcomes.clear()
+        self.orientation.anchor_outcomes.clear()
+        self.orientation.deterministic_probe_passed = False
+        self.orientation.deterministic_probe_success_rate = None
+        self.orientation.deterministic_probe_collision_rate = None
+        self.orientation.deterministic_probe_joint_limit_rate = None
+        self.orientation.deterministic_probe_previous_success_rate = None
+        self.orientation.deterministic_probe_previous_collision_rate = None
+        self.orientation.deterministic_probe_previous_joint_limit_rate = None
+        self.orientation.deterministic_probe_confirmation_passed = False
+        self.orientation.deterministic_probe_level_steps = -1
+        self.orientation.retention_warning = False
+        self.orientation.recovery_mode = False
 
     def contract(self, scene: str) -> tuple[float, bool]:
         return (1.0, True) if scene == "none" else (self.states[scene].xi, self.states[scene].strict)
@@ -412,6 +640,10 @@ class HomotopyCurriculum:
 
     @property
     def orientation_tolerance(self) -> float:
+        if self.joint_pose_levels:
+            return self.joint_pose_levels[self.orientation.level_index][
+                "orientation_tolerance"
+            ]
         fraction = (self.orientation.scale - self.orientation.start) / max(
             self.orientation.end - self.orientation.start, 1e-12
         )
@@ -422,7 +654,46 @@ class HomotopyCurriculum:
         )
 
     @property
+    def position_tolerance(self) -> float:
+        if self.joint_pose_levels:
+            return self.joint_pose_levels[self.orientation.level_index][
+                "position_tolerance"
+            ]
+        return 0.055
+
+    def pose_contract(self, *, previous: bool = False) -> dict[str, float]:
+        if not self.joint_pose_levels:
+            return {
+                "goal_scale": self.goal_scale,
+                "orientation_scale": self.orientation_scale,
+                "position_tolerance": self.position_tolerance,
+                "orientation_tolerance": self.orientation_tolerance,
+            }
+        index = self.orientation.level_index
+        if previous:
+            index = max(0, index - 1)
+        level = self.joint_pose_levels[index]
+        contract = {
+            "goal_scale": level["goal_scale"],
+            # Keep the level coordinate here because replay partitions use it
+            # as their key.  Explicit task-space bounds, rather than this
+            # bookkeeping value, control target-orientation sampling.
+            "orientation_scale": self.orientation.levels[index],
+            "position_tolerance": level["position_tolerance"],
+            "orientation_tolerance": level["orientation_tolerance"],
+        }
+        if "target_distance_max_m" in level:
+            contract.update({
+                "target_distance_min_m": level["target_distance_min_m"],
+                "target_distance_max_m": level["target_distance_max_m"],
+                "target_orientation_min_rad": level["target_orientation_min_rad"],
+                "target_orientation_max_rad": level["target_orientation_max_rad"],
+            })
+        return contract
+    @property
     def position_phase_complete(self) -> bool:
+        if self.joint_pose_levels:
+            return self.orientation_at_full_scale
         return bool(
             self.goal_at_full_scale
             and self.goal.full_scale_steps >= self.goal_full_scale_min_steps
@@ -431,6 +702,39 @@ class HomotopyCurriculum:
     @property
     def pose_phase_complete(self) -> bool:
         """Whether the complete pose task is ready for dense safety shaping."""
+        if self.precision_only_task_space:
+            retention_ready = bool(
+                self.orientation.level_index == 0
+                or (
+                    self.orientation.deterministic_probe_previous_success_rate
+                    is not None
+                    and self.orientation.deterministic_probe_previous_success_rate
+                    >= self.orientation.deterministic_previous_success_floor
+                    and (
+                        self.orientation.deterministic_probe_previous_collision_rate
+                        is None
+                        or self.orientation.deterministic_probe_previous_collision_rate
+                        <= self.orientation.deterministic_previous_collision_ceiling
+                    )
+                    and (
+                        self.orientation.deterministic_probe_previous_joint_limit_rate
+                        is None
+                        or self.orientation.deterministic_probe_previous_joint_limit_rate
+                        == 0.0
+                    )
+                )
+            )
+        else:
+            retention_ready = bool(
+                (self.joint_pose_levels and self.orientation.level_index == 0)
+                or (
+                    len(self.orientation.anchor_outcomes)
+                    == self.orientation.anchor_outcomes.maxlen
+                    and self.orientation_anchor_success_rate is not None
+                    and self.orientation_anchor_success_rate
+                    >= self.orientation.deterministic_previous_success_floor
+                )
+            )
         return bool(
             self.position_phase_complete
             and self.orientation_at_full_scale
@@ -438,12 +742,22 @@ class HomotopyCurriculum:
             and len(self.orientation.outcomes) == self.orientation.outcomes.maxlen
             and self.orientation_success_rate is not None
             and self.orientation_success_rate >= self.orientation.floor
-            and len(self.orientation.anchor_outcomes) == self.orientation.anchor_outcomes.maxlen
-            and self.orientation_anchor_success_rate is not None
-            and self.orientation_anchor_success_rate >= self.orientation.anchor_floor
+            and retention_ready
             and (
                 not self.orientation.deterministic_probe_required
                 or self.orientation.deterministic_probe_passed
+            )
+        )
+
+    @property
+    def self_safety_probe_passed(self) -> bool:
+        return bool(
+            not self.orientation.deterministic_probe_required
+            or (
+                self.orientation.deterministic_probe_passed
+                and self.orientation.deterministic_probe_collision_rate is not None
+                and self.orientation.deterministic_probe_collision_rate
+                <= self.self_probe_collision_ceiling
             )
         )
 
@@ -457,10 +771,13 @@ class HomotopyCurriculum:
                 atol=1e-12,
             )
             and self.self_safety.full_weight_steps >= self.self_full_weight_min_steps
+            and self.self_safety_probe_passed
         )
 
     @property
     def s0_phase(self) -> str:
+        if self.joint_pose_levels and not self.pose_phase_complete:
+            return "joint_pose"
         if not self.position_phase_complete:
             return "position"
         # Once dense self-safety shaping has started, a retention drop freezes
@@ -490,6 +807,13 @@ class HomotopyCurriculum:
         """Count position and full-pose consolidation from their actual contracts."""
         if self.stage != "s0" or not curriculum_eligible:
             return
+        if self.joint_pose_levels:
+            if np.isclose(float(goal_scale), self.goal.scale, rtol=0.0, atol=1e-12):
+                self.goal.current_level_steps += 1
+            if self.orientation_at_full_scale and not orientation_anchor:
+                self.goal.full_scale_steps += 1
+                self.orientation.full_scale_steps += 1
+            return
         if np.isclose(float(goal_scale), self.goal.scale, rtol=0.0, atol=1e-12):
             self.goal.current_level_steps += 1
         if np.isclose(
@@ -516,6 +840,36 @@ class HomotopyCurriculum:
     def s0_goal_gate_eligible(
         self, minimum_goal_full_scale_steps: int, minimum_pose_full_scale_steps: int
     ) -> bool:
+        if self.precision_only_task_space:
+            retention_ready = bool(
+                self.orientation.level_index == 0
+                or (
+                    self.orientation.deterministic_probe_previous_success_rate
+                    is not None
+                    and self.orientation.deterministic_probe_previous_success_rate
+                    >= self.orientation.anchor_floor
+                    and (
+                        self.orientation.deterministic_probe_previous_collision_rate
+                        is None
+                        or self.orientation.deterministic_probe_previous_collision_rate
+                        <= self.orientation.deterministic_previous_collision_ceiling
+                    )
+                    and (
+                        self.orientation.deterministic_probe_previous_joint_limit_rate
+                        is None
+                        or self.orientation.deterministic_probe_previous_joint_limit_rate
+                        == 0.0
+                    )
+                )
+            )
+        else:
+            retention_ready = bool(
+                len(self.orientation.anchor_outcomes)
+                == self.orientation.anchor_outcomes.maxlen
+                and self.orientation_anchor_success_rate is not None
+                and self.orientation_anchor_success_rate
+                >= self.orientation.anchor_floor
+            )
         return bool(
             self.stage == "s0"
             and self.goal_at_full_scale
@@ -525,9 +879,7 @@ class HomotopyCurriculum:
             and len(self.orientation.outcomes) == self.orientation.outcomes.maxlen
             and self.orientation_success_rate is not None
             and self.orientation_success_rate >= self.orientation.floor
-            and len(self.orientation.anchor_outcomes) == self.orientation.anchor_outcomes.maxlen
-            and self.orientation_anchor_success_rate is not None
-            and self.orientation_anchor_success_rate >= self.orientation.anchor_floor
+            and retention_ready
             and np.isclose(
                 self.self_safety.weight,
                 self.self_safety.end,
@@ -535,19 +887,99 @@ class HomotopyCurriculum:
                 atol=1e-12,
             )
             and self.self_safety.full_weight_steps >= self.self_full_weight_min_steps
+            and self.self_safety_phase_complete
             and (
                 not self.orientation.deterministic_probe_required
                 or self.orientation.deterministic_probe_passed
             )
         )
 
+    def scene_stage_complete(self, scene: str, minimum_strict_steps: int) -> bool:
+        """Return whether a formal obstacle stage may hand off its checkpoint."""
+        if scene not in {"static", "dynamic"}:
+            raise ValueError("scene must be 'static' or 'dynamic'")
+        state = self.states[scene]
+        return bool(
+            state.strict
+            and state.replay_strictified
+            and int(state.strict_steps) >= int(minimum_strict_steps)
+        )
+
+    def stage_complete(
+        self, minimum_goal_full_scale_steps: int,
+        minimum_pose_full_scale_steps: int, minimum_strict_steps: int,
+    ) -> bool:
+        """Formal completion contract for the active serial stage."""
+        if self.stage == "s0":
+            return self.s0_goal_gate_eligible(
+                minimum_goal_full_scale_steps, minimum_pose_full_scale_steps,
+            )
+        scene = "static" if self.stage == "s1" else "dynamic"
+        return self.scene_stage_complete(scene, minimum_strict_steps)
+
     def finish_episode(
         self, scene: str, position_reached: bool, task_reached: bool, transitions: int,
         *, orientation_anchor: bool = False, curriculum_eligible: bool = True,
+        pose_phase_complete_at_start: bool | None = None,
+        self_weight_full_at_start: bool | None = None,
     ) -> dict[str, Any]:
         goal_rate = None
         orientation_rate = None
         if self.stage == "s0":
+            if self.joint_pose_levels:
+                current_episode_full_steps = (
+                    0 if orientation_anchor or not self.orientation_at_full_scale
+                    else int(transitions)
+                )
+                if pose_phase_complete_at_start is None:
+                    pose_phase_complete_at_episode_start = bool(
+                        self.pose_phase_complete
+                        and self.orientation.full_scale_steps - current_episode_full_steps
+                        >= self.orientation_full_scale_min_steps
+                    )
+                else:
+                    pose_phase_complete_at_episode_start = bool(
+                        pose_phase_complete_at_start
+                    )
+                if self_weight_full_at_start is None:
+                    self_weight_full_at_episode_start = bool(np.isclose(
+                        self.self_safety.weight, self.self_safety.end,
+                        rtol=0.0, atol=1e-12,
+                    ))
+                else:
+                    self_weight_full_at_episode_start = bool(self_weight_full_at_start)
+                if curriculum_eligible:
+                    self.goal.outcomes.append(bool(task_reached))
+                    goal_rate = float(np.mean(self.goal.outcomes))
+                    if orientation_anchor:
+                        self.orientation.anchor_outcomes.append(bool(task_reached))
+                    else:
+                        self.orientation.current_level_steps += int(transitions)
+                        self.orientation.outcomes.append(bool(task_reached))
+                        orientation_rate = float(np.mean(self.orientation.outcomes))
+                if (curriculum_eligible and not orientation_anchor
+                        and pose_phase_complete_at_episode_start):
+                    self.self_safety.eligible_steps += int(transitions)
+                    fraction = min(
+                        self.self_safety.eligible_steps / self.self_safety.ramp_steps, 1.0
+                    )
+                    self.self_safety.weight = float(
+                        self.self_safety.start
+                        + fraction * (self.self_safety.end - self.self_safety.start)
+                    )
+                    if self_weight_full_at_episode_start:
+                        self.self_safety.full_weight_steps += int(transitions)
+                return {
+                    "became_strict": False,
+                    "rolling_task_reach_rate": None,
+                    "rolling_goal_success_rate": goal_rate,
+                    "rolling_orientation_success_rate": orientation_rate,
+                    "goal_scale": self.goal.scale,
+                    "orientation_scale": self.orientation.scale,
+                    "position_tolerance": self.position_tolerance,
+                    "orientation_tolerance": self.orientation_tolerance,
+                    "lambda_self": self.lambda_self,
+                }
             # Phase predicates are sampled before incorporating this episode so
             # its fixed reward contract cannot qualify itself retroactively.
             pose_phase_complete_at_episode_start = self.pose_phase_complete
@@ -646,12 +1078,47 @@ class HomotopyCurriculum:
     def xi_map(self) -> dict[str, float]:
         return {name: state.xi for name, state in self.states.items()}
 
+    def inherit_task_state(self, previous: dict[str, Any]) -> None:
+        """Carry the completed S0 task and self-safety contract into S1/S2."""
+        self.goal = copy.deepcopy(previous["goal"])
+        self.orientation = copy.deepcopy(previous["orientation"])
+        self.joint_pose_levels = tuple(copy.deepcopy(previous.get("joint_pose_levels", ())))
+        self._refresh_precision_only_task_space()
+        self.self_safety = copy.deepcopy(previous["self_safety"])
+
+    def _refresh_precision_only_task_space(self) -> None:
+        self.precision_only_task_space = False
+        if not self.joint_pose_levels:
+            return
+        required = (
+            "target_distance_min_m", "target_distance_max_m",
+            "target_orientation_min_rad", "target_orientation_max_rad",
+        )
+        if not all(all(key in level for key in required) for level in self.joint_pose_levels):
+            return
+        first = tuple(self.joint_pose_levels[0][key] for key in required)
+        self.precision_only_task_space = all(
+            np.allclose(
+                tuple(level[key] for key in required), first,
+                rtol=0.0, atol=1e-12,
+            )
+            for level in self.joint_pose_levels[1:]
+        )
+
+    def inherit_scene_state(self, previous: dict[str, Any], scene: str) -> None:
+        """Carry one completed scene curriculum without replacing stage policy."""
+        if scene not in self.states or scene not in previous["states"]:
+            raise ValueError(f"cannot inherit unknown scene {scene!r}")
+        self.states[scene] = copy.deepcopy(previous["states"][scene])
+
     def state_dict(self) -> dict[str, Any]:
         return {"stage": self.stage, "ramp_steps": self.ramp_steps, "probabilities": self.probabilities,
                 "goal_full_scale_min_steps": self.goal_full_scale_min_steps,
                 "orientation_full_scale_min_steps": self.orientation_full_scale_min_steps,
                 "self_full_weight_min_steps": self.self_full_weight_min_steps,
+                "self_probe_collision_ceiling": self.self_probe_collision_ceiling,
                 "goal": self.goal, "orientation": self.orientation,
+                "joint_pose_levels": self.joint_pose_levels,
                 "self_safety": self.self_safety,
                 "states": self.states, "rng_state": self.rng.bit_generator.state}
 
@@ -663,8 +1130,15 @@ class HomotopyCurriculum:
             state["orientation_full_scale_min_steps"]
         )
         self.self_full_weight_min_steps = int(state["self_full_weight_min_steps"])
+        self.self_probe_collision_ceiling = float(
+            state.get(
+                "self_probe_collision_ceiling", self.self_probe_collision_ceiling,
+            )
+        )
         self.goal = state["goal"]
         self.orientation = state["orientation"]
+        self.joint_pose_levels = tuple(state.get("joint_pose_levels", ()))
+        self._refresh_precision_only_task_space()
         self.self_safety = state["self_safety"]
         self.states = state["states"]
         self.rng.bit_generator.state = state["rng_state"]

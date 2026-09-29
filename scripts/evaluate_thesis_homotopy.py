@@ -1,20 +1,33 @@
 #!/usr/bin/env python3
+"""Run the single, parallel frozen-policy evaluation for V13.5."""
+
 from __future__ import annotations
 
 import argparse
-import csv
+import hashlib
 import json
+import multiprocessing as mp
+import os
 from pathlib import Path
 import sys
+import time
 
 import numpy as np
 import torch
 
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT))
+
 from rl_risk_sac.algorithms.thesis_sac import ThesisSACAgent
+from rl_risk_sac.envs.parallel_thesis_env import ParallelThesisEnvPool
 from rl_risk_sac.envs.thesis_homotopy_env import ThesisHomotopyEnv
 from rl_risk_sac.utils.config import load_config
+from scripts.train_thesis_homotopy import (
+    run_deterministic_pose_probe,
+    run_parallel_deterministic_pose_probe,
+)
 
 
 MOTION_METRICS = (
@@ -30,6 +43,26 @@ MOTION_METRICS = (
     "command_jerk_peak_rad_s3",
     "measured_jerk_rms_rad_s3",
     "measured_jerk_peak_rad_s3",
+)
+
+EVALUATION_INFO_KEYS = (
+    "rho_orientation",
+    "next_rho_orientation",
+    "control_self_min_distance",
+    "strict_pose_reached",
+    "obstacle_collision",
+    "self_collision",
+    "environment_collision",
+    "joint_limit",
+    "task_reached",
+    "next_rho_position",
+    "keypoint_distance",
+    "next_keypoint_distance",
+    "keypoint_tracking_quality",
+    "keypoint_precision_quality",
+    "keypoint_precision_reward",
+    "keypoint_progress",
+    "jacobian_clip_ratio",
 )
 
 
@@ -76,165 +109,241 @@ def motion_metrics(
     return metrics
 
 
+def available_physical_cpu_ids() -> list[int] | None:
+    """Return one allowed logical CPU per physical core when Linux exposes it."""
+    if not hasattr(os, "sched_getaffinity"):
+        return None
+    allowed = sorted(os.sched_getaffinity(0))
+    selected: list[int] = []
+    seen: set[tuple[str, str, str]] = set()
+    for cpu in allowed:
+        topology = Path(f"/sys/devices/system/cpu/cpu{cpu}/topology")
+        try:
+            package = (topology / "physical_package_id").read_text().strip()
+            # On multi-die CPUs (including Threadripper), core_id is only
+            # unique within a die rather than within the whole package.
+            die_path = topology / "die_id"
+            die = die_path.read_text().strip() if die_path.exists() else "0"
+            core = (topology / "core_id").read_text().strip()
+        except OSError:
+            return allowed
+        key = (package, die, core)
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(cpu)
+    return selected
+
+
+def physical_cpu_ids(count: int) -> list[int] | None:
+    """Choose ``count`` distinct physical cores from the allowed CPU set."""
+    available = available_physical_cpu_ids()
+    if available is None or len(available) < count:
+        return None
+    return available[:count]
+
+
+def automatic_num_envs(episodes: int) -> int:
+    """Use all available physical cores without creating idle workers."""
+    physical = available_physical_cpu_ids()
+    capacity = len(physical) if physical else (os.cpu_count() or 1)
+    return max(1, min(int(episodes), capacity))
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Strict validation for a thesis homotopy checkpoint")
+    parser = argparse.ArgumentParser(
+        description="Parallel frozen-policy evaluation for a V13.5 checkpoint"
+    )
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--config", default="configs/experiments/thesis_homotopy.yaml")
-    parser.add_argument("--scenes", nargs="+", choices=("none", "static", "dynamic"), default=["none", "static", "dynamic"])
-    parser.add_argument("--episodes", type=int, default=100)
-    parser.add_argument("--seed", type=int, default=41001)
+    parser.add_argument(
+        "--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+    )
+    parser.add_argument(
+        "--level-index", type=int,
+        help="pose level; inferred from a complete checkpoint when omitted",
+    )
+    parser.add_argument("--episodes", type=int, default=1000)
+    parser.add_argument("--max-episode-steps", type=int,
+                        help="override the evaluation episode horizon (default: config horizon)")
+    parser.add_argument("--seed", type=int, default=31001)
+    parser.add_argument(
+        "--scene", choices=("auto", "none", "static", "dynamic"), default="auto",
+        help="auto maps complete S0/S1/S2 checkpoints to none/static/dynamic",
+    )
+    parser.add_argument("--device", choices=("cpu", "cuda:auto"), default="cpu")
+    parser.add_argument(
+        "--num-envs", type=int, default=0,
+        help="parallel environments; 0 (default) uses all available physical cores",
+    )
+    parser.add_argument(
+        "--no-cpu-affinity", action="store_true",
+        help="let the OS schedule workers instead of using distinct physical cores",
+    )
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
-    config = load_config(ROOT / args.config)
+
+    if args.episodes < 1:
+        parser.error("--episodes must be positive")
+    if args.max_episode_steps is not None and args.max_episode_steps < 1:
+        parser.error("--max-episode-steps must be positive")
+    if args.num_envs < 0:
+        parser.error("--num-envs must be non-negative")
+    num_envs = automatic_num_envs(args.episodes) if args.num_envs == 0 else min(
+        args.num_envs, args.episodes
+    )
+    torch.set_num_threads(1)
+    try:
+        torch.set_num_interop_threads(1)
+    except RuntimeError:
+        pass
+
+    config_path = Path(args.config)
+    if not config_path.is_absolute():
+        config_path = ROOT / config_path
+    config = load_config(config_path)
+    config["device"] = args.device
+    if args.max_episode_steps is not None:
+        config["thesis"]["horizon"] = args.max_episode_steps
+    env = ThesisHomotopyEnv(config)
+    try:
+        agent = ThesisSACAgent(
+            int(env.observation_space.shape[0]),
+            int(env.action_space.shape[0]),
+            config,
+        )
+    finally:
+        env.close()
+
     checkpoint_path = Path(args.checkpoint)
     if not checkpoint_path.is_absolute():
         checkpoint_path = ROOT / checkpoint_path
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    if checkpoint.get("protocol") != config["thesis"]["protocol"]:
-        raise ValueError(
-            f"checkpoint protocol {checkpoint.get('protocol')!r} does not match "
-            f"configured protocol {config['thesis']['protocol']!r}"
+    started = time.perf_counter()
+    state = torch.load(checkpoint_path, map_location=agent.device, weights_only=False)
+    checkpoint_stage = None
+    if isinstance(state, dict) and "curriculum" in state:
+        checkpoint_stage = state["curriculum"].get("stage")
+    scene = args.scene
+    if scene == "auto":
+        scene = {"s0": "none", "s1": "static", "s2": "dynamic"}.get(
+            checkpoint_stage, "none"
         )
-    checkpoint_stage = checkpoint["curriculum"]["stage"]
-    if checkpoint_stage == "s0":
-        goal = checkpoint["curriculum"]["goal"]
-        orientation = checkpoint["curriculum"]["orientation"]
-        self_safety = checkpoint["curriculum"].get("self_safety")
-        required = int(config["thesis"]["goal_curriculum"]["full_scale_min_transitions"])
-        pose_required = int(config["thesis"]["orientation_curriculum"]["full_scale_min_transitions"])
-        self_required = int(
-            config["thesis"]["self_collision"]["curriculum"][
-                "full_weight_min_transitions"
-            ]
+    level_index = args.level_index
+    if level_index is None and isinstance(state, dict) and "curriculum" in state:
+        orientation = state["curriculum"].get("orientation")
+        level_index = int(orientation.level_index)
+    if level_index is None:
+        parser.error("--level-index is required for an actor-only checkpoint")
+    levels = config["thesis"]["joint_pose_curriculum"]["levels"]
+    if not 0 <= level_index < len(levels):
+        parser.error(f"--level-index must be in [0, {len(levels) - 1}]")
+    if isinstance(state, dict) and "agent" in state:
+        actor_state = state["agent"]["actor"]
+    elif isinstance(state, dict) and "actor" in state:
+        actor_state = state["actor"]
+    else:
+        actor_state = state
+    agent.actor.load_state_dict(actor_state)
+    agent.actor.eval()
+
+    level = levels[level_index]
+    orientation_levels = config["thesis"]["orientation_curriculum"]["levels"]
+    contract = dict(
+        scene=scene,
+        goal_scale=float(level["goal_scale"]),
+        orientation_scale=float(orientation_levels[level_index]),
+        position_tolerance=float(level["position_tolerance_m"]),
+        orientation_tolerance=float(level["orientation_tolerance_rad"]),
+        target_distance_min_m=float(level["target_distance_min_m"]),
+        target_distance_max_m=float(level["target_distance_max_m"]),
+        target_orientation_min_rad=float(level["target_orientation_min_rad"]),
+        target_orientation_max_rad=float(level["target_orientation_max_rad"]),
+    )
+    cpu_ids = None
+    if num_envs > 1 and not args.no_cpu_affinity:
+        cpu_ids = physical_cpu_ids(num_envs)
+        if cpu_ids is None:
+            print("warning: distinct physical CPU affinity unavailable; using OS scheduling")
+    if num_envs == 1:
+        metrics = run_deterministic_pose_probe(
+            agent, config, episodes=args.episodes, seed=args.seed, **contract,
         )
-        full_scale_steps = int(getattr(goal, "full_scale_steps", 0))
-        at_full_scale = np.isclose(float(goal.scale), float(goal.end), rtol=0.0, atol=1e-12)
-        full_pose_steps = int(orientation.full_scale_steps)
-        orientation_at_full = np.isclose(
-            float(orientation.scale), float(orientation.end), rtol=0.0, atol=1e-12
+    else:
+        worker_seeds = [args.seed + 1000000 + index for index in range(num_envs)]
+        # CPU-only evaluation can safely fork after the temporary construction
+        # environment has closed.  This avoids importing PyTorch and PyBullet
+        # again in every worker.  CUDA retains spawn semantics.
+        start_method = (
+            "fork"
+            if args.device == "cpu" and "fork" in mp.get_all_start_methods()
+            else "spawn"
         )
-        pose_rate = float(np.mean(orientation.outcomes)) if orientation.outcomes else None
-        anchor_rate = (
-            float(np.mean(orientation.anchor_outcomes))
-            if orientation.anchor_outcomes else None
-        )
-        if (not at_full_scale or full_scale_steps < required or not orientation_at_full
-                or full_pose_steps < pose_required
-                or len(orientation.outcomes) != orientation.outcomes.maxlen
-                or pose_rate is None or pose_rate < orientation.floor
-                or len(orientation.anchor_outcomes) != orientation.anchor_outcomes.maxlen
-                or anchor_rate is None or anchor_rate < orientation.anchor_floor
-                or self_safety is None
-                or not np.isclose(
-                    float(self_safety.weight), float(self_safety.end),
-                    rtol=0.0, atol=1e-12,
-                )
-                or int(getattr(self_safety, "full_weight_steps", 0)) < self_required
-                or (getattr(orientation, "deterministic_probe_required", False)
-                    and not getattr(orientation, "deterministic_probe_passed", False))):
-            raise ValueError(
-                "S0 checkpoint is not Gate-eligible: "
-                f"goal_scale={goal.scale}, full_scale_steps={full_scale_steps}, required={required}"
-                f", orientation_scale={orientation.scale}, full_pose_steps={full_pose_steps}, "
-                f"pose_required={pose_required}, pose_rate={pose_rate}, anchor_rate={anchor_rate}, "
-                f"self_full_weight_steps={getattr(self_safety, 'full_weight_steps', 0)}, "
-                f"self_required={self_required}"
+        with ParallelThesisEnvPool(
+            config, worker_seeds, cpu_ids=cpu_ids,
+            step_info_keys=EVALUATION_INFO_KEYS,
+            start_method=start_method,
+        ) as pool:
+            metrics = run_parallel_deterministic_pose_probe(
+                agent, pool, config,
+                episodes=args.episodes, seed=args.seed, **contract,
             )
-    if checkpoint_stage in {"s1", "s2"}:
-        new_scene = "static" if checkpoint_stage == "s1" else "dynamic"
-        state = checkpoint["curriculum"]["states"][new_scene]
-        if not (state.strict and state.replay_strictified and state.strict_steps >= int(config["thesis"]["strict_min_transitions"])):
-            raise ValueError(f"checkpoint is not Gate-eligible: {new_scene} strict_steps={state.strict_steps}")
+
+    settings = config["thesis"]["orientation_curriculum"]
+    thresholds = {
+        "none": {
+            "success": float(settings["deterministic_probe_success_floor"]),
+            "collision": float(settings["deterministic_probe_collision_ceiling"]),
+            "timeout": 0.05,
+        },
+        "static": {"success": 0.90, "collision": 0.03, "timeout": 0.10},
+        "dynamic": {"success": 0.80, "collision": 0.05, "timeout": 0.20},
+    }
+    threshold = thresholds[scene]
+    metrics.update({
+        "checkpoint": str(checkpoint_path.relative_to(ROOT)),
+        "checkpoint_sha256": file_sha256(checkpoint_path),
+        "level_index": level_index,
+        "scene": scene,
+        "episodes": args.episodes,
+        "max_episode_steps": int(config["thesis"]["horizon"]),
+        "seed": args.seed,
+        "num_envs": num_envs,
+        "worker_start_method": start_method if num_envs > 1 else None,
+        "worker_cpu_ids": cpu_ids,
+        "elapsed_seconds": time.perf_counter() - started,
+        "success_floor": threshold["success"],
+        "bin_success_floor": float(settings["deterministic_probe_bin_success_floor"]),
+        "collision_ceiling": threshold["collision"],
+        "timeout_ceiling": threshold["timeout"],
+        "passed": bool(
+            metrics["success_rate"]
+            >= threshold["success"]
+            and metrics["minimum_bin_success_rate"]
+            >= float(settings["deterministic_probe_bin_success_floor"])
+            and metrics["collision_rate"]
+            <= threshold["collision"]
+            and metrics["joint_limit_rate"] == 0.0
+            and metrics["timeout_rate"] <= threshold["timeout"]
+        ),
+    })
     output = Path(args.output)
     if not output.is_absolute():
         output = ROOT / output
-    output.mkdir(parents=True, exist_ok=False)
-    env = ThesisHomotopyEnv(config)
-    agent = ThesisSACAgent(
-        int(env.observation_space.shape[0]), int(env.action_space.shape[0]), config
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists():
+        raise FileExistsError(f"refusing to overwrite {output}")
+    output.write_text(
+        json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    agent.load_state_dict(checkpoint["agent"])
-    rows = []
-    for scene_index, scene in enumerate(args.scenes):
-        for episode in range(args.episodes):
-            env.configure_episode(
-                scene, xi=1.0, strict=True, goal_scale=1.0,
-                orientation_scale=1.0,
-                orientation_tolerance=float(config["thesis"]["orientation_tolerance"]),
-            )
-            observation, _ = env.reset(seed=args.seed + scene_index * 100000 + episode)
-            terminated = truncated = False; total = 0.0; length = 0; info = {}
-            minimum_distance = float("inf")
-            minimum_self_distance = float("inf")
-            command_velocities = []
-            measured_velocities = []
-            while not (terminated or truncated):
-                action = agent.select_action(observation, deterministic=True)
-                observation, reward, _, terminated, truncated, info = env.step(action)
-                total += reward; length += 1
-                command_velocities.append(np.asarray(info["qdot_cmd"], dtype=np.float64))
-                measured_velocities.append(np.asarray(info["qdot_measured"], dtype=np.float64))
-                minimum_distance = min(minimum_distance, float(info["control_min_distance"]))
-                minimum_self_distance = min(
-                    minimum_self_distance, float(info["control_self_min_distance"])
-                )
-            collision = bool(
-                info["obstacle_collision"] or info["self_collision"] or info["environment_collision"]
-            )
-            rows.append({
-                "scene": scene, "episode": episode, "return": total, "length": length,
-                "safe_success": int(info["safe_success"]),
-                "obstacle_collision": int(info["obstacle_collision"]),
-                "self_collision": int(info["self_collision"]),
-                "environment_collision": int(info["environment_collision"]),
-                "collision": int(collision), "joint_limit": int(info["joint_limit"]),
-                "timeout": int(truncated), "position_error_m": float(info["goal_error_norm"]),
-                "orientation_error_rad": float(info["orientation_error_norm"]),
-                "minimum_distance_m": minimum_distance,
-                "minimum_self_distance_m": minimum_self_distance,
-                **motion_metrics(
-                    np.asarray(command_velocities),
-                    np.asarray(measured_velocities),
-                    float(config["thesis"]["control_dt"]),
-                ),
-            })
-    env.close()
-    with (output / "episodes.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0])); writer.writeheader(); writer.writerows(rows)
-    summary = {}
-    for scene in args.scenes:
-        selected = [row for row in rows if row["scene"] == scene]; count = len(selected)
-        summary[scene] = {key + "_rate": float(np.mean([row[key] for row in selected]))
-                          for key in ("safe_success", "collision", "obstacle_collision", "self_collision",
-                                      "environment_collision", "joint_limit", "timeout")}
-        summary[scene]["episodes"] = count
-        for field in ("position_error_m", "orientation_error_rad"):
-            values = np.asarray([row[field] for row in selected], dtype=np.float64)
-            summary[scene][field + "_mean"] = float(np.mean(values))
-            summary[scene][field + "_p95"] = float(np.quantile(values, .95))
-        summary[scene]["minimum_distance_m"] = float(
-            np.min([row["minimum_distance_m"] for row in selected])
-        )
-        summary[scene]["minimum_self_distance_m"] = float(
-            np.min([row["minimum_self_distance_m"] for row in selected])
-        )
-        for field in MOTION_METRICS:
-            values = np.asarray([row[field] for row in selected], dtype=np.float64)
-            summary[scene][field + "_mean"] = float(np.mean(values))
-            summary[scene][field + "_p95"] = float(np.quantile(values, .95))
-            summary[scene][field + "_max"] = float(np.max(values))
-    thresholds = {
-        "none": {"safe_success_rate": .95, "collision_rate": 0.0, "joint_limit_rate": 0.0, "timeout_rate": .05},
-        "static": {"safe_success_rate": .90, "collision_rate": .03, "joint_limit_rate": 0.0, "timeout_rate": .10},
-        "dynamic": {"safe_success_rate": .80, "collision_rate": .05, "joint_limit_rate": 0.0, "timeout_rate": .20},
-    }
-    for scene in args.scenes:
-        actual, limit = summary[scene], thresholds[scene]
-        actual["gate_pass"] = bool(actual["safe_success_rate"] >= limit["safe_success_rate"]
-                                   and actual["collision_rate"] <= limit["collision_rate"]
-                                   and actual["joint_limit_rate"] <= limit["joint_limit_rate"]
-                                   and actual["timeout_rate"] <= limit["timeout_rate"])
-    (output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(metrics, ensure_ascii=False))
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()

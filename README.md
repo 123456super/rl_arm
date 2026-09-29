@@ -1,140 +1,57 @@
-# Link-Level Dynamic Risk SAC
+# UR5 Serial Curriculum
 
-本项目是 UR5 在单动态球形障碍物场景下的连杆级动态风险 SAC 仿真原型。最终论文主比较使用末端风险基线、连杆级固定风险惩罚 SAC（`w_R=1.0`）和连杆级约束 SAC；当前 held-out 结果支持前者作为部署候选，而非将约束 SAC 表述为整体最优。
+本项目只保留一条正式训练线路：
 
-文档已按当前论文主线、旧实验材料、工程说明和投稿材料归类，入口见 [docs/README.md](docs/README.md)。
+`S0 到达与姿态精度课程 -> S1 静态障碍物 -> S2 动态障碍物`
+
+唯一正式配置是 `configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml`，
+训练入口是 `scripts/train_thesis_homotopy.py`。Hybrid Keypoint + Jacobian + Auto-PCR
+与四池 replay 的实际配置见
+[方案文档](docs/experiments_9/four_pool_hybrid_keypoint_jacobian_scheme.md)。
 
 ## 环境
-
-推荐从项目根目录创建环境：
 
 ```bash
 conda env create -f environment.yml
 conda activate rl
-```
-
-如果需要指定 CUDA 版 PyTorch，可先按下面方式创建 Python 环境，再手动安装匹配本机 CUDA 的 `torch`。
-
-```bash
-conda env remove -n rl -y
-conda create -n rl --override-channels -c https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge -y python=3.13
-conda install -n rl --override-channels -c https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge -y pip
-conda activate rl
-```
-
-逐个安装 Python 包：
-
-```bash
-python -m pip install numpy -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
-python -m pip install pandas -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
-python -m pip install matplotlib -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
-python -m pip install tqdm -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
-python -m pip install pyyaml -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
-python -m pip install gymnasium -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
-python -m pip install pybullet -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
-python -m pip install torch --index-url https://download.pytorch.org/whl/cu126
 python -m pip install -e . --no-deps
 ```
 
-如果 PyTorch 下载较慢，可先手动下载匹配当前 Python 版本的 wheel，再用 `python -m pip install ./文件名.whl` 本地安装。当前测试通过的组合是 Python 3.13、PyTorch `2.13.0+cu126`。
+测试使用 `/home/c211/anaconda3/envs/rl/bin/python` 对应的 `rl` 环境。
 
-GPU 验证：
-
-```bash
-python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no cuda')"
-```
-
-如需自动选择 GPU，把 `configs/default.yaml` 中的 `device` 改为 `cuda:auto`。程序会综合候选显卡的空闲显存和算力评分选择一张卡；如果 CUDA 不可用且 `device_selection.fallback_to_cpu: true`，会自动回退到 CPU。
-
-## 快速检查
+## 训练与评估
 
 ```bash
-conda run -n rl python scripts/smoke_test.py
+python scripts/train_thesis_homotopy.py \
+  --config configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml \
+  --stage s0 --run-name s0_seed11001
 ```
 
-## 训练
-
-详细训练流程、过程观察和下一步决策见 [docs/project/training_guide.md](docs/project/training_guide.md)。
-
-训练命令固定为读取 YAML 配置，方法、步数、seed、输出目录都在配置文件里改：
+S0 的四池续训和 L1 升档命令见上述方案文档。冻结评估使用：
 
 ```bash
-conda run -n rl python scripts/train.py --config configs/default.yaml
+python scripts/evaluate_thesis_homotopy.py \
+  --config configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml \
+  --checkpoint /absolute/path/to/actor_step_XXXXXXX.pt \
+  --level-index N --scene none \
+  --episodes 1000 \
+  --output outputs/eval/latest.json
 ```
 
-短训练示例：
+评估固定覆盖 10×10 目标空间网格，报告总体/最弱网格成功率、碰撞、限位、
+超时和自碰撞安全距离；默认自动使用可用物理核心，也可用 `--num-envs N`
+手动限制并行度。固定 seed 下的任务语义与原串行评估一致。
 
-```bash
-conda run -n rl python scripts/train.py --config configs/experiments/ur5_short_train.yaml
-```
+## 初始化 actor
 
-使用固定 Butterworth—五次多项式 RTB 重新训练部署候选：
+可选的 V13.4 到达 actor 保存在
+`artifacts/initialization/v13_5_reaching_actor.pt`，其来源和 SHA-256 记录在同目录
+的 provenance JSON 中。它只用于 actor-only 初始化，不恢复旧训练体系或旧 replay。
 
-```bash
-conda run -n rl python scripts/train.py --config configs/experiments/random_crossing_link_fixed_penalty1_rtb.yaml
-```
+## 代码结构
 
-论文式动态目标接口使用 `linear_bounce` 目标提供器，必须独立重训：
-
-```bash
-conda run -n rl python scripts/train.py --config configs/experiments/dynamic_target_tracking.yaml
-```
-
-既有正式结果使用旧的一阶 EMA 执行器。需要复现实验时使用 `random_crossing_link_fixed_penalty1_ema.yaml`；旧结果不能作为新 RTB 有效性的证据。
-
-## 评估
-
-```bash
-python scripts/evaluate.py --checkpoint outputs/runs/某次训练目录/actor.pt --episodes 20
-```
-
-如需导出典型 episode 曲线数据：
-
-```bash
-python scripts/evaluate.py --checkpoint outputs/runs/某次训练目录/actor.pt --episodes 3 --trace-output outputs/runs/某次训练目录/traces
-```
-
-启用 `trace-output` 后会同时生成20 Hz策略轨迹和带 `_physics.csv` 后缀的约240 Hz物理子步轨迹；后者用于展示RTB下的关节速度、加速度和jerk连续性。
-
-## 场景配置
-
-配置入口是 `configs/default.yaml`，它通过 `includes` 组合多个子配置。脚本中的命令行参数只作为临时覆盖使用。
-
-```text
-configs/
-  default.yaml          # 默认入口，组合下面几个配置
-  ur5.yaml              # 使用真实导出的 UR5 URDF 的入口
-  robot/ur5.yaml        # UR5 URDF、真实关节名、真实 link 名称
-  environment/sim.yaml  # PyBullet、目标、障碍物、场景和可视化
-  algo/sac.yaml         # 风险代价、平滑、奖励和 SAC 超参数
-  run/dev.yaml          # train、eval、smoke 的运行参数
-```
-
-`env.obstacle.enabled` 可关闭动态障碍物，用于基础目标到达能力检查。`env.obstacle.scenario` 默认为 `random`，也可设置为 `upper_arm_crossing`、`elbow_crossing`、`forearm_crossing` 或 `wrist_crossing`，用于后续构造靠近不同非末端连杆区域的受控测试场景。
-
-## UR5 离线模型
-
-`assets/robots/universal_robots/ur_models/` 是从 ROS2 环境导出的离线 URDF 目录，当前只保留 `ur5.urdf` 和对应 meshes。PyBullet 已验证可以直接加载该 URDF；官方 URDF 中包含固定关节，因此配置使用 `joint_names` 和 `tool_link_name` 自动解析 PyBullet id。
-
-使用默认 UR5 配置做快速检查：
-
-```bash
-conda run -n rl python scripts/smoke_test.py --config configs/ur5.yaml
-```
-
-使用 UR5 配置做短训练：
-
-```bash
-conda run -n rl python scripts/train.py --config configs/experiments/ur5_short_train.yaml
-```
-
-当前项目只适配真实导出的 `ur5.urdf`。正式实验前仍建议复核胶囊体半径、工具 TCP 和目标/障碍物工作空间是否符合论文场景。
-
-## 方法名称
-
-- `ee_fixed`: SAC-EndEffectorRisk-FixedPenalty-FixedSmooth
-- `link_fixed`: SAC-LinkDynamicRisk-FixedPenalty-FixedSmooth；当 `sac.fixed_risk_penalty: 1.0` 时，论文中记为 `link_fixed_penalty1`
-- `ldrc_fixed`: LDRC-SAC-LinkDynamicRisk-FixedSmooth
-- `ldrc_adaptive`: LDRC-SAC-LinkDynamicRisk-AdaptiveSmooth（历史失败消融，不是部署候选）
-
-当前代码定位为论文仿真实验原型。真实 UR5/RGB-D 部署需要接入实际机器人控制接口、相机标定和障碍物检测模块后再使用。
+- `src/rl_risk_sac/envs/thesis_homotopy_env.py`：统一的到达、静态障碍和动态障碍环境。
+- `src/rl_risk_sac/algorithms/homotopy_curriculum.py`：S0 精度课程及 S1/S2 gate。
+- `src/rl_risk_sac/algorithms/homotopy_replay.py`：按场景、精度档位和语义格采样的 replay。
+- `src/rl_risk_sac/algorithms/thesis_sac.py`：标准 reward-only SAC。
+- `tests/`：串行协议、replay、环境和工具测试。

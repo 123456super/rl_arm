@@ -37,11 +37,26 @@ def resolve_path(value: str) -> Path:
     return path if path.is_absolute() else ROOT / path
 
 
-def orientation_tolerance(config: dict, eta: float) -> float:
+def pose_tolerances(config: dict, eta: float) -> tuple[float, float]:
+    joint = config["thesis"].get("joint_pose_curriculum", {}).get("levels")
+    if joint:
+        scales = np.asarray(
+            config["thesis"]["orientation_curriculum"]["levels"], dtype=np.float64
+        )
+        index = int(np.argmin(np.abs(scales - float(eta))))
+        if not np.isclose(scales[index], float(eta), rtol=0.0, atol=1e-7):
+            raise ValueError(f"V12 orientation scale must be one of {scales.tolist()}")
+        return (
+            float(joint[index]["position_tolerance_m"]),
+            float(joint[index]["orientation_tolerance_rad"]),
+        )
     curriculum = config["thesis"]["orientation_curriculum"]
     start = float(curriculum["tolerance_start"])
     end = float(curriculum["tolerance_end"])
-    return start + float(np.clip(eta, 0.0, 1.0)) * (end - start)
+    return (
+        float(config["thesis"]["position_tolerance"]),
+        start + float(np.clip(eta, 0.0, 1.0)) * (end - start),
+    )
 
 
 def quaternion_from_z_axis(direction: np.ndarray) -> list[float]:
@@ -232,7 +247,7 @@ def main() -> None:
         description="Replay a thesis checkpoint in PyBullet and capture report figures"
     )
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--config", default="configs/experiments/thesis_homotopy.yaml")
+    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
     parser.add_argument("--scene", choices=("none", "static", "dynamic"), default="none")
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--seed", type=int, default=61001)
@@ -279,6 +294,7 @@ def main() -> None:
     lambda_self = (
         checkpoint_lambda_self if args.lambda_self is None else float(args.lambda_self)
     )
+    position_tolerance, current_orientation_tolerance = pose_tolerances(config, eta)
     if not 0.0 < goal_scale <= 1.0:
         parser.error("--goal-scale must be in (0, 1]")
     if not 0.0 <= eta <= 1.0 or not 0.0 <= lambda_self <= 1.0:
@@ -312,7 +328,8 @@ def main() -> None:
                 strict=True,
                 goal_scale=goal_scale,
                 orientation_scale=eta,
-                orientation_tolerance=orientation_tolerance(config, eta),
+                position_tolerance=position_tolerance,
+                orientation_tolerance=current_orientation_tolerance,
                 lambda_self=lambda_self,
             )
             observation, info = env.reset(seed=args.seed + episode)

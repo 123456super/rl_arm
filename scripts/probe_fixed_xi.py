@@ -23,7 +23,7 @@ from rl_risk_sac.utils.config import load_config
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/experiments/thesis_homotopy.yaml")
+    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--xi", type=float, required=True)
     parser.add_argument("--steps", type=int, default=5000)

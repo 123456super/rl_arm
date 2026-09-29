@@ -8,8 +8,7 @@ from rl_risk_sac.robots.ur5_capsules import CapsuleState
 from rl_risk_sac.utils.risk import closest_point_on_segment
 
 
-THESIS_OBSERVATION_DIM = 122
-WORLD_POSITION_SCALE = 1.0
+THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN = 166
 APPROACH_VELOCITY_SCALE = 1.0
 SELF_DISTANCE_LOWER = -0.02
 SELF_DISTANCE_UPPER = 0.25
@@ -32,16 +31,82 @@ def quaternion_to_matrix(quaternion: np.ndarray) -> np.ndarray:
     )
 
 
-def rotation_6d(rotation: np.ndarray) -> np.ndarray:
-    """Continuous SO(3) embedding formed by the first two matrix columns."""
-    matrix = np.asarray(rotation, dtype=np.float64)
-    if matrix.shape != (3, 3):
-        raise ValueError(f"rotation must have shape (3, 3), got {matrix.shape}")
-    return matrix[:, :2].reshape(6, order="F").astype(np.float32)
+def thesis_observation_dim(
+    include_orientation_error_vector: bool = False,
+    *,
+    keypoint_jacobian_pose: bool = True,
+    hybrid_explicit_pose_error: bool = True,
+) -> int:
+    """Only the 166D Hybrid Keypoint + Jacobian representation is supported."""
+    if include_orientation_error_vector or not keypoint_jacobian_pose or not hybrid_explicit_pose_error:
+        raise ValueError("only Hybrid Keypoint + Jacobian observations are supported")
+    return THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN
 
 
-def quaternion_rotation_6d(quaternion: np.ndarray) -> np.ndarray:
-    return rotation_6d(quaternion_to_matrix(quaternion))
+def pose_keypoint_errors(
+    goal_position: np.ndarray,
+    goal_quaternion: np.ndarray,
+    ee_position: np.ndarray,
+    ee_quaternion: np.ndarray,
+    *,
+    cube_side_m: float = 0.30,
+) -> np.ndarray:
+    """Return goal-minus-current errors for three corresponding cube vertices.
+
+    Three non-collinear vertices are the minimum required to identify a rigid
+    pose.  They follow the paper's 0.3 m end-effector-aligned cube, expressed
+    here in the fixed robot-base/world frame used by both pose errors and J.
+    """
+    if cube_side_m <= 0.0:
+        raise ValueError("keypoint cube side must be positive")
+    goal_points = np.asarray(goal_position, dtype=np.float64) + pose_keypoint_offsets_world(
+        goal_quaternion, cube_side_m=cube_side_m,
+    )
+    ee_points = np.asarray(ee_position, dtype=np.float64) + pose_keypoint_offsets_world(
+        ee_quaternion, cube_side_m=cube_side_m,
+    )
+    return (goal_points - ee_points).astype(np.float32)
+
+
+def pose_keypoint_offsets_world(
+    ee_quaternion: np.ndarray, *, cube_side_m: float = 0.30,
+) -> np.ndarray:
+    """Three selected cube-vertex offsets expressed in the base/world frame."""
+    if cube_side_m <= 0.0:
+        raise ValueError("keypoint cube side must be positive")
+    half = 0.5 * float(cube_side_m)
+    offsets = half * np.asarray(
+        [[1.0, 1.0, 1.0], [1.0, -1.0, -1.0], [-1.0, 1.0, -1.0]],
+        dtype=np.float64,
+    )
+    return (offsets @ quaternion_to_matrix(ee_quaternion).T).astype(np.float32)
+
+
+def keypoint_position_jacobian(
+    geometric_jacobian: np.ndarray,
+    ee_quaternion: np.ndarray,
+    *,
+    cube_side_m: float = 0.30,
+) -> np.ndarray:
+    """Map joint velocity directly to the velocities of three pose keypoints."""
+    jacobian = np.asarray(geometric_jacobian, dtype=np.float64)
+    if jacobian.shape != (6, 6) or not np.isfinite(jacobian).all():
+        raise ValueError("geometric_jacobian must be a finite (6, 6) matrix")
+
+    def skew(vector: np.ndarray) -> np.ndarray:
+        x, y, z = np.asarray(vector, dtype=np.float64)
+        return np.asarray([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]])
+
+    blocks = []
+    for offset in pose_keypoint_offsets_world(
+        ee_quaternion, cube_side_m=cube_side_m,
+    ):
+        point_twist_map = np.concatenate((np.eye(3), -skew(offset)), axis=1)
+        blocks.append(point_twist_map @ jacobian)
+    result = np.vstack(blocks).astype(np.float32)
+    if result.shape != (9, 6) or not np.isfinite(result).all():
+        raise RuntimeError("invalid keypoint Jacobian")
+    return result
 
 
 def so3_log(rotation: np.ndarray) -> np.ndarray:
@@ -87,6 +152,49 @@ def pose_error(
     ee_rotation = quaternion_to_matrix(ee_quaternion)
     orientation = so3_log(goal_rotation @ ee_rotation.T)
     return position.astype(np.float32), orientation.astype(np.float32)
+
+
+def damped_least_squares_velocity(
+    jacobian: np.ndarray,
+    position_error: np.ndarray,
+    orientation_error: np.ndarray,
+    *,
+    position_gain: float,
+    orientation_gain: float,
+    damping: float,
+    max_linear_speed: float,
+    max_angular_speed: float,
+    max_joint_speed: float,
+) -> np.ndarray:
+    """Compute a bounded resolved-rate command from observable pose error."""
+    jacobian = np.asarray(jacobian, dtype=np.float64)
+    if jacobian.ndim != 2 or jacobian.shape[0] != 6:
+        raise ValueError("jacobian must have shape (6, number_of_joints)")
+    if not np.isfinite(jacobian).all():
+        raise ValueError("jacobian must be finite")
+    if min(
+        position_gain, orientation_gain, damping,
+        max_linear_speed, max_angular_speed, max_joint_speed,
+    ) <= 0.0:
+        raise ValueError("DLS gains, damping, and bounds must be positive")
+
+    def bounded(vector: np.ndarray, limit: float) -> np.ndarray:
+        value = np.asarray(vector, dtype=np.float64)
+        norm = float(np.linalg.norm(value))
+        return value if norm <= limit else value * (limit / norm)
+
+    desired_twist = np.concatenate((
+        bounded(position_gain * np.asarray(position_error), max_linear_speed),
+        bounded(orientation_gain * np.asarray(orientation_error), max_angular_speed),
+    ))
+    regularized = jacobian @ jacobian.T + damping * damping * np.eye(6)
+    try:
+        solved = np.linalg.solve(regularized, desired_twist)
+    except np.linalg.LinAlgError:
+        solved = np.linalg.lstsq(regularized, desired_twist, rcond=None)[0]
+    return np.clip(
+        jacobian.T @ solved, -max_joint_speed, max_joint_speed,
+    ).astype(np.float32)
 
 
 def canonicalize_quaternion(quaternion: np.ndarray) -> np.ndarray:
@@ -295,21 +403,77 @@ def build_thesis_observation(
     goal_quaternion: np.ndarray,
     position_error: np.ndarray,
     orientation_error: np.ndarray,
-    orientation_scale: float,
+    goal_scale: float,
+    position_tolerance: float,
+    orientation_tolerance: float,
     remaining_time_fraction: float,
     obstacle_present: bool,
     obstacle_position: np.ndarray,
     obstacle_velocity: np.ndarray,
     geometry: ThesisGeometry | None,
     self_geometry: SelfCollisionGeometry | None = None,
+    include_orientation_error_vector: bool = False,
+    keypoint_jacobian_pose: bool = True,
+    hybrid_explicit_pose_error: bool = True,
+    keypoint_cube_side_m: float = 0.30,
+    keypoint_error_scale_m: float = 1.0,
+    ee_jacobian: np.ndarray | None = None,
+    keypoint_jacobian: np.ndarray | None = None,
+    keypoint_jacobian_scale: float = 1.0,
 ) -> np.ndarray:
     q_normalized = np.clip(2.0 * (q - joint_lower) / (joint_upper - joint_lower) - 1.0, -1.0, 1.0)
     qdot_normalized = np.clip(qdot / joint_velocity_scale, -1.0, 1.0)
-    ee_rotation = quaternion_to_matrix(ee_quaternion)
-    goal_rotation = quaternion_to_matrix(goal_quaternion)
-    relative_rotation = goal_rotation @ ee_rotation.T
+    thesis_observation_dim(
+        include_orientation_error_vector,
+        keypoint_jacobian_pose=keypoint_jacobian_pose,
+        hybrid_explicit_pose_error=hybrid_explicit_pose_error,
+    )
     position_error_norm = float(np.linalg.norm(position_error))
     orientation_error_norm = float(np.linalg.norm(orientation_error))
+    if min(keypoint_error_scale_m, keypoint_jacobian_scale) <= 0.0:
+        raise ValueError("keypoint and Jacobian scales must be positive")
+    if keypoint_jacobian is None:
+        if ee_jacobian is None:
+            raise ValueError(
+                "ee_jacobian or keypoint_jacobian is required for "
+                "keypoint-Jacobian observation"
+            )
+        jacobian = np.asarray(ee_jacobian, dtype=np.float32)
+        if jacobian.shape != (6, 6) or not np.isfinite(jacobian).all():
+            raise ValueError("ee_jacobian must be a finite (6, 6) matrix")
+        keypoint_jacobian_array = keypoint_position_jacobian(
+            jacobian, ee_quaternion, cube_side_m=keypoint_cube_side_m,
+        )
+    else:
+        keypoint_jacobian_array = np.asarray(
+            keypoint_jacobian, dtype=np.float32,
+        )
+        if (
+            keypoint_jacobian_array.shape != (9, 6)
+            or not np.isfinite(keypoint_jacobian_array).all()
+        ):
+            raise ValueError("keypoint_jacobian must be a finite (9, 6) matrix")
+    keypoint_features = np.clip(
+        pose_keypoint_errors(
+            goal_position, goal_quaternion, ee_position, ee_quaternion,
+            cube_side_m=keypoint_cube_side_m,
+        ).reshape(-1) / keypoint_error_scale_m,
+        -1.0, 1.0,
+    )
+    jacobian_features = np.clip(
+        keypoint_jacobian_array / keypoint_jacobian_scale, -1.0, 1.0,
+    ).reshape(-1)
+    pose_features = [keypoint_features, jacobian_features,
+        np.clip(np.asarray(position_error, dtype=np.float32), -1.0, 1.0),
+        np.clip(
+            np.asarray(orientation_error, dtype=np.float32) / np.pi,
+            -1.0, 1.0,
+        ),
+        np.asarray([
+            np.clip(position_error_norm, 0.0, 1.0),
+            np.clip(orientation_error_norm / np.pi, 0.0, 1.0),
+        ], dtype=np.float32),
+    ]
     if obstacle_present:
         if geometry is None:
             raise ValueError("geometry is required when an obstacle is present")
@@ -357,17 +521,18 @@ def build_thesis_observation(
         [
             q_normalized,
             qdot_normalized,
-            np.clip(np.asarray(ee_position) / WORLD_POSITION_SCALE, -1.0, 1.0),
-            rotation_6d(ee_rotation),
-            np.clip(np.asarray(goal_position) / WORLD_POSITION_SCALE, -1.0, 1.0),
-            rotation_6d(goal_rotation),
-            np.clip(position_error, -1.0, 1.0),
-            rotation_6d(relative_rotation),
-            np.asarray([np.clip(position_error_norm / 1.0, 0.0, 1.0)], dtype=np.float32),
-            np.asarray([np.clip(orientation_error_norm / np.pi, 0.0, 1.0)], dtype=np.float32),
+            *pose_features,
             np.clip(np.asarray(ee_linear_velocity) / ee_linear_velocity_scale, -1.0, 1.0),
             np.clip(np.asarray(ee_angular_velocity) / ee_angular_velocity_scale, -1.0, 1.0),
-            np.asarray([2.0 * np.clip(orientation_scale, 0.0, 1.0) - 1.0], dtype=np.float32),
+            np.asarray([2.0 * np.clip(goal_scale, 0.0, 1.0) - 1.0], dtype=np.float32),
+            np.asarray(
+                [2.0 * np.clip(position_tolerance / 0.20, 0.0, 1.0) - 1.0],
+                dtype=np.float32,
+            ),
+            np.asarray(
+                [2.0 * np.clip(orientation_tolerance / np.pi, 0.0, 1.0) - 1.0],
+                dtype=np.float32,
+            ),
             np.asarray(
                 [2.0 * np.clip(remaining_time_fraction, 0.0, 1.0) - 1.0],
                 dtype=np.float32,
@@ -386,9 +551,14 @@ def build_thesis_observation(
             self_risk,
         ]
     ).astype(np.float32)
-    if observation.shape != (THESIS_OBSERVATION_DIM,):
+    expected_dim = thesis_observation_dim(
+        include_orientation_error_vector,
+        keypoint_jacobian_pose=keypoint_jacobian_pose,
+        hybrid_explicit_pose_error=hybrid_explicit_pose_error,
+    )
+    if observation.shape != (expected_dim,):
         raise RuntimeError(
-            f"thesis observation must have shape ({THESIS_OBSERVATION_DIM},), got {observation.shape}"
+            f"thesis observation must have shape ({expected_dim},), got {observation.shape}"
         )
     return observation
 
@@ -404,6 +574,7 @@ def homotopy_reward(
     orientation_scale: float,
     task_reached: bool,
     hard_failure: bool,
+    timeout: bool = False,
     obstacle_collision: bool,
     terminal_obstacle_collision: bool = False,
     risk_max: float,
@@ -419,30 +590,98 @@ def homotopy_reward(
     position_sigma: float = 0.20,
     orientation_sigma: float = 1.00,
     micro_power: float = 4.0,
-    orientation_priority_weight: float = 1.0,
-    potential_scale: float = 20.0,
+    fine_position_sigma: float = 0.02,
+    fine_orientation_sigma: float = 0.06,
+    orientation_tolerance: float | None = None,
+    fine_position_progress_scale: float = 1.0,
+    fine_orientation_progress_scale: float = 1.0,
+    precision_position_scale: float = 0.03,
+    precision_orientation_scale: float = 0.09,
+    precision_stop_cost_weight: float = 0.20,
+    joint_precision_progress_scale: float = 0.0,
+    joint_precision_temperature: float = 1.0,
+    joint_position_tolerance: float = 0.01,
+    joint_orientation_tolerance: float = 0.03,
+    leave_tolerance_multiplier: float = 2.0,
+    leave_joint_tolerance_penalty: float = 0.0,
+    partial_precision_reward_scale: float = 0.0,
+    position_progress_scale: float = 2.0,
+    orientation_progress_scale: float = 2.0,
+    position_state_cost_weight: float = 0.02,
+    orientation_state_cost_weight: float = 0.02,
+    rtpc_orientation_reward: bool = False,
+    pose_balanced_rtpc_reward: bool = False,
+    orientation_absolute_error_scale: float = 0.125,
+    orientation_error_progress_scale: float = 0.15,
+    orientation_completion_reward_scale: float = 0.10,
+    orientation_absolute_position_gate_sigma: float = 0.20,
+    orientation_completion_position_gate_multiplier: float = 1.0,
+    keypoint_pose_reward: bool = True,
+    keypoint_tracking_quality: float = 0.0,
+    keypoint_distance: float = 0.0,
+    next_keypoint_distance: float = 0.0,
+    keypoint_tracking_scale: float = 0.20,
+    keypoint_tracking_sigma: float = 0.05,
+    keypoint_progress_scale: float = 10.0,
+    keypoint_precision_reward_scale: float = 0.0,
     success_bonus: float = 20.0,
     velocity_cost_weight: float = 0.04,
     smooth_cost_weight: float = 0.01,
-    hard_failure_penalty: float = 10.0,
+    hard_failure_penalty: float = 20.0,
+    timeout_penalty: float = 2.0,
     safety_risk_weight: float = 2.0,
     safety_clearance_weight: float = 8.0,
     self_risk_weight: float = 2.0,
     self_clearance_weight: float = 8.0,
-    external_safety_scale: float = 1.0,
-    self_safety_scale: float = 1.0,
+    external_safety_scale: float = 0.05,
+    self_safety_scale: float = 0.05,
 ) -> tuple[float, dict[str, float]]:
+    if not keypoint_pose_reward or rtpc_orientation_reward or pose_balanced_rtpc_reward:
+        raise ValueError("only unified keypoint pose reward is supported")
     if not 0.0 < gamma < 1.0:
         raise ValueError("gamma must be in (0, 1)")
     if horizon < 1:
         raise ValueError("horizon must be positive")
     eta = float(np.clip(orientation_scale, 0.0, 1.0))
-    if position_sigma <= 0.0 or orientation_sigma <= 0.0:
+    if min(
+        position_sigma, orientation_sigma, fine_position_sigma,
+        fine_orientation_sigma, precision_position_scale,
+        precision_orientation_scale, joint_precision_temperature,
+        joint_position_tolerance, joint_orientation_tolerance,
+        leave_tolerance_multiplier,
+        orientation_absolute_position_gate_sigma,
+        orientation_completion_position_gate_multiplier,
+        keypoint_tracking_sigma,
+    ) <= 0.0:
         raise ValueError("pose quality sigmas must be positive")
     if micro_power <= 1.0:
         raise ValueError("micro_power must be greater than one")
-    if orientation_priority_weight < 0.0 or potential_scale <= 0.0:
-        raise ValueError("reward scales must be non-negative and potential_scale positive")
+    if min(
+        keypoint_distance, next_keypoint_distance,
+    ) < 0.0:
+        raise ValueError("keypoint distances must be non-negative")
+    if min(
+        position_progress_scale,
+        orientation_progress_scale,
+        fine_position_progress_scale,
+        fine_orientation_progress_scale,
+        precision_stop_cost_weight,
+        joint_precision_progress_scale,
+        leave_joint_tolerance_penalty,
+        partial_precision_reward_scale,
+        position_state_cost_weight,
+        orientation_state_cost_weight,
+        orientation_absolute_error_scale,
+        orientation_error_progress_scale,
+        orientation_completion_reward_scale,
+        keypoint_tracking_scale,
+        keypoint_progress_scale,
+        keypoint_precision_reward_scale,
+        success_bonus,
+        hard_failure_penalty,
+        timeout_penalty,
+    ) < 0.0:
+        raise ValueError("task reward weights must be non-negative")
     if min(
         safety_risk_weight,
         safety_clearance_weight,
@@ -463,28 +702,124 @@ def homotopy_reward(
 
     position_quality = enhanced_quality(rho_position, position_sigma)
     next_position_quality = enhanced_quality(next_rho_position, position_sigma)
-    orientation_quality = enhanced_quality(rho_orientation, orientation_sigma)
-    next_orientation_quality = enhanced_quality(next_rho_orientation, orientation_sigma)
-    pose_potential = position_quality * (
-        1.0 + orientation_priority_weight * eta * orientation_quality
+    # Use a bounded linear global orientation potential so large-angle poses
+    # retain a non-vanishing improvement signal. The legacy orientation_sigma
+    # argument remains accepted for checkpoint/config compatibility.
+    orientation_quality = float(1.0 - np.clip(max(float(rho_orientation), 0.0) / np.pi, 0.0, 1.0))
+    next_orientation_quality = float(
+        1.0 - np.clip(max(float(next_rho_orientation), 0.0) / np.pi, 0.0, 1.0)
     )
-    next_pose_potential = next_position_quality * (
-        1.0 + orientation_priority_weight * eta * next_orientation_quality
+    fine_position_quality = enhanced_quality(rho_position, fine_position_sigma)
+    next_fine_position_quality = enhanced_quality(next_rho_position, fine_position_sigma)
+    local_sigma = max(
+        float(fine_orientation_sigma),
+        0.5 * float(orientation_tolerance)
+        if orientation_tolerance is not None else float(fine_orientation_sigma),
     )
-    pose_potential_progress = float(gamma * next_pose_potential - pose_potential)
-    position_progress = float(next_position_quality - position_quality)
-    orientation_progress = float(next_orientation_quality - orientation_quality)
-    orientation_reward_scale = float(
-        orientation_priority_weight * eta * next_position_quality
+    fine_orientation_quality = float(np.exp(-max(float(rho_orientation), 0.0) / local_sigma))
+    next_fine_orientation_quality = float(
+        np.exp(-max(float(next_rho_orientation), 0.0) / local_sigma)
     )
+    # Position and orientation are deliberately additive.  Multiplying the
+    # terms suppresses orientation learning whenever position is temporarily
+    # lost, which is exactly when a coupled 6-DoF controller needs both signals.
+    pose_potential = position_quality + orientation_quality
+    next_pose_potential = next_position_quality + next_orientation_quality
+    position_progress = float(gamma * next_position_quality - position_quality)
+    orientation_progress = float(gamma * next_orientation_quality - orientation_quality)
+    fine_position_progress = float(
+        gamma * next_fine_position_quality - fine_position_quality
+    )
+    fine_orientation_progress = float(
+        gamma * next_fine_orientation_quality - fine_orientation_quality
+    )
+    pose_potential_progress = position_progress + orientation_progress
+    position_state_cost = position_state_cost_weight * (1.0 - next_position_quality)
+    orientation_state_cost = orientation_state_cost_weight * (1.0 - next_orientation_quality)
+    state_cost = position_state_cost + orientation_state_cost
+    orientation_reward_scale = float(orientation_progress_scale)
     velocity_cost = velocity_cost_weight * float(np.clip(velocity_magnitude, 0.0, 1.0))
+    precision_proximity = float(
+        np.exp(-max(next_rho_position, 0.0) / precision_position_scale)
+        * np.exp(-max(next_rho_orientation, 0.0) / precision_orientation_scale)
+    )
+    precision_stop_cost = (
+        precision_stop_cost_weight
+        * precision_proximity
+        * float(np.clip(velocity_magnitude, 0.0, 1.0))
+    )
+    joint_tolerance_ratio = float(max(
+        max(rho_position, 0.0) / joint_position_tolerance,
+        max(rho_orientation, 0.0) / joint_orientation_tolerance,
+    ))
+    next_joint_tolerance_ratio = float(max(
+        max(next_rho_position, 0.0) / joint_position_tolerance,
+        max(next_rho_orientation, 0.0) / joint_orientation_tolerance,
+    ))
+    joint_precision_quality = float(np.exp(
+        -joint_tolerance_ratio / joint_precision_temperature
+    ))
+    next_joint_precision_quality = float(np.exp(
+        -next_joint_tolerance_ratio / joint_precision_temperature
+    ))
+    joint_precision_progress = float(
+        gamma * next_joint_precision_quality - joint_precision_quality
+    )
+    joint_precision_reward = (
+        joint_precision_progress_scale * joint_precision_progress
+    )
+    left_joint_tolerance_region = bool(
+        joint_tolerance_ratio <= leave_tolerance_multiplier
+        and next_joint_tolerance_ratio > leave_tolerance_multiplier
+    )
+    leave_joint_penalty = (
+        leave_joint_tolerance_penalty * float(left_joint_tolerance_region)
+    )
+    position_completion = float(np.clip(
+        (joint_position_tolerance - next_rho_position) / joint_position_tolerance,
+        0.0, 1.0,
+    ))
+    completion_orientation_tolerance = joint_orientation_tolerance
+    orientation_completion = float(np.clip(
+        (completion_orientation_tolerance - next_rho_orientation)
+        / completion_orientation_tolerance,
+        0.0, 1.0,
+    ))
+    partial_precision_reward = partial_precision_reward_scale * (
+        position_completion
+        + orientation_completion
+    )
+    orientation_error_progress = float(
+        max(float(rho_orientation), 0.0)
+        - max(float(next_rho_orientation), 0.0)
+    )
+    # Legacy diagnostic columns remain readable, but do not shape the reward.
+    orientation_absolute_position_gate = 1.0
+    orientation_completion_position_gate = 1.0
+    orientation_absolute_penalty = 0.0
+    orientation_error_progress_reward = 0.0
+    orientation_completion_reward = 0.0
+    orientation_shaping_reward = (
+        orientation_progress_scale * orientation_progress
+        + fine_orientation_progress_scale * fine_orientation_progress
+        - orientation_state_cost
+    )
     smooth_cost = smooth_cost_weight * float(np.clip(smooth_velocity, 0.0, 1.0))
-    state_cost = 0.0
+    bounded_keypoint_quality = float(np.clip(keypoint_tracking_quality, 0.0, 1.0))
+    keypoint_progress = float(keypoint_distance) - float(next_keypoint_distance)
+    keypoint_tracking_reward = keypoint_tracking_scale * bounded_keypoint_quality
+    keypoint_progress_reward = keypoint_progress_scale * keypoint_progress
+    keypoint_precision_quality = next_joint_precision_quality
+    keypoint_precision_reward = (
+        keypoint_precision_reward_scale * keypoint_precision_quality
+    )
     r_goal = (
-        potential_scale * pose_potential_progress
-        -velocity_cost
-        -smooth_cost
-        +success_bonus * float(task_reached)
+        keypoint_tracking_reward
+        + keypoint_progress_reward
+        + keypoint_precision_reward
+        - velocity_cost
+        - smooth_cost
+        + success_bonus * float(task_reached)
     )
     if d_safe <= 0.0 or d_self_safe <= 0.0:
         raise ValueError("safety distances must be positive")
@@ -504,6 +839,7 @@ def homotopy_reward(
         terminal_obstacle_collision and not hard_failure
     )
     hard_penalty = hard_failure_penalty * float(hard_failure)
+    timeout_guard = timeout_penalty * float(timeout and not task_reached and not hard_failure)
     # Each dense constraint group is normalized to [0, scale].  This keeps a
     # continuously active constraint from overwhelming the sparse task bonus.
     external_safety_cost = (
@@ -521,27 +857,67 @@ def homotopy_reward(
         float(lambda_self) * self_safety_scale * self_safety_cost
     )
     safety_penalty = external_safety_penalty + self_safety_penalty
-    reward = r_goal - hard_penalty - safety_penalty - terminal_guard
+    reward = r_goal - hard_penalty - timeout_guard - safety_penalty - terminal_guard
     return float(reward), {
         "r_goal": float(r_goal),
         "c_proximity": float(proximity),
         "hard_failure": float(hard_failure),
         "obstacle_collision": obstacle_only,
         "state_cost": float(state_cost),
-        "position_state_cost": 0.0,
-        "orientation_state_cost": 0.0,
+        "position_state_cost": float(position_state_cost),
+        "orientation_state_cost": float(orientation_state_cost),
         "velocity_cost": velocity_cost,
         "orientation_scale": eta,
         "orientation_reward_scale": float(orientation_reward_scale),
-        "orientation_reward_gate": float(next_position_quality),
+        "orientation_reward_gate": 1.0,
         "position_progress": position_progress,
         "orientation_progress": orientation_progress,
+        "orientation_error_progress": orientation_error_progress,
+        "orientation_absolute_penalty": float(orientation_absolute_penalty),
+        "orientation_absolute_position_gate": float(
+            orientation_absolute_position_gate
+        ),
+        "orientation_error_progress_reward": float(
+            orientation_error_progress_reward
+        ),
+        "orientation_completion_reward": float(orientation_completion_reward),
+        "orientation_completion_position_gate": float(
+            orientation_completion_position_gate
+        ),
+        "orientation_shaping_reward": float(orientation_shaping_reward),
+        "fine_position_progress": fine_position_progress,
+        "fine_orientation_progress": fine_orientation_progress,
+        "fine_position_quality": float(next_fine_position_quality),
+        "fine_orientation_quality": float(next_fine_orientation_quality),
+        "local_orientation_sigma": float(local_sigma),
+        "precision_proximity": precision_proximity,
+        "precision_stop_cost": float(precision_stop_cost),
+        "joint_tolerance_ratio": joint_tolerance_ratio,
+        "next_joint_tolerance_ratio": next_joint_tolerance_ratio,
+        "joint_precision_quality": joint_precision_quality,
+        "next_joint_precision_quality": next_joint_precision_quality,
+        "joint_precision_progress": joint_precision_progress,
+        "joint_precision_reward": float(joint_precision_reward),
+        "left_joint_tolerance_region": float(left_joint_tolerance_region),
+        "leave_joint_tolerance_penalty": float(leave_joint_penalty),
+        "position_completion": position_completion,
+        "orientation_completion": orientation_completion,
+        "partial_precision_reward": float(partial_precision_reward),
         "position_quality": float(next_position_quality),
         "orientation_quality": float(next_orientation_quality),
+        "keypoint_tracking_quality": bounded_keypoint_quality,
+        "keypoint_distance": float(keypoint_distance),
+        "next_keypoint_distance": float(next_keypoint_distance),
+        "keypoint_progress": keypoint_progress,
+        "keypoint_tracking_reward": float(keypoint_tracking_reward),
+        "keypoint_progress_reward": float(keypoint_progress_reward),
+        "keypoint_precision_quality": float(keypoint_precision_quality),
+        "keypoint_precision_reward": float(keypoint_precision_reward),
         "pose_potential": float(pose_potential),
         "next_pose_potential": float(next_pose_potential),
         "pose_potential_progress": pose_potential_progress,
         "smooth_cost": smooth_cost,
+        "timeout_penalty": float(timeout_guard),
         "clearance_violation": clearance_violation,
         "self_clearance_violation": self_clearance_violation,
         "self_risk_max": bounded_self_risk,

@@ -1,8 +1,107 @@
-numpy>=1.24
-pandas>=2.0
-matplotlib>=3.7
-tqdm>=4.66
-pyyaml>=6.0
-gymnasium>=0.29
-torch>=2.2
-pybullet>=3.2.6
+结论很明确：100k 已学到有效的 keypoint 接近行为，但 200k 发生严重策略崩塌；当前 CHAIN-PCR 约束几乎没有实际作用。正在运行的 4000k 训练不建议仅靠“继续跑”期待自然恢复。
+
+### Frozen 评估
+
+相同的 1,000 episodes、seed `51001`、level 0：
+
+| 指标 | 100k | 200k | 变化 |
+|---|---:|---:|---:|
+| Overall SR | 17.6% | 2.3% | 严重下降 |
+| O7–O9 SR | 3.0% | 1.33% | 下降 |
+| Timeout | 75.0% | 76.9% | 略升 |
+| Joint-limit failure | 0% | 10.7% | 严重恶化 |
+| Collision | 7.4% | 10.1% | 恶化 |
+| Episode 初始 \(D_{KP}\) | 0.566 m | 0.566 m | 完全一致 |
+| Episode 最终 \(D_{KP}\) | 0.336 m | 0.700 m | 从改善变成远离目标 |
+| 平均 \(D_{KP}\) 改善 | +0.230 m | −0.134 m | 方向反转 |
+| Episode 净改善比例 | 88.7% | 38.2% | 崩塌 |
+| Tracking quality | 0.0268 | 0.00750 | 下降72% |
+| 平均 progress | +0.001096 m | −0.000590 m | 转负 |
+| 正 progress 比例 | 59.0% | 45.6% | 低于随机方向基线 |
+| Jacobian clip ratio | 0.283% | 0.561% | 仍然很低 |
+
+因此：
+
+1. \(D_{KP}\) 没有持续下降。它在 100k 表现良好，到 200k 已经反向增长。
+2. `keypoint_tracking_quality` 没有继续上升，200k 明显下降。
+3. 100k 的正 progress 比例 `59.0%` 尚可；200k 的 `45.6%` 明确异常。
+4. Jacobian clip 仍不是问题。200k 的 `0.561%` 接近但没有超过离线标定的 `0.574%`。
+5. 崩塌不是因为 keypoint/Jacobian 数值范围失控，而是策略更新不稳定。
+
+评估文件：
+
+- [100k frozen 结果](/home/c211/jxf/rl/outputs/serial_keypoint_jacobian_chain/s0_seed11001_keypoint_jacobian_chain_4000k/evaluations/actor_step_0100000_seed51001.json)
+- [200k frozen 结果](/home/c211/jxf/rl/outputs/serial_keypoint_jacobian_chain/s0_seed11001_keypoint_jacobian_chain_4000k/evaluations/actor_step_0200000_seed51001.json)
+- [训练窗口分析](/home/c211/jxf/rl/outputs/serial_keypoint_jacobian_chain/s0_seed11001_keypoint_jacobian_chain_4000k/evaluations/training_metrics_100k_200k.json)
+
+### CHAIN 与 churn
+
+75–100k 训练窗口：
+
+- Policy churn L2：`1.032`
+- UpdateReversal：`54.7%`
+
+175–200k：
+
+- Policy churn L2：`1.886`
+- O7–O9 churn：`1.894`
+- UpdateReversal：`75.35%`
+- O7–O9 reversal：`70.54%`
+- Min-Q churn：`2.220`
+
+原127D后期参考值：
+
+- Policy churn：`1.569`
+- UpdateReversal：`78.38%`
+- Min-Q churn：`0.704`
+
+所以组合方案在约100k附近一度比127D稍稳定，但到200k：
+
+- policy churn 已经高于127D；
+- reversal 与127D同属很高区间；
+- Q churn 约为127D的 `3.2` 倍。
+
+完整诊断：
+
+- [50k–200k churn/plasticity 结果](/home/c211/jxf/rl/outputs/serial_keypoint_jacobian_chain/s0_seed11001_keypoint_jacobian_chain_4000k/evaluations/plasticity_q_stability_050k_200k.json)
+
+`policy_churn_to_sac_ratio` 也解释了原因：
+
+| 窗口 | Ratio 均值 | 相对 SAC loss |
+|---|---:|---:|
+| 75–100k | `8.38e-7` | `0.000084%` |
+| 175–200k | `1.03e-5` | `0.00103%` |
+
+当前 `λπ=5e-4` 下，PCR penalty 相对于 SAC actor loss 小了约五到六个数量级，实际上没有约束住 Actor。也就是说，配置里虽然“启用了 CHAIN”，但优化意义上几乎等于没启用。
+
+### 评估代码更新
+
+现在现有工具已能覆盖全部指标：
+
+- `evaluate_thesis_homotopy.py`：overall/O7–O9 SR，以及 frozen \(D_{KP}\)、quality、progress、clip ratio。
+- [analyze_keypoint_training.py](/home/c211/jxf/rl/scripts/analyze_keypoint_training.py)：按固定训练窗口分析上述指标和 CHAIN ratio。
+- `evaluate_model_plasticity.py`：policy churn、Q churn、UpdateReversal、网络活性。
+- 全套测试：`158 passed`。
+
+我的判断是：当前训练的首要问题不是表示、reward 或 Jacobian，而是 CHAIN 系数按论文原始范围迁移后尺度完全不匹配。建议先保留100k checkpoint，并暂停把当前配置盲目跑满4000k；下一步应根据实际 loss ratio重新标定 PCR 强度。
+
+
+根据实际 loss ratio重新标定 PCR 强度
+
+
+
+
+
+
+
+22:54
+
+
+
+
+
+
+我会先核对 CHAIN 当前 penalty 的精确定义、actor loss 的量级分布和系数恢复逻辑，再用已有 50k–200k 日志反推“有效但不过强”的系数范围。随后把配置与文档改成可解释的标定值，并验证训练/续训不会因 checkpoint 中旧配置而悄悄沿用旧系数。
+
+
+按真实日志反推后，固定系数的合理量级不是 5e-4，而是约 1.0：若策略轨迹暂时不变，它会让 PCR/SAC loss ratio 从当前的 10^-6–10^-5 提升到约 0.17% → 2.05%，后期 P95 约 4.77%。我会采用 λπ=1.0，同时增加单次 ratio 10% 上限，防止少量小 SAC-loss batch 让正则瞬间压过主目标。

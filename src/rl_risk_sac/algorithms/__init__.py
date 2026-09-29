@@ -1,8 +1,5 @@
-"""强化学习算法子包。
+"""Algorithms for the V13.5 serial thesis protocol."""
 
-当前主要暴露 SACAgent：它同时覆盖固定风险惩罚 SAC 和 LDRC 约束 SAC。
-"""
+from rl_risk_sac.algorithms.thesis_sac import ThesisSACAgent
 
-from rl_risk_sac.algorithms.sac import SACAgent
-
-__all__ = ["SACAgent"]
+__all__ = ["ThesisSACAgent"]

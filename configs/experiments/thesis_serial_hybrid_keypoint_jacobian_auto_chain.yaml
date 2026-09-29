@@ -1,0 +1,323 @@
+# Hybrid Keypoint + Jacobian + Auto-PCR: the only supported experiment.
+# Common robot/runtime defaults are retained; no legacy experiment is included.
+includes:
+  - ../default.yaml
+
+seed: 11001
+device: cuda:auto
+robot:
+  tool_link_name: wrist_3_link
+thesis:
+  protocol: task_space_precision_curriculum_hybrid_keypoint_jacobian_auto_chain_pcr
+  stage: s0
+  physics_dt: 0.004166666666666667
+  control_dt: 0.05
+  horizon: 240
+  action_scale: 0.7
+  precision_control:
+    enabled: true
+    position_scale_m: 0.05
+    orientation_scale_rad: 0.15
+    min_action_scale: 0.1
+  success_hold_steps: 5
+  ee_linear_velocity_scale: 1.0
+  ee_angular_velocity_scale: 4.2
+  joint_motor_force: 90.0
+  obstacle_radius: 0.075
+  obstacle_speed: 0.1
+  d_safe: 0.12
+  position_tolerance: 0.05
+  orientation_tolerance: 0.1
+  goal_sample_max_attempts: 10000
+  ramp_steps: 50000
+  strict_min_transitions: 25000
+  serial_stages:
+    s0:
+      purpose: reaching
+      scene_probabilities:
+        none: 1.0
+        static: 0.0
+        dynamic: 0.0
+      completion: final_p5_probe_and_p4_retention_plus_self_safety
+    s1:
+      purpose: static_obstacle_avoidance
+      scene_probabilities:
+        none: 0.25
+        static: 0.75
+        dynamic: 0.0
+      completion: static_strict_replay_and_25000_strict_transitions
+    s2:
+      purpose: dynamic_obstacle_avoidance
+      scene_probabilities:
+        none: 0.2
+        static: 0.3
+        dynamic: 0.5
+      completion: dynamic_strict_replay_and_25000_strict_transitions
+  self_collision:
+    safe_distance_m: 0.005
+    query_distance_m: 0.25
+    ttc_max_s: 3.0
+    approach_velocity_scale: 0.7
+    ttc_tau_s: 1.0
+    curriculum:
+      start_weight: 0.2
+      end_weight: 1.0
+      ramp_steps: 50000
+      full_weight_min_transitions: 25000
+      probe_collision_ceiling: 0.01
+  self_safety_projection:
+    enabled: false
+    activation_distance_m: 0.05
+    gain: 5.0
+    fd_epsilon: 0.001
+    max_iterations: 16
+    eps: 1.0e-08
+    violation_tolerance: 1.0e-06
+  goal_curriculum:
+    start_scale: 1.0
+    end_scale: 1.0
+    levels:
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    min_transitions_per_level: 100000
+    success_window: 100
+    success_floor: 0.85
+    full_scale_min_transitions: 25000
+  orientation_curriculum:
+    start_scale: 0.0
+    end_scale: 1.0
+    levels:
+    - 0.0
+    - 0.25
+    - 0.5
+    - 0.75
+    - 1.0
+    tolerance_start: 0.3
+    tolerance_end: 0.1
+    min_transitions_per_level: 100000
+    success_window: 100
+    success_floor: 0.85
+    anchor_probability: 0.0
+    anchor_probability_intermediate: 0.0
+    anchor_probability_recovery: 0.0
+    anchor_success_window: 100
+    anchor_success_floor: 0.9
+    retention_target: 0.95
+    retention_min_observations: 20
+    replay_success_fraction: 0.3
+    replay_success_schedule:
+      low_start_episodes: 5
+      medium_start_episodes: 20
+      full_start_episodes: 50
+      low_fraction: 0.05
+      medium_fraction: 0.15
+    replay_anchor_fraction: 0.0
+    replay_current_fraction: 0.7
+    replay_anchor_intermediate: 0.0
+    replay_current_intermediate: 0.7
+    replay_anchor_recovery: 0.0
+    replay_current_recovery: 0.7
+    replay_storage:
+      anchor_capacity: 15000
+      current_capacity: 30000
+      current_success_capacity: 15000
+      history_capacity_per_level: 3000
+    deterministic_probe_required: true
+    deterministic_probe_episodes: 1000
+    deterministic_probe_seed: 31001
+    deterministic_probe_success_floor: 0.85
+    deterministic_probe_bin_success_floor: 0.6
+    deterministic_probe_position_bins: 10
+    deterministic_probe_orientation_bins: 10
+    deterministic_previous_success_floor: 0.8
+    deterministic_probe_collision_ceiling: 0.05
+    deterministic_previous_collision_ceiling: 0.05
+    retention_recovery_success_floor: 0.9
+    retention_recovery_collision_ceiling: 0.05
+    deterministic_confirmation_episodes: 1000
+    deterministic_confirmation_seed: 51001
+    deterministic_probe_interval_transitions: 100000
+    cross_level_probe_enabled: true
+    manual_promotion: true
+    manual_probe_interval_transitions: 25000
+    rollback_patience: 3
+    rollback_success_drop: 0.1
+    rollback_actor_lr_factor: 1.0
+    full_scale_min_transitions: 25000
+  joint_pose_curriculum:
+    task_space_sampling:
+      balanced_bins: true
+      position_bins: 10
+      orientation_bins: 10
+      reset_max_attempts: 32
+      history_probability: 0.5
+      fixed_orientation_mixture:
+        enabled: true
+        uniform_fraction: 0.5
+        orientation_groups:
+        - fraction: 0.25
+          bins:
+          - 5
+          - 6
+          - 7
+          - 8
+          - 9
+        - fraction: 0.25
+          bins:
+          - 7
+          - 8
+          - 9
+      adaptive:
+        enabled: false
+        beta: 0.6
+        improvement_weight: 0.5
+        score_floor: 0.01
+    levels:
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.7
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.1
+      orientation_tolerance_rad: 0.3
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.7
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.08
+      orientation_tolerance_rad: 0.24
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.7
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.064
+      orientation_tolerance_rad: 0.192
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.7
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.0512
+      orientation_tolerance_rad: 0.1536
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.7
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.05
+      orientation_tolerance_rad: 0.1
+  semantic_long_term_replay:
+    enabled: true
+    fraction: 0.2
+    position_bins: 10
+    orientation_bins: 10
+    episodes_per_bin: 8
+    transitions_per_episode: 64
+  reward:
+    position_sigma_m: 0.2
+    micro_power: 4.0
+    fine_position_sigma_m: 0.02
+    fine_orientation_sigma_rad: 0.06
+    fine_position_progress_scale: 1.0
+    fine_orientation_progress_scale: 1.0
+    precision_position_scale_m: 0.03
+    precision_orientation_scale_rad: 0.09
+    precision_stop_cost_weight: 0.2
+    joint_precision_progress_scale: 2.0
+    joint_precision_temperature: 1.0
+    joint_position_tolerance_m: 0.05
+    joint_orientation_tolerance_rad: 0.1
+    use_episode_tolerance_for_joint_precision: true
+    partial_precision_reward_scale: 0.1
+    leave_tolerance_multiplier: 2.0
+    leave_joint_tolerance_penalty: 0.2
+    position_progress_scale: 2.0
+    orientation_progress_scale: 2.0
+    position_state_cost_weight: 0.02
+    orientation_state_cost_weight: 0.02
+    success_bonus: 20.0
+    velocity_cost_weight: 0.04
+    smooth_cost_weight: 0.01
+    hard_failure_penalty: 20.0
+    timeout_penalty: 2.0
+    safety_risk_weight: 2.0
+    safety_clearance_weight: 8.0
+    self_risk_weight: 2.0
+    self_clearance_weight: 8.0
+    external_safety_scale: 0.05
+    self_safety_scale: 0.05
+    pose_objective: unified_keypoint
+    keypoint_pose_reward: true
+    keypoint_tracking_sigma_m: 0.05
+    keypoint_tracking_scale: 0.2
+    keypoint_progress_scale: 10.0
+    keypoint_precision_reward_scale: 0.2
+  stable_success:
+    joint_velocity_rms_rad_s: 0.1
+    ee_linear_speed_m_s: 0.02
+    ee_angular_speed_rad_s: 0.1
+  observation:
+    include_orientation_error_vector: false
+    keypoint_jacobian_pose: true
+    keypoint_cube_side_m: 0.5
+    keypoint_error_scale_m: 1.0
+    keypoint_jacobian_scale: 1.0
+    hybrid_explicit_pose_error: true
+train:
+  total_steps: 200000
+  max_stage_steps: 5000000
+  num_envs: 8
+  evaluate_during_training: false
+  actor_initialization_critic_warmup_transitions: 5000
+  save_interval: 25000
+  progress_interval: 1000
+  log_flush_interval: 100
+  output_dir: outputs/serial_hybrid_keypoint_jacobian_auto_chain
+  plateau:
+    comparison_blocks: 2
+    min_current_episodes_per_block: 100
+    min_anchor_episodes_per_block: 50
+    safe_success_delta: 0.02
+    self_collision_delta: 0.01
+    timeout_delta: 0.02
+    anchor_success_delta: 0.01
+    probe_success_delta: 0.02
+    probe_collision_delta: 0.01
+    probe_timeout_delta: 0.02
+    position_error_delta_m: 0.005
+    orientation_error_delta_rad: 0.03
+    probe_position_error_delta_m: 0.005
+    probe_orientation_error_delta_rad: 0.03
+    q_abs_limit: 1000.0
+    critic_loss_limit: 1000.0
+    divergence_ratio: 5.0
+sac:
+  gamma: 0.99
+  tau: 0.005
+  actor_lr: 0.0001
+  critic_lr: 0.0001
+  alpha_lr: 0.0003
+  batch_size: 1024
+  updates_per_transition: 0.25
+  warmup_steps: 3000
+  update_after: 1000
+  hidden_dims:
+  - 256
+  - 256
+  initial_alpha: 0.2
+  critic_gradient_clip: 10.0
+  actor_gradient_clip: 10.0
+  actor_update_interval: 2
+  chain_pcr_enabled: true
+  chain_pcr_coefficient: 1.0
+  chain_pcr_max_loss_ratio: 0.1
+  chain_pcr_auto_enabled: true
+  chain_pcr_target_ratio: 0.003
+  chain_pcr_ema_decay: 0.99
+  chain_pcr_auto_min_coefficient: 0.0001
+  chain_pcr_auto_max_coefficient: 100.0
