@@ -127,7 +127,7 @@ def run_worker(args: tuple) -> dict:
             while not (terminated or truncated):
                 with torch.no_grad():
                     action = actor.deterministic(torch.from_numpy(obs).unsqueeze(0)).squeeze(0).numpy()
-                obs, _, terminated, truncated, info = env.step(action)
+                obs, _, _, terminated, truncated, info = env.step(action)
             outcomes.append([index, int(info["task_reached"]), int(info["timeout"]),
                              int(info["obstacle_collision"] or info["self_collision"] or info["environment_collision"]),
                              int(info["joint_limit"]), env.step_count])

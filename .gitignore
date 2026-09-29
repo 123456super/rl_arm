@@ -19,11 +19,9 @@ dist/
 # Training outputs and local artifacts
 runs/
 checkpoints/
-*.pt
 *.pth
 *.onnx
 *.whl
-!artifacts/initialization/*.pt
 
 # OS/editor files
 .DS_Store
