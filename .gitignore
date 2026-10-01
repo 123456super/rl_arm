@@ -17,7 +17,15 @@ dist/
 *.egg
 
 # Training outputs and local artifacts
+# outputs 下默认全部忽略
 outputs/**
+
+# 逐层放行目录
+!outputs/serial_hybrid_keypoint_jacobian_auto_chain/
+!outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_recent_success_semantic_162d_h500_4000k/
+!outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_recent_success_semantic_162d_h500_4000k/checkpoints/
+
+# 最终只放行这个文件
 !outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_recent_success_semantic_162d_h500_4000k/checkpoints/actor_step_2600000.pt
 
 # OS/editor files
