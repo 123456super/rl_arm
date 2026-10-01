@@ -62,21 +62,24 @@
 | 自碰撞 | 安全距离 `0.005 m`、查询距离 `0.25 m`、TTC 上限 `3 s` |
 | 自安全课程 | `lambda_self` 从 `0.2` 到 `1.0`，ramp `50k`，满权重最少 `25k` transition；实际进度由课程门控 |
 | 自安全 QP | `self_safety_projection.enabled: false`，当前不投影动作 |
-| 保存/训练 | 每 `25k` 保存；配置每块 `200k`，阶段硬预算 `5M`；正式 S0 默认 8 环境 |
+| 保存/训练 | 每 `25k` 保存；配置每块 `200k`，S0 阶段硬预算 `10M`；正式 S0 默认 8 环境 |
 
 S0 的 rollout 场景全为 `none`；S1 为 25% none + 75% static；S2 为 20% none + 30% static + 50% dynamic。S1/S2 必须从上一阶段完整 checkpoint 继承，当前多环境训练入口只支持 S0。场景 rollout 比例不等于 replay 的场景 batch 比例。
 
-当前精度课程按 `--level-index` 使用以下五档。全部档位的目标距离范围都是 `[0.03,0.70] m`，目标姿态差范围都是 `[0.03,3.141592] rad`，goal scale 都为 `1.0`：
+当前精度课程按 `--level-index` 使用以下八档。全部档位的目标距离范围都是 `[0.03,0.70] m`，目标姿态差范围都是 `[0.03,3.141592] rad`，goal scale 都为 `1.0`：
 
-| 索引 | 位置阈值 eps_p（m） | 姿态阈值 eps_R（rad） | 内部 orientation scale/分池标记 |
+| 索引 | 位置阈值 eps_p（m） | 姿态阈值 eps_R（rad） | orientation scale |
 | --- | ---: | ---: | ---: |
 | L0 / 0 | 0.1000 | 0.3000 | 0.00 |
 | L1 / 1 | 0.0800 | 0.2400 | 0.25 |
 | L2 / 2 | 0.0640 | 0.1920 | 0.50 |
 | L3 / 3 | 0.0512 | 0.1536 | 0.75 |
 | L4 / 4 | 0.0500 | 0.1000 | 1.00 |
+| L5 / 5 | 0.0250 | 0.1000 | 1.00 |
+| L6 / 6 | 0.0100 | 0.1000 | 1.00 |
+| L7 / 7 | 0.0050 | 0.1000 | 1.00 |
 
-这里升档主要收紧精度，不扩大目标范围。内部 `orientation_scale=0` 不表示 L0 只采零姿态差；task-space 合同已经明确完整角度范围。采样器使用位置和姿态各 10 档的 100 cell；正常训练的固定 mixture 为 50% 全 cell 均匀 + 25% O5–O9 + 25% O7–O9，adaptive 采样关闭。这是采样目标分布，实际可达性拒绝采样仍可能影响接受分布。
+这里升档只收紧成功精度，不扩大目标范围。L4--L7 的姿态阈值和姿态 scale 均保持不变；replay 使用整数 level index 区分这些位置精度档位。内部 `orientation_scale=0` 不表示 L0 只采零姿态差；task-space 合同已经明确完整角度范围。采样器使用位置和姿态各 10 档的 100 cell；正常训练的固定 mixture 为 50% 全 cell 均匀 + 25% O5–O9 + 25% O7–O9，adaptive 采样关闭。这是采样目标分布，实际可达性拒绝采样仍可能影响接受分布。
 
 `ThesisHomotopyEnv.step()` 的成功条件为：无硬失败/障碍失败，位置误差 `<= eps_p` 且姿态误差 `<= eps_R`，连续满足 `5` 个控制 step。正常合同达到成功即终止；硬失败也终止，未终止且达到 horizon 则截断。**当前成功判定没有额外要求关节或末端速度低于 `stable_success` 的配置值**，不能把这些遗留速度阈值写成终止条件。目标速度命令限制为 `+-0.7 rad/s`；这不是对仿真测得实际 qdot 的硬钳制。
 
@@ -121,11 +124,13 @@ Actor 输出六维 tanh-Gaussian 动作：训练从高斯重参数化采样后 t
 
 ```text
 a = clip(actor_action, -1, 1)
-precision_scale = clip(max(rho_p/0.05, rho_R/0.15), 0.10, 1.0)
+z = max(rho_p/eps_p, rho_R/eps_R)
+precision_scale = .05 + .05*z                         # 0 <= z <= 1
+precision_scale = .10 + .90*min(z-1, 1)^2             # z > 1
 joint_target_velocity = clip(0.7*a*precision_scale, -0.7, 0.7)
 ```
 
-precision scale 当前开启；其 `.05/.15` 是固定控制尺度，不随 L0/L1 成功阈值自动替换。随后经过自安全投影入口，但当前投影关闭，返回未投影命令。
+precision scale 当前开启，eps_p/eps_R 使用当前 episode 的课程成功阈值；误差读取动作执行前状态。严格区域内缩放为 .05--.10，1--2 倍阈值之间连续恢复速度，达到 2 倍阈值后为 1。所有六关节使用同一系数；.05 是系数下限，不是非零速度下限。随后经过自安全投影入口，但当前投影关闭，返回未投影命令。
 
 | 项目 | 当前实现/有效配置 |
 | --- | --- |
@@ -146,23 +151,30 @@ Auto-PCR 对 Actor 加 `KL(old Gaussian || current Gaussian)`，比较 tanh 前�
 启用 `pose_objective: unified_keypoint`。令三个关键点的平均距离为 D_KP，下一状态跟踪质量 `T=mean_i(exp(-d_i(next)/.05))`，本 episode 成功阈值为 eps_p/eps_R：
 
 ```text
-precision_quality = exp(-max(rho_p(next)/eps_p, rho_R(next)/eps_R))
+precision_quality = exp(-(rho_p(next)/eps_p + rho_R(next)/eps_R)/2)
+I_current = (rho_p(current) <= eps_p and rho_R(current) <= eps_R)
+I_next = (rho_p(next) <= eps_p and rho_R(next) <= eps_R)
+hold_reward = .05 * (I_current and I_next and not terminal_collision_or_hard_failure)
+leave_penalty = .20 * (I_current and not I_next)
 velocity_cost = clip(mean((qdot_after/0.7)^2), 0, 1)
 smooth_cost = clip(mean(((qdot_after-qdot_before)/0.7)^2), 0, 1)
 r_goal = .20*T + 10*(D_KP(current)-D_KP(next))
          + .20*precision_quality - .04*velocity_cost - .01*smooth_cost
+         + hold_reward - leave_penalty
          + 20*task_reached
 r = r_goal - hard_penalty - timeout_guard
            - external_safety_penalty - self_safety_penalty - terminal_guard
 ```
 
-精度项 temperature 为 1，`use_episode_tolerance_for_joint_precision: true`，所以升档会改变该项的 eps_p/eps_R，但不改变公式及系数。关键点 progress 是直接距离差，没有在此项乘 gamma。
+精度项 temperature 为 2，权重保持 .20；两项归一化误差相等时，与旧 temperature=1 的 max 公式强度一致，不保证其他状态等强度。`use_episode_tolerance_for_joint_precision: true`，升档会改变 eps_p/eps_R。外到内不领取保持奖励，内到内固定奖励 .05，内到外罚 .20；不按保持步数递增，不新增 observation。第 5 个连续严格命中 step 仍额外给予成功奖励 20。`orientation_scale` 和整数 level index 不直接进入 reward 公式；L4--L7 只有位置 tolerance 变化。关键点 progress 是直接距离差，不乘 gamma。
 
 硬失败（自碰撞、环境碰撞、关节越界）罚 20；未成功且无硬失败的 timeout 罚 2。外部/自碰撞安全组都为 `(2*risk+8*clearance_violation)/10`，分别再乘 `xi*.05`、`lambda_self*.05`；风险与距离违例均裁剪到 `[0,1]`。`clearance_violation=clip((safe_distance-min_distance)/safe_distance,0,1)`，外部/自安全距离分别 `.12/.005 m`。终止障碍碰撞且非硬失败的 terminal guard 罚 20。
 
-配置和日志仍保留 position/orientation shaping、fine reward、joint-precision progress、partial precision、leave-tolerance 等字段；当前 `r_goal` 不把这些诊断项相加。不能把配置出现的所有系数都当成生效奖励。
+配置和日志仍保留 position/orientation shaping、fine reward、joint-precision progress、partial precision 等诊断项，当前 `r_goal` 不把它们相加。leave-tolerance 惩罚现在实际生效，只判断严格边界（倍率 1），不再使用旧的 2 倍范围。
 
 Replay 每条保存 observation、action、next observation、done、episode/step 和 29 个 raw 特征。训练抽样时重新计算 reward，安全权重采用当前 curriculum；精度阈值读取该 transition 保存的 episode 合同，**不是把所有历史样本重新标成新档位成功**。当前 SAC 是 reward-only，Batch 的 cost 不对应另一套 cost Critic。
+
+环境与 replay 同步使用新联合精度、保持和退出公式；从旧完整 checkpoint 恢复时，上述奖励参数采用当前配置，历史 raw 数据重新计算奖励。网络维度不变，但动作映射及奖励已改变，旧评估结果不能当作新方案结果。
 
 ## 7. L0 定向采集与四池
 
@@ -213,7 +225,7 @@ S1/S2 的 replay 则按场景分配：1024 batch 在 S1 为 none/static/dynamic=
 
 评估使用当前 YAML 构造环境与网络，再加载 Actor。完整 checkpoint 可推断档位/阶段；Actor-only checkpoint 必须提供 `--level-index`，且 S1/S2 Actor-only 应显式指定场景。评估不更新网络、不采训练 replay；正常 frozen probe 按 100 cell 均衡采样，不能用在线训练成功率替代。
 
-标准 L1 评估为 240 step、连续 5 step 保持、eps_p=.08 m/eps_R=.24 rad，例如：
+标准 L1 评估为 500 step、连续 5 step 保持、eps_p=.08 m/eps_R=.24 rad，例如：
 
 ```bash
 conda activate rl
@@ -224,13 +236,13 @@ python scripts/core/evaluate_thesis_homotopy.py \
   --output outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_four_pool_25k_inherited_level1_1000k/evaluations/actor_step_0300000_level1_seed51001.json
 ```
 
-加 `--max-episode-steps 500` 并使用不同 output 路径可做 500-step 诊断，精度仍是 L1；这只改变允许的 episode 步数，不会向 observation 注入剩余时间特征。
+如需使用更短的 `240` step 上限，可显式传 `--max-episode-steps 240` 并使用不同 output 路径做诊断；精度仍是 L1，这只改变允许的 episode 步数，不会向 observation 注入剩余时间特征。
 
 当前保留的两个 JSON 记录了同一个 +300k L1 Actor、1000 episode、seed 51001 的已有结果，本次没有重新评估：
 
 | 评估 horizon | 成功率 | Timeout | 最差 cell 成功率 | 文件名（上述 run 的 evaluations 下） |
 | --- | ---: | ---: | ---: | --- |
-| 240 | 82.7% | 16.8% | 30.0% | `actor_step_0300000_level1_seed51001.json` |
+| 240（历史记录） | 82.7% | 16.8% | 30.0% | `actor_step_0300000_level1_seed51001.json` |
 | 500 | 83.9% | 15.3% | 30.0% | `actor_step_0300000_level1_seed51001_horizon500.json` |
 
 独立评估脚本的 `passed` 条件还区分场景：
@@ -241,7 +253,7 @@ python scripts/core/evaluate_thesis_homotopy.py \
 | static | 90% | 3% | 10% | 同上 |
 | dynamic | 80% | 5% | 20% | 同上 |
 
-课程升档另有上一档保持检查（配置成功率下限 80%、碰撞上限 5%），自安全完成另有 1% collision ceiling；这些不应与独立评估的单个 `passed` 混为一谈。上述两次结果仅总体和最差 cell 已不足 S0 阈值，Timeout 和关节越界也未满足标准，不构成课程通过证明；500-step 结果也不等同标准 240-step 通过率。这里只记录已有单次实验，不能据此声称四池改善/遗忘的因果结论。
+课程升档另有上一档保持检查（配置成功率下限 80%、碰撞上限 5%），自安全完成另有 1% collision ceiling；这些不应与独立评估的单个 `passed` 混为一谈。上述两次结果仅总体和最差 cell 已不足 S0 阈值，Timeout 和关节越界也未满足标准，不构成课程通过证明；历史 240-step 结果与当前默认 500-step 标准不能直接横向比较。这里只记录已有单次实验，不能据此声称四池改善/遗忘的因果结论。
 
 ## 10. 代码核对入口
 

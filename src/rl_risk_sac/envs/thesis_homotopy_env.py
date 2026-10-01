@@ -96,14 +96,11 @@ class ThesisHomotopyEnv(gym.Env):
             raise ValueError("qdot observation scales must be positive")
         precision_control = thesis.get("precision_control", {})
         self.precision_control_enabled = bool(precision_control.get("enabled", False))
-        self.precision_position_scale = float(precision_control.get("position_scale_m", 0.05))
-        self.precision_orientation_scale = float(precision_control.get("orientation_scale_rad", 0.15))
-        self.precision_min_action_scale = float(precision_control.get("min_action_scale", 0.10))
+        self.precision_min_action_scale = float(precision_control.get("min_action_scale", 0.05))
+        self.precision_strict_action_scale = float(precision_control.get("strict_action_scale", 0.10))
         self.success_hold_steps = int(thesis.get("success_hold_steps", 1))
-        if self.precision_position_scale <= 0.0 or self.precision_orientation_scale <= 0.0:
-            raise ValueError("precision control error scales must be positive")
-        if not 0.0 < self.precision_min_action_scale <= 1.0:
-            raise ValueError("precision control minimum action scale must be in (0, 1]")
+        if not 0.0 < self.precision_min_action_scale <= self.precision_strict_action_scale <= 1.0:
+            raise ValueError("precision action scales must satisfy 0 < minimum <= strict <= 1")
         if self.success_hold_steps < 1:
             raise ValueError("success_hold_steps must be positive")
         self.velocity_limits = np.full(6, np.pi, dtype=np.float32)
@@ -172,7 +169,7 @@ class ThesisHomotopyEnv(gym.Env):
                 reward_config.get("joint_precision_progress_scale", 0.0)
             ),
             "joint_precision_temperature": float(
-                reward_config.get("joint_precision_temperature", 1.0)
+                reward_config.get("joint_precision_temperature", 2.0)
             ),
             "joint_position_tolerance": float(
                 reward_config.get("joint_position_tolerance_m", self.position_tolerance)
@@ -188,6 +185,7 @@ class ThesisHomotopyEnv(gym.Env):
             "leave_joint_tolerance_penalty": float(
                 reward_config.get("leave_joint_tolerance_penalty", 0.0)
             ),
+            "hold_reward_scale": float(reward_config.get("hold_reward_scale", 0.0)),
             "partial_precision_reward_scale": float(
                 reward_config.get("partial_precision_reward_scale", 0.0)
             ),
@@ -599,10 +597,18 @@ class ThesisHomotopyEnv(gym.Env):
         policy_command = action * self.action_scale
         precision_action_scale = 1.0
         if self.precision_control_enabled:
-            precision_action_scale = float(np.clip(max(
-                self.previous_rho_position / self.precision_position_scale,
-                self.previous_rho_orientation / self.precision_orientation_scale,
-            ), self.precision_min_action_scale, 1.0))
+            z = max(
+                self.previous_rho_position / self.contract.position_tolerance,
+                self.previous_rho_orientation / self.contract.orientation_tolerance,
+            )
+            if z <= 1.0:
+                precision_action_scale = self.precision_min_action_scale + (
+                    self.precision_strict_action_scale - self.precision_min_action_scale
+                ) * max(z, 0.0)
+            else:
+                precision_action_scale = self.precision_strict_action_scale + (
+                    1.0 - self.precision_strict_action_scale
+                ) * min(z - 1.0, 1.0) ** 2
         scaled_policy_command = policy_command * precision_action_scale
         unprojected_command = np.clip(
             scaled_policy_command, -self.action_scale, self.action_scale

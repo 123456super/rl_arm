@@ -18,25 +18,25 @@ python scripts/core/train_thesis_homotopy.py \
   --run-name s1_seed11001
 ```
 
-须使用完整的 `step_*.pt`，不能用 actor-only checkpoint。训练器核验来源阶段、protocol、seed/RNG stream 和 S0 最终的 P5 frozen probe、P4 retention、自安全完成 gate；Actor、双 Critic、target Critic、温度 α、优化器及 replay 一起恢复。任务课程和 self-safety 状态继承；static 同伦状态在 S1 初始化。S1/S2 目前只支持单环境采样，配置中的 `train.num_envs: 8` 仅用于 S0，显式指定 S1 多环境会报错。示例路径需换成真实完成 S0 gate 的 checkpoint。
+须使用完整的 `step_*.pt`，不能用 actor-only checkpoint。训练器核验来源阶段、protocol、seed/RNG stream 和 S0 最终的 P8 frozen probe、P7 retention、自安全完成 gate；Actor、双 Critic、target Critic、温度 α、优化器及 replay 一起恢复。任务课程和 self-safety 状态继承；static 同伦状态在 S1 初始化。S1/S2 目前只支持单环境采样，配置中的 `train.num_envs: 8` 仅用于 S0，显式指定 S1 多环境会报错。示例路径需换成真实完成 S0 gate 的 checkpoint。
 
 ## 固定合同
 
 | 项目 | 当前值 |
 |---|---|
 | 物理/控制步长 | 1/240 s、0.05 s（每控制步 12 个物理子步） |
-| 时限/成功保持 | 最多 240 控制步；位姿在当前容差内连续保持 5 步 |
+| 时限/成功保持 | 最多 500 控制步；位姿在当前容差内连续保持 5 步 |
 | 动作 | 6 维归一化关节速度；命令 `0.7 * action` rad/s |
 | 精度缩放 | 根据上一步位置、姿态误差，控制命令再乘 [0.1, 1] 系数 |
-| 观测 | 166 维 Hybrid Keypoint + Jacobian + 显式位姿误差 |
+| 观测 | 162 维 Hybrid Keypoint + Jacobian + 显式位姿误差 |
 | SAC | batch 1024、每 transition 0.25 次更新、每 25k 保存 |
 | 网络 | 两层 256 宽 ReLU 的 Gaussian actor 和双 Q；`gamma=0.99`、`tau=0.005` |
 | 学习率 | actor/critic 各 1e-4，α 3e-4；actor 每 2 次 update 更新一次 |
 | Auto-PCR | CHAIN-PCR 开启，自适应系数；目标 penalty/SAC 比 0.003，上限比例 0.1 |
 
-166 维观测由关节位置/速度 12、目标和末端三关键点位置误差 9、关键点位置 Jacobian 54、显式位置/旋转误差及其模长 8、末端线/角速度 6、目标比例/双容差/剩余时间 4、外部障碍物信息 49、自碰撞几何信息 24 组成。外部 49 维具体为六连杆相对向量 18、障碍物位置/速度 6、每连杆距离/TTC/接近速度/风险 24、存在标志 1。输入分量经过各自的界限或比例归一化/裁剪，不能当作原始物理量直接解释；none 场景使用安全占位值。Jacobian 是三个关键点各自 3x6 的位置 Jacobian，输入不是逆 Jacobian 控制器。动作最终仍由 SAC 直接给出六关节速度，`self_safety_projection.enabled: false`。
+162 维观测由关节位置/速度 12、三关键点位置误差 9、关键点位置 Jacobian 54、显式位置/旋转误差及其模长 8、末端线/角速度 6、外部障碍物信息 49、自碰撞几何信息 24 组成。目标尺度、位置阈值、姿态阈值和剩余时间不再作为网络输入。外部 49 维具体为六连杆相对向量 18、障碍物位置/速度 6、每连杆距离/TTC/接近速度/风险 24、存在标志 1。输入分量经过各自的界限或比例归一化/裁剪，不能当作原始物理量直接解释；none 场景使用安全占位值。Jacobian 是三个关键点各自 3x6 的位置 Jacobian，输入不是逆 Jacobian 控制器。动作最终仍由 SAC 直接给出六关节速度，`self_safety_projection.enabled: false`。
 
-当前任务空间目标范围在各精度档一致：位置距离 0.03–0.7 m、旋转距离 0.03–π rad。S1 继承 S0 已通过 gate 的课程档位和对应容差，不因加入障碍物重新回到宽松档；最终档容差为位置 0.05 m、姿态 0.1 rad。成功计数取决于目标位姿与 hold，不等同于某个奖励分数。
+当前任务空间目标范围在各精度档一致：位置距离 0.03–0.7 m、旋转距离 0.03–π rad。S1 继承 S0 已通过 gate 的课程档位和对应容差，不因加入障碍物重新回到宽松档；最高档 L7 容差为位置 0.005 m、姿态 0.1 rad。L4–L7 的姿态 scale 均为 1.0，replay 用 level index 区分位置精度档。成功计数取决于目标位姿与 hold，不等同于某个奖励分数。
 
 ## 静态障碍物和安全课程
 
@@ -48,11 +48,11 @@ static 初始化 `xi=0.02`、成功率门槛 0.90、`strict=false`。最近 100 
 xi = min(1, 0.02 + 0.98 * eligible_steps / 50_000)
 ```
 
-达到 1 后置 strict。strict 前接触仅计入事件/风险，不单独引发障碍物失败；strict 后，外部障碍物接触会终止 episode 并施加 terminal guard 惩罚。自碰撞、环境碰撞及关节越界始终是 hard failure。没有成功或失败而到 240 步为 timeout。strict 开启后的首个 episode 才开始累计 strict transitions，不能将升档当次 episode 反计进去。
+达到 1 后置 strict。strict 前接触仅计入事件/风险，不单独引发障碍物失败；strict 后，外部障碍物接触会终止 episode 并施加 terminal guard 惩罚。自碰撞、环境碰撞及关节越界始终是 hard failure。没有成功或失败而到 500 步为 timeout。strict 开启后的首个 episode 才开始累计 strict transitions，不能将升档当次 episode 反计进去。
 
 ## 奖励与回放
 
-当前 `pose_objective: unified_keypoint`，实际 `r_goal` 使用三关键点 tracking (`0.2 * quality`)、关键点距离进度 (`10 * progress`)、关键点精度 (`0.2 * quality`)，再扣速度与动作平滑代价；成功加 20。位置、姿态等历史诊断列仍在日志，但不能误写为当前 `r_goal` 的额外双指数 progress 项。hard failure 扣 20、未成功 timeout 扣 2。自安全 penalty 继续生效；外部项为：
+当前 `pose_objective: unified_keypoint`，实际 `r_goal` 使用三关键点 tracking (`0.2 * quality`)、关键点距离进度 (`10 * progress`)、关键点精度 (`0.2 * quality`)，再扣速度与动作平滑代价；成功加 20。升档通过每个 episode 保存的位置/姿态 tolerance 改变精度项，档位编号和 `orientation_scale` 不直接进入 reward 公式。位置、姿态等历史诊断列仍在日志，但不能误写为当前 `r_goal` 的额外双指数 progress 项。hard failure 扣 20、未成功 timeout 扣 2。自安全 penalty 继续生效；外部项为：
 
 ```text
 clearance = clip((0.12 - min_distance) / 0.12, 0, 1)

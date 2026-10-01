@@ -1166,16 +1166,18 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
     assert config["sac"]["updates_per_transition"] == .25
     assert config["train"]["actor_initialization_critic_warmup_transitions"] == 5000
     assert thesis["precision_control"] == {
-        "enabled": True, "position_scale_m": .05,
-        "orientation_scale_rad": .15, "min_action_scale": .10,
+        "enabled": True, "min_action_scale": .05,
+        "strict_action_scale": .10,
     }
     assert thesis["success_hold_steps"] == 5
     assert THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN == 162
     assert thesis["reward"]["joint_precision_progress_scale"] == 2.0
     assert thesis["reward"]["joint_position_tolerance_m"] == .05
     assert thesis["reward"]["joint_orientation_tolerance_rad"] == .10
-    assert thesis["reward"]["leave_tolerance_multiplier"] == 2.0
+    assert thesis["reward"]["leave_tolerance_multiplier"] == 1.0
     assert thesis["reward"]["leave_joint_tolerance_penalty"] == .20
+    assert thesis["reward"]["hold_reward_scale"] == .05
+    assert thesis["reward"]["joint_precision_temperature"] == 2.0
     assert "orientation_sigma_rad" not in thesis["reward"]
     assert "nominal_controller" not in thesis
     assert thesis["orientation_curriculum"]["deterministic_probe_collision_ceiling"] == .05
@@ -1200,12 +1202,16 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
     assert settings["deterministic_probe_position_bins"] == 10
     assert settings["deterministic_probe_orientation_bins"] == 10
     assert settings["anchor_probability"] == 0.0
-    assert config["train"]["max_stage_steps"] >= 25 * 100000
+    assert config["train"]["max_stage_steps"] >= len(levels) * 100000
     for previous, current in zip(levels, levels[1:]):
         assert current["target_distance_max_m"] == previous["target_distance_max_m"]
         assert current["target_orientation_max_rad"] == previous["target_orientation_max_rad"]
-    assert [level["position_tolerance_m"] for level in levels] == [.10, .08, .064, .0512, .05]
-    assert [level["orientation_tolerance_rad"] for level in levels] == [.30, .24, .192, .1536, .10]
+    assert [level["position_tolerance_m"] for level in levels] == [
+        .10, .08, .064, .0512, .05, .025, .01, .005,
+    ]
+    assert [level["orientation_tolerance_rad"] for level in levels] == [
+        .30, .24, .192, .1536, .10, .10, .10, .10,
+    ]
     assert levels[-1]["target_distance_max_m"] == .70
     assert np.isclose(levels[-1]["target_orientation_max_rad"], np.pi, atol=1e-6)
 
@@ -1256,10 +1262,10 @@ def test_v13_5_precision_curriculum_keeps_full_range_and_tightens_only_precision
     }
     assert len(bounds) == 1
     assert [level["position_tolerance_m"] for level in levels] == [
-        .10, .08, .064, .0512, .05,
+        .10, .08, .064, .0512, .05, .025, .01, .005,
     ]
     assert [level["orientation_tolerance_rad"] for level in levels] == [
-        .30, .24, .192, .1536, .10,
+        .30, .24, .192, .1536, .10, .10, .10, .10,
     ]
     assert thesis["reward"]["use_episode_tolerance_for_joint_precision"] is True
     assert thesis["reward"]["partial_precision_reward_scale"] == .10
@@ -2159,6 +2165,8 @@ def test_replay_preserves_self_geometry_and_relabels_current_self_weight():
 
 @pytest.mark.parametrize("parameters", [
     {"keypoint_precision_reward_scale": .20},
+    {"keypoint_precision_reward_scale": .20, "hold_reward_scale": .05,
+     "leave_joint_tolerance_penalty": .20},
     {"keypoint_tracking_scale": .35, "keypoint_progress_scale": 7.0,
      "keypoint_precision_reward_scale": .10, "joint_precision_temperature": .75},
 ])
@@ -2269,7 +2277,7 @@ def test_replay_reward_relabel_uses_each_transition_curriculum_tolerances():
 
     batch = replay.sample(
         "s0", {"static": .02, "dynamic": .02}, batch_size=1,
-        orientation_scale=.50,
+        orientation_scale=.50, curriculum_level=2,
     )
     expected, _ = homotopy_reward(
         rho_position=.11, next_rho_position=.09,
@@ -2877,12 +2885,74 @@ def test_precision_control_reduces_velocity_near_goal():
         env.previous_rho_position = .01
         env.previous_rho_orientation = .03
         _, _, _, _, _, info = env.step(np.ones(6, dtype=np.float32))
-        assert np.isclose(info["precision_action_scale"], .2)
+        z = max(.01 / env.contract.position_tolerance, .03 / env.contract.orientation_tolerance)
+        expected_scale = .05 + .05 * z
+        assert np.isclose(info["precision_action_scale"], expected_scale)
         np.testing.assert_allclose(
-            info["commanded_joint_velocity"], .14 * np.ones(6), atol=1e-7,
+            info["commanded_joint_velocity"], .7 * expected_scale * np.ones(6), atol=1e-7,
         )
     finally:
         env.close()
+
+
+@pytest.mark.parametrize("level", [0, 4, 5, 6, 7])
+@pytest.mark.parametrize("z, expected", [(0.0, .05), (.5, .075), (1., .10), (1.5, .325), (2., 1.), (3., 1.)])
+def test_precision_control_uses_episode_tolerances(level, z, expected):
+    root = Path(__file__).resolve().parents[2]
+    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    env = ThesisHomotopyEnv(config)
+    try:
+        thresholds = config["thesis"]["joint_pose_curriculum"]["levels"][level]
+        env.configure_episode(
+            "none", xi=1.0, strict=True,
+            position_tolerance=thresholds["position_tolerance_m"],
+            orientation_tolerance=thresholds["orientation_tolerance_rad"],
+        )
+        env.reset(seed=20260922)
+        env.previous_rho_position = z * env.contract.position_tolerance
+        env.previous_rho_orientation = z * env.contract.orientation_tolerance
+        _, _, _, _, _, info = env.step(np.ones(6, dtype=np.float32))
+        assert info["precision_action_scale"] == pytest.approx(expected)
+        np.testing.assert_allclose(info["commanded_joint_velocity"], .7 * expected, atol=1e-7)
+    finally:
+        env.close()
+
+
+@pytest.mark.parametrize("before, after, expected", [(2., .5, 0.), (.5, .5, .05), (.5, 2., -.2), (2., 2., 0.)])
+@pytest.mark.parametrize("success", [False, True])
+def test_pose_hold_and_exit_rewards_match_replay(before, after, expected, success):
+    raw = np.zeros((1, 29), dtype=np.float32)
+    raw[0, 0:4] = [before * .05, after * .05, before * .10, after * .10]
+    raw[0, 5] = success
+    raw[0, 12] = .8
+    raw[0, 18] = .25
+    raw[0, 24:26] = [.05, .10]
+    parameters = dict(hold_reward_scale=.05, leave_joint_tolerance_penalty=.20)
+    reward, fields = homotopy_reward(
+        rho_position=float(raw[0, 0]), next_rho_position=float(raw[0, 1]),
+        rho_orientation=float(raw[0, 2]), next_rho_orientation=float(raw[0, 3]),
+        joint_position_tolerance=float(raw[0, 24]), joint_orientation_tolerance=float(raw[0, 25]),
+        smooth_velocity=0., velocity_magnitude=0., orientation_scale=1., task_reached=success,
+        hard_failure=False, obstacle_collision=False, risk_max=0., distance_min=.8, xi=1.,
+        **parameters,
+    )
+    assert fields["r_goal"] == pytest.approx(expected + 20. * success)
+    vectorized, _ = _vectorized_replay_rewards(raw, np.zeros((1, 1)), np.ones(1), 0., .99, parameters)
+    assert vectorized[0] == pytest.approx(reward)
+
+
+def test_joint_precision_quality_uses_sum_and_temperature():
+    _, fields = homotopy_reward(
+        rho_position=.05, next_rho_position=.025,
+        rho_orientation=.1, next_rho_orientation=.1,
+        joint_position_tolerance=.05, joint_orientation_tolerance=.1,
+        joint_precision_temperature=2., keypoint_precision_reward_scale=.2,
+        smooth_velocity=0., velocity_magnitude=0., orientation_scale=1., task_reached=False,
+        hard_failure=False, obstacle_collision=False, risk_max=0., distance_min=.8, xi=1.,
+    )
+    assert fields["joint_precision_quality"] == pytest.approx(np.exp(-1.))
+    assert fields["next_joint_precision_quality"] == pytest.approx(np.exp(-.75))
+    assert fields["keypoint_precision_reward"] == pytest.approx(.2 * np.exp(-.75))
 
 
 def test_initial_goal_curriculum_samples_locally():

@@ -325,8 +325,8 @@ def validate_serial_stage_transition(
     if not complete:
         if source_stage == "s0":
             raise ValueError(
-                "S0 checkpoint has not passed the final P5 frozen-probe, "
-                "P4 retention, and self-safety completion gate"
+                "S0 checkpoint has not passed the final precision-level frozen "
+                "probe, previous-level retention, and self-safety completion gate"
             )
         raise ValueError(
             "S1 checkpoint has not completed strict static-scene consolidation"
@@ -1117,7 +1117,7 @@ def run_manual_pose_checkpoint_probe(
         agent, config, curriculum, settings, pool=pool,
     )
     # In manual-promotion mode the probe is observational for intermediate
-    # levels, but the final P5 probe is the formal frozen evidence used by the
+    # levels, but the final precision-level probe is the formal frozen evidence used by the
     # S0->S1 gate.  Persist those metrics because there is no later promotion
     # command that would otherwise record them in the curriculum checkpoint.
     if (
@@ -1630,6 +1630,7 @@ def run_parallel_s0(
                     reference_batch = replay.sample(
                         "s0", curriculum.xi_map(), batch_size,
                         orientation_scale=curriculum.orientation.scale,
+                        curriculum_level=curriculum.orientation.level_index,
                         s0_anchor_fraction=anchor_fraction,
                         s0_current_fraction=current_fraction,
                         lambda_self=curriculum.lambda_self,
@@ -1638,6 +1639,7 @@ def run_parallel_s0(
                 batch = replay.sample(
                     "s0", curriculum.xi_map(), batch_size,
                     orientation_scale=curriculum.orientation.scale,
+                    curriculum_level=curriculum.orientation.level_index,
                     s0_anchor_fraction=anchor_fraction,
                     s0_current_fraction=current_fraction,
                     lambda_self=curriculum.lambda_self,
@@ -1762,7 +1764,7 @@ def run_parallel_s0(
                             rolled_back = True
                     advanced = curriculum.advance_orientation_if_ready()
                     if advanced:
-                        replay.begin_orientation_level(curriculum.orientation.scale)
+                        replay.begin_orientation_level(curriculum.orientation.level_index)
                         contract = curriculum.pose_contract()
                         replay.update_semantic_bounds(
                             distance_min=contract["target_distance_min_m"],
@@ -2485,6 +2487,12 @@ def main() -> None:
             raise ValueError(f"invalid stage transition {previous_stage}->{stage}")
         env.rng.bit_generator.state = state["environment_rng"]
         warmup_action_rng.bit_generator.state = state["warmup_action_rng"]
+        # Historical transitions are relabeled using the active reward scheme.
+        replay.reward_parameters.update({
+            key: env.reward_parameters[key]
+            for key in ("joint_precision_temperature", "hold_reward_scale",
+                        "leave_joint_tolerance_penalty", "leave_tolerance_multiplier")
+        })
     elif args.initialize_actor_from:
         start_level = int(args.start_level)
         maximum_level = len(thesis["joint_pose_curriculum"]["levels"]) - 1
@@ -2501,7 +2509,7 @@ def main() -> None:
         agent.reset_chain_reference_actor()
         if start_level > curriculum.orientation.level_index:
             curriculum.manually_advance_orientation_to(start_level, allow_early=True)
-        replay.begin_orientation_level(curriculum.orientation.scale)
+        replay.begin_orientation_level(curriculum.orientation.level_index)
         # An imported actor should collect the new reward contract immediately;
         # only critic updates retain the normal update_after replay warm-up.
         counters["random_steps_used"] = int(config["sac"]["warmup_steps"])
@@ -2520,6 +2528,11 @@ def main() -> None:
         resume_mode = "actor_only_fresh_replay_and_critics"
     elif stage != "s0":
         raise ValueError("S1/S2 must use --resume with the preceding stage's complete checkpoint")
+    if checkpoint_source and replay.s0_joint_pose:
+        replay.migrate_joint_pose_level_keys(
+            tuple(float(value) for value in state["curriculum"]["orientation"].levels),
+            current_level=int(state["curriculum"]["orientation"].level_index),
+        )
     curriculum.configure_orientation_retention(orientation_curriculum)
     bad_state_starts = None
     previous_sampling = counters.get("bad_state_sampling")
@@ -2644,7 +2657,7 @@ def main() -> None:
                 "manual promotion could not advance (already final level or "
                 "online prerequisites are incomplete)"
             )
-        replay.begin_orientation_level(curriculum.orientation.scale)
+        replay.begin_orientation_level(curriculum.orientation.level_index)
         counters.setdefault("manual_promotions", []).append({
             "from_level": int(previous_level),
             "to_level": int(curriculum.orientation.level_index),
@@ -2676,13 +2689,13 @@ def main() -> None:
         )
         if four_pool_promotion:
             replay.promote_four_pool_to_history(
-                curriculum.orientation.scale,
+                curriculum.orientation.level_index,
                 current_fraction=(.5 if args.promoted_current_fraction is None
                                   else args.promoted_current_fraction),
             )
             counters["bad_state_sampling_previous_level"] = counters.pop("bad_state_sampling")
         else:
-            replay.begin_orientation_level(curriculum.orientation.scale)
+            replay.begin_orientation_level(curriculum.orientation.level_index)
         counters.setdefault("manual_promotions", []).append({
             "from_level": previous_level,
             "to_level": target_level,
@@ -3144,6 +3157,7 @@ def main() -> None:
                         reference_batch = replay.sample(
                             stage, curriculum.xi_map(), batch_size,
                             orientation_scale=curriculum.orientation.scale,
+                            curriculum_level=curriculum.orientation.level_index,
                             s0_anchor_fraction=replay_anchor_fraction,
                             s0_current_fraction=replay_current_fraction,
                             lambda_self=curriculum.lambda_self,
@@ -3152,6 +3166,7 @@ def main() -> None:
                     batch = replay.sample(
                         stage, curriculum.xi_map(), batch_size,
                         orientation_scale=curriculum.orientation.scale,
+                        curriculum_level=curriculum.orientation.level_index,
                         s0_anchor_fraction=replay_anchor_fraction,
                         s0_current_fraction=replay_current_fraction,
                         lambda_self=curriculum.lambda_self,
@@ -3566,7 +3581,7 @@ def main() -> None:
                 counters["probe_best"] = best_probes
                 advanced = curriculum.advance_orientation_if_ready()
                 if advanced:
-                    replay.begin_orientation_level(curriculum.orientation.scale)
+                    replay.begin_orientation_level(curriculum.orientation.level_index)
                     contract = curriculum.pose_contract()
                     replay.update_semantic_bounds(
                         distance_min=contract["target_distance_min_m"],

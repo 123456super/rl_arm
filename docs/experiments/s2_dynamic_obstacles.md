@@ -22,9 +22,9 @@ python scripts/core/train_thesis_homotopy.py \
 
 ## 网络、任务与采样合同
 
-S2 沿用 S1 的 166 维观测和 6 维归一化关节速度动作，不迁移输入层或重建 Critic。关节状态 12、三关键点位姿误差 9、三个关键点的 9x6 位置 Jacobian 54、显式位姿误差及模长 8、末端速度 6、目标/容差/剩余时间 4、外部障碍物 49、自碰撞信息 24，合计 166。动态外部 49 维包含六连杆相对向量、障碍物的位置和**速度**、各连杆距离/TTC/接近速度/风险、存在标志；不同字段按代码规定的不同尺度归一化/裁剪。三个关键点的位置 Jacobian 是观测特征，不是执行的逆运动学控制器。
+S2 沿用 S1 的 162 维观测和 6 维归一化关节速度动作，不迁移输入层或重建 Critic。关节状态 12、三关键点位置误差 9、三个关键点的 9x6 位置 Jacobian 54、显式位姿误差及模长 8、末端速度 6、外部障碍物 49、自碰撞信息 24，合计 162。目标尺度、位置阈值、姿态阈值和剩余时间不作为网络输入。动态外部 49 维包含六连杆相对向量、障碍物的位置和**速度**、各连杆距离/TTC/接近速度/风险、存在标志；不同字段按代码规定的不同尺度归一化/裁剪。三个关键点的位置 Jacobian 是观测特征，不是执行的逆运动学控制器。
 
-目标任务空间距离始终 0.03–0.7 m、角度 0.03–π rad；继承 S1 已通过 gate 的精度档及位置/姿态容差。每个 episode 最多 240 控制步，位置和姿态同时满足当前容差并连续保持 5 步算 task reached。环境输出 `action in [-1,1]^6`，关节速度命令首先乘 `0.7 rad/s`，近目标再由上一步位姿误差缩至 [0.1,1] 倍；自安全投影配置关闭。
+目标任务空间距离始终 0.03–0.7 m、角度 0.03–π rad；继承 S1 已通过 gate 的精度档及位置/姿态容差，最高档 L7 为 `0.005 m / 0.1 rad`。每个 episode 最多 500 控制步，位置和姿态同时满足当前容差并连续保持 5 步算 task reached。环境输出 `action in [-1,1]^6`，关节速度命令首先乘 `0.7 rad/s`，近目标再由上一步位姿误差缩至 [0.1,1] 倍；自安全投影配置关闭。
 
 网络是两层 256 宽 ReLU 的 Gaussian SAC actor、双 Q 和双 target Q；`gamma=0.99`、`tau=0.005`、actor/critic LR 均 1e-4、α LR 3e-4、batch 1024、每 transition 0.25 次更新、actor 每两次 update 更新一次。CHAIN-PCR/Auto-PCR 沿用：目标 penalty/SAC 比 0.003、最大比例 0.1；不是一个新 SAC 结构。控制步 0.05 s（12 个 1/240 s 物理子步），每 25k transitions 保存 checkpoint。
 
@@ -44,7 +44,7 @@ xi = min(1, 0.02 + 0.98 * eligible_steps / 50_000)
 
 `xi=1` 后 dynamic strict，之后的完整 strict episode 才增加 strict_steps。strict 前障碍物接触记风险但不单独终止，strict 后接触触发独立的 obstacle failure 与 terminal guard；自碰撞、环境碰撞和关节越界一直是 hard failure。达到 horizon 且未成功/失败则 timeout。S1 继承来的 static 保持 strict 状态，不在 S2 重新走 static ramp。
 
-奖励继续使用 `pose_objective: unified_keypoint`：三关键点 tracking、关键点误差 progress、关键点精度奖励，减速度和动作平滑代价，成功 +20；hard failure -20，未成功 timeout -2；另有自安全代价与当前场景的外部安全项。过去位置/姿态 progress 等诊断字段仍记录，但不作为当前 `r_goal` 的额外加项。
+奖励继续使用 `pose_objective: unified_keypoint`：三关键点 tracking、关键点误差 progress、关键点精度奖励，减速度和动作平滑代价，成功 +20；hard failure -20，未成功 timeout -2；另有自安全代价与当前场景的外部安全项。升档通过 transition 保存的位置/姿态 tolerance 影响精度项，档位编号和 `orientation_scale` 不直接进入 reward 公式。过去位置/姿态 progress 等诊断字段仍记录，但不作为当前 `r_goal` 的额外加项。
 
 ```text
 clearance = clip((0.12 - min_distance) / 0.12, 0, 1)

@@ -17,9 +17,8 @@ thesis:
   qdot_observation_scale: 0.8
   precision_control:
     enabled: true
-    position_scale_m: 0.05
-    orientation_scale_rad: 0.15
-    min_action_scale: 0.1
+    min_action_scale: 0.05
+    strict_action_scale: 0.1
   success_hold_steps: 5
   ee_linear_velocity_scale: 0.55
   ee_angular_velocity_scale: 1.5
@@ -83,18 +82,26 @@ thesis:
     - 1.0
     - 1.0
     - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
     min_transitions_per_level: 100000
     success_window: 100
     success_floor: 0.85
     full_scale_min_transitions: 25000
   orientation_curriculum:
     start_scale: 0.0
+    # L4--L7 have the same full orientation objective; replay uses the
+    # curriculum level index to distinguish these precision-only levels.
     end_scale: 1.0
     levels:
     - 0.0
     - 0.25
     - 0.5
     - 0.75
+    - 1.0
+    - 1.0
+    - 1.0
     - 1.0
     tolerance_start: 0.3
     tolerance_end: 0.1
@@ -212,6 +219,27 @@ thesis:
       target_orientation_max_rad: 3.141592
       position_tolerance_m: 0.05
       orientation_tolerance_rad: 0.1
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.7
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.025
+      orientation_tolerance_rad: 0.1
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.7
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.01
+      orientation_tolerance_rad: 0.1
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.7
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.005
+      orientation_tolerance_rad: 0.1
   semantic_long_term_replay:
     enabled: true
     fraction: 0.2
@@ -230,13 +258,14 @@ thesis:
     precision_orientation_scale_rad: 0.09
     precision_stop_cost_weight: 0.2
     joint_precision_progress_scale: 2.0
-    joint_precision_temperature: 1.0
+    joint_precision_temperature: 2.0
     joint_position_tolerance_m: 0.05
     joint_orientation_tolerance_rad: 0.1
     use_episode_tolerance_for_joint_precision: true
     partial_precision_reward_scale: 0.1
-    leave_tolerance_multiplier: 2.0
+    leave_tolerance_multiplier: 1.0
     leave_joint_tolerance_penalty: 0.2
+    hold_reward_scale: 0.05
     position_progress_scale: 2.0
     orientation_progress_scale: 2.0
     position_state_cost_weight: 0.02
@@ -271,7 +300,7 @@ thesis:
     hybrid_explicit_pose_error: true
 train:
   total_steps: 200000
-  max_stage_steps: 5000000
+  max_stage_steps: 10000000
   num_envs: 8
   evaluate_during_training: false
   actor_initialization_critic_warmup_transitions: 5000

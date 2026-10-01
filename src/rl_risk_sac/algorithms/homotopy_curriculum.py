@@ -181,8 +181,8 @@ class HomotopyCurriculum:
             )
         if goal_min_transitions_per_level < 1:
             raise ValueError("goal_min_transitions_per_level must be positive")
-        if not 0.0 <= orientation_start_scale <= orientation_end_scale <= 1.0:
-            raise ValueError("orientation scales must satisfy 0 <= start <= end <= 1")
+        if not 0.0 <= orientation_start_scale <= orientation_end_scale:
+            raise ValueError("orientation scales must satisfy 0 <= start <= end")
         if not 0.0 < orientation_tolerance_end <= orientation_tolerance_start <= np.pi:
             raise ValueError("orientation tolerances must satisfy 0 < end <= start <= pi")
         if orientation_success_window < 1:
@@ -197,11 +197,11 @@ class HomotopyCurriculum:
         if (len(orientation_levels_tuple) < 2
                 or not np.isclose(orientation_levels_tuple[0], orientation_start_scale)
                 or not np.isclose(orientation_levels_tuple[-1], orientation_end_scale)
-                or any(right <= left for left, right in zip(
+                or any(right < left for left, right in zip(
                     orientation_levels_tuple, orientation_levels_tuple[1:]
                 ))):
             raise ValueError(
-                "orientation_levels must be strictly increasing from start_scale to end_scale"
+                "orientation_levels must be non-decreasing from start_scale to end_scale"
             )
         if orientation_min_transitions_per_level < 1:
             raise ValueError("orientation_min_transitions_per_level must be positive")
@@ -798,6 +798,8 @@ class HomotopyCurriculum:
 
     @property
     def orientation_at_full_scale(self) -> bool:
+        if self.joint_pose_levels:
+            return self.orientation.level_index == len(self.orientation.levels) - 1
         return bool(np.isclose(self.orientation.scale, self.orientation.end, rtol=0.0, atol=1e-12))
 
     def record_transition(
@@ -1124,6 +1126,9 @@ class HomotopyCurriculum:
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         if state["stage"] != self.stage: raise ValueError("checkpoint curriculum stage mismatch")
+        configured_goal = copy.deepcopy(self.goal)
+        configured_orientation = copy.deepcopy(self.orientation)
+        configured_pose_levels = copy.deepcopy(self.joint_pose_levels)
         self.ramp_steps = state["ramp_steps"]; self.probabilities = state["probabilities"]
         self.goal_full_scale_min_steps = int(state["goal_full_scale_min_steps"])
         self.orientation_full_scale_min_steps = int(
@@ -1135,10 +1140,38 @@ class HomotopyCurriculum:
                 "self_probe_collision_ceiling", self.self_probe_collision_ceiling,
             )
         )
-        self.goal = state["goal"]
-        self.orientation = state["orientation"]
-        self.joint_pose_levels = tuple(state.get("joint_pose_levels", ()))
+        self.goal = copy.deepcopy(state["goal"])
+        self.orientation = copy.deepcopy(state["orientation"])
+        self.joint_pose_levels = tuple(copy.deepcopy(state.get("joint_pose_levels", ())))
+        saved_level_count = len(self.orientation.levels)
+        configured_level_count = len(configured_orientation.levels)
+        if saved_level_count < configured_level_count:
+            if tuple(self.orientation.levels) != tuple(
+                configured_orientation.levels[:saved_level_count]
+            ):
+                raise ValueError(
+                    "checkpoint curriculum levels are not a prefix of the current contract"
+                )
+            if tuple(self.goal.levels) != tuple(
+                configured_goal.levels[:saved_level_count]
+            ):
+                raise ValueError(
+                    "checkpoint goal levels are not a prefix of the current contract"
+                )
+            if tuple(self.joint_pose_levels) != tuple(
+                configured_pose_levels[:saved_level_count]
+            ):
+                raise ValueError(
+                    "checkpoint pose levels are not a prefix of the current contract"
+                )
+            # Preserve all learned curriculum counters while exposing appended
+            # precision levels to checkpoints created under the shorter chain.
+            self.goal.levels = configured_goal.levels
+            self.goal.end = configured_goal.end
+            self.orientation.levels = configured_orientation.levels
+            self.orientation.end = configured_orientation.end
+            self.joint_pose_levels = tuple(configured_pose_levels)
         self._refresh_precision_only_task_space()
-        self.self_safety = state["self_safety"]
-        self.states = state["states"]
+        self.self_safety = copy.deepcopy(state["self_safety"])
+        self.states = copy.deepcopy(state["states"])
         self.rng.bit_generator.state = state["rng_state"]

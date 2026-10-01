@@ -33,7 +33,9 @@ def _vectorized_replay_rewards(
     scene_xi = np.asarray(xi, dtype=np.float64).reshape(-1)
     p = {
         "d_safe": 0.12, "d_self_safe": 0.005,
-        "joint_precision_temperature": 1.0,
+        "joint_precision_temperature": 2.0,
+        "hold_reward_scale": 0.0,
+        "leave_joint_tolerance_penalty": 0.0,
         "keypoint_pose_reward": True,
         "keypoint_tracking_scale": 0.20,
         "keypoint_progress_scale": 10.0,
@@ -54,21 +56,29 @@ def _vectorized_replay_rewards(
         raise ValueError("only unified keypoint pose reward is supported")
     if r.shape[1] < 29:
         raise ValueError("keypoint replay rows require current/next distance and tracking quality")
-    next_tolerance_ratio = np.maximum(
-        np.maximum(r[:, 1], 0.0) / r[:, 24],
-        np.maximum(r[:, 3], 0.0) / r[:, 25],
-    )
+    position_ratio = np.maximum(r[:, 0], 0.0) / r[:, 24]
+    orientation_ratio = np.maximum(r[:, 2], 0.0) / r[:, 25]
+    next_position_ratio = np.maximum(r[:, 1], 0.0) / r[:, 24]
+    next_orientation_ratio = np.maximum(r[:, 3], 0.0) / r[:, 25]
+    was_strict = (position_ratio <= 1.0) & (orientation_ratio <= 1.0)
+    next_strict = (next_position_ratio <= 1.0) & (next_orientation_ratio <= 1.0)
     velocity_cost = float(p["velocity_cost_weight"]) * np.clip(r[:, 15], 0.0, 1.0)
     smooth_cost = float(p["smooth_cost_weight"]) * np.clip(r[:, 4], 0.0, 1.0)
     task_reached = r[:, 5] != 0.0
     hard_failure = r[:, 6] != 0.0
     obstacle_collision = r[:, 7] != 0.0
     timeout = r[:, 22] != 0.0
+    terminal_obstacle = obstacle_collision & (done != 0.0) & ~task_reached & ~hard_failure
+    held = was_strict & next_strict & ~hard_failure & ~terminal_obstacle
+    left = was_strict & ~next_strict
     r_goal = (
         float(p["keypoint_tracking_scale"]) * np.clip(r[:, 28], 0.0, 1.0)
         + float(p["keypoint_progress_scale"]) * (r[:, 26] - r[:, 27])
         + float(p["keypoint_precision_reward_scale"])
-        * np.exp(-next_tolerance_ratio / float(p["joint_precision_temperature"]))
+        * np.exp(-(next_position_ratio + next_orientation_ratio)
+                 / float(p["joint_precision_temperature"]))
+        + float(p["hold_reward_scale"]) * held
+        - float(p["leave_joint_tolerance_penalty"]) * left
         - velocity_cost
         - smooth_cost
         + float(p["success_bonus"]) * task_reached
@@ -101,7 +111,6 @@ def _vectorized_replay_rewards(
     timeout_penalty = float(p["timeout_penalty"]) * (
         timeout & ~task_reached & ~hard_failure
     )
-    terminal_obstacle = obstacle_collision & (done != 0.0) & ~task_reached & ~hard_failure
     terminal_guard = float(p["hard_failure_penalty"]) * terminal_obstacle
     rewards = r_goal - hard_penalty - timeout_penalty - safety_penalty - terminal_guard
     return rewards, proximity
@@ -283,6 +292,7 @@ class HomotopyReplayBuffer:
             obs_dim, action_dim, int(s0_success_capacity), self.raw_dim
         )
         self.s0_current_scale: float | None = None
+        self.s0_level_keys_are_indices = False
         self.s0_history: dict[float, _Partition] = {}
         self.s0_history_capacity_per_level = int(s0_history_capacity_per_level)
         if min(
@@ -762,6 +772,42 @@ class HomotopyReplayBuffer:
         self._archive_current_level()
         self.s0_current_scale = scale
 
+    def migrate_joint_pose_level_keys(
+        self, saved_levels: tuple[float, ...], current_level: int | None = None,
+    ) -> None:
+        """Convert legacy orientation-scale replay keys to level indices."""
+        if not self.s0_joint_pose or self.s0_level_keys_are_indices:
+            return
+
+        def level_index(scale: float) -> float:
+            matches = [
+                index for index, value in enumerate(saved_levels)
+                if np.isclose(scale, value, rtol=0.0, atol=1e-7)
+            ]
+            if not matches:
+                raise ValueError(
+                    f"cannot map legacy replay level key {scale} to curriculum"
+                )
+            # Duplicate full-orientation markers were used briefly before
+            # level-index replay keys were introduced; map them to the last
+            # matching precision level (L4 for the legacy 5-level contract).
+            return float(matches[-1])
+
+        migrated_history: dict[float, _Partition] = {}
+        for scale, partition in self.s0_history.items():
+            key = level_index(float(scale))
+            if key in migrated_history:
+                raise ValueError(f"legacy replay levels collide at L{int(key)}")
+            migrated_history[key] = partition
+        self.s0_history = migrated_history
+        if self.s0_current_scale is not None:
+            self.s0_current_scale = (
+                float(current_level)
+                if current_level is not None
+                else level_index(float(self.s0_current_scale))
+            )
+        self.s0_level_keys_are_indices = True
+
     def add(
         self, scene: str, observation, action, next_observation, terminal: bool,
         info: dict[str, Any], episode_id: int, step_in_episode: int,
@@ -803,7 +849,14 @@ class HomotopyReplayBuffer:
                 episode_id, step_in_episode,
             )
             return
-        scale = self._scale_key(info["orientation_scale"])
+        # L4--L7 share orientation_scale=1.0; use the explicit curriculum
+        # index when available so their position-precision replay remains
+        # partitioned by level.
+        scale = self._scale_key(
+            curriculum_level if curriculum_level is not None else info["orientation_scale"]
+        )
+        if curriculum_level is not None:
+            self.s0_level_keys_are_indices = True
         if self.s0_joint_pose and orientation_anchor:
             self.s0_anchor.add(
                 observation, action, next_observation, terminal, raw,
@@ -1321,6 +1374,7 @@ class HomotopyReplayBuffer:
     def sample(
         self, stage: str, xi: dict[str, float], batch_size: int = 256,
         *, orientation_scale: float | None = None,
+        curriculum_level: int | None = None,
         s0_anchor_fraction: float | None = None,
         s0_current_fraction: float | None = None,
         lambda_self: float = 1.0,
@@ -1355,7 +1409,8 @@ class HomotopyReplayBuffer:
             if count:
                 if stage == "s0" and scene == "none":
                     selected = self._sample_s0_rows(
-                        int(count), orientation_scale,
+                        int(count),
+                        curriculum_level if curriculum_level is not None else orientation_scale,
                         s0_anchor_fraction, s0_current_fraction,
                     )
                     rows.extend(
@@ -1478,6 +1533,7 @@ class HomotopyReplayBuffer:
                 "s0_current": self.s0_current,
                 "s0_current_success": self.s0_current_success,
                 "s0_current_scale": self.s0_current_scale,
+                "s0_level_keys_are_indices": self.s0_level_keys_are_indices,
                 "s0_history": self.s0_history,
                 "s0_history_capacity_per_level": self.s0_history_capacity_per_level,
                 "rng_state": self.rng.bit_generator.state,
@@ -1512,6 +1568,9 @@ class HomotopyReplayBuffer:
         self.s0_current = state["s0_current"]
         self.s0_current_success = state["s0_current_success"]
         self.s0_current_scale = state["s0_current_scale"]
+        self.s0_level_keys_are_indices = bool(
+            state.get("s0_level_keys_are_indices", False)
+        )
         self.s0_history = state["s0_history"]
         self.s0_history_capacity_per_level = int(
             state["s0_history_capacity_per_level"]

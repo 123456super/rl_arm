@@ -582,11 +582,12 @@ def homotopy_reward(
     precision_orientation_scale: float = 0.09,
     precision_stop_cost_weight: float = 0.20,
     joint_precision_progress_scale: float = 0.0,
-    joint_precision_temperature: float = 1.0,
+    joint_precision_temperature: float = 2.0,
     joint_position_tolerance: float = 0.01,
     joint_orientation_tolerance: float = 0.03,
     leave_tolerance_multiplier: float = 2.0,
     leave_joint_tolerance_penalty: float = 0.0,
+    hold_reward_scale: float = 0.0,
     partial_precision_reward_scale: float = 0.0,
     position_progress_scale: float = 2.0,
     orientation_progress_scale: float = 2.0,
@@ -651,6 +652,7 @@ def homotopy_reward(
         precision_stop_cost_weight,
         joint_precision_progress_scale,
         leave_joint_tolerance_penalty,
+        hold_reward_scale,
         partial_precision_reward_scale,
         position_state_cost_weight,
         orientation_state_cost_weight,
@@ -740,10 +742,14 @@ def homotopy_reward(
         max(next_rho_orientation, 0.0) / joint_orientation_tolerance,
     ))
     joint_precision_quality = float(np.exp(
-        -joint_tolerance_ratio / joint_precision_temperature
+        -(max(rho_position, 0.0) / joint_position_tolerance
+          + max(rho_orientation, 0.0) / joint_orientation_tolerance)
+        / joint_precision_temperature
     ))
     next_joint_precision_quality = float(np.exp(
-        -next_joint_tolerance_ratio / joint_precision_temperature
+        -(max(next_rho_position, 0.0) / joint_position_tolerance
+          + max(next_rho_orientation, 0.0) / joint_orientation_tolerance)
+        / joint_precision_temperature
     ))
     joint_precision_progress = float(
         gamma * next_joint_precision_quality - joint_precision_quality
@@ -752,12 +758,17 @@ def homotopy_reward(
         joint_precision_progress_scale * joint_precision_progress
     )
     left_joint_tolerance_region = bool(
-        joint_tolerance_ratio <= leave_tolerance_multiplier
-        and next_joint_tolerance_ratio > leave_tolerance_multiplier
+        joint_tolerance_ratio <= 1.0
+        and next_joint_tolerance_ratio > 1.0
     )
     leave_joint_penalty = (
         leave_joint_tolerance_penalty * float(left_joint_tolerance_region)
     )
+    held_joint_tolerance_region = bool(
+        joint_tolerance_ratio <= 1.0 and next_joint_tolerance_ratio <= 1.0
+        and not hard_failure and not terminal_obstacle_collision
+    )
+    hold_reward = hold_reward_scale * float(held_joint_tolerance_region)
     position_completion = float(np.clip(
         (joint_position_tolerance - next_rho_position) / joint_position_tolerance,
         0.0, 1.0,
@@ -800,6 +811,8 @@ def homotopy_reward(
         keypoint_tracking_reward
         + keypoint_progress_reward
         + keypoint_precision_reward
+        + hold_reward
+        - leave_joint_penalty
         - velocity_cost
         - smooth_cost
         + success_bonus * float(task_reached)
@@ -883,6 +896,8 @@ def homotopy_reward(
         "joint_precision_reward": float(joint_precision_reward),
         "left_joint_tolerance_region": float(left_joint_tolerance_region),
         "leave_joint_tolerance_penalty": float(leave_joint_penalty),
+        "held_joint_tolerance_region": float(held_joint_tolerance_region),
+        "hold_reward": float(hold_reward),
         "position_completion": position_completion,
         "orientation_completion": orientation_completion,
         "partial_precision_reward": float(partial_precision_reward),
