@@ -2,14 +2,14 @@
 
 > 依据当前代码及唯一主配置 `configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml`；这是阶段合同，并非已取得的评估结果。
 >
-> 训练入口：`scripts/train_thesis_homotopy.py`；环境：`src/rl_risk_sac/envs/thesis_homotopy_env.py`；课程与回放：`src/rl_risk_sac/algorithms/homotopy_curriculum.py`、`homotopy_replay.py`。
+> 训练入口：`scripts/core/train_thesis_homotopy.py`；环境：`src/rl_risk_sac/envs/thesis_homotopy_env.py`；课程与回放：`src/rl_risk_sac/algorithms/homotopy_curriculum.py`、`homotopy_replay.py`。
 
 ## 阶段边界与启动
 
 S2 从通过 S1 static strict 完成 gate 的完整 checkpoint 接续同一 Hybrid Keypoint + Jacobian + Auto-PCR SAC 策略。episode 场景概率为 none 20%、static 30%、dynamic 50%；前两者用于检验并继续训练已有无障碍和静态安全能力。动态障碍物为单个运动球体，没有预测网络、历史帧或额外 recurrent state。
 
 ```bash
-python scripts/train_thesis_homotopy.py \
+python scripts/core/train_thesis_homotopy.py \
   --config configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml \
   --stage s2 \
   --resume /absolute/path/to/completed-s1/checkpoints/step_XXXXXXX.pt \

@@ -12,16 +12,17 @@ thesis:
   stage: s0
   physics_dt: 0.004166666666666667
   control_dt: 0.05
-  horizon: 240
+  horizon: 500
   action_scale: 0.7
+  qdot_observation_scale: 0.8
   precision_control:
     enabled: true
     position_scale_m: 0.05
     orientation_scale_rad: 0.15
     min_action_scale: 0.1
   success_hold_steps: 5
-  ee_linear_velocity_scale: 1.0
-  ee_angular_velocity_scale: 4.2
+  ee_linear_velocity_scale: 0.55
+  ee_angular_velocity_scale: 1.5
   joint_motor_force: 90.0
   obstacle_radius: 0.075
   obstacle_speed: 0.1
@@ -265,8 +266,8 @@ thesis:
     include_orientation_error_vector: false
     keypoint_jacobian_pose: true
     keypoint_cube_side_m: 0.5
-    keypoint_error_scale_m: 1.0
-    keypoint_jacobian_scale: 1.0
+    keypoint_error_scale_m: 0.65
+    keypoint_jacobian_scale: 1.1
     hybrid_explicit_pose_error: true
 train:
   total_steps: 200000

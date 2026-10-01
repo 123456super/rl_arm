@@ -79,7 +79,7 @@
 现在现有工具已能覆盖全部指标：
 
 - `evaluate_thesis_homotopy.py`：overall/O7–O9 SR，以及 frozen \(D_{KP}\)、quality、progress、clip ratio。
-- [analyze_keypoint_training.py](/home/c211/jxf/rl/scripts/analyze_keypoint_training.py)：按固定训练窗口分析上述指标和 CHAIN ratio。
+- [analyze_keypoint_training.py](/home/c211/jxf/rl/scripts/analysis/analyze_keypoint_training.py)：按固定训练窗口分析上述指标和 CHAIN ratio。
 - `evaluate_model_plasticity.py`：policy churn、Q churn、UpdateReversal、网络活性。
 - 全套测试：`158 passed`。
 

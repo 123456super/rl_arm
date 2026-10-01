@@ -54,7 +54,7 @@ class ThesisHomotopyEnv(gym.Env):
     """Hybrid Keypoint + Jacobian environment for S0/S1/S2.
 
     Observations combine keypoint errors, their joint Jacobian, explicit pose
-    errors, task-space twist, and collision geometry in 166 dimensions.
+    errors, task-space twist, and collision geometry in 162 dimensions.
     """
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 20}
@@ -86,8 +86,14 @@ class ThesisHomotopyEnv(gym.Env):
         self.substeps = int(round(self.control_dt / self.physics_dt))
         if self.substeps != 12 or not np.isclose(self.substeps * self.physics_dt, self.control_dt):
             raise ValueError("thesis protocol requires 12 substeps at 1/240 s for a 0.05 s control period")
-        self.horizon = int(thesis.get("horizon", 240))
+        self.horizon = int(thesis.get("horizon", 500))
         self.action_scale = np.full(6, float(thesis.get("action_scale", 0.7)), dtype=np.float32)
+        self.qdot_observation_scale = np.full(
+            6, float(thesis.get("qdot_observation_scale", thesis.get("action_scale", 0.7))),
+            dtype=np.float32,
+        )
+        if np.any(self.qdot_observation_scale <= 0.0):
+            raise ValueError("qdot observation scales must be positive")
         precision_control = thesis.get("precision_control", {})
         self.precision_control_enabled = bool(precision_control.get("enabled", False))
         self.precision_position_scale = float(precision_control.get("position_scale_m", 0.05))
@@ -1292,7 +1298,7 @@ class ThesisHomotopyEnv(gym.Env):
             qdot=qdot,
             joint_lower=self.robot.joint_lower_limits,
             joint_upper=self.robot.joint_upper_limits,
-            joint_velocity_scale=self.action_scale,
+            joint_velocity_scale=self.qdot_observation_scale,
             ee_position=ee_position,
             ee_quaternion=ee_quaternion,
             ee_linear_velocity=ee_linear_velocity,
@@ -1303,10 +1309,6 @@ class ThesisHomotopyEnv(gym.Env):
             goal_quaternion=self.goal_quaternion,
             position_error=position_error,
             orientation_error=orientation_error,
-            goal_scale=self.contract.goal_scale,
-            position_tolerance=self.contract.position_tolerance,
-            orientation_tolerance=self.contract.orientation_tolerance,
-            remaining_time_fraction=max(0.0, (self.horizon - self.step_count) / self.horizon),
             obstacle_present=self.obstacle_id is not None,
             obstacle_position=self.obstacle_position,
             obstacle_velocity=self.obstacle_velocity,

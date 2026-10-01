@@ -249,7 +249,7 @@ class HomotopyReplayBuffer:
         seed: int = 0,
         *,
         reward_gamma: float = 0.99,
-        reward_horizon: int = 240,
+        reward_horizon: int = 500,
         s0_anchor_fraction: float = 0.25,
         s0_current_fraction: float = 0.50,
         s0_anchor_capacity: int = 15000,

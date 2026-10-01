@@ -4,7 +4,7 @@
 
 ## 1. 主线与实际可达路径
 
-正式实验配置只有 `configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml`，其直接继承 `../default.yaml`；不再继承已删除的旧 thesis 实验配置。训练入口 `validate_training_architecture()` 限制为 Hybrid Keypoint + Jacobian + Auto-PCR：166 维 Hybrid observation、unified keypoint reward、开启 CHAIN-PCR 和 Auto-PCR。
+正式实验配置只有 `configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml`，其直接继承 `../default.yaml`；不再继承已删除的旧 thesis 实验配置。训练入口 `validate_training_architecture()` 限制为 Hybrid Keypoint + Jacobian + Auto-PCR：162 维 Hybrid observation、unified keypoint reward、开启 CHAIN-PCR 和 Auto-PCR。
 
 但“架构唯一”不等于“四池 replay 默认开启”。当前启动方式仍决定不同的数据路径：
 
@@ -56,8 +56,8 @@
 | --- | --- |
 | 机器人 | UR5 六关节，工具参考 link 为 `wrist_3_link` |
 | 仿真/控制 | 物理步长 `1/240 s`，每动作 12 个子步，控制周期 `0.05 s` |
-| Episode horizon | `240` 控制 step，最多 12 s；冻结评估可单独覆盖 |
-| 动作尺度/电机力 | 每关节目标速度尺度 `0.7 rad/s`；motor force `90` |
+| Episode horizon | `500` 控制 step，最多 25 s；冻结评估可单独覆盖 |
+| 动作尺度/电机力 | 每关节目标速度尺度 `0.7 rad/s`；motor force `90`。动作尺度与 qdot observation 归一化尺度分离。 |
 | 外部安全距离 | `d_safe=0.12 m`；障碍半径 `0.075 m`，速度配置 `0.1 m/s` |
 | 自碰撞 | 安全距离 `0.005 m`、查询距离 `0.25 m`、TTC 上限 `3 s` |
 | 自安全课程 | `lambda_self` 从 `0.2` 到 `1.0`，ramp `50k`，满权重最少 `25k` transition；实际进度由课程门控 |
@@ -84,36 +84,32 @@ S0 的 rollout 场景全为 `none`；S1 为 25% none + 75% static；S2 为 20% n
 
 ## 4. 网络输入与缩放
 
-输入为 `166` 维 float32，Box 声明范围 `[-1,1]`。以下索引采用 Python 左闭右开区间，拼接顺序与 `build_thesis_observation()` 一致。`clip` 指按表中范围裁剪；代码不是拼接后统一再做一次全局 clip。
+输入为 `162` 维 float32，Box 声明范围 `[-1,1]`。以下索引采用 Python 左闭右开区间，拼接顺序与 `build_thesis_observation()` 一致。`clip` 指按表中范围裁剪；代码不是拼接后统一再做一次全局 clip。目标尺度、位置阈值、姿态阈值和剩余时间不再作为模型输入；它们仍用于课程、成功判定或训练逻辑。
 
 | 索引 | 维数 | 量与当前处理 |
 | --- | ---: | --- |
 | `[0:6]` | 6 | q：`clip(2*(q-lower)/(upper-lower)-1,-1,1)`，按 URDF 关节上下限归一化 |
-| `[6:12]` | 6 | qdot：`clip(qdot/0.7,-1,1)` |
-| `[12:21]` | 9 | 三个非共线关键点的目标位置减末端位置，除 `1.0 m` 后 clip；立方体边长 `0.50 m` |
-| `[21:75]` | 54 | `J_KP`（9 x 6），除 `1.0` 后 clip，按行展开 |
+| `[6:12]` | 6 | qdot：`clip(qdot/0.8,-1,1)`（配置项 `qdot_observation_scale=0.8`）；这是 observation 专用尺度，动作命令仍使用 `0.7 rad/s` |
+| `[12:21]` | 9 | 三个非共线关键点的目标位置减末端位置，除 `0.65 m` 后 clip；立方体边长 `0.50 m` |
+| `[21:75]` | 54 | `J_KP`（9 x 6），统一除 `1.1` 后 clip，按行展开 |
 | `[75:78]` | 3 | 显式位置误差：直接以米输入并 clip，**没有另除位置尺度** |
 | `[78:81]` | 3 | SO(3) 旋转误差向量：除 pi 后 clip |
 | `[81:82]` | 1 | 位置误差范数（米）：直接 clip 到 `[0,1]` |
 | `[82:83]` | 1 | 姿态误差范数：除 pi，clip 到 `[0,1]` |
-| `[83:86]` | 3 | 末端线速度：除 `1.0 m/s` 后 clip |
-| `[86:89]` | 3 | 末端角速度：除 `4.2 rad/s` 后 clip |
-| `[89:90]` | 1 | goal scale：`2*clip(scale,0,1)-1` |
-| `[90:91]` | 1 | eps_p：`2*clip(eps_p/0.20,0,1)-1` |
-| `[91:92]` | 1 | eps_R：`2*clip(eps_R/pi,0,1)-1` |
-| `[92:93]` | 1 | 剩余时间：`2*clip((horizon-step_count)/horizon,0,1)-1` |
-| `[93:111]` | 18 | 六 link 的障碍相对向量（米）：直接 clip，无另外尺度除法 |
-| `[111:114]` | 3 | 障碍位置：low=`[.22,-.62,.18]`、high=`[.72,.62,.62]`，映射到 `[-1,1]` 后 clip |
-| `[114:117]` | 3 | 障碍速度：除 `0.1 m/s`；该项没有独立 clip |
-| `[117:123]` | 6 | 外部距离：`2*(clip(d,-.20,.80)+.20)-1` |
-| `[123:129]` | 6 | 外部 TTC：`clip(ttc,0,3)/3` |
-| `[129:135]` | 6 | 外部接近速度：除 observation 常量 `1.0 m/s`，clip 到 `[0,1]` |
-| `[135:141]` | 6 | 外部风险：clip 到 `[0,1]` |
-| `[141:142]` | 1 | 障碍 presence：0/1，不做缩放 |
-| `[142:148]` | 6 | 自碰撞距离：`2*(clip(d,-.02,.25)+.02)/.27-1` |
-| `[148:154]` | 6 | 自碰撞 TTC：`clip(ttc,0,3)/3` |
-| `[154:160]` | 6 | 自碰撞接近速度：除 observation 常量 `1.0 m/s`，clip 到 `[0,1]` |
-| `[160:166]` | 6 | 自碰撞风险：clip 到 `[0,1]` |
+| `[83:86]` | 3 | 末端线速度：除 `0.55 m/s` 后 clip |
+| `[86:89]` | 3 | 末端角速度：除 `1.5 rad/s` 后 clip |
+| `[89:107]` | 18 | 六 link 的障碍相对向量（米）：直接 clip，无另外尺度除法 |
+| `[107:110]` | 3 | 障碍位置：low=`[.22,-.62,.18]`、high=`[.72,.62,.62]`，映射到 `[-1,1]` 后 clip |
+| `[110:113]` | 3 | 障碍速度：除 `0.1 m/s`；该项没有独立 clip |
+| `[113:119]` | 6 | 外部距离：`2*(clip(d,-.20,.80)+.20)-1` |
+| `[119:125]` | 6 | 外部 TTC：`clip(ttc,0,3)/3` |
+| `[125:131]` | 6 | 外部接近速度：除 observation 常量 `1.0 m/s`，clip 到 `[0,1]` |
+| `[131:137]` | 6 | 外部风险：clip 到 `[0,1]` |
+| `[137:138]` | 1 | 障碍 presence：0/1，不做缩放 |
+| `[138:144]` | 6 | 自碰撞距离：`2*(clip(d,-.02,.25)+.02)/.27-1` |
+| `[144:150]` | 6 | 自碰撞 TTC：`clip(ttc,0,3)/3` |
+| `[150:156]` | 6 | 自碰撞接近速度：除 observation 常量 `1.0 m/s`，clip 到 `[0,1]` |
+| `[156:162]` | 6 | 自碰撞风险：clip 到 `[0,1]` |
 
 S0 没有外部障碍，但仍保留 49 维外部槽位：相对向量/位置/速度/接近速度/风险/presence 为零，距离和 TTC 为一。自碰撞槽位仍由实际几何计算。接近速度 observation 的 `1.0` 尺度不要与自碰撞风险计算配置的 `approach_velocity_scale: 0.7` 混淆。
 
@@ -133,9 +129,9 @@ precision scale 当前开启；其 `.05/.15` 是固定控制尺度，不随 L0/L
 
 | 项目 | 当前实现/有效配置 |
 | --- | --- |
-| Actor backbone | `166 -> 256 ReLU -> 256 ReLU -> 256 Linear`，最后一层无激活；mean/log_std 两个 `256 -> 6` 头 |
+| Actor backbone | `162 -> 256 ReLU -> 256 ReLU -> 256 Linear`，最后一层无激活；mean/log_std 两个 `256 -> 6` 头 |
 | Actor 分布 | log_std 限制 `[-20,2]`；tanh 动作并做 log probability Jacobian 修正 |
-| Critic | Q1/Q2 独立，各为 `172 -> 256 ReLU -> 256 ReLU -> 1`；输入为 observation + action；各有 Target |
+| Critic | Q1/Q2 独立，各为 `168 -> 256 ReLU -> 256 ReLU -> 1`；输入为 observation + action；各有 Target |
 | Critic loss/target | 两个 Huber loss 之和；target 使用 Target 双 Q 最小值减 entropy 项，terminal mask 屏蔽 bootstrap |
 | SAC | `gamma=.99`，`tau=.005`，target entropy `-6`；alpha 初始 `.2`，自动学习 |
 | Adam 学习率 | Actor `1e-4`，Critic `1e-4`，alpha `3e-4` |
@@ -201,7 +197,7 @@ L0 的 bad-state bank 不继续用于 L1 rollout，升档入口不允许同时�
 
 ```bash
 conda activate rl
-python scripts/train_thesis_homotopy.py \
+python scripts/core/train_thesis_homotopy.py \
   --config configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml \
   --stage s0 \
   --resume outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_four_pool_from_1m_200k/checkpoints/step_0025000.pt \
@@ -221,14 +217,14 @@ S1/S2 的 replay 则按场景分配：1024 batch 在 S1 为 none/static/dynamic=
 
 ```bash
 conda activate rl
-python scripts/evaluate_thesis_homotopy.py \
+python scripts/core/evaluate_thesis_homotopy.py \
   --config configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml \
   --checkpoint outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_four_pool_25k_inherited_level1_1000k/checkpoints/actor_step_0300000.pt \
   --level-index 1 --scene none --episodes 1000 --seed 51001 --num-envs 8 \
   --output outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_four_pool_25k_inherited_level1_1000k/evaluations/actor_step_0300000_level1_seed51001.json
 ```
 
-加 `--max-episode-steps 500` 并使用不同 output 路径可做 500-step 诊断，精度仍是 L1；这也改变 observation 的剩余时间比例，不只是额外允许 260 step。
+加 `--max-episode-steps 500` 并使用不同 output 路径可做 500-step 诊断，精度仍是 L1；这只改变允许的 episode 步数，不会向 observation 注入剩余时间特征。
 
 当前保留的两个 JSON 记录了同一个 +300k L1 Actor、1000 episode、seed 51001 的已有结果，本次没有重新评估：
 
@@ -252,15 +248,15 @@ python scripts/evaluate_thesis_homotopy.py \
 | 内容 | 源码 |
 | --- | --- |
 | 正式参数、精度档与场景课程 | `configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml` |
-| 启动分支、完整恢复、手动升档、定向概率、PCR 参考 batch | `scripts/train_thesis_homotopy.py` |
-| 166 维顺序/缩放、J_KP、实际 reward | `src/rl_risk_sac/tasks/thesis_reaching.py` |
+| 启动分支、完整恢复、手动升档、定向概率、PCR 参考 batch | `scripts/core/train_thesis_homotopy.py` |
+| 162 维顺序/缩放、J_KP、实际 reward | `src/rl_risk_sac/tasks/thesis_reaching.py` |
 | 动作执行、成功/超时、坏状态邻域 reset | `src/rl_risk_sac/envs/thesis_homotopy_env.py` |
 | 并行环境采集 | `src/rl_risk_sac/envs/parallel_thesis_env.py` |
 | Actor/Critic 结构 | `src/rl_risk_sac/algorithms/networks.py` |
 | SAC/Auto-PCR、alpha 与优化器恢复 | `src/rl_risk_sac/algorithms/thesis_sac.py` |
 | 课程合同与门控 | `src/rl_risk_sac/algorithms/homotopy_curriculum.py` |
 | 四池、旧 replay、升档 History、Semantic、重算 reward | `src/rl_risk_sac/algorithms/homotopy_replay.py` |
-| 原始 frozen Actor 建 Anchor/Frontier | `scripts/build_four_pool_seed.py` |
-| 冻结评估档位、场景与 horizon 覆盖 | `scripts/evaluate_thesis_homotopy.py` |
+| 原始 frozen Actor 建 Anchor/Frontier | `scripts/replay/build_four_pool_seed.py` |
+| 冻结评估档位、场景与 horizon 覆盖 | `scripts/core/evaluate_thesis_homotopy.py` |
 
 结论：当前正式模型主线是 Hybrid Keypoint + Jacobian + Auto-PCR；L0 四池是需要显式启用的数据方案，L1 Current/History 是其升档行为，代码仍保留默认旧 replay 与 Actor-only 初始化入口。描述当前实现时必须同时说明架构和实际 replay 模式，不能只凭 YAML 名称或 run 名称认定四池正在生效。

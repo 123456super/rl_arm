@@ -8,7 +8,7 @@ from rl_risk_sac.robots.ur5_capsules import CapsuleState
 from rl_risk_sac.utils.risk import closest_point_on_segment
 
 
-THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN = 166
+THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN = 162
 APPROACH_VELOCITY_SCALE = 1.0
 SELF_DISTANCE_LOWER = -0.02
 SELF_DISTANCE_UPPER = 0.25
@@ -37,7 +37,7 @@ def thesis_observation_dim(
     keypoint_jacobian_pose: bool = True,
     hybrid_explicit_pose_error: bool = True,
 ) -> int:
-    """Only the 166D Hybrid Keypoint + Jacobian representation is supported."""
+    """Only the 162D Hybrid Keypoint + Jacobian representation is supported."""
     if include_orientation_error_vector or not keypoint_jacobian_pose or not hybrid_explicit_pose_error:
         raise ValueError("only Hybrid Keypoint + Jacobian observations are supported")
     return THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN
@@ -403,10 +403,6 @@ def build_thesis_observation(
     goal_quaternion: np.ndarray,
     position_error: np.ndarray,
     orientation_error: np.ndarray,
-    goal_scale: float,
-    position_tolerance: float,
-    orientation_tolerance: float,
-    remaining_time_fraction: float,
     obstacle_present: bool,
     obstacle_position: np.ndarray,
     obstacle_velocity: np.ndarray,
@@ -524,19 +520,6 @@ def build_thesis_observation(
             *pose_features,
             np.clip(np.asarray(ee_linear_velocity) / ee_linear_velocity_scale, -1.0, 1.0),
             np.clip(np.asarray(ee_angular_velocity) / ee_angular_velocity_scale, -1.0, 1.0),
-            np.asarray([2.0 * np.clip(goal_scale, 0.0, 1.0) - 1.0], dtype=np.float32),
-            np.asarray(
-                [2.0 * np.clip(position_tolerance / 0.20, 0.0, 1.0) - 1.0],
-                dtype=np.float32,
-            ),
-            np.asarray(
-                [2.0 * np.clip(orientation_tolerance / np.pi, 0.0, 1.0) - 1.0],
-                dtype=np.float32,
-            ),
-            np.asarray(
-                [2.0 * np.clip(remaining_time_fraction, 0.0, 1.0) - 1.0],
-                dtype=np.float32,
-            ),
             relative,
             obstacle_normalized,
             obstacle_velocity_normalized,
@@ -586,7 +569,7 @@ def homotopy_reward(
     d_safe: float = 0.12,
     d_self_safe: float = 0.005,
     gamma: float = 0.99,
-    horizon: int = 240,
+    horizon: int = 500,
     position_sigma: float = 0.20,
     orientation_sigma: float = 1.00,
     micro_power: float = 4.0,

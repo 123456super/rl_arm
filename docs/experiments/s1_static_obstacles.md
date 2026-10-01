@@ -2,14 +2,14 @@
 
 > 依据当前代码及唯一主配置 `configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml`；这是设计与实现说明，不代表已有 S1 实验通过验收。
 >
-> 训练入口：`scripts/train_thesis_homotopy.py`；环境：`src/rl_risk_sac/envs/thesis_homotopy_env.py`；课程与回放：`src/rl_risk_sac/algorithms/homotopy_curriculum.py`、`homotopy_replay.py`。
+> 训练入口：`scripts/core/train_thesis_homotopy.py`；环境：`src/rl_risk_sac/envs/thesis_homotopy_env.py`；课程与回放：`src/rl_risk_sac/algorithms/homotopy_curriculum.py`、`homotopy_replay.py`。
 
 ## 阶段边界与启动
 
 S1 在通过正式完成 gate 的 S0 完整 checkpoint 上继续训练同一个 Hybrid Keypoint + Jacobian + Auto-PCR SAC agent，加入单个静止的外部球形障碍物。每个 episode 的场景概率为 none 25%、static 75%、dynamic 0%；none 用来保留无障碍 6D 到达。S1 不引入动态障碍物，也不改变网络输入输出、奖励定义或 SAC 超参数。
 
 ```bash
-python scripts/train_thesis_homotopy.py \
+python scripts/core/train_thesis_homotopy.py \
   --config configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml \
   --stage s1 \
   --resume /absolute/path/to/completed-s0/checkpoints/step_XXXXXXX.pt \

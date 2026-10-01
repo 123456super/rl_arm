@@ -5,7 +5,7 @@
 `S0 到达与姿态精度课程 -> S1 静态障碍物 -> S2 动态障碍物`
 
 唯一正式配置是 `configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml`，
-训练入口是 `scripts/train_thesis_homotopy.py`。Hybrid Keypoint + Jacobian + Auto-PCR
+训练入口是 `scripts/core/train_thesis_homotopy.py`。Hybrid Keypoint + Jacobian + Auto-PCR
 与四池 replay 的实际配置见
 [方案文档](docs/experiments_9/four_pool_hybrid_keypoint_jacobian_scheme.md)。
 
@@ -22,7 +22,7 @@ python -m pip install -e . --no-deps
 ## 训练与评估
 
 ```bash
-python scripts/train_thesis_homotopy.py \
+python scripts/core/train_thesis_homotopy.py \
   --config configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml \
   --stage s0 --run-name s0_seed11001
 ```
@@ -30,7 +30,7 @@ python scripts/train_thesis_homotopy.py \
 S0 的四池续训和 L1 升档命令见上述方案文档。冻结评估使用：
 
 ```bash
-python scripts/evaluate_thesis_homotopy.py \
+python scripts/core/evaluate_thesis_homotopy.py \
   --config configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml \
   --checkpoint /absolute/path/to/actor_step_XXXXXXX.pt \
   --level-index N --scene none \
