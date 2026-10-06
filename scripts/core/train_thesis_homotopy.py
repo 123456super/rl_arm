@@ -1503,6 +1503,12 @@ def run_parallel_s0(
             "sample_current_recent": replay.last_orientation_sample_counts["current_recent"],
             "sample_previous_level": replay.last_orientation_sample_counts["previous"],
             "sample_semantic_long_term": replay.last_orientation_sample_counts.get("semantic_long_term", 0),
+            "sample_precision_boundary": replay.last_orientation_sample_counts.get("precision_boundary", 0),
+            "sample_precision_strict_exit": replay.last_precision_sample_counts["strict_exit"],
+            "sample_precision_inside_hold": replay.last_precision_sample_counts["inside_hold"],
+            "sample_precision_position_only_inside": replay.last_precision_sample_counts["position_only_inside"],
+            "sample_precision_orientation_only_inside": replay.last_precision_sample_counts["orientation_only_inside"],
+            "sample_precision_position_boundary": replay.last_precision_sample_counts["position_boundary"],
             "sample_stability_anchor": replay.last_orientation_sample_counts.get("stability_anchor", 0),
             "sample_frontier": replay.last_orientation_sample_counts.get("frontier", 0),
             "stored_stability_anchor": sum(p.size for p in replay.stability_anchor.values()),
@@ -1518,9 +1524,14 @@ def run_parallel_s0(
             "replay_current_recent_fraction": (
                 .375 if replay.four_pool_enabled else
                 replay.four_pool_current_fraction if replay.four_pool_history_mode else
-                1.0 - replay_mix[0] - replay.effective_s0_success_fraction - replay.semantic_fraction
+                1.0 - replay_mix[0] - replay.effective_s0_success_fraction
+                - replay.semantic_fraction - replay.precision_replay_fraction
             ),
             "replay_semantic_long_term_fraction": .1875 if replay.four_pool_enabled else (0. if replay.four_pool_history_mode else replay.semantic_fraction),
+            "replay_precision_boundary_fraction": (
+                0.0 if (replay.four_pool_enabled or replay.four_pool_history_mode)
+                else replay.precision_replay_fraction
+            ),
             "replay_previous_level_fraction": (1. - replay.four_pool_current_fraction) if replay.four_pool_history_mode else (0. if replay.four_pool_enabled else replay_mix[0]),
             "stored_orientation_anchor": storage["anchor"],
             "stored_orientation_current": storage["current"],
@@ -1665,6 +1676,12 @@ def run_parallel_s0(
                     "sample_current_recent": replay.last_orientation_sample_counts["current_recent"],
                     "sample_previous_level": replay.last_orientation_sample_counts["previous"],
                     "sample_semantic_long_term": replay.last_orientation_sample_counts.get("semantic_long_term", 0),
+                    "sample_precision_boundary": replay.last_orientation_sample_counts.get("precision_boundary", 0),
+                    "sample_precision_strict_exit": replay.last_precision_sample_counts["strict_exit"],
+                    "sample_precision_inside_hold": replay.last_precision_sample_counts["inside_hold"],
+                    "sample_precision_position_only_inside": replay.last_precision_sample_counts["position_only_inside"],
+                    "sample_precision_orientation_only_inside": replay.last_precision_sample_counts["orientation_only_inside"],
+                    "sample_precision_position_boundary": replay.last_precision_sample_counts["position_boundary"],
                     "sample_stability_anchor": replay.last_orientation_sample_counts.get("stability_anchor", 0),
                     "sample_frontier": replay.last_orientation_sample_counts.get("frontier", 0),
                 })
@@ -1928,6 +1945,9 @@ def run_parallel_s0(
                         "keypoint_progress_reward": info["keypoint_progress_reward"],
                         "keypoint_precision_quality": info["keypoint_precision_quality"],
                         "keypoint_precision_reward": info["keypoint_precision_reward"],
+                        "terminal_occupancy_compensation": info[
+                            "terminal_occupancy_compensation"
+                        ],
                         "pose_potential": info["pose_potential"],
                         "next_pose_potential": info["next_pose_potential"],
                         "pose_potential_progress": info["pose_potential_progress"],
@@ -2325,6 +2345,7 @@ def main() -> None:
     agent = ThesisSACAgent(obs_dim, action_dim, config)
     orientation_curriculum = thesis["orientation_curriculum"]
     replay_storage = orientation_curriculum["replay_storage"]
+    precision_replay = thesis["precision_boundary_replay"]
     self_curriculum = thesis["self_collision"]["curriculum"]
     capacities = ({"none": 512, "static": 512, "dynamic": 512} if args.validation_mode else None)
     storage_scale = 512 if args.validation_mode else None
@@ -2347,6 +2368,16 @@ def main() -> None:
         s0_success_schedule=orientation_curriculum.get("replay_success_schedule"),
         s0_success_capacity=(
             storage_scale or int(replay_storage["current_success_capacity"])
+        ),
+        precision_replay_fraction=(
+            float(precision_replay["fraction"])
+            if bool(precision_replay["enabled"]) and stage == "s0" else 0.0
+        ),
+        precision_position_boundary_low=float(
+            precision_replay["position_boundary_low_ratio"]
+        ),
+        precision_position_boundary_high=float(
+            precision_replay["position_boundary_high_ratio"]
         ),
         reward_parameters=env.reward_parameters,
     )
@@ -2776,6 +2807,12 @@ def main() -> None:
                 }
             ),
         },
+        "precision_boundary_replay": {
+            "enabled": bool(precision_replay["enabled"]) and stage == "s0",
+            "fraction": replay.precision_replay_fraction,
+            "position_boundary_low_ratio": replay.precision_position_boundary_low,
+            "position_boundary_high_ratio": replay.precision_position_boundary_high,
+        },
         "approve_orientation_promotion": bool(args.approve_orientation_promotion),
         "promote_to_level": args.promote_to_level,
         "allow_early_promotion": bool(args.allow_early_promotion),
@@ -2846,6 +2883,7 @@ def main() -> None:
                          "next_keypoint_distance", "keypoint_progress",
                          "keypoint_tracking_reward", "keypoint_progress_reward",
                          "keypoint_precision_quality", "keypoint_precision_reward",
+                         "terminal_occupancy_compensation",
                          "pose_potential", "next_pose_potential", "pose_potential_progress",
                          "position_progress", "orientation_progress",
                          "orientation_error_progress", "orientation_absolute_penalty",
@@ -2881,7 +2919,11 @@ def main() -> None:
         "q1_mean", "q2_mean", "target_mean", "sample_none", "sample_static", "sample_dynamic",
         "sample_orientation_anchor", "sample_orientation_current", "sample_orientation_historical",
         "sample_current_success", "sample_current_recent", "sample_previous_level",
-        "sample_semantic_long_term",
+        "sample_semantic_long_term", "sample_precision_boundary",
+        "sample_precision_strict_exit", "sample_precision_inside_hold",
+        "sample_precision_position_only_inside",
+        "sample_precision_orientation_only_inside",
+        "sample_precision_position_boundary",
         "sample_stability_anchor", "sample_frontier",
         "critic_gradient_norm", "actor_gradient_norm", "actor_updated",
     ]
@@ -2908,13 +2950,18 @@ def main() -> None:
         "sample_orientation_anchor",
         "sample_orientation_current", "sample_orientation_historical",
         "sample_current_success", "sample_current_recent", "sample_previous_level",
-        "sample_semantic_long_term",
+        "sample_semantic_long_term", "sample_precision_boundary",
+        "sample_precision_strict_exit", "sample_precision_inside_hold",
+        "sample_precision_position_only_inside",
+        "sample_precision_orientation_only_inside",
+        "sample_precision_position_boundary",
         "sample_stability_anchor", "sample_frontier", "stored_stability_anchor", "stored_frontier",
         "full_pose_steps", "position_phase_complete", "orientation_retention_mode",
         "orientation_anchor_probability", "replay_orientation_anchor_fraction",
         "replay_orientation_current_fraction", "replay_orientation_historical_fraction",
         "replay_current_success_fraction", "replay_current_recent_fraction",
         "replay_previous_level_fraction", "replay_semantic_long_term_fraction",
+        "replay_precision_boundary_fraction",
         "stored_orientation_anchor", "stored_orientation_current",
         "stored_orientation_historical", "stored_orientation_historical_levels",
         "stored_current_success_episodes",
@@ -3191,6 +3238,12 @@ def main() -> None:
                         "sample_current_recent": replay.last_orientation_sample_counts["current_recent"],
                         "sample_previous_level": replay.last_orientation_sample_counts["previous"],
                         "sample_semantic_long_term": replay.last_orientation_sample_counts.get("semantic_long_term", 0),
+                        "sample_precision_boundary": replay.last_orientation_sample_counts.get("precision_boundary", 0),
+                        "sample_precision_strict_exit": replay.last_precision_sample_counts["strict_exit"],
+                        "sample_precision_inside_hold": replay.last_precision_sample_counts["inside_hold"],
+                        "sample_precision_position_only_inside": replay.last_precision_sample_counts["position_only_inside"],
+                        "sample_precision_orientation_only_inside": replay.last_precision_sample_counts["orientation_only_inside"],
+                        "sample_precision_position_boundary": replay.last_precision_sample_counts["position_boundary"],
                         "critic_gradient_norm": last_update["critic_gradient_norm"],
                         "actor_gradient_norm": last_update["actor_gradient_norm"],
                         "actor_updated": last_update["actor_updated"],
@@ -3239,6 +3292,9 @@ def main() -> None:
                     "keypoint_progress_reward": info["keypoint_progress_reward"],
                     "keypoint_precision_quality": info["keypoint_precision_quality"],
                     "keypoint_precision_reward": info["keypoint_precision_reward"],
+                    "terminal_occupancy_compensation": info[
+                        "terminal_occupancy_compensation"
+                    ],
                     "pose_potential": info["pose_potential"],
                     "next_pose_potential": info["next_pose_potential"],
                     "pose_potential_progress": info["pose_potential_progress"],
@@ -3377,6 +3433,12 @@ def main() -> None:
                         "sample_current_recent": replay.last_orientation_sample_counts["current_recent"],
                         "sample_previous_level": replay.last_orientation_sample_counts["previous"],
                         "sample_semantic_long_term": replay.last_orientation_sample_counts.get("semantic_long_term", 0),
+                        "sample_precision_boundary": replay.last_orientation_sample_counts.get("precision_boundary", 0),
+                        "sample_precision_strict_exit": replay.last_precision_sample_counts["strict_exit"],
+                        "sample_precision_inside_hold": replay.last_precision_sample_counts["inside_hold"],
+                        "sample_precision_position_only_inside": replay.last_precision_sample_counts["position_only_inside"],
+                        "sample_precision_orientation_only_inside": replay.last_precision_sample_counts["orientation_only_inside"],
+                        "sample_precision_position_boundary": replay.last_precision_sample_counts["position_boundary"],
                         "full_pose_steps": curriculum.orientation.full_scale_steps,
                         "position_phase_complete": int(curriculum.position_phase_complete),
                         "orientation_retention_mode": curriculum.orientation_retention_mode,
@@ -3389,8 +3451,10 @@ def main() -> None:
                             1.0 - replay_anchor_fraction
                             - replay.effective_s0_success_fraction
                             - replay.semantic_fraction
+                            - replay.precision_replay_fraction
                         ),
                         "replay_semantic_long_term_fraction": replay.semantic_fraction,
+                        "replay_precision_boundary_fraction": replay.precision_replay_fraction,
                         "replay_previous_level_fraction": replay_anchor_fraction,
                         "stored_orientation_anchor": replay_storage_counts["anchor"],
                         "stored_orientation_current": replay_storage_counts["current"],

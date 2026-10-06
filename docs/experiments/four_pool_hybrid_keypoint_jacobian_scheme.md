@@ -1,6 +1,6 @@
 # 四池 Hybrid Keypoint + Jacobian + Auto-PCR 实现说明
 
-更新日期：2026-09-29。本文以当前工作区代码与配置为准，区分配置默认行为、L0 四池定向续训、升档后的 Current/History 行为，以及已有实验结果。本文更新不启动训练或评估，不修改算法。
+更新日期：2026-10-06。本文以当前工作区代码与配置为准，区分配置默认行为、L0 四池定向续训、升档后的 Current/History 行为，以及已有实验结果。
 
 ## 1. 主线与实际可达路径
 
@@ -10,7 +10,7 @@
 
 | 启动方式/阶段 | 实际行为 |
 | --- | --- |
-| 直接使用当前 YAML 新建 S0，或恢复非四池 checkpoint | 默认 joint-pose replay：Recent + Success + Semantic，可包含 Previous；不是四池 |
+| 直接使用当前 YAML 新建 S0，或恢复非四池 checkpoint | 默认 joint-pose replay：Recent + Success + Semantic + Precision，可包含 Previous；不是四池 |
 | 原始 1M 完整 checkpoint + `--bad-state-starts`，不提供 seed | 增加定向 rollout，但 replay 仍为旧配比；不是四池 |
 | 原始 1M 完整 checkpoint + `--bad-state-starts` + `--four-pool-seed` | 初始化 L0 四池，Recent 清空重建，Success 不再单独采样 |
 | 恢复 L0 四池完整 checkpoint | 从 checkpoint 继承四池，仍须提供原 bad-state bank，不重复加载 seed |
@@ -77,9 +77,9 @@ S0 的 rollout 场景全为 `none`；S1 为 25% none + 75% static；S2 为 20% n
 | L4 / 4 | 0.0500 | 0.1000 | 1.00 |
 | L5 / 5 | 0.0250 | 0.1000 | 1.00 |
 | L6 / 6 | 0.0100 | 0.1000 | 1.00 |
-| L7 / 7 | 0.0050 | 0.1000 | 1.00 |
 
-这里升档只收紧成功精度，不扩大目标范围。L4--L7 的姿态阈值和姿态 scale 均保持不变；replay 使用整数 level index 区分这些位置精度档位。内部 `orientation_scale=0` 不表示 L0 只采零姿态差；task-space 合同已经明确完整角度范围。采样器使用位置和姿态各 10 档的 100 cell；正常训练的固定 mixture 为 50% 全 cell 均匀 + 25% O5–O9 + 25% O7–O9，adaptive 采样关闭。这是采样目标分布，实际可达性拒绝采样仍可能影响接受分布。
+
+这里升档只收紧成功精度，不扩大目标范围。L4--L6 的姿态阈值和姿态 scale 均保持不变；L6（10 mm）为最高档；replay 使用整数 level index 区分这些位置精度档位。内部 `orientation_scale=0` 不表示 L0 只采零姿态差；task-space 合同已经明确完整角度范围。采样器使用位置和姿态各 10 档的 100 cell；正常训练的固定 mixture 为 50% 全 cell 均匀 + 25% O5–O9 + 25% O7–O9，adaptive 采样关闭。这是采样目标分布，实际可达性拒绝采样仍可能影响接受分布。
 
 `ThesisHomotopyEnv.step()` 的成功条件为：无硬失败/障碍失败，位置误差 `<= eps_p` 且姿态误差 `<= eps_R`，连续满足 `5` 个控制 step。正常合同达到成功即终止；硬失败也终止，未终止且达到 horizon 则截断。**当前成功判定没有额外要求关节或末端速度低于 `stable_success` 的配置值**，不能把这些遗留速度阈值写成终止条件。目标速度命令限制为 `+-0.7 rad/s`；这不是对仿真测得实际 qdot 的硬钳制。
 
@@ -95,10 +95,10 @@ S0 的 rollout 场景全为 `none`；S1 为 25% none + 75% static；S2 为 20% n
 | `[6:12]` | 6 | qdot：`clip(qdot/0.8,-1,1)`（配置项 `qdot_observation_scale=0.8`）；这是 observation 专用尺度，动作命令仍使用 `0.7 rad/s` |
 | `[12:21]` | 9 | 三个非共线关键点的目标位置减末端位置，除 `0.65 m` 后 clip；立方体边长 `0.50 m` |
 | `[21:75]` | 54 | `J_KP`（9 x 6），统一除 `1.1` 后 clip，按行展开 |
-| `[75:78]` | 3 | 显式位置误差：直接以米输入并 clip，**没有另除位置尺度** |
-| `[78:81]` | 3 | SO(3) 旋转误差向量：除 pi 后 clip |
-| `[81:82]` | 1 | 位置误差范数（米）：直接 clip 到 `[0,1]` |
-| `[82:83]` | 1 | 姿态误差范数：除 pi，clip 到 `[0,1]` |
+| `[75:78]` | 3 | 显式位置误差：除 `0.05 m` 后 clip 到 `[-1,1]` |
+| `[78:81]` | 3 | SO(3) 旋转误差向量：除 `0.50 rad` 后 clip 到 `[-1,1]` |
+| `[81:82]` | 1 | 位置误差范数：除 `0.05 m` 后 clip 到 `[0,1]` |
+| `[82:83]` | 1 | 姿态误差范数：除 `0.50 rad` 后 clip 到 `[0,1]` |
 | `[83:86]` | 3 | 末端线速度：除 `0.55 m/s` 后 clip |
 | `[86:89]` | 3 | 末端角速度：除 `1.5 rad/s` 后 clip |
 | `[89:107]` | 18 | 六 link 的障碍相对向量（米）：直接 clip，无另外尺度除法 |
@@ -113,6 +113,8 @@ S0 的 rollout 场景全为 `none`；S1 为 25% none + 75% static；S2 为 20% n
 | `[144:150]` | 6 | 自碰撞 TTC：`clip(ttc,0,3)/3` |
 | `[150:156]` | 6 | 自碰撞接近速度：除 observation 常量 `1.0 m/s`，clip 到 `[0,1]` |
 | `[156:162]` | 6 | 自碰撞风险：clip 到 `[0,1]` |
+
+显式位姿误差缩放是替换式 observation 语义，不保留旧的米值/除 pi 编码。虽然维数仍为 162，使用旧语义训练的 Actor、Critic 和已存 replay observation 均不与该编码兼容。
 
 S0 没有外部障碍，但仍保留 49 维外部槽位：相对向量/位置/速度/接近速度/风险/presence 为零，距离和 TTC 为一。自碰撞槽位仍由实际几何计算。接近速度 observation 的 `1.0` 尺度不要与自碰撞风险计算配置的 `approach_velocity_scale: 0.7` 混淆。
 
@@ -151,30 +153,38 @@ Auto-PCR 对 Actor 加 `KL(old Gaussian || current Gaussian)`，比较 tanh 前�
 启用 `pose_objective: unified_keypoint`。令三个关键点的平均距离为 D_KP，下一状态跟踪质量 `T=mean_i(exp(-d_i(next)/.05))`，本 episode 成功阈值为 eps_p/eps_R：
 
 ```text
-precision_quality = exp(-(rho_p(next)/eps_p + rho_R(next)/eps_R)/2)
+precision_quality(s) = exp(-(rho_p(s)/eps_p + rho_R(s)/eps_R)/2)
 I_current = (rho_p(current) <= eps_p and rho_R(current) <= eps_R)
 I_next = (rho_p(next) <= eps_p and rho_R(next) <= eps_R)
 hold_reward = .05 * (I_current and I_next and not terminal_collision_or_hard_failure)
 leave_penalty = .20 * (I_current and not I_next)
 velocity_cost = clip(mean((qdot_after/0.7)^2), 0, 1)
 smooth_cost = clip(mean(((qdot_after-qdot_before)/0.7)^2), 0, 1)
+precision_proximity = exp(-rho_p_next/.03) * exp(-rho_R_next/.09)
+precision_stop_cost = .10 * precision_proximity * velocity_magnitude
+remaining_steps = horizon - episode_step
+terminal_occupancy_compensation = task_reached * min(
+    15, .15*(1-.99^remaining_steps)/(1-.99))
 r_goal = .20*T + 10*(D_KP(current)-D_KP(next))
-         + .20*precision_quality - .04*velocity_cost - .01*smooth_cost
+         + .20*precision_quality(next)
+         - .04*velocity_cost - .01*smooth_cost
+         - precision_stop_cost
          + hold_reward - leave_penalty
          + 20*task_reached
+         + terminal_occupancy_compensation
 r = r_goal - hard_penalty - timeout_guard
            - external_safety_penalty - self_safety_penalty - terminal_guard
 ```
 
-精度项 temperature 为 2，权重保持 .20；两项归一化误差相等时，与旧 temperature=1 的 max 公式强度一致，不保证其他状态等强度。`use_episode_tolerance_for_joint_precision: true`，升档会改变 eps_p/eps_R。外到内不领取保持奖励，内到内固定奖励 .05，内到外罚 .20；不按保持步数递增，不新增 observation。第 5 个连续严格命中 step 仍额外给予成功奖励 20。`orientation_scale` 和整数 level index 不直接进入 reward 公式；L4--L7 只有位置 tolerance 变化。关键点 progress 是直接距离差，不乘 gamma。
+精度质量的 temperature 为 2，`use_episode_tolerance_for_joint_precision: true`，因此升档会改变 eps_p/eps_R。关键点质量和联合精度质量都提供有界正状态奖励。外到内不领取保持奖励，内到内固定奖励 .05，内到外罚 .20；不按保持步数递增，不新增 observation。停止成本权重为 `.10`，按下一状态与目标的接近程度连续生效，不做严格区门控。第 5 个连续严格命中 step 仍给予原成功奖励 20，并额外补偿成功终止后放弃的正占用价值；补偿尺度 `.15`、上限 `15`，仅在 `task_reached` 的终止 transition 生效。所有非成功 transition 的奖励保持不变。`orientation_scale` 和整数 level index 不直接进入 reward 公式；L4--L6 只有位置 tolerance 变化。关键点 progress 使用直接距离差，不乘 gamma。
 
 硬失败（自碰撞、环境碰撞、关节越界）罚 20；未成功且无硬失败的 timeout 罚 2。外部/自碰撞安全组都为 `(2*risk+8*clearance_violation)/10`，分别再乘 `xi*.05`、`lambda_self*.05`；风险与距离违例均裁剪到 `[0,1]`。`clearance_violation=clip((safe_distance-min_distance)/safe_distance,0,1)`，外部/自安全距离分别 `.12/.005 m`。终止障碍碰撞且非硬失败的 terminal guard 罚 20。
 
-配置和日志仍保留 position/orientation shaping、fine reward、joint-precision progress、partial precision 等诊断项，当前 `r_goal` 不把它们相加。leave-tolerance 惩罚现在实际生效，只判断严格边界（倍率 1），不再使用旧的 2 倍范围。
+配置和日志仍保留 position/orientation shaping、fine reward、partial precision 和 joint-precision progress 等诊断项，但这些项不进入 unified-keypoint 的 `r_goal`。`keypoint_precision_reward` 是 `.20*precision_quality(next)`。leave-tolerance 惩罚只判断严格边界（倍率 1）。
 
 Replay 每条保存 observation、action、next observation、done、episode/step 和 29 个 raw 特征。训练抽样时重新计算 reward，安全权重采用当前 curriculum；精度阈值读取该 transition 保存的 episode 合同，**不是把所有历史样本重新标成新档位成功**。当前 SAC 是 reward-only，Batch 的 cost 不对应另一套 cost Critic。
 
-环境与 replay 同步使用新联合精度、保持和退出公式；从旧完整 checkpoint 恢复时，上述奖励参数采用当前配置，历史 raw 数据重新计算奖励。网络维度不变，但动作映射及奖励已改变，旧评估结果不能当作新方案结果。
+环境与 replay 同步使用上述奖励公式。Replay 存储版本为 9，旧完整 checkpoint 不兼容；应使用 Actor-only 初始化，让 Critic、alpha、优化器和 replay 重新开始。网络与 observation 维度不变。
 
 ## 7. L0 定向采集与四池
 
@@ -197,7 +207,9 @@ Frontier 保存条件包括：起点后前 40 step；rho_R 在 `[.6,1]` 且单�
 
 四池实际是固定 `384+256+192+192=1024`，不会因为 YAML 的 semantic fraction `.20` 而改成 20%；这里是 18.75%。Success 独立池重建为容量 1 的占位池，不再写入成功 episode，也不占 batch。一个 transition 可同时出现在 Recent、Frontier、Semantic 中；跨池并未全局去重。四池若无法凑齐配额会报错，不会自动回退到旧 success replay。
 
-默认旧 replay 与四池不同：Success 配额按成功 episode 数调度，少于 5 个为 0，5/20/50 个门槛对应 `.05/.15/.30`，Semantic 目标 `.20`，Previous 配置为 0，剩余由 Recent 填充；冷启动有补齐逻辑。保留此路径意味着代码当前还不是“四池唯一数据实现”。
+默认 joint-pose replay 与四池不同：Success 配额按成功 episode 数调度，少于 5 个为 0，5/20/50 个门槛对应 `.05/.15/.20`；Semantic 目标 `.20`，按 episode 初始目标距离和姿态跨度的 100 个 task cell 做长期覆盖；Precision 目标 `.20`，直接依据每条 transition 相对本 episode 阈值的实时误差，轮转均衡抽取五类事件：严格位姿区间退出、非终止的区间内保持/进入、仅位置达标、仅姿态达标、位置误差比处于 `[.8,1.5]` 的边界。五类按优先级互斥，避免同一条 transition 重复占多个 Precision 类别；同一 batch 中，Precision 已选的 Current 行也不会再次进入 Recent。Previous 默认 0，成熟期 1024 batch 约为 Success 205、Semantic 205、Precision 205、Recent 409；任一专用池冷启动不足时，缺额回填 Recent。训练 CSV 同时记录 Precision 总数和五个子类计数。
+
+Precision 均衡的是“训练过程中实际到达的误差边界事件”，不是把从最小距离到最大距离的连续区间强制采成均匀分布；初始任务范围的均匀覆盖仍由目标生成器和 Semantic task cell 负责。四池模式继续固定为 `384/256/192/192`，不启用该 `.20` Precision 配额。保留两条路径意味着代码当前还不是“四池唯一数据实现”。
 
 ## 8. L1 完整继承与 Current/History
 
@@ -271,4 +283,4 @@ python scripts/core/evaluate_thesis_homotopy.py \
 | 原始 frozen Actor 建 Anchor/Frontier | `scripts/replay/build_four_pool_seed.py` |
 | 冻结评估档位、场景与 horizon 覆盖 | `scripts/core/evaluate_thesis_homotopy.py` |
 
-结论：当前正式模型主线是 Hybrid Keypoint + Jacobian + Auto-PCR；L0 四池是需要显式启用的数据方案，L1 Current/History 是其升档行为，代码仍保留默认旧 replay 与 Actor-only 初始化入口。描述当前实现时必须同时说明架构和实际 replay 模式，不能只凭 YAML 名称或 run 名称认定四池正在生效。
+结论：当前正式模型主线是 Hybrid Keypoint + Jacobian + Auto-PCR；L0 四池是需要显式启用的数据方案，L1 Current/History 是其升档行为，代码仍保留默认 joint-pose replay（含 Semantic 与 Precision 配额）和 Actor-only 初始化入口。描述当前实现时必须同时说明架构和实际 replay 模式，不能只凭 YAML 名称或 run 名称认定四池正在生效。

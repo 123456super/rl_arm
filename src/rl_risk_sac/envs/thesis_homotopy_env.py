@@ -163,7 +163,7 @@ class ThesisHomotopyEnv(gym.Env):
                 reward_config.get("precision_orientation_scale_rad", 0.09)
             ),
             "precision_stop_cost_weight": float(
-                reward_config.get("precision_stop_cost_weight", 0.20)
+                reward_config.get("precision_stop_cost_weight", 0.10)
             ),
             "joint_precision_progress_scale": float(
                 reward_config.get("joint_precision_progress_scale", 0.0)
@@ -238,6 +238,12 @@ class ThesisHomotopyEnv(gym.Env):
                 reward_config.get("keypoint_precision_reward_scale", 0.0)
             ),
             "success_bonus": float(reward_config.get("success_bonus", 20.0)),
+            "occupancy_compensation_scale": float(
+                reward_config.get("occupancy_compensation_scale", 0.15)
+            ),
+            "maximum_terminal_compensation": float(
+                reward_config.get("maximum_terminal_compensation", 15.0)
+            ),
             "velocity_cost_weight": float(reward_config.get("velocity_cost_weight", 0.04)),
             "smooth_cost_weight": float(reward_config.get("smooth_cost_weight", 0.01)),
             "hard_failure_penalty": float(
@@ -744,6 +750,7 @@ class ThesisHomotopyEnv(gym.Env):
             lambda_self=self.contract.lambda_self,
             gamma=float(self.config["sac"]["gamma"]),
             horizon=self.horizon,
+            remaining_steps=max(0, self.horizon - self.step_count),
             keypoint_tracking_quality=keypoint_tracking_quality,
             keypoint_distance=self.previous_keypoint_distance,
             next_keypoint_distance=next_keypoint_distance,

@@ -246,13 +246,36 @@ def main() -> None:
     selected = []
     failures = 0
     never_hit = 0
+    failure_hit_categories = {
+        "position_never_in_tolerance": 0,
+        "orientation_never_in_tolerance": 0,
+        "neither_position_nor_orientation_in_tolerance": 0,
+        "both_position_and_orientation_hit_but_not_success": 0,
+        "position_only_hit": 0,
+        "orientation_only_hit": 0,
+    }
     for episode in range(args.episodes):
         result = completed[episode]
         if result["success"]:
             continue
         failures += 1
         rows = result["rows"]
-        if not any(bool(row["strict"]) for row in rows):
+        position_hit = any(float(row["rho_p"]) <= position_tolerance for row in rows)
+        orientation_hit = any(float(row["rho_r"]) <= orientation_tolerance for row in rows)
+        strict_hit = any(bool(row["strict"]) for row in rows)
+        if not position_hit:
+            failure_hit_categories["position_never_in_tolerance"] += 1
+        if not orientation_hit:
+            failure_hit_categories["orientation_never_in_tolerance"] += 1
+        if not position_hit and not orientation_hit:
+            failure_hit_categories["neither_position_nor_orientation_in_tolerance"] += 1
+        elif position_hit and orientation_hit and not strict_hit:
+            failure_hit_categories["both_position_and_orientation_hit_but_not_success"] += 1
+        elif position_hit and not orientation_hit:
+            failure_hit_categories["position_only_hit"] += 1
+        elif orientation_hit and not position_hit:
+            failure_hit_categories["orientation_only_hit"] += 1
+        if not strict_hit:
             never_hit += 1
             continue
         analysis = analyze_episode(rows, position_tolerance, orientation_tolerance)
@@ -287,6 +310,7 @@ def main() -> None:
         "failure_episodes": failures,
         "failure_episodes_ever_strict": len(selected),
         "failure_episodes_never_strict": never_hit,
+        "failure_hit_categories": failure_hit_categories,
         "max_consecutive_strict_steps": run_counts,
         "first_exit_cause": first_causes,
         "all_exit_events": all_causes,

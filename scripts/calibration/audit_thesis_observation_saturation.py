@@ -17,7 +17,12 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from rl_risk_sac.algorithms.networks import GaussianActor
 from rl_risk_sac.envs import thesis_homotopy_env as env_module
-from rl_risk_sac.tasks.thesis_reaching import pose_keypoint_errors, keypoint_position_jacobian
+from rl_risk_sac.tasks.thesis_reaching import (
+    EXPLICIT_ORIENTATION_ERROR_SCALE_RAD,
+    EXPLICIT_POSITION_ERROR_SCALE_M,
+    keypoint_position_jacobian,
+    pose_keypoint_errors,
+)
 from rl_risk_sac.utils.config import load_config
 
 
@@ -37,10 +42,20 @@ def preclip_blocks(k: dict) -> dict[str, np.ndarray]:
                            else keypoint_position_jacobian(k["ee_jacobian"], k["ee_quaternion"],
                                                            cube_side_m=k["keypoint_cube_side_m"]))
                 .reshape(-1) / k["keypoint_jacobian_scale"],
-        "position_error": np.asarray(k["position_error"]),
-        "orientation_error": np.asarray(k["orientation_error"]) / np.pi,
-        "rho_position": np.asarray([np.linalg.norm(k["position_error"])]),
-        "rho_orientation": np.asarray([np.linalg.norm(k["orientation_error"]) / np.pi]),
+        "position_error": (
+            np.asarray(k["position_error"]) / EXPLICIT_POSITION_ERROR_SCALE_M
+        ),
+        "orientation_error": (
+            np.asarray(k["orientation_error"])
+            / EXPLICIT_ORIENTATION_ERROR_SCALE_RAD
+        ),
+        "rho_position": np.asarray([
+            np.linalg.norm(k["position_error"]) / EXPLICIT_POSITION_ERROR_SCALE_M
+        ]),
+        "rho_orientation": np.asarray([
+            np.linalg.norm(k["orientation_error"])
+            / EXPLICIT_ORIENTATION_ERROR_SCALE_RAD
+        ]),
         "EE_linear_velocity": np.asarray(k["ee_linear_velocity"]) / k["ee_linear_velocity_scale"],
         "EE_angular_velocity": np.asarray(k["ee_angular_velocity"]) / k["ee_angular_velocity_scale"],
         "goal_scale": np.asarray([2 * k["goal_scale"] - 1]),

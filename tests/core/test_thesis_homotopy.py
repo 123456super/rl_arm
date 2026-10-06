@@ -315,6 +315,7 @@ def test_hybrid_keypoint_auto_chain_contract_is_162d():
         root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
     )
     assert config["thesis"]["observation"]["hybrid_explicit_pose_error"] is True
+    assert config["thesis"]["reward"]["keypoint_tracking_scale"] == .20
     assert config["thesis"]["reward"]["keypoint_precision_reward_scale"] == .20
     assert config["sac"]["chain_pcr_auto_enabled"] is True
     assert config["sac"]["chain_pcr_target_ratio"] == .003
@@ -324,14 +325,21 @@ def test_hybrid_keypoint_auto_chain_contract_is_162d():
         assert observation.shape == (
             THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN,
         )
-        np.testing.assert_allclose(observation[75:78], info["goal_position"] - info["ee_position"], atol=1e-6)
         np.testing.assert_allclose(
-            observation[78:81], info["orientation_error_vector"] / np.pi,
+            observation[75:78],
+            np.clip((info["goal_position"] - info["ee_position"]) / .05, -1., 1.),
             atol=1e-6,
         )
-        assert observation[81] == pytest.approx(info["goal_error_norm"], abs=1e-6)
+        np.testing.assert_allclose(
+            observation[78:81],
+            np.clip(info["orientation_error_vector"] / .50, -1., 1.),
+            atol=1e-6,
+        )
+        assert observation[81] == pytest.approx(
+            np.clip(info["goal_error_norm"] / .05, 0., 1.), abs=1e-6,
+        )
         assert observation[82] == pytest.approx(
-            info["orientation_error_norm"] / np.pi, abs=1e-6,
+            np.clip(info["orientation_error_norm"] / .50, 0., 1.), abs=1e-6,
         )
     finally:
         env.close()
@@ -448,12 +456,12 @@ def test_keypoint_reward_replaces_all_split_pose_shaping():
         keypoint_distance=.20, next_keypoint_distance=.19,
         keypoint_tracking_scale=.2,
         keypoint_progress_scale=10.0,
+        precision_stop_cost_weight=0.0,
     )
     reward_a, fields_a = homotopy_reward(**common)
     reward_b, fields_b = homotopy_reward(
         **common, position_progress_scale=999.0,
         orientation_progress_scale=999.0,
-        joint_precision_progress_scale=999.0,
     )
     assert reward_a == pytest.approx(reward_b)
     assert fields_a["r_goal"] == pytest.approx(fields_b["r_goal"])
@@ -473,7 +481,7 @@ def test_keypoint_near_goal_precision_requires_position_and_orientation():
         keypoint_tracking_scale=0.0, keypoint_progress_scale=0.0,
         joint_position_tolerance=.10, joint_orientation_tolerance=.30,
     )
-    baseline, _ = homotopy_reward(**common, keypoint_precision_reward_scale=0.0)
+    baseline, _ = homotopy_reward(**common)
     rewarded, fields = homotopy_reward(
         **common, keypoint_precision_reward_scale=.20,
     )
@@ -481,6 +489,85 @@ def test_keypoint_near_goal_precision_requires_position_and_orientation():
     assert fields["keypoint_precision_quality"] == pytest.approx(expected_quality)
     assert fields["keypoint_precision_reward"] == pytest.approx(.20 * expected_quality)
     assert rewarded - baseline == pytest.approx(.20 * expected_quality)
+
+
+def test_success_compensates_discounted_remaining_positive_occupancy():
+    common = dict(
+        rho_position=.01, next_rho_position=.009,
+        rho_orientation=.09, next_rho_orientation=.08,
+        smooth_velocity=0.0, velocity_magnitude=0.0,
+        orientation_scale=1.0, hard_failure=False,
+        obstacle_collision=False, risk_max=0.0, distance_min=.8, xi=1.0,
+        keypoint_pose_reward=True, keypoint_tracking_quality=.8,
+        keypoint_distance=.03, next_keypoint_distance=.025,
+        gamma=.99, horizon=500, remaining_steps=100,
+        occupancy_compensation_scale=.15,
+        maximum_terminal_compensation=15.0,
+    )
+    running, running_fields = homotopy_reward(**common, task_reached=False)
+    succeeded, success_fields = homotopy_reward(**common, task_reached=True)
+    expected = .15 * (1.0 - .99**100) / (1.0 - .99)
+    assert running_fields["terminal_occupancy_compensation"] == 0.0
+    assert success_fields["terminal_occupancy_compensation"] == pytest.approx(expected)
+    assert succeeded - running == pytest.approx(20.0 + expected)
+
+    capped, capped_fields = homotopy_reward(
+        **{**common, "remaining_steps": 499}, task_reached=True,
+    )
+    without_compensation, _ = homotopy_reward(
+        **{
+            **common,
+            "remaining_steps": 499,
+            "occupancy_compensation_scale": 0.0,
+        },
+        task_reached=True,
+    )
+    expected_499 = .15 * (1.0 - .99**499) / .01
+    assert capped_fields["terminal_occupancy_compensation"] == pytest.approx(
+        expected_499
+    )
+    assert capped_fields["terminal_occupancy_compensation"] <= 15.0
+    assert capped - without_compensation == pytest.approx(expected_499)
+
+    _, explicitly_capped = homotopy_reward(
+        **{
+            **common,
+            "remaining_steps": 499,
+            "occupancy_compensation_scale": .30,
+        },
+        task_reached=True,
+    )
+    assert explicitly_capped["terminal_occupancy_compensation"] == 15.0
+
+
+def test_replay_success_compensation_matches_scalar_remaining_steps():
+    parameters = {
+        "occupancy_compensation_scale": .15,
+        "maximum_terminal_compensation": 15.0,
+    }
+    raw = np.zeros((1, 29), dtype=np.float32)
+    raw[0, 5] = 1.0
+    raw[0, 12] = .8
+    raw[0, 18] = .25
+    raw[0, 24:26] = [.01, .10]
+    replay_reward, _ = _vectorized_replay_rewards(
+        raw, np.ones((1, 1)), np.ones(1), 0.0, .99, parameters,
+        steps=np.asarray([399]), reward_horizon=500,
+    )
+    scalar_reward, fields = homotopy_reward(
+        rho_position=0.0, next_rho_position=0.0,
+        rho_orientation=0.0, next_rho_orientation=0.0,
+        smooth_velocity=0.0, velocity_magnitude=0.0,
+        orientation_scale=1.0, task_reached=True, hard_failure=False,
+        obstacle_collision=False, risk_max=0.0, distance_min=.8, xi=1.0,
+        joint_position_tolerance=.01, joint_orientation_tolerance=.10,
+        gamma=.99, horizon=500, remaining_steps=100,
+        **parameters,
+    )
+    assert fields["terminal_occupancy_compensation"] == pytest.approx(
+        .15 * (1.0 - .99**100) / .01
+    )
+    assert replay_reward[0] == pytest.approx(scalar_reward, abs=1e-7)
 
 
 def test_keypoint_replay_reward_matches_scalar_and_uses_29_fields():
@@ -522,7 +609,7 @@ def test_keypoint_replay_reward_matches_scalar_and_uses_29_fields():
         keypoint_progress_scale=10.0,
         keypoint_precision_reward_scale=.2,
     )
-    assert vectorized[0] == pytest.approx(scalar)
+    assert vectorized[0] == pytest.approx(scalar, abs=1e-7)
 
 
 def test_keypoint_reward_statistics_report_density_and_signed_progress():
@@ -834,14 +921,28 @@ def test_stop_cost_is_stronger_near_the_goal():
         orientation_scale=0.0, task_reached=False, hard_failure=False,
         obstacle_collision=False, risk_max=0.0, distance_min=.8, xi=1.0,
     )
-    _, near = homotopy_reward(
+    near_reward, near = homotopy_reward(
         **common, next_rho_position=.01, next_rho_orientation=.03,
     )
-    _, far = homotopy_reward(
+    far_reward, far = homotopy_reward(
         **common, next_rho_position=.20, next_rho_orientation=.80,
+    )
+    near_without_stop, _ = homotopy_reward(
+        **common, next_rho_position=.01, next_rho_orientation=.03,
+        precision_stop_cost_weight=0.0,
+    )
+    far_without_stop, _ = homotopy_reward(
+        **common, next_rho_position=.20, next_rho_orientation=.80,
+        precision_stop_cost_weight=0.0,
     )
     assert near["precision_proximity"] > far["precision_proximity"]
     assert near["precision_stop_cost"] > far["precision_stop_cost"]
+    assert near_without_stop - near_reward == pytest.approx(
+        near["precision_stop_cost"]
+    )
+    assert far_without_stop - far_reward == pytest.approx(
+        far["precision_stop_cost"]
+    )
 
 
 
@@ -1192,6 +1293,19 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
         "low_fraction": .05,
         "medium_fraction": .15,
     }
+    assert settings["replay_success_fraction"] == .20
+    assert settings["replay_current_fraction"] == .80
+    assert settings["replay_current_intermediate"] == .80
+    assert settings["replay_current_recovery"] == .80
+    assert thesis["reward"]["precision_stop_cost_weight"] == .10
+    assert thesis["reward"]["occupancy_compensation_scale"] == .15
+    assert thesis["reward"]["maximum_terminal_compensation"] == 15.0
+    assert thesis["precision_boundary_replay"] == {
+        "enabled": True,
+        "fraction": .20,
+        "position_boundary_low_ratio": .8,
+        "position_boundary_high_ratio": 1.5,
+    }
     assert settings["min_transitions_per_level"] == 100000
     assert settings["deterministic_probe_interval_transitions"] == 100000
     assert settings["manual_promotion"] is True
@@ -1207,10 +1321,10 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
         assert current["target_distance_max_m"] == previous["target_distance_max_m"]
         assert current["target_orientation_max_rad"] == previous["target_orientation_max_rad"]
     assert [level["position_tolerance_m"] for level in levels] == [
-        .10, .08, .064, .0512, .05, .025, .01, .005,
+        .10, .08, .064, .0512, .05, .025, .01,
     ]
     assert [level["orientation_tolerance_rad"] for level in levels] == [
-        .30, .24, .192, .1536, .10, .10, .10, .10,
+        .30, .24, .192, .1536, .10, .10, .10,
     ]
     assert levels[-1]["target_distance_max_m"] == .70
     assert np.isclose(levels[-1]["target_orientation_max_rad"], np.pi, atol=1e-6)
@@ -1262,10 +1376,10 @@ def test_v13_5_precision_curriculum_keeps_full_range_and_tightens_only_precision
     }
     assert len(bounds) == 1
     assert [level["position_tolerance_m"] for level in levels] == [
-        .10, .08, .064, .0512, .05, .025, .01, .005,
+        .10, .08, .064, .0512, .05, .025, .01,
     ]
     assert [level["orientation_tolerance_rad"] for level in levels] == [
-        .30, .24, .192, .1536, .10, .10, .10, .10,
+        .30, .24, .192, .1536, .10, .10, .10,
     ]
     assert thesis["reward"]["use_episode_tolerance_for_joint_precision"] is True
     assert thesis["reward"]["partial_precision_reward_scale"] == .10
@@ -1982,6 +2096,69 @@ def test_v13_2_success_replay_warms_up_by_independent_episode_count(
     )
     assert replay.last_orientation_sample_counts["current_success"] == expected_samples
     assert replay.last_orientation_sample_counts["current_recent"] == 100 - expected_samples
+
+
+def test_precision_boundary_replay_balances_live_error_strata():
+    replay = HomotopyReplayBuffer(
+        2, 1, "cpu", capacities={"none": 400, "static": 1, "dynamic": 1},
+        seed=39, s0_joint_pose=True, s0_success_fraction=0.0,
+        s0_anchor_fraction=0.0, s0_current_fraction=1.0,
+        s0_current_capacity=400, s0_success_capacity=10,
+        precision_replay_fraction=.40,
+        precision_position_boundary_low=.8,
+        precision_position_boundary_high=1.5,
+    )
+    episode = 0
+
+    def add_transition(rho_p, next_rho_p, rho_r, next_rho_r):
+        nonlocal episode
+        info = _transition_info(orientation_scale=.2)
+        info.update({
+            "rho_position": rho_p,
+            "next_rho_position": next_rho_p,
+            "rho_orientation": rho_r,
+            "next_rho_orientation": next_rho_r,
+            "position_tolerance": .01,
+            "orientation_tolerance": .10,
+        })
+        replay.add(
+            "none", np.full(2, episode), np.zeros(1),
+            np.full(2, episode + 1), False, info, episode, 0,
+        )
+        episode += 1
+
+    for _ in range(20):
+        add_transition(.009, .011, .09, .09)   # strict exit
+        add_transition(.012, .009, .11, .09)   # strict entry/hold
+        add_transition(.020, .009, .20, .20)   # position only inside
+        add_transition(.020, .020, .11, .09)   # orientation only inside
+        add_transition(.020, .012, .20, .20)   # position boundary
+    for _ in range(60):
+        add_transition(.30, .29, .50, .49)     # ordinary recent
+
+    rows = replay._sample_joint_pose_rows(100, .2)
+    assert replay.last_orientation_sample_counts["precision_boundary"] == 40
+    assert replay.last_orientation_sample_counts["current_recent"] == 60
+    assert replay.last_orientation_sample_counts["current"] == 100
+    assert replay.last_precision_sample_counts == {
+        "strict_exit": 8,
+        "inside_hold": 8,
+        "position_only_inside": 8,
+        "orientation_only_inside": 8,
+        "position_boundary": 8,
+    }
+    current_rows = [index for part, index, _ in rows if part is replay.s0_current]
+    assert len(current_rows) == len(set(current_rows)) == 100
+
+    restored = HomotopyReplayBuffer(
+        2, 1, "cpu", capacities={"none": 1, "static": 1, "dynamic": 1},
+        seed=40, s0_joint_pose=True,
+    )
+    restored.load_state_dict(replay.state_dict())
+    assert restored.precision_replay_fraction == .40
+    assert restored.precision_position_boundary_low == .8
+    assert restored.precision_position_boundary_high == 1.5
+    assert restored.last_precision_sample_counts == replay.last_precision_sample_counts
 
 
 def test_semantic_long_term_replay_balances_bins_and_survives_restore():
@@ -2895,7 +3072,7 @@ def test_precision_control_reduces_velocity_near_goal():
         env.close()
 
 
-@pytest.mark.parametrize("level", [0, 4, 5, 6, 7])
+@pytest.mark.parametrize("level", [0, 4, 5, 6])
 @pytest.mark.parametrize("z, expected", [(0.0, .05), (.5, .075), (1., .10), (1.5, .325), (2., 1.), (3., 1.)])
 def test_precision_control_uses_episode_tolerances(level, z, expected):
     root = Path(__file__).resolve().parents[2]
@@ -2927,7 +3104,11 @@ def test_pose_hold_and_exit_rewards_match_replay(before, after, expected, succes
     raw[0, 12] = .8
     raw[0, 18] = .25
     raw[0, 24:26] = [.05, .10]
-    parameters = dict(hold_reward_scale=.05, leave_joint_tolerance_penalty=.20)
+    parameters = dict(
+        hold_reward_scale=.05,
+        leave_joint_tolerance_penalty=.20,
+        keypoint_tracking_scale=0.0,
+    )
     reward, fields = homotopy_reward(
         rho_position=float(raw[0, 0]), next_rho_position=float(raw[0, 1]),
         rho_orientation=float(raw[0, 2]), next_rho_orientation=float(raw[0, 3]),
@@ -2946,13 +3127,13 @@ def test_joint_precision_quality_uses_sum_and_temperature():
         rho_position=.05, next_rho_position=.025,
         rho_orientation=.1, next_rho_orientation=.1,
         joint_position_tolerance=.05, joint_orientation_tolerance=.1,
-        joint_precision_temperature=2., keypoint_precision_reward_scale=.2,
+        joint_precision_temperature=2.,
         smooth_velocity=0., velocity_magnitude=0., orientation_scale=1., task_reached=False,
         hard_failure=False, obstacle_collision=False, risk_max=0., distance_min=.8, xi=1.,
     )
     assert fields["joint_precision_quality"] == pytest.approx(np.exp(-1.))
     assert fields["next_joint_precision_quality"] == pytest.approx(np.exp(-.75))
-    assert fields["keypoint_precision_reward"] == pytest.approx(.2 * np.exp(-.75))
+    assert fields["keypoint_precision_reward"] == 0.0
 
 
 def test_initial_goal_curriculum_samples_locally():

@@ -19,6 +19,8 @@ def _vectorized_replay_rewards(
     lambda_self: float,
     reward_gamma: float,
     reward_parameters: dict[str, float],
+    steps: np.ndarray | None = None,
+    reward_horizon: int = 500,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Recompute replay rewards for a whole batch without Python row loops.
 
@@ -40,7 +42,12 @@ def _vectorized_replay_rewards(
         "keypoint_tracking_scale": 0.20,
         "keypoint_progress_scale": 10.0,
         "keypoint_precision_reward_scale": 0.0,
+        "precision_position_scale": 0.03,
+        "precision_orientation_scale": 0.09,
+        "precision_stop_cost_weight": 0.10,
         "success_bonus": 20.0, "velocity_cost_weight": 0.04,
+        "occupancy_compensation_scale": 0.15,
+        "maximum_terminal_compensation": 15.0,
         "smooth_cost_weight": 0.01, "hard_failure_penalty": 20.0,
         "timeout_penalty": 2.0,
         "safety_risk_weight": 2.0, "safety_clearance_weight": 8.0,
@@ -60,11 +67,42 @@ def _vectorized_replay_rewards(
     orientation_ratio = np.maximum(r[:, 2], 0.0) / r[:, 25]
     next_position_ratio = np.maximum(r[:, 1], 0.0) / r[:, 24]
     next_orientation_ratio = np.maximum(r[:, 3], 0.0) / r[:, 25]
+    next_precision_quality = np.exp(
+        -(next_position_ratio + next_orientation_ratio)
+        / float(p["joint_precision_temperature"])
+    )
     was_strict = (position_ratio <= 1.0) & (orientation_ratio <= 1.0)
     next_strict = (next_position_ratio <= 1.0) & (next_orientation_ratio <= 1.0)
     velocity_cost = float(p["velocity_cost_weight"]) * np.clip(r[:, 15], 0.0, 1.0)
     smooth_cost = float(p["smooth_cost_weight"]) * np.clip(r[:, 4], 0.0, 1.0)
+    precision_proximity = (
+        np.exp(-np.maximum(r[:, 1], 0.0) / float(p["precision_position_scale"]))
+        * np.exp(
+            -np.maximum(r[:, 3], 0.0)
+            / float(p["precision_orientation_scale"])
+        )
+    )
+    precision_stop_cost = (
+        float(p["precision_stop_cost_weight"])
+        * precision_proximity
+        * np.clip(r[:, 15], 0.0, 1.0)
+    )
     task_reached = r[:, 5] != 0.0
+    if steps is None:
+        remaining_steps = np.zeros(len(r), dtype=np.float64)
+    else:
+        transition_steps = np.asarray(steps, dtype=np.int64).reshape(-1)
+        if len(transition_steps) != len(r):
+            raise ValueError("replay step count must match the reward batch")
+        remaining_steps = np.maximum(
+            int(reward_horizon) - (transition_steps + 1), 0,
+        )
+    terminal_occupancy_compensation = np.minimum(
+        float(p["maximum_terminal_compensation"]),
+        float(p["occupancy_compensation_scale"])
+        * (1.0 - float(reward_gamma) ** remaining_steps)
+        / (1.0 - float(reward_gamma)),
+    ) * task_reached
     hard_failure = r[:, 6] != 0.0
     obstacle_collision = r[:, 7] != 0.0
     timeout = r[:, 22] != 0.0
@@ -74,14 +112,14 @@ def _vectorized_replay_rewards(
     r_goal = (
         float(p["keypoint_tracking_scale"]) * np.clip(r[:, 28], 0.0, 1.0)
         + float(p["keypoint_progress_scale"]) * (r[:, 26] - r[:, 27])
-        + float(p["keypoint_precision_reward_scale"])
-        * np.exp(-(next_position_ratio + next_orientation_ratio)
-                 / float(p["joint_precision_temperature"]))
+        + float(p["keypoint_precision_reward_scale"]) * next_precision_quality
         + float(p["hold_reward_scale"]) * held
         - float(p["leave_joint_tolerance_penalty"]) * left
+        - precision_stop_cost
         - velocity_cost
         - smooth_cost
         + float(p["success_bonus"]) * task_reached
+        + terminal_occupancy_compensation
     )
 
     clearance = np.clip(
@@ -247,7 +285,7 @@ class HomotopyReplayBuffer:
     merely because they contain more transitions.
     """
 
-    STORAGE_VERSION = 6
+    STORAGE_VERSION = 9
 
     def __init__(
         self,
@@ -268,6 +306,9 @@ class HomotopyReplayBuffer:
         s0_success_fraction: float = 0.30,
         s0_success_schedule: dict[str, float | int] | None = None,
         s0_success_capacity: int = 15000,
+        precision_replay_fraction: float = 0.0,
+        precision_position_boundary_low: float = 0.8,
+        precision_position_boundary_high: float = 1.5,
         reward_parameters: dict[str, float] | None = None,
     ) -> None:
         capacities = capacities or {"none": 60000, "static": 90000, "dynamic": 150000}
@@ -318,10 +359,35 @@ class HomotopyReplayBuffer:
         self.s0_success_schedule = self._validate_success_schedule(
             s0_success_schedule
         )
+        self.precision_replay_fraction = float(precision_replay_fraction)
+        self.precision_position_boundary_low = float(
+            precision_position_boundary_low
+        )
+        self.precision_position_boundary_high = float(
+            precision_position_boundary_high
+        )
+        if not 0.0 <= self.precision_replay_fraction <= self.s0_current_fraction:
+            raise ValueError(
+                "precision replay fraction must be in [0, s0_current_fraction]"
+            )
+        if not (
+            0.0 <= self.precision_position_boundary_low
+            < self.precision_position_boundary_high
+        ):
+            raise ValueError("precision position boundary ratios are invalid")
         self.last_sample_counts = {s: 0 for s in SCENES}
         self.last_orientation_sample_counts = {
             "anchor": 0, "current": 0, "historical": 0,
             "current_success": 0, "current_recent": 0, "previous": 0,
+        }
+        if self.precision_replay_fraction:
+            self.last_orientation_sample_counts["precision_boundary"] = 0
+        self.last_precision_sample_counts = {
+            "strict_exit": 0,
+            "inside_hold": 0,
+            "position_only_inside": 0,
+            "orientation_only_inside": 0,
+            "position_boundary": 0,
         }
         self.redistribution_count = 0
         # Task-semantic long-term replay is part of the formal S0 protocol.
@@ -582,9 +648,13 @@ class HomotopyReplayBuffer:
         """
         if enabled and not self.s0_joint_pose:
             raise ValueError("semantic long-term replay requires joint-pose S0")
-        if not 0.0 <= float(fraction) <= self.s0_current_fraction:
+        if not (
+            0.0 <= float(fraction)
+            <= self.s0_current_fraction - self.precision_replay_fraction
+        ):
             raise ValueError(
-                "semantic replay fraction must be in [0, s0_current_fraction]"
+                "semantic and precision replay fractions exceed "
+                "s0_current_fraction"
             )
         if min(
             int(position_bins), int(orientation_bins), int(episodes_per_bin),
@@ -849,7 +919,7 @@ class HomotopyReplayBuffer:
                 episode_id, step_in_episode,
             )
             return
-        # L4--L7 share orientation_scale=1.0; use the explicit curriculum
+        # L4--L6 share orientation_scale=1.0; use the explicit curriculum
         # index when available so their position-precision replay remains
         # partitioned by level.
         scale = self._scale_key(
@@ -968,6 +1038,7 @@ class HomotopyReplayBuffer:
     def _sample_episode_balanced_rows(
         self, part: _Partition, count: int, category: str,
         excluded_episodes: set[int] | None = None,
+        excluded_rows: set[int] | None = None,
     ) -> list[tuple[_Partition, int, str]]:
         """Give each stored episode equal weight regardless of its length."""
         if count <= 0 or part.size == 0:
@@ -979,13 +1050,21 @@ class HomotopyReplayBuffer:
         ]
         pools: dict[int, np.ndarray] = {}
         cursors: dict[int, int] = {}
+        excluded_array = (
+            np.fromiter(excluded_rows, dtype=np.int64)
+            if excluded_rows else None
+        )
         for episode in episodes:
             indices = np.fromiter(indexed[episode], dtype=np.int64)
+            if excluded_array is not None:
+                indices = indices[~np.isin(indices, excluded_array)]
+            if not len(indices):
+                continue
             self.rng.shuffle(indices)
             pools[episode] = indices
             cursors[episode] = 0
         selected: list[tuple[_Partition, int, str]] = []
-        active = episodes
+        active = list(pools)
         while active and len(selected) < count:
             self.rng.shuffle(active)
             remaining = []
@@ -999,6 +1078,86 @@ class HomotopyReplayBuffer:
                 if len(selected) >= count:
                     break
             active = remaining
+        return selected
+
+    def _sample_precision_rows(
+        self, count: int,
+    ) -> list[tuple[_Partition, int, str]]:
+        """Balance live pose-error boundary events from current-level replay.
+
+        The semantic bank balances initial task difficulty.  This sampler is
+        complementary: it bins individual transitions by their current/next
+        error relative to the episode tolerances saved in raw replay.
+        """
+        if count <= 0 or self.s0_current.size == 0:
+            self.last_precision_sample_counts = {
+                key: 0 for key in self.last_precision_sample_counts
+            }
+            return []
+        part = self.s0_current
+        indices = part.chronological_indices()
+        raw = part.raw[indices]
+        position_tolerance = raw[:, 24]
+        orientation_tolerance = raw[:, 25]
+        valid = (position_tolerance > 0.0) & (orientation_tolerance > 0.0)
+        current_position = raw[:, 0] / np.maximum(position_tolerance, 1e-12)
+        next_position = raw[:, 1] / np.maximum(position_tolerance, 1e-12)
+        current_orientation = raw[:, 2] / np.maximum(orientation_tolerance, 1e-12)
+        next_orientation = raw[:, 3] / np.maximum(orientation_tolerance, 1e-12)
+        current_strict = (current_position <= 1.0) & (current_orientation <= 1.0)
+        next_position_inside = next_position <= 1.0
+        next_orientation_inside = next_orientation <= 1.0
+        next_strict = next_position_inside & next_orientation_inside
+
+        # Priority makes the strata disjoint.  Entry/hold includes nonterminal
+        # strict transitions; terminal successes already have their own pool.
+        masks = {
+            "strict_exit": valid & current_strict & ~next_strict,
+            "inside_hold": valid & next_strict & (raw[:, 5] < 0.5),
+            "position_only_inside": (
+                valid & next_position_inside & ~next_orientation_inside
+            ),
+            "orientation_only_inside": (
+                valid & ~next_position_inside & next_orientation_inside
+            ),
+            "position_boundary": (
+                valid
+                & (next_position >= self.precision_position_boundary_low)
+                & (next_position <= self.precision_position_boundary_high)
+            ),
+        }
+        available = valid.copy()
+        pools: list[np.ndarray] = []
+        labels: list[str] = []
+        for label, mask in masks.items():
+            pool = indices[mask & available]
+            available[mask] = False
+            if len(pool):
+                self.rng.shuffle(pool)
+                pools.append(pool)
+                labels.append(label)
+
+        selected: list[tuple[_Partition, int, str]] = []
+        sampled_counts = {key: 0 for key in masks}
+        cursors = [0] * len(pools)
+        active = list(range(len(pools)))
+        while active and len(selected) < count:
+            self.rng.shuffle(active)
+            remaining = []
+            for pool_index in active:
+                cursor = cursors[pool_index]
+                selected.append((
+                    part, int(pools[pool_index][cursor]), "precision_boundary",
+                ))
+                sampled_counts[labels[pool_index]] += 1
+                cursor += 1
+                cursors[pool_index] = cursor
+                if cursor < len(pools[pool_index]):
+                    remaining.append(pool_index)
+                if len(selected) >= count:
+                    break
+            active = remaining
+        self.last_precision_sample_counts = sampled_counts
         return selected
 
     def _sample_semantic_rows(
@@ -1091,10 +1250,14 @@ class HomotopyReplayBuffer:
         desired_success = round(count * effective_success_fraction)
         desired_previous = round(count * previous_fraction)
         desired_semantic = round(count * self.semantic_fraction)
-        desired_recent = count - desired_success - desired_previous - desired_semantic
+        desired_precision = round(count * self.precision_replay_fraction)
+        desired_recent = (
+            count - desired_success - desired_previous
+            - desired_semantic - desired_precision
+        )
         if desired_recent < 0:
             raise ValueError(
-                "semantic replay quota exceeds the current/recent replay quota"
+                "semantic and precision replay quotas exceed the current/recent quota"
             )
         selected = self._sample_episode_balanced_rows(
             self.s0_current_success, desired_success, "current_success",
@@ -1104,11 +1267,20 @@ class HomotopyReplayBuffer:
         )
         semantic_rows = self._sample_semantic_rows(desired_semantic)
         selected.extend(semantic_rows)
-        # During the initial cold start, unfilled semantic quota remains
+        precision_rows = self._sample_precision_rows(desired_precision)
+        selected.extend(precision_rows)
+        # During cold start, unfilled semantic or precision quota remains
         # ordinary recent replay; total batch size and update count stay fixed.
-        desired_recent += desired_semantic - len(semantic_rows)
+        desired_recent += (
+            desired_semantic - len(semantic_rows)
+            + desired_precision - len(precision_rows)
+        )
+        precision_indices = {
+            index for part, index, _ in precision_rows if part is self.s0_current
+        }
         selected.extend(self._sample_episode_balanced_rows(
             self.s0_current, desired_recent, "current_recent", successful_episodes,
+            precision_indices,
         ))
         previous_candidates: list[tuple[_Partition, int, str]] = []
         if self.s0_history:
@@ -1146,13 +1318,17 @@ class HomotopyReplayBuffer:
         categories = ["current_success", "current_recent", "previous"]
         if self.semantic_enabled:
             categories.append("semantic_long_term")
+        if self.precision_replay_fraction:
+            categories.append("precision_boundary")
         counts = {
             category: sum(row[2] == category for row in selected)
             for category in categories
         }
         self.last_orientation_sample_counts = {
             "anchor": counts["current_success"],
-            "current": counts["current_recent"],
+            "current": (
+                counts["current_recent"] + counts.get("precision_boundary", 0)
+            ),
             "historical": counts["previous"],
             **counts,
         }
@@ -1161,6 +1337,9 @@ class HomotopyReplayBuffer:
     def _sample_four_pool_rows(
         self, count: int, orientation_scale: float | None,
     ) -> list[tuple[_Partition, int, str]]:
+        self.last_precision_sample_counts = {
+            key: 0 for key in self.last_precision_sample_counts
+        }
         if count != 1024 or orientation_scale is None or not np.isclose(
             orientation_scale, self.s0_current_scale, rtol=0, atol=1e-7,
         ):
@@ -1201,6 +1380,9 @@ class HomotopyReplayBuffer:
     def _sample_four_pool_history_rows(
         self, count: int, orientation_scale: float | None,
     ) -> list[tuple[_Partition, int, str]]:
+        self.last_precision_sample_counts = {
+            key: 0 for key in self.last_precision_sample_counts
+        }
         if orientation_scale is None or not np.isclose(
             orientation_scale, self.s0_current_scale, rtol=0, atol=1e-7,
         ) or not self.s0_history:
@@ -1446,9 +1628,15 @@ class HomotopyReplayBuffer:
             dtype=np.float64,
             count=len(rows),
         )
+        steps = np.fromiter(
+            (part.step[index] for _, part, index, _ in rows),
+            dtype=np.int64,
+            count=len(rows),
+        )
         rewards, costs = _vectorized_replay_rewards(
             raw, dones, scene_xi, lambda_self, self.reward_gamma,
-            self.reward_parameters,
+            self.reward_parameters, steps=steps,
+            reward_horizon=self.reward_horizon,
         )
         observations = self._gather_rows(rows, "obs")
         actions = self._gather_rows(rows, "action")
@@ -1543,16 +1731,20 @@ class HomotopyReplayBuffer:
                 "s0_joint_pose": self.s0_joint_pose,
                 "s0_success_fraction": self.s0_success_fraction,
                 "s0_success_schedule": self.s0_success_schedule,
+                "precision_replay_fraction": self.precision_replay_fraction,
+                "precision_position_boundary_low": self.precision_position_boundary_low,
+                "precision_position_boundary_high": self.precision_position_boundary_high,
                 "reward_parameters": self.reward_parameters,
                 "last_sample_counts": self.last_sample_counts,
                 "last_orientation_sample_counts": self.last_orientation_sample_counts,
+                "last_precision_sample_counts": self.last_precision_sample_counts,
                 "redistribution_count": self.redistribution_count,
                 "semantic_long_term": semantic_state}
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         if int(state.get("storage_version", 0)) != self.STORAGE_VERSION:
             raise ValueError(
-                "checkpoint replay storage is incompatible with the success-replay schedule"
+                "checkpoint replay storage is incompatible with the active reward contract"
             )
         self.parts = state["parts"]
         four_pool = state.get("four_pool")
@@ -1586,6 +1778,13 @@ class HomotopyReplayBuffer:
         self.s0_success_schedule = self._validate_success_schedule(
             state.get("s0_success_schedule", self.s0_success_schedule)
         )
+        self.precision_replay_fraction = float(state["precision_replay_fraction"])
+        self.precision_position_boundary_low = float(
+            state["precision_position_boundary_low"]
+        )
+        self.precision_position_boundary_high = float(
+            state["precision_position_boundary_high"]
+        )
         # Sampling policy is a property of the current protocol, not old replay data.
         self.last_sample_counts = state.get("last_sample_counts", {s: 0 for s in SCENES})
         self.last_orientation_sample_counts = state.get(
@@ -1593,6 +1792,12 @@ class HomotopyReplayBuffer:
                 "anchor": 0, "current": 0, "historical": 0,
                 "current_success": 0, "current_recent": 0, "previous": 0,
             },
+        )
+        self.last_precision_sample_counts = state.get(
+            "last_precision_sample_counts",
+            {"strict_exit": 0, "inside_hold": 0,
+             "position_only_inside": 0, "orientation_only_inside": 0,
+             "position_boundary": 0},
         )
         self.redistribution_count = state.get("redistribution_count", 0)
         self._loaded_semantic_state = state.get("semantic_long_term")

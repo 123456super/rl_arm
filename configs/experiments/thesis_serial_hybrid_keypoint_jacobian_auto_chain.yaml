@@ -84,14 +84,13 @@ thesis:
     - 1.0
     - 1.0
     - 1.0
-    - 1.0
     min_transitions_per_level: 100000
     success_window: 100
     success_floor: 0.85
     full_scale_min_transitions: 25000
   orientation_curriculum:
     start_scale: 0.0
-    # L4--L7 have the same full orientation objective; replay uses the
+    # L4--L6 have the same full orientation objective; replay uses the
     # curriculum level index to distinguish these precision-only levels.
     end_scale: 1.0
     levels:
@@ -99,7 +98,6 @@ thesis:
     - 0.25
     - 0.5
     - 0.75
-    - 1.0
     - 1.0
     - 1.0
     - 1.0
@@ -115,7 +113,7 @@ thesis:
     anchor_success_floor: 0.9
     retention_target: 0.95
     retention_min_observations: 20
-    replay_success_fraction: 0.3
+    replay_success_fraction: 0.2
     replay_success_schedule:
       low_start_episodes: 5
       medium_start_episodes: 20
@@ -123,11 +121,11 @@ thesis:
       low_fraction: 0.05
       medium_fraction: 0.15
     replay_anchor_fraction: 0.0
-    replay_current_fraction: 0.7
+    replay_current_fraction: 0.8
     replay_anchor_intermediate: 0.0
-    replay_current_intermediate: 0.7
+    replay_current_intermediate: 0.8
     replay_anchor_recovery: 0.0
-    replay_current_recovery: 0.7
+    replay_current_recovery: 0.8
     replay_storage:
       anchor_capacity: 15000
       current_capacity: 30000
@@ -233,13 +231,6 @@ thesis:
       target_orientation_max_rad: 3.141592
       position_tolerance_m: 0.01
       orientation_tolerance_rad: 0.1
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.7
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.005
-      orientation_tolerance_rad: 0.1
   semantic_long_term_replay:
     enabled: true
     fraction: 0.2
@@ -247,6 +238,11 @@ thesis:
     orientation_bins: 10
     episodes_per_bin: 8
     transitions_per_episode: 64
+  precision_boundary_replay:
+    enabled: true
+    fraction: 0.2
+    position_boundary_low_ratio: 0.8
+    position_boundary_high_ratio: 1.5
   reward:
     position_sigma_m: 0.2
     micro_power: 4.0
@@ -256,7 +252,7 @@ thesis:
     fine_orientation_progress_scale: 1.0
     precision_position_scale_m: 0.03
     precision_orientation_scale_rad: 0.09
-    precision_stop_cost_weight: 0.2
+    precision_stop_cost_weight: 0.1
     joint_precision_progress_scale: 2.0
     joint_precision_temperature: 2.0
     joint_position_tolerance_m: 0.05
@@ -271,6 +267,8 @@ thesis:
     position_state_cost_weight: 0.02
     orientation_state_cost_weight: 0.02
     success_bonus: 20.0
+    occupancy_compensation_scale: 0.15
+    maximum_terminal_compensation: 15.0
     velocity_cost_weight: 0.04
     smooth_cost_weight: 0.01
     hard_failure_penalty: 20.0

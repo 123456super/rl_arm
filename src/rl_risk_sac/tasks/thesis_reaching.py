@@ -10,6 +10,8 @@ from rl_risk_sac.utils.risk import closest_point_on_segment
 
 THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN = 162
 APPROACH_VELOCITY_SCALE = 1.0
+EXPLICIT_POSITION_ERROR_SCALE_M = 0.05
+EXPLICIT_ORIENTATION_ERROR_SCALE_RAD = 0.50
 SELF_DISTANCE_LOWER = -0.02
 SELF_DISTANCE_UPPER = 0.25
 
@@ -460,14 +462,28 @@ def build_thesis_observation(
         keypoint_jacobian_array / keypoint_jacobian_scale, -1.0, 1.0,
     ).reshape(-1)
     pose_features = [keypoint_features, jacobian_features,
-        np.clip(np.asarray(position_error, dtype=np.float32), -1.0, 1.0),
         np.clip(
-            np.asarray(orientation_error, dtype=np.float32) / np.pi,
+            np.asarray(position_error, dtype=np.float32)
+            / EXPLICIT_POSITION_ERROR_SCALE_M,
+            -1.0,
+            1.0,
+        ),
+        np.clip(
+            np.asarray(orientation_error, dtype=np.float32)
+            / EXPLICIT_ORIENTATION_ERROR_SCALE_RAD,
             -1.0, 1.0,
         ),
         np.asarray([
-            np.clip(position_error_norm, 0.0, 1.0),
-            np.clip(orientation_error_norm / np.pi, 0.0, 1.0),
+            np.clip(
+                position_error_norm / EXPLICIT_POSITION_ERROR_SCALE_M,
+                0.0,
+                1.0,
+            ),
+            np.clip(
+                orientation_error_norm / EXPLICIT_ORIENTATION_ERROR_SCALE_RAD,
+                0.0,
+                1.0,
+            ),
         ], dtype=np.float32),
     ]
     if obstacle_present:
@@ -570,6 +586,7 @@ def homotopy_reward(
     d_self_safe: float = 0.005,
     gamma: float = 0.99,
     horizon: int = 500,
+    remaining_steps: int = 0,
     position_sigma: float = 0.20,
     orientation_sigma: float = 1.00,
     micro_power: float = 4.0,
@@ -580,7 +597,7 @@ def homotopy_reward(
     fine_orientation_progress_scale: float = 1.0,
     precision_position_scale: float = 0.03,
     precision_orientation_scale: float = 0.09,
-    precision_stop_cost_weight: float = 0.20,
+    precision_stop_cost_weight: float = 0.10,
     joint_precision_progress_scale: float = 0.0,
     joint_precision_temperature: float = 2.0,
     joint_position_tolerance: float = 0.01,
@@ -609,6 +626,8 @@ def homotopy_reward(
     keypoint_progress_scale: float = 10.0,
     keypoint_precision_reward_scale: float = 0.0,
     success_bonus: float = 20.0,
+    occupancy_compensation_scale: float = 0.15,
+    maximum_terminal_compensation: float = 15.0,
     velocity_cost_weight: float = 0.04,
     smooth_cost_weight: float = 0.01,
     hard_failure_penalty: float = 20.0,
@@ -626,6 +645,8 @@ def homotopy_reward(
         raise ValueError("gamma must be in (0, 1)")
     if horizon < 1:
         raise ValueError("horizon must be positive")
+    if not 0 <= int(remaining_steps) <= horizon:
+        raise ValueError("remaining_steps must be in [0, horizon]")
     eta = float(np.clip(orientation_scale, 0.0, 1.0))
     if min(
         position_sigma, orientation_sigma, fine_position_sigma,
@@ -663,6 +684,8 @@ def homotopy_reward(
         keypoint_progress_scale,
         keypoint_precision_reward_scale,
         success_bonus,
+        occupancy_compensation_scale,
+        maximum_terminal_compensation,
         hard_failure_penalty,
         timeout_penalty,
     ) < 0.0:
@@ -705,9 +728,6 @@ def homotopy_reward(
     next_fine_orientation_quality = float(
         np.exp(-max(float(next_rho_orientation), 0.0) / local_sigma)
     )
-    # Position and orientation are deliberately additive.  Multiplying the
-    # terms suppresses orientation learning whenever position is temporarily
-    # lost, which is exactly when a coupled 6-DoF controller needs both signals.
     pose_potential = position_quality + orientation_quality
     next_pose_potential = next_position_quality + next_orientation_quality
     position_progress = float(gamma * next_position_quality - position_quality)
@@ -728,11 +748,6 @@ def homotopy_reward(
         np.exp(-max(next_rho_position, 0.0) / precision_position_scale)
         * np.exp(-max(next_rho_orientation, 0.0) / precision_orientation_scale)
     )
-    precision_stop_cost = (
-        precision_stop_cost_weight
-        * precision_proximity
-        * float(np.clip(velocity_magnitude, 0.0, 1.0))
-    )
     joint_tolerance_ratio = float(max(
         max(rho_position, 0.0) / joint_position_tolerance,
         max(rho_orientation, 0.0) / joint_orientation_tolerance,
@@ -741,6 +756,11 @@ def homotopy_reward(
         max(next_rho_position, 0.0) / joint_position_tolerance,
         max(next_rho_orientation, 0.0) / joint_orientation_tolerance,
     ))
+    precision_stop_cost = (
+        precision_stop_cost_weight
+        * precision_proximity
+        * float(np.clip(velocity_magnitude, 0.0, 1.0))
+    )
     joint_precision_quality = float(np.exp(
         -(max(rho_position, 0.0) / joint_position_tolerance
           + max(rho_orientation, 0.0) / joint_orientation_tolerance)
@@ -807,15 +827,26 @@ def homotopy_reward(
     keypoint_precision_reward = (
         keypoint_precision_reward_scale * keypoint_precision_quality
     )
+    discounted_remaining_occupancy = (
+        occupancy_compensation_scale
+        * (1.0 - gamma ** int(remaining_steps))
+        / (1.0 - gamma)
+    )
+    terminal_occupancy_compensation = (
+        min(maximum_terminal_compensation, discounted_remaining_occupancy)
+        * float(task_reached)
+    )
     r_goal = (
         keypoint_tracking_reward
         + keypoint_progress_reward
         + keypoint_precision_reward
         + hold_reward
         - leave_joint_penalty
+        - precision_stop_cost
         - velocity_cost
         - smooth_cost
         + success_bonus * float(task_reached)
+        + terminal_occupancy_compensation
     )
     if d_safe <= 0.0 or d_self_safe <= 0.0:
         raise ValueError("safety distances must be positive")
@@ -911,6 +942,9 @@ def homotopy_reward(
         "keypoint_progress_reward": float(keypoint_progress_reward),
         "keypoint_precision_quality": float(keypoint_precision_quality),
         "keypoint_precision_reward": float(keypoint_precision_reward),
+        "terminal_occupancy_compensation": float(
+            terminal_occupancy_compensation
+        ),
         "pose_potential": float(pose_potential),
         "next_pose_potential": float(next_pose_potential),
         "pose_potential_progress": pose_potential_progress,
