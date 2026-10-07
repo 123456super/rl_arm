@@ -136,6 +136,9 @@ def record_keypoint_reward_statistics(
     counters["keypoint_precision_reward_sum"] = float(
         counters.get("keypoint_precision_reward_sum", 0.0)
     ) + float(info.get("keypoint_precision_reward", 0.0))
+    counters["joint_bottleneck_shaping_reward_sum"] = float(
+        counters.get("joint_bottleneck_shaping_reward_sum", 0.0)
+    ) + float(info.get("joint_bottleneck_shaping_reward", 0.0))
     counters["keypoint_progress_sum"] = float(
         counters.get("keypoint_progress_sum", 0.0)
     ) + progress
@@ -159,6 +162,7 @@ def keypoint_reward_statistics(counters: dict) -> dict[str, float | str]:
             "keypoint_tracking_quality_mean": "",
             "keypoint_precision_quality_mean": "",
             "keypoint_precision_reward_mean": "",
+            "joint_bottleneck_shaping_reward_mean": "",
             "keypoint_progress_mean": "",
             "keypoint_progress_positive_ratio": "",
             "keypoint_progress_mean_when_positive": "",
@@ -173,6 +177,9 @@ def keypoint_reward_statistics(counters: dict) -> dict[str, float | str]:
         ) / count,
         "keypoint_precision_reward_mean": float(
             counters.get("keypoint_precision_reward_sum", 0.0)
+        ) / count,
+        "joint_bottleneck_shaping_reward_mean": float(
+            counters.get("joint_bottleneck_shaping_reward_sum", 0.0)
         ) / count,
         "keypoint_progress_mean": float(
             counters.get("keypoint_progress_sum", 0.0)
@@ -594,6 +601,7 @@ def _empty_keypoint_probe_accumulator() -> dict[str, object]:
         "quality_sum": 0.0,
         "precision_quality_sum": 0.0,
         "precision_reward_sum": 0.0,
+        "joint_bottleneck_shaping_reward_sum": 0.0,
         "progress_sum": 0.0,
         "positive_count": 0,
         "jacobian_clip_ratio_sum": 0.0,
@@ -613,6 +621,7 @@ def _record_keypoint_probe_step(
         ("quality_sum", "keypoint_tracking_quality"),
         ("precision_quality_sum", "keypoint_precision_quality"),
         ("precision_reward_sum", "keypoint_precision_reward"),
+        ("joint_bottleneck_shaping_reward_sum", "joint_bottleneck_shaping_reward"),
         ("progress_sum", "keypoint_progress"),
         ("jacobian_clip_ratio_sum", "jacobian_clip_ratio"),
     ):
@@ -645,6 +654,9 @@ def _keypoint_probe_statistics(
         ) / steps,
         "keypoint_precision_reward_mean": float(
             accumulator["precision_reward_sum"]
+        ) / steps,
+        "joint_bottleneck_shaping_reward_mean": float(
+            accumulator["joint_bottleneck_shaping_reward_sum"]
         ) / steps,
         "keypoint_progress_mean_m": float(accumulator["progress_sum"]) / steps,
         "keypoint_progress_positive_ratio": int(
@@ -1990,6 +2002,11 @@ def run_parallel_s0(
                         "keypoint_progress_reward": info["keypoint_progress_reward"],
                         "keypoint_precision_quality": info["keypoint_precision_quality"],
                         "keypoint_precision_reward": info["keypoint_precision_reward"],
+                        "joint_bottleneck_ratio": info["joint_bottleneck_ratio"],
+                        "next_joint_bottleneck_ratio": info["next_joint_bottleneck_ratio"],
+                        "joint_bottleneck_potential": info["joint_bottleneck_potential"],
+                        "next_joint_bottleneck_potential": info["next_joint_bottleneck_potential"],
+                        "joint_bottleneck_shaping_reward": info["joint_bottleneck_shaping_reward"],
                         "pose_potential": info["pose_potential"],
                         "next_pose_potential": info["next_pose_potential"],
                         "pose_potential_progress": info["pose_potential_progress"],
@@ -2566,7 +2583,9 @@ def main() -> None:
             for key in ("joint_precision_temperature", "hold_reward_scale",
                         "leave_joint_tolerance_penalty", "leave_tolerance_multiplier",
                         "keypoint_tracking_scale", "keypoint_progress_scale",
-                        "keypoint_precision_reward_scale")
+                        "keypoint_precision_reward_scale",
+                        "joint_bottleneck_shaping_scale",
+                        "joint_bottleneck_temperature")
         })
     elif args.initialize_actor_from:
         start_level = int(args.start_level)
@@ -2927,6 +2946,9 @@ def main() -> None:
                          "next_keypoint_distance", "keypoint_progress",
                          "keypoint_tracking_reward", "keypoint_progress_reward",
                          "keypoint_precision_quality", "keypoint_precision_reward",
+                         "joint_bottleneck_ratio", "next_joint_bottleneck_ratio",
+                         "joint_bottleneck_potential", "next_joint_bottleneck_potential",
+                         "joint_bottleneck_shaping_reward",
                          "pose_potential", "next_pose_potential", "pose_potential_progress",
                          "position_progress", "orientation_progress",
                          "orientation_error_progress", "orientation_absolute_penalty",
@@ -2979,7 +3001,8 @@ def main() -> None:
         "chain_pcr_sac_loss_ema", "chain_pcr_loss_ema",
         "q1_mean", "q2_mean", "target_mean",
         "keypoint_tracking_quality_mean", "keypoint_precision_quality_mean",
-        "keypoint_precision_reward_mean", "keypoint_progress_mean",
+        "keypoint_precision_reward_mean",
+        "joint_bottleneck_shaping_reward_mean", "keypoint_progress_mean",
         "keypoint_progress_positive_ratio",
         "keypoint_progress_mean_when_positive",
         "jacobian_clip_ratio_mean",
@@ -3347,6 +3370,11 @@ def main() -> None:
                     "keypoint_progress_reward": info["keypoint_progress_reward"],
                     "keypoint_precision_quality": info["keypoint_precision_quality"],
                     "keypoint_precision_reward": info["keypoint_precision_reward"],
+                    "joint_bottleneck_ratio": info["joint_bottleneck_ratio"],
+                    "next_joint_bottleneck_ratio": info["next_joint_bottleneck_ratio"],
+                    "joint_bottleneck_potential": info["joint_bottleneck_potential"],
+                    "next_joint_bottleneck_potential": info["next_joint_bottleneck_potential"],
+                    "joint_bottleneck_shaping_reward": info["joint_bottleneck_shaping_reward"],
                     "pose_potential": info["pose_potential"],
                     "next_pose_potential": info["next_pose_potential"],
                     "pose_potential_progress": info["pose_potential_progress"],

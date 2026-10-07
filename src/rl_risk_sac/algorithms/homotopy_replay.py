@@ -40,6 +40,8 @@ def _vectorized_replay_rewards(
         "keypoint_tracking_scale": 0.05,
         "keypoint_progress_scale": 20.0,
         "keypoint_precision_reward_scale": 0.05,
+        "joint_bottleneck_shaping_scale": 0.0,
+        "joint_bottleneck_temperature": 2.0,
         "precision_position_scale": 0.03,
         "precision_orientation_scale": 0.09,
         "precision_stop_cost_weight": 0.10,
@@ -66,6 +68,27 @@ def _vectorized_replay_rewards(
     next_precision_quality = np.exp(
         -(next_position_ratio + next_orientation_ratio)
         / float(p["joint_precision_temperature"])
+    )
+    bottleneck_ratio = np.maximum(position_ratio, orientation_ratio)
+    next_bottleneck_ratio = np.maximum(
+        next_position_ratio, next_orientation_ratio
+    )
+    bottleneck_potential = float(
+        p["joint_bottleneck_shaping_scale"]
+    ) * np.exp(
+        -bottleneck_ratio / float(p["joint_bottleneck_temperature"])
+    )
+    next_bottleneck_potential = float(
+        p["joint_bottleneck_shaping_scale"]
+    ) * np.exp(
+        -next_bottleneck_ratio / float(p["joint_bottleneck_temperature"])
+    )
+    next_bottleneck_potential = np.where(
+        done != 0.0, 0.0, next_bottleneck_potential
+    )
+    bottleneck_shaping = (
+        float(reward_gamma) * next_bottleneck_potential
+        - bottleneck_potential
     )
     was_strict = (position_ratio <= 1.0) & (orientation_ratio <= 1.0)
     next_strict = (next_position_ratio <= 1.0) & (next_orientation_ratio <= 1.0)
@@ -94,6 +117,7 @@ def _vectorized_replay_rewards(
         float(p["keypoint_tracking_scale"]) * np.clip(r[:, 28], 0.0, 1.0)
         + float(p["keypoint_progress_scale"]) * (r[:, 26] - r[:, 27])
         + float(p["keypoint_precision_reward_scale"]) * next_precision_quality
+        + bottleneck_shaping
         + float(p["hold_reward_scale"]) * held
         - float(p["leave_joint_tolerance_penalty"]) * left
         - precision_stop_cost

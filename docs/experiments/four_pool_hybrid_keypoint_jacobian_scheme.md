@@ -66,7 +66,7 @@
 
 S0 的 rollout 场景全为 `none`；S1 为 25% none + 75% static；S2 为 20% none + 30% static + 50% dynamic。S1/S2 必须从上一阶段完整 checkpoint 继承，当前多环境训练入口只支持 S0。场景 rollout 比例不等于 replay 的场景 batch 比例。
 
-当前精度课程按 `--level-index` 使用以下八档。全部档位的目标距离范围都是 `[0.03,0.70] m`，目标姿态差范围都是 `[0.03,3.141592] rad`，goal scale 都为 `1.0`：
+当前精度课程按 `--level-index` 使用以下七档。全部档位的目标距离范围都是 `[0.03,0.50] m`，目标姿态差范围都是 `[0.03,3.141592] rad`，goal scale 都为 `1.0`。距离上限由原来的 `0.70 m` 收缩到 `0.50 m`，为后续静态/动态避障绕行保留工作空间余量：
 
 | 索引 | 位置阈值 eps_p（m） | 姿态阈值 eps_R（rad） | orientation scale |
 | --- | ---: | ---: | ---: |
@@ -79,7 +79,9 @@ S0 的 rollout 场景全为 `none`；S1 为 25% none + 75% static；S2 为 20% n
 | L6 / 6 | 0.0100 | 0.1000 | 1.00 |
 
 
-这里升档只收紧成功精度，不扩大目标范围。L4--L6 的姿态阈值和姿态 scale 均保持不变；L6（10 mm）为最高档；replay 使用整数 level index 区分这些位置精度档位。内部 `orientation_scale=0` 不表示 L0 只采零姿态差；task-space 合同已经明确完整角度范围。采样器使用位置和姿态各 10 档的 100 cell；正常训练的固定 mixture 为 50% 全 cell 均匀 + 25% O5–O9 + 25% O7–O9，adaptive 采样关闭。这是采样目标分布，实际可达性拒绝采样仍可能影响接受分布。
+这里升档只收紧成功精度，不扩大目标范围。L4--L6 的姿态阈值和姿态 scale 均保持不变；L6（10 mm）为最高档；replay 使用整数 level index 区分这些位置精度档位。内部 `orientation_scale=0` 不表示 L0 只采零姿态差；task-space 合同已经明确完整角度范围。采样器使用位置和姿态各 10 档的 100 cell，位置桶在 `[0.03,0.50] m` 内等宽划分，每桶宽 `0.047 m`；正常训练的固定 mixture 为 50% 全 cell 均匀 + 25% O5–O9 + 25% O7–O9，adaptive 采样关闭。这是采样目标分布，实际可达性拒绝采样仍可能影响接受分布。
+
+旧 checkpoint 中的 Critic 与 replay 包含原 `[0.03,0.70] m` 合同下的数据，不应完整续训到这个收缩后的合同。重新训练时只迁移 Actor，重新初始化 Critic、target Critic、优化器与 replay；这样新价值函数和全部 replay 样本只学习 `[0.03,0.50] m` 区间。
 
 `ThesisHomotopyEnv.step()` 的成功条件为：无硬失败/障碍失败，位置误差 `<= eps_p` 且姿态误差 `<= eps_R`，连续满足 `5` 个控制 step。正常合同达到成功即终止；硬失败也终止，未终止且达到 horizon 则截断。**当前成功判定没有额外要求关节或末端速度低于 `stable_success` 的配置值**，不能把这些遗留速度阈值写成终止条件。目标速度命令限制为 `+-0.7 rad/s`；这不是对仿真测得实际 qdot 的硬钳制。
 

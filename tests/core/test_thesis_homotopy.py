@@ -356,6 +356,8 @@ def test_hybrid_keypoint_auto_chain_contract_is_162d():
     assert config["thesis"]["reward"]["keypoint_tracking_scale"] == .05
     assert config["thesis"]["reward"]["keypoint_progress_scale"] == 20.0
     assert config["thesis"]["reward"]["keypoint_precision_reward_scale"] == .05
+    assert config["thesis"]["reward"]["joint_bottleneck_shaping_scale"] == 5.0
+    assert config["thesis"]["reward"]["joint_bottleneck_temperature"] == 2.0
     assert config["thesis"]["reward"]["hold_reward_scale"] == .15
     assert config["sac"]["chain_pcr_auto_enabled"] is True
     assert config["sac"]["chain_pcr_target_ratio"] == .003
@@ -544,10 +546,57 @@ def test_success_adds_only_the_fixed_bonus():
         keypoint_distance=.03, next_keypoint_distance=.025,
         success_bonus=20.0,
     )
-    running, _ = homotopy_reward(**common, task_reached=False)
-    succeeded, fields = homotopy_reward(**common, task_reached=True)
+    running, _ = homotopy_reward(
+        **common, task_reached=False, joint_bottleneck_shaping_scale=0.0,
+    )
+    succeeded, fields = homotopy_reward(
+        **common, task_reached=True, joint_bottleneck_shaping_scale=0.0,
+    )
     assert succeeded - running == pytest.approx(20.0)
     assert "terminal_occupancy_compensation" not in fields
+
+
+def test_joint_bottleneck_potential_shaping_distinguishes_progress_and_stasis():
+    common = dict(
+        rho_position=.01, rho_orientation=.10,
+        smooth_velocity=0.0, velocity_magnitude=0.0,
+        orientation_scale=1.0, hard_failure=False,
+        obstacle_collision=False, risk_max=0.0, distance_min=.8, xi=1.0,
+        keypoint_pose_reward=True, keypoint_tracking_quality=0.0,
+        keypoint_distance=.2, next_keypoint_distance=.2,
+        keypoint_tracking_scale=0.0, keypoint_progress_scale=0.0,
+        keypoint_precision_reward_scale=0.0, hold_reward_scale=0.0,
+        velocity_cost_weight=0.0, smooth_cost_weight=0.0,
+        precision_stop_cost_weight=0.0,
+        joint_position_tolerance=.01, joint_orientation_tolerance=.10,
+        joint_bottleneck_shaping_scale=5.0,
+        joint_bottleneck_temperature=2.0,
+        gamma=.99,
+    )
+    stationary, stationary_fields = homotopy_reward(
+        **common, next_rho_position=.01, next_rho_orientation=.10,
+        task_reached=False,
+    )
+    improving, _ = homotopy_reward(
+        **common, next_rho_position=.009, next_rho_orientation=.09,
+        task_reached=False,
+    )
+    worsening, _ = homotopy_reward(
+        **common, next_rho_position=.011, next_rho_orientation=.11,
+        task_reached=False,
+    )
+    terminal, terminal_fields = homotopy_reward(
+        **common, next_rho_position=.009, next_rho_orientation=.09,
+        task_reached=True, success_bonus=0.0,
+    )
+
+    expected_potential = 5.0 * np.exp(-.5)
+    assert stationary == pytest.approx(-.01 * expected_potential)
+    assert improving > 0.0
+    assert worsening < stationary
+    assert stationary_fields["joint_bottleneck_ratio"] == pytest.approx(1.0)
+    assert terminal_fields["next_joint_bottleneck_potential"] == 0.0
+    assert terminal == pytest.approx(-expected_potential)
 
 
 def test_keypoint_replay_reward_matches_scalar_and_uses_29_fields():
@@ -556,6 +605,8 @@ def test_keypoint_replay_reward_matches_scalar_and_uses_29_fields():
         "keypoint_tracking_scale": .2,
         "keypoint_progress_scale": 10.0,
         "keypoint_precision_reward_scale": .2,
+        "joint_bottleneck_shaping_scale": 5.0,
+        "joint_bottleneck_temperature": 2.0,
     }
     replay = HomotopyReplayBuffer(
         162, 6, "cpu", capacities={"none": 8, "static": 8, "dynamic": 8},
@@ -588,6 +639,8 @@ def test_keypoint_replay_reward_matches_scalar_and_uses_29_fields():
         keypoint_tracking_scale=.2,
         keypoint_progress_scale=10.0,
         keypoint_precision_reward_scale=.2,
+        joint_bottleneck_shaping_scale=5.0,
+        joint_bottleneck_temperature=2.0,
     )
     assert vectorized[0] == pytest.approx(scalar, abs=1e-7)
 
@@ -1305,11 +1358,11 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
     assert [level["orientation_tolerance_rad"] for level in levels] == [
         .30, .24, .192, .1536, .10, .10, .10,
     ]
-    assert levels[-1]["target_distance_max_m"] == .70
+    assert levels[-1]["target_distance_max_m"] == .50
     assert np.isclose(levels[-1]["target_orientation_max_rad"], np.pi, atol=1e-6)
 
 
-def test_v13_5_precision_curriculum_keeps_full_range_and_tightens_only_precision():
+def test_v13_5_precision_curriculum_keeps_restricted_range_and_tightens_only_precision():
     root = Path(__file__).resolve().parents[2]
     config = load_config(
         root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
@@ -1341,7 +1394,7 @@ def test_v13_5_precision_curriculum_keeps_full_range_and_tightens_only_precision
         "position_tolerance": .10,
         "orientation_tolerance": .30,
         "target_distance_min_m": .03,
-        "target_distance_max_m": .70,
+        "target_distance_max_m": .50,
         "target_orientation_min_rad": .03,
         "target_orientation_max_rad": 3.141592,
     }

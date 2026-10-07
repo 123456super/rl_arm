@@ -184,49 +184,49 @@ thesis:
     levels:
     - goal_scale: 1.0
       target_distance_min_m: 0.03
-      target_distance_max_m: 0.7
+      target_distance_max_m: 0.5
       target_orientation_min_rad: 0.03
       target_orientation_max_rad: 3.141592
       position_tolerance_m: 0.1
       orientation_tolerance_rad: 0.3
     - goal_scale: 1.0
       target_distance_min_m: 0.03
-      target_distance_max_m: 0.7
+      target_distance_max_m: 0.5
       target_orientation_min_rad: 0.03
       target_orientation_max_rad: 3.141592
       position_tolerance_m: 0.08
       orientation_tolerance_rad: 0.24
     - goal_scale: 1.0
       target_distance_min_m: 0.03
-      target_distance_max_m: 0.7
+      target_distance_max_m: 0.5
       target_orientation_min_rad: 0.03
       target_orientation_max_rad: 3.141592
       position_tolerance_m: 0.064
       orientation_tolerance_rad: 0.192
     - goal_scale: 1.0
       target_distance_min_m: 0.03
-      target_distance_max_m: 0.7
+      target_distance_max_m: 0.5
       target_orientation_min_rad: 0.03
       target_orientation_max_rad: 3.141592
       position_tolerance_m: 0.0512
       orientation_tolerance_rad: 0.1536
     - goal_scale: 1.0
       target_distance_min_m: 0.03
-      target_distance_max_m: 0.7
+      target_distance_max_m: 0.5
       target_orientation_min_rad: 0.03
       target_orientation_max_rad: 3.141592
       position_tolerance_m: 0.05
       orientation_tolerance_rad: 0.1
     - goal_scale: 1.0
       target_distance_min_m: 0.03
-      target_distance_max_m: 0.7
+      target_distance_max_m: 0.5
       target_orientation_min_rad: 0.03
       target_orientation_max_rad: 3.141592
       position_tolerance_m: 0.025
       orientation_tolerance_rad: 0.1
     - goal_scale: 1.0
       target_distance_min_m: 0.03
-      target_distance_max_m: 0.7
+      target_distance_max_m: 0.5
       target_orientation_min_rad: 0.03
       target_orientation_max_rad: 3.141592
       position_tolerance_m: 0.01
@@ -283,6 +283,8 @@ thesis:
     keypoint_tracking_scale: 0.05
     keypoint_progress_scale: 20.0
     keypoint_precision_reward_scale: 0.05
+    joint_bottleneck_shaping_scale: 5.0
+    joint_bottleneck_temperature: 2.0
   stable_success:
     joint_velocity_rms_rad_s: 0.1
     ee_linear_speed_m_s: 0.02

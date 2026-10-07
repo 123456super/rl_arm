@@ -624,6 +624,8 @@ def homotopy_reward(
     keypoint_tracking_sigma: float = 0.05,
     keypoint_progress_scale: float = 20.0,
     keypoint_precision_reward_scale: float = 0.05,
+    joint_bottleneck_shaping_scale: float = 0.0,
+    joint_bottleneck_temperature: float = 2.0,
     success_bonus: float = 20.0,
     velocity_cost_weight: float = 0.04,
     smooth_cost_weight: float = 0.01,
@@ -652,6 +654,7 @@ def homotopy_reward(
         orientation_absolute_position_gate_sigma,
         orientation_completion_position_gate_multiplier,
         keypoint_tracking_sigma,
+        joint_bottleneck_temperature,
     ) <= 0.0:
         raise ValueError("pose quality sigmas must be positive")
     if micro_power <= 1.0:
@@ -678,6 +681,7 @@ def homotopy_reward(
         keypoint_tracking_scale,
         keypoint_progress_scale,
         keypoint_precision_reward_scale,
+        joint_bottleneck_shaping_scale,
         success_bonus,
         hard_failure_penalty,
         timeout_penalty,
@@ -820,10 +824,38 @@ def homotopy_reward(
     keypoint_precision_reward = (
         keypoint_precision_reward_scale * keypoint_precision_quality
     )
+    joint_bottleneck_ratio = max(
+        max(rho_position, 0.0) / joint_position_tolerance,
+        max(rho_orientation, 0.0) / joint_orientation_tolerance,
+    )
+    next_joint_bottleneck_ratio = max(
+        max(next_rho_position, 0.0) / joint_position_tolerance,
+        max(next_rho_orientation, 0.0) / joint_orientation_tolerance,
+    )
+    joint_bottleneck_potential = (
+        joint_bottleneck_shaping_scale
+        * float(np.exp(-joint_bottleneck_ratio / joint_bottleneck_temperature))
+    )
+    next_joint_bottleneck_potential = (
+        joint_bottleneck_shaping_scale
+        * float(np.exp(
+            -next_joint_bottleneck_ratio / joint_bottleneck_temperature
+        ))
+    )
+    terminal_transition = bool(
+        task_reached or hard_failure or terminal_obstacle_collision or timeout
+    )
+    if terminal_transition:
+        next_joint_bottleneck_potential = 0.0
+    joint_bottleneck_shaping_reward = float(
+        gamma * next_joint_bottleneck_potential
+        - joint_bottleneck_potential
+    )
     r_goal = (
         keypoint_tracking_reward
         + keypoint_progress_reward
         + keypoint_precision_reward
+        + joint_bottleneck_shaping_reward
         + hold_reward
         - leave_joint_penalty
         - precision_stop_cost
@@ -925,6 +957,15 @@ def homotopy_reward(
         "keypoint_progress_reward": float(keypoint_progress_reward),
         "keypoint_precision_quality": float(keypoint_precision_quality),
         "keypoint_precision_reward": float(keypoint_precision_reward),
+        "joint_bottleneck_ratio": float(joint_bottleneck_ratio),
+        "next_joint_bottleneck_ratio": float(next_joint_bottleneck_ratio),
+        "joint_bottleneck_potential": float(joint_bottleneck_potential),
+        "next_joint_bottleneck_potential": float(
+            next_joint_bottleneck_potential
+        ),
+        "joint_bottleneck_shaping_reward": float(
+            joint_bottleneck_shaping_reward
+        ),
         "pose_potential": float(pose_potential),
         "next_pose_potential": float(next_pose_potential),
         "pose_potential_progress": pose_potential_progress,

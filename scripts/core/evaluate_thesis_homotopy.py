@@ -61,6 +61,7 @@ EVALUATION_INFO_KEYS = (
     "keypoint_tracking_quality",
     "keypoint_precision_quality",
     "keypoint_precision_reward",
+    "joint_bottleneck_shaping_reward",
     "keypoint_progress",
     "jacobian_clip_ratio",
 )

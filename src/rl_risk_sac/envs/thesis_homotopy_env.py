@@ -237,6 +237,12 @@ class ThesisHomotopyEnv(gym.Env):
             "keypoint_precision_reward_scale": float(
                 reward_config.get("keypoint_precision_reward_scale", 0.05)
             ),
+            "joint_bottleneck_shaping_scale": float(
+                reward_config.get("joint_bottleneck_shaping_scale", 0.0)
+            ),
+            "joint_bottleneck_temperature": float(
+                reward_config.get("joint_bottleneck_temperature", 2.0)
+            ),
             "success_bonus": float(reward_config.get("success_bonus", 20.0)),
             "velocity_cost_weight": float(reward_config.get("velocity_cost_weight", 0.04)),
             "smooth_cost_weight": float(reward_config.get("smooth_cost_weight", 0.01)),
