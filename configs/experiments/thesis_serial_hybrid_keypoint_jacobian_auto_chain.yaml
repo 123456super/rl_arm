@@ -261,14 +261,12 @@ thesis:
     partial_precision_reward_scale: 0.1
     leave_tolerance_multiplier: 1.0
     leave_joint_tolerance_penalty: 0.2
-    hold_reward_scale: 0.05
+    hold_reward_scale: 0.15
     position_progress_scale: 2.0
     orientation_progress_scale: 2.0
     position_state_cost_weight: 0.02
     orientation_state_cost_weight: 0.02
     success_bonus: 20.0
-    occupancy_compensation_scale: 0.15
-    maximum_terminal_compensation: 15.0
     velocity_cost_weight: 0.04
     smooth_cost_weight: 0.01
     hard_failure_penalty: 20.0
@@ -282,9 +280,9 @@ thesis:
     pose_objective: unified_keypoint
     keypoint_pose_reward: true
     keypoint_tracking_sigma_m: 0.05
-    keypoint_tracking_scale: 0.2
-    keypoint_progress_scale: 10.0
-    keypoint_precision_reward_scale: 0.2
+    keypoint_tracking_scale: 0.05
+    keypoint_progress_scale: 20.0
+    keypoint_precision_reward_scale: 0.05
   stable_success:
     joint_velocity_rms_rad_s: 0.1
     ee_linear_speed_m_s: 0.02
@@ -305,6 +303,7 @@ train:
   save_interval: 25000
   progress_interval: 1000
   log_flush_interval: 100
+  update_log_interval: 10
   output_dir: outputs/serial_hybrid_keypoint_jacobian_auto_chain
   plateau:
     comparison_blocks: 2

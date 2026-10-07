@@ -1,0 +1,1222 @@
+pybullet build time: Sep  7 2026 13:42:56
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+base_linkb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+ft_frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+baseb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+flangeb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+tool0* cuda:0 NVIDIA GeForce RTX 3090 free=22.29GB free_ratio=0.946 compute_ratio=1.000 score=0.962
+selected device: cuda:0
+pybullet build time: Sep  7 2026 13:42:56
+pybullet build time: Sep  7 2026 13:42:56
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+base_linkb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+ft_frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+baseb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+flangeb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+tool0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+base_linkb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+ft_frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+baseb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+flangeb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+tool0pybullet build time: Sep  7 2026 13:42:56
+pybullet build time: Sep  7 2026 13:42:56
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+base_linkb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+ft_frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+baseb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+flangeb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+tool0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+base_linkpybullet build time: Sep  7 2026 13:42:56
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+ft_frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+baseb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+flangeb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+tool0pybullet build time: Sep  7 2026 13:42:56
+pybullet build time: Sep  7 2026 13:42:56
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+base_linkb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+base_linkb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+ft_frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+baseb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+flangeb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+tool0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+ft_frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+baseb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+flangeb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+tool0pybullet build time: Sep  7 2026 13:42:56
+b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+base_linkb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+ft_frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+baseb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+flangeb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+tool0b3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+base_linkb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+ft_frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+baseb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+flangeb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+No inertial data for link, using mass=1, localinertiadiagonal = 1,1,1, identity local inertial frameb3Warning[examples/Importers/ImportURDFDemo/BulletUrdfImporter.cpp,126]:
+tool0step=1000/2000000 envs=8 episodes=8 replay=1000 updates=0 level=6 success=1.0 steps/s=348.0
+step=2000/2000000 envs=8 episodes=14 replay=2000 updates=242 level=6 success=1.0 steps/s=276.3
+step=3000/2000000 envs=8 episodes=23 replay=3000 updates=492 level=6 success=1.0 steps/s=255.1
+step=4000/2000000 envs=8 episodes=33 replay=4000 updates=742 level=6 success=0.9696969696969697 steps/s=242.6
+step=5000/2000000 envs=8 episodes=42 replay=5000 updates=992 level=6 success=0.9523809523809523 steps/s=233.0
+step=6000/2000000 envs=8 episodes=45 replay=6000 updates=1242 level=6 success=0.9555555555555556 steps/s=208.1
+step=7000/2000000 envs=8 episodes=47 replay=7000 updates=1492 level=6 success=0.9574468085106383 steps/s=193.1
+step=8000/2000000 envs=8 episodes=50 replay=8000 updates=1742 level=6 success=0.9 steps/s=182.9
+step=9000/2000000 envs=8 episodes=52 replay=9000 updates=1992 level=6 success=0.8846153846153846 steps/s=177.0
+step=10000/2000000 envs=8 episodes=53 replay=10000 updates=2242 level=6 success=0.8679245283018868 steps/s=171.6
+step=11000/2000000 envs=8 episodes=55 replay=11000 updates=2492 level=6 success=0.8363636363636363 steps/s=166.3
+step=12000/2000000 envs=8 episodes=58 replay=12000 updates=2742 level=6 success=0.7931034482758621 steps/s=161.6
+step=13000/2000000 envs=8 episodes=60 replay=13000 updates=2992 level=6 success=0.7666666666666667 steps/s=157.8
+step=14000/2000000 envs=8 episodes=62 replay=14000 updates=3242 level=6 success=0.7580645161290323 steps/s=154.0
+step=15000/2000000 envs=8 episodes=65 replay=15000 updates=3492 level=6 success=0.7384615384615385 steps/s=151.3
+step=16000/2000000 envs=8 episodes=66 replay=16000 updates=3742 level=6 success=0.7272727272727273 steps/s=148.6
+step=17000/2000000 envs=8 episodes=68 replay=17000 updates=3992 level=6 success=0.7058823529411765 steps/s=146.6
+step=18000/2000000 envs=8 episodes=70 replay=18000 updates=4242 level=6 success=0.6857142857142857 steps/s=144.4
+step=19000/2000000 envs=8 episodes=73 replay=19000 updates=4492 level=6 success=0.6575342465753424 steps/s=142.2
+step=20000/2000000 envs=8 episodes=75 replay=20000 updates=4742 level=6 success=0.64 steps/s=140.5
+step=21000/2000000 envs=8 episodes=77 replay=21000 updates=4992 level=6 success=0.6363636363636364 steps/s=138.8
+step=22000/2000000 envs=8 episodes=80 replay=22000 updates=5242 level=6 success=0.6125 steps/s=136.7
+step=23000/2000000 envs=8 episodes=84 replay=23000 updates=5492 level=6 success=0.6071428571428571 steps/s=134.7
+step=24000/2000000 envs=8 episodes=85 replay=24000 updates=5742 level=6 success=0.6 steps/s=132.8
+step=25000/2000000 envs=8 episodes=86 replay=25000 updates=5992 level=6 success=0.5930232558139535 steps/s=131.0
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0025000.pt envs=8 replay=25000
+step=26000/2000000 envs=8 episodes=90 replay=26000 updates=6242 level=6 success=0.6 steps/s=127.6
+step=27000/2000000 envs=8 episodes=93 replay=27000 updates=6492 level=6 success=0.5913978494623656 steps/s=126.1
+step=28000/2000000 envs=8 episodes=96 replay=28000 updates=6742 level=6 success=0.59375 steps/s=124.6
+step=29000/2000000 envs=8 episodes=98 replay=29000 updates=6992 level=6 success=0.6020408163265306 steps/s=123.2
+step=30000/2000000 envs=8 episodes=101 replay=30000 updates=7242 level=6 success=0.6 steps/s=121.9
+step=31000/2000000 envs=8 episodes=106 replay=30000 updates=7492 level=6 success=0.57 steps/s=120.7
+step=32000/2000000 envs=8 episodes=107 replay=30000 updates=7742 level=6 success=0.57 steps/s=119.3
+step=33000/2000000 envs=8 episodes=109 replay=30000 updates=7992 level=6 success=0.56 steps/s=118.2
+step=34000/2000000 envs=8 episodes=112 replay=30000 updates=8242 level=6 success=0.54 steps/s=117.1
+step=35000/2000000 envs=8 episodes=115 replay=30000 updates=8492 level=6 success=0.52 steps/s=116.0
+step=36000/2000000 envs=8 episodes=117 replay=30000 updates=8742 level=6 success=0.52 steps/s=115.0
+step=37000/2000000 envs=8 episodes=121 replay=30000 updates=8992 level=6 success=0.51 steps/s=114.1
+step=38000/2000000 envs=8 episodes=122 replay=30000 updates=9242 level=6 success=0.5 steps/s=113.2
+step=39000/2000000 envs=8 episodes=124 replay=30000 updates=9492 level=6 success=0.48 steps/s=112.2
+step=40000/2000000 envs=8 episodes=128 replay=30000 updates=9742 level=6 success=0.47 steps/s=111.4
+step=41000/2000000 envs=8 episodes=132 replay=30000 updates=9992 level=6 success=0.45 steps/s=110.6
+step=42000/2000000 envs=8 episodes=136 replay=30000 updates=10242 level=6 success=0.45 steps/s=109.9
+step=43000/2000000 envs=8 episodes=140 replay=30000 updates=10492 level=6 success=0.44 steps/s=109.2
+step=44000/2000000 envs=8 episodes=144 replay=30000 updates=10742 level=6 success=0.45 steps/s=108.6
+step=45000/2000000 envs=8 episodes=146 replay=30000 updates=10992 level=6 success=0.44 steps/s=108.0
+step=46000/2000000 envs=8 episodes=151 replay=30000 updates=11242 level=6 success=0.47 steps/s=107.4
+step=47000/2000000 envs=8 episodes=153 replay=30000 updates=11492 level=6 success=0.48 steps/s=106.9
+step=48000/2000000 envs=8 episodes=155 replay=30000 updates=11742 level=6 success=0.49 steps/s=106.4
+step=49000/2000000 envs=8 episodes=158 replay=30000 updates=11992 level=6 success=0.5 steps/s=106.0
+step=50000/2000000 envs=8 episodes=165 replay=30000 updates=12242 level=6 success=0.53 steps/s=105.6
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0050000.pt envs=8 replay=30000
+step=51000/2000000 envs=8 episodes=168 replay=30000 updates=12492 level=6 success=0.55 steps/s=104.6
+step=52000/2000000 envs=8 episodes=169 replay=30000 updates=12742 level=6 success=0.56 steps/s=104.2
+step=53000/2000000 envs=8 episodes=172 replay=30000 updates=12992 level=6 success=0.58 steps/s=103.9
+step=54000/2000000 envs=8 episodes=176 replay=30000 updates=13242 level=6 success=0.6 steps/s=103.5
+step=55000/2000000 envs=8 episodes=184 replay=30000 updates=13492 level=6 success=0.64 steps/s=103.1
+step=56000/2000000 envs=8 episodes=185 replay=30000 updates=13742 level=6 success=0.65 steps/s=102.9
+step=57000/2000000 envs=8 episodes=189 replay=30000 updates=13992 level=6 success=0.67 steps/s=102.6
+step=58000/2000000 envs=8 episodes=190 replay=30000 updates=14242 level=6 success=0.67 steps/s=102.4
+step=59000/2000000 envs=8 episodes=196 replay=30000 updates=14492 level=6 success=0.67 steps/s=102.1
+step=60000/2000000 envs=8 episodes=200 replay=30000 updates=14742 level=6 success=0.68 steps/s=101.9
+step=61000/2000000 envs=8 episodes=203 replay=30000 updates=14992 level=6 success=0.69 steps/s=101.6
+step=62000/2000000 envs=8 episodes=204 replay=30000 updates=15242 level=6 success=0.69 steps/s=101.4
+step=63000/2000000 envs=8 episodes=208 replay=30000 updates=15492 level=6 success=0.69 steps/s=101.1
+step=64000/2000000 envs=8 episodes=211 replay=30000 updates=15742 level=6 success=0.69 steps/s=100.9
+step=65000/2000000 envs=8 episodes=217 replay=30000 updates=15992 level=6 success=0.7 steps/s=100.7
+step=66000/2000000 envs=8 episodes=221 replay=30000 updates=16242 level=6 success=0.7 steps/s=100.5
+step=67000/2000000 envs=8 episodes=226 replay=30000 updates=16492 level=6 success=0.73 steps/s=100.3
+step=68000/2000000 envs=8 episodes=231 replay=30000 updates=16742 level=6 success=0.75 steps/s=100.0
+step=69000/2000000 envs=8 episodes=234 replay=30000 updates=16992 level=6 success=0.75 steps/s=99.8
+step=70000/2000000 envs=8 episodes=238 replay=30000 updates=17242 level=6 success=0.75 steps/s=99.6
+step=71000/2000000 envs=8 episodes=244 replay=30000 updates=17492 level=6 success=0.75 steps/s=99.4
+step=72000/2000000 envs=8 episodes=249 replay=30000 updates=17742 level=6 success=0.76 steps/s=99.2
+step=73000/2000000 envs=8 episodes=252 replay=30000 updates=17992 level=6 success=0.76 steps/s=99.0
+step=74000/2000000 envs=8 episodes=258 replay=30000 updates=18242 level=6 success=0.78 steps/s=98.8
+step=75000/2000000 envs=8 episodes=264 replay=30000 updates=18492 level=6 success=0.79 steps/s=98.6
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0075000.pt envs=8 replay=30000
+step=76000/2000000 envs=8 episodes=267 replay=30000 updates=18742 level=6 success=0.79 steps/s=98.1
+step=77000/2000000 envs=8 episodes=273 replay=30000 updates=18992 level=6 success=0.81 steps/s=97.9
+step=78000/2000000 envs=8 episodes=280 replay=30000 updates=19242 level=6 success=0.83 steps/s=97.7
+step=79000/2000000 envs=8 episodes=285 replay=30000 updates=19492 level=6 success=0.83 steps/s=97.5
+step=80000/2000000 envs=8 episodes=289 replay=30000 updates=19742 level=6 success=0.83 steps/s=97.2
+step=81000/2000000 envs=8 episodes=294 replay=30000 updates=19992 level=6 success=0.84 steps/s=97.0
+step=82000/2000000 envs=8 episodes=299 replay=30000 updates=20242 level=6 success=0.83 steps/s=96.8
+step=83000/2000000 envs=8 episodes=301 replay=30000 updates=20492 level=6 success=0.83 steps/s=96.7
+step=84000/2000000 envs=8 episodes=305 replay=30000 updates=20742 level=6 success=0.83 steps/s=96.5
+step=85000/2000000 envs=8 episodes=312 replay=30000 updates=20992 level=6 success=0.84 steps/s=96.3
+step=86000/2000000 envs=8 episodes=317 replay=30000 updates=21242 level=6 success=0.86 steps/s=96.1
+step=87000/2000000 envs=8 episodes=320 replay=30000 updates=21492 level=6 success=0.87 steps/s=95.9
+step=88000/2000000 envs=8 episodes=324 replay=30000 updates=21742 level=6 success=0.87 steps/s=95.8
+step=89000/2000000 envs=8 episodes=327 replay=30000 updates=21992 level=6 success=0.86 steps/s=95.6
+step=90000/2000000 envs=8 episodes=332 replay=30000 updates=22242 level=6 success=0.84 steps/s=95.4
+step=91000/2000000 envs=8 episodes=336 replay=30000 updates=22492 level=6 success=0.84 steps/s=95.3
+step=92000/2000000 envs=8 episodes=339 replay=30000 updates=22742 level=6 success=0.83 steps/s=95.1
+step=93000/2000000 envs=8 episodes=344 replay=30000 updates=22992 level=6 success=0.82 steps/s=95.0
+step=94000/2000000 envs=8 episodes=349 replay=30000 updates=23242 level=6 success=0.81 steps/s=94.8
+step=95000/2000000 envs=8 episodes=355 replay=30000 updates=23492 level=6 success=0.81 steps/s=94.7
+step=96000/2000000 envs=8 episodes=363 replay=30000 updates=23742 level=6 success=0.83 steps/s=94.5
+step=97000/2000000 envs=8 episodes=370 replay=30000 updates=23992 level=6 success=0.83 steps/s=94.4
+step=98000/2000000 envs=8 episodes=375 replay=30000 updates=24242 level=6 success=0.83 steps/s=94.2
+step=99000/2000000 envs=8 episodes=379 replay=30000 updates=24492 level=6 success=0.82 steps/s=94.1
+step=100000/2000000 envs=8 episodes=383 replay=30000 updates=24742 level=6 success=0.82 steps/s=93.9
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0100000.pt envs=8 replay=30000
+step=101000/2000000 envs=8 episodes=387 replay=30000 updates=24992 level=6 success=0.82 steps/s=93.6
+step=102000/2000000 envs=8 episodes=395 replay=30000 updates=25242 level=6 success=0.81 steps/s=93.4
+step=103000/2000000 envs=8 episodes=401 replay=30000 updates=25492 level=6 success=0.83 steps/s=93.2
+step=104000/2000000 envs=8 episodes=406 replay=30000 updates=25742 level=6 success=0.84 steps/s=93.1
+step=105000/2000000 envs=8 episodes=411 replay=30000 updates=25992 level=6 success=0.86 steps/s=92.9
+step=106000/2000000 envs=8 episodes=418 replay=30000 updates=26242 level=6 success=0.84 steps/s=92.7
+step=107000/2000000 envs=8 episodes=421 replay=30000 updates=26492 level=6 success=0.83 steps/s=92.6
+step=108000/2000000 envs=8 episodes=424 replay=30000 updates=26742 level=6 success=0.84 steps/s=92.5
+step=109000/2000000 envs=8 episodes=426 replay=30000 updates=26992 level=6 success=0.83 steps/s=92.5
+step=110000/2000000 envs=8 episodes=436 replay=30000 updates=27242 level=6 success=0.86 steps/s=92.4
+step=111000/2000000 envs=8 episodes=443 replay=30000 updates=27492 level=6 success=0.88 steps/s=92.3
+step=112000/2000000 envs=8 episodes=448 replay=30000 updates=27742 level=6 success=0.88 steps/s=92.1
+step=113000/2000000 envs=8 episodes=451 replay=30000 updates=27992 level=6 success=0.89 steps/s=92.0
+step=114000/2000000 envs=8 episodes=456 replay=30000 updates=28242 level=6 success=0.89 steps/s=91.9
+step=115000/2000000 envs=8 episodes=461 replay=30000 updates=28492 level=6 success=0.88 steps/s=91.8
+step=116000/2000000 envs=8 episodes=466 replay=30000 updates=28742 level=6 success=0.86 steps/s=91.7
+step=117000/2000000 envs=8 episodes=472 replay=30000 updates=28992 level=6 success=0.86 steps/s=91.6
+step=118000/2000000 envs=8 episodes=477 replay=30000 updates=29242 level=6 success=0.86 steps/s=91.5
+step=119000/2000000 envs=8 episodes=479 replay=30000 updates=29492 level=6 success=0.85 steps/s=91.4
+step=120000/2000000 envs=8 episodes=483 replay=30000 updates=29742 level=6 success=0.85 steps/s=91.4
+step=121000/2000000 envs=8 episodes=488 replay=30000 updates=29992 level=6 success=0.85 steps/s=91.3
+step=122000/2000000 envs=8 episodes=493 replay=30000 updates=30242 level=6 success=0.83 steps/s=91.2
+step=123000/2000000 envs=8 episodes=498 replay=30000 updates=30492 level=6 success=0.83 steps/s=91.1
+step=124000/2000000 envs=8 episodes=504 replay=30000 updates=30742 level=6 success=0.82 steps/s=91.0
+step=125000/2000000 envs=8 episodes=511 replay=30000 updates=30992 level=6 success=0.81 steps/s=90.9
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0125000.pt envs=8 replay=30000
+step=126000/2000000 envs=8 episodes=518 replay=30000 updates=31242 level=6 success=0.82 steps/s=90.6
+step=127000/2000000 envs=8 episodes=522 replay=30000 updates=31492 level=6 success=0.82 steps/s=90.4
+step=128000/2000000 envs=8 episodes=527 replay=30000 updates=31742 level=6 success=0.82 steps/s=90.4
+step=129000/2000000 envs=8 episodes=531 replay=30000 updates=31992 level=6 success=0.82 steps/s=90.3
+step=130000/2000000 envs=8 episodes=534 replay=30000 updates=32242 level=6 success=0.81 steps/s=90.2
+step=131000/2000000 envs=8 episodes=539 replay=30000 updates=32492 level=6 success=0.8 steps/s=90.2
+step=132000/2000000 envs=8 episodes=548 replay=30000 updates=32742 level=6 success=0.8 steps/s=90.1
+step=133000/2000000 envs=8 episodes=555 replay=30000 updates=32992 level=6 success=0.79 steps/s=90.0
+step=134000/2000000 envs=8 episodes=559 replay=30000 updates=33242 level=6 success=0.8 steps/s=90.0
+step=135000/2000000 envs=8 episodes=568 replay=30000 updates=33492 level=6 success=0.81 steps/s=89.9
+step=136000/2000000 envs=8 episodes=577 replay=30000 updates=33742 level=6 success=0.82 steps/s=89.9
+step=137000/2000000 envs=8 episodes=583 replay=30000 updates=33992 level=6 success=0.82 steps/s=89.8
+step=138000/2000000 envs=8 episodes=587 replay=30000 updates=34242 level=6 success=0.83 steps/s=89.7
+step=139000/2000000 envs=8 episodes=595 replay=30000 updates=34492 level=6 success=0.87 steps/s=89.6
+step=140000/2000000 envs=8 episodes=600 replay=30000 updates=34742 level=6 success=0.86 steps/s=89.5
+step=141000/2000000 envs=8 episodes=607 replay=30000 updates=34992 level=6 success=0.86 steps/s=89.3
+step=142000/2000000 envs=8 episodes=611 replay=30000 updates=35242 level=6 success=0.87 steps/s=89.2
+step=143000/2000000 envs=8 episodes=619 replay=30000 updates=35492 level=6 success=0.87 steps/s=89.1
+step=144000/2000000 envs=8 episodes=626 replay=30000 updates=35742 level=6 success=0.88 steps/s=89.0
+step=145000/2000000 envs=8 episodes=635 replay=30000 updates=35992 level=6 success=0.89 steps/s=88.9
+step=146000/2000000 envs=8 episodes=640 replay=30000 updates=36242 level=6 success=0.9 steps/s=88.8
+step=147000/2000000 envs=8 episodes=645 replay=30000 updates=36492 level=6 success=0.91 steps/s=88.8
+step=148000/2000000 envs=8 episodes=649 replay=30000 updates=36742 level=6 success=0.9 steps/s=88.7
+step=149000/2000000 envs=8 episodes=657 replay=30000 updates=36992 level=6 success=0.89 steps/s=88.6
+step=150000/2000000 envs=8 episodes=662 replay=30000 updates=37242 level=6 success=0.9 steps/s=88.5
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0150000.pt envs=8 replay=30000
+step=151000/2000000 envs=8 episodes=671 replay=30000 updates=37492 level=6 success=0.88 steps/s=88.3
+step=152000/2000000 envs=8 episodes=678 replay=30000 updates=37742 level=6 success=0.88 steps/s=88.2
+step=153000/2000000 envs=8 episodes=683 replay=30000 updates=37992 level=6 success=0.88 steps/s=88.1
+step=154000/2000000 envs=8 episodes=689 replay=30000 updates=38242 level=6 success=0.88 steps/s=88.0
+step=155000/2000000 envs=8 episodes=692 replay=30000 updates=38492 level=6 success=0.87 steps/s=87.9
+step=156000/2000000 envs=8 episodes=696 replay=30000 updates=38742 level=6 success=0.86 steps/s=87.8
+step=157000/2000000 envs=8 episodes=704 replay=30000 updates=38992 level=6 success=0.87 steps/s=87.8
+step=158000/2000000 envs=8 episodes=713 replay=30000 updates=39242 level=6 success=0.85 steps/s=87.7
+step=159000/2000000 envs=8 episodes=724 replay=30000 updates=39492 level=6 success=0.87 steps/s=87.7
+step=160000/2000000 envs=8 episodes=732 replay=30000 updates=39742 level=6 success=0.88 steps/s=87.6
+step=161000/2000000 envs=8 episodes=743 replay=30000 updates=39992 level=6 success=0.87 steps/s=87.5
+step=162000/2000000 envs=8 episodes=754 replay=30000 updates=40242 level=6 success=0.9 steps/s=87.4
+step=163000/2000000 envs=8 episodes=761 replay=30000 updates=40492 level=6 success=0.91 steps/s=87.3
+step=164000/2000000 envs=8 episodes=770 replay=30000 updates=40742 level=6 success=0.92 steps/s=87.2
+step=165000/2000000 envs=8 episodes=778 replay=30000 updates=40992 level=6 success=0.92 steps/s=87.1
+step=166000/2000000 envs=8 episodes=781 replay=30000 updates=41242 level=6 success=0.91 steps/s=87.0
+step=167000/2000000 envs=8 episodes=787 replay=30000 updates=41492 level=6 success=0.92 steps/s=86.9
+step=168000/2000000 envs=8 episodes=796 replay=30000 updates=41742 level=6 success=0.92 steps/s=86.8
+step=169000/2000000 envs=8 episodes=803 replay=30000 updates=41992 level=6 success=0.91 steps/s=86.7
+step=170000/2000000 envs=8 episodes=811 replay=30000 updates=42242 level=6 success=0.93 steps/s=86.6
+step=171000/2000000 envs=8 episodes=818 replay=30000 updates=42492 level=6 success=0.93 steps/s=86.6
+step=172000/2000000 envs=8 episodes=826 replay=30000 updates=42742 level=6 success=0.92 steps/s=86.5
+step=173000/2000000 envs=8 episodes=830 replay=30000 updates=42992 level=6 success=0.92 steps/s=86.4
+step=174000/2000000 envs=8 episodes=838 replay=30000 updates=43242 level=6 success=0.9 steps/s=86.3
+step=175000/2000000 envs=8 episodes=843 replay=30000 updates=43492 level=6 success=0.91 steps/s=86.3
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0175000.pt envs=8 replay=30000
+step=176000/2000000 envs=8 episodes=850 replay=30000 updates=43742 level=6 success=0.88 steps/s=86.1
+step=177000/2000000 envs=8 episodes=855 replay=30000 updates=43992 level=6 success=0.88 steps/s=86.1
+step=178000/2000000 envs=8 episodes=862 replay=30000 updates=44242 level=6 success=0.88 steps/s=86.0
+step=179000/2000000 envs=8 episodes=869 replay=30000 updates=44492 level=6 success=0.88 steps/s=86.0
+step=180000/2000000 envs=8 episodes=876 replay=30000 updates=44742 level=6 success=0.87 steps/s=85.9
+step=181000/2000000 envs=8 episodes=885 replay=30000 updates=44992 level=6 success=0.88 steps/s=85.8
+step=182000/2000000 envs=8 episodes=895 replay=30000 updates=45242 level=6 success=0.89 steps/s=85.8
+step=183000/2000000 envs=8 episodes=906 replay=30000 updates=45492 level=6 success=0.91 steps/s=85.7
+step=184000/2000000 envs=8 episodes=914 replay=30000 updates=45742 level=6 success=0.91 steps/s=85.6
+step=185000/2000000 envs=8 episodes=920 replay=30000 updates=45992 level=6 success=0.91 steps/s=85.5
+step=186000/2000000 envs=8 episodes=931 replay=30000 updates=46242 level=6 success=0.92 steps/s=85.4
+step=187000/2000000 envs=8 episodes=934 replay=30000 updates=46492 level=6 success=0.93 steps/s=85.3
+step=188000/2000000 envs=8 episodes=940 replay=30000 updates=46742 level=6 success=0.92 steps/s=85.3
+step=189000/2000000 envs=8 episodes=947 replay=30000 updates=46992 level=6 success=0.94 steps/s=85.1
+step=190000/2000000 envs=8 episodes=952 replay=30000 updates=47242 level=6 success=0.93 steps/s=85.0
+step=191000/2000000 envs=8 episodes=959 replay=30000 updates=47492 level=6 success=0.92 steps/s=85.0
+step=192000/2000000 envs=8 episodes=966 replay=30000 updates=47742 level=6 success=0.93 steps/s=84.9
+step=193000/2000000 envs=8 episodes=970 replay=30000 updates=47992 level=6 success=0.91 steps/s=84.8
+step=194000/2000000 envs=8 episodes=977 replay=30000 updates=48242 level=6 success=0.92 steps/s=84.7
+step=195000/2000000 envs=8 episodes=984 replay=30000 updates=48492 level=6 success=0.92 steps/s=84.7
+step=196000/2000000 envs=8 episodes=995 replay=30000 updates=48742 level=6 success=0.92 steps/s=84.6
+step=197000/2000000 envs=8 episodes=1003 replay=30000 updates=48992 level=6 success=0.92 steps/s=84.5
+step=198000/2000000 envs=8 episodes=1011 replay=30000 updates=49242 level=6 success=0.92 steps/s=84.4
+step=199000/2000000 envs=8 episodes=1018 replay=30000 updates=49492 level=6 success=0.91 steps/s=84.4
+step=200000/2000000 envs=8 episodes=1027 replay=30000 updates=49742 level=6 success=0.9 steps/s=84.3
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0200000.pt envs=8 replay=30000
+step=201000/2000000 envs=8 episodes=1035 replay=30000 updates=49992 level=6 success=0.9 steps/s=84.1
+step=202000/2000000 envs=8 episodes=1043 replay=30000 updates=50242 level=6 success=0.92 steps/s=84.1
+step=203000/2000000 envs=8 episodes=1052 replay=30000 updates=50492 level=6 success=0.92 steps/s=84.0
+step=204000/2000000 envs=8 episodes=1059 replay=30000 updates=50742 level=6 success=0.92 steps/s=83.9
+step=205000/2000000 envs=8 episodes=1064 replay=30000 updates=50992 level=6 success=0.92 steps/s=83.8
+step=206000/2000000 envs=8 episodes=1070 replay=30000 updates=51242 level=6 success=0.92 steps/s=83.7
+step=207000/2000000 envs=8 episodes=1077 replay=30000 updates=51492 level=6 success=0.91 steps/s=83.6
+step=208000/2000000 envs=8 episodes=1083 replay=30000 updates=51742 level=6 success=0.9 steps/s=83.5
+step=209000/2000000 envs=8 episodes=1092 replay=30000 updates=51992 level=6 success=0.91 steps/s=83.4
+step=210000/2000000 envs=8 episodes=1103 replay=30000 updates=52242 level=6 success=0.89 steps/s=83.3
+step=211000/2000000 envs=8 episodes=1111 replay=30000 updates=52492 level=6 success=0.89 steps/s=83.3
+step=212000/2000000 envs=8 episodes=1116 replay=30000 updates=52742 level=6 success=0.9 steps/s=83.2
+step=213000/2000000 envs=8 episodes=1122 replay=30000 updates=52992 level=6 success=0.9 steps/s=83.0
+step=214000/2000000 envs=8 episodes=1126 replay=30000 updates=53242 level=6 success=0.88 steps/s=82.8
+step=215000/2000000 envs=8 episodes=1132 replay=30000 updates=53492 level=6 success=0.88 steps/s=82.7
+step=216000/2000000 envs=8 episodes=1140 replay=30000 updates=53742 level=6 success=0.88 steps/s=82.6
+step=217000/2000000 envs=8 episodes=1145 replay=30000 updates=53992 level=6 success=0.89 steps/s=82.5
+step=218000/2000000 envs=8 episodes=1155 replay=30000 updates=54242 level=6 success=0.88 steps/s=82.4
+step=219000/2000000 envs=8 episodes=1161 replay=30000 updates=54492 level=6 success=0.88 steps/s=82.4
+step=220000/2000000 envs=8 episodes=1168 replay=30000 updates=54742 level=6 success=0.88 steps/s=82.3
+step=221000/2000000 envs=8 episodes=1173 replay=30000 updates=54992 level=6 success=0.88 steps/s=82.2
+step=222000/2000000 envs=8 episodes=1181 replay=30000 updates=55242 level=6 success=0.88 steps/s=82.0
+step=223000/2000000 envs=8 episodes=1189 replay=30000 updates=55492 level=6 success=0.88 steps/s=82.0
+step=224000/2000000 envs=8 episodes=1196 replay=30000 updates=55742 level=6 success=0.87 steps/s=81.9
+step=225000/2000000 envs=8 episodes=1199 replay=30000 updates=55992 level=6 success=0.87 steps/s=81.8
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0225000.pt envs=8 replay=30000
+step=226000/2000000 envs=8 episodes=1202 replay=30000 updates=56242 level=6 success=0.88 steps/s=81.7
+step=227000/2000000 envs=8 episodes=1210 replay=30000 updates=56492 level=6 success=0.85 steps/s=81.6
+step=228000/2000000 envs=8 episodes=1220 replay=30000 updates=56742 level=6 success=0.83 steps/s=81.5
+step=229000/2000000 envs=8 episodes=1228 replay=30000 updates=56992 level=6 success=0.85 steps/s=81.5
+step=230000/2000000 envs=8 episodes=1235 replay=30000 updates=57242 level=6 success=0.87 steps/s=81.4
+step=231000/2000000 envs=8 episodes=1243 replay=30000 updates=57492 level=6 success=0.86 steps/s=81.3
+step=232000/2000000 envs=8 episodes=1254 replay=30000 updates=57742 level=6 success=0.87 steps/s=81.3
+step=233000/2000000 envs=8 episodes=1260 replay=30000 updates=57992 level=6 success=0.87 steps/s=81.2
+step=234000/2000000 envs=8 episodes=1268 replay=30000 updates=58242 level=6 success=0.89 steps/s=81.2
+step=235000/2000000 envs=8 episodes=1276 replay=30000 updates=58492 level=6 success=0.9 steps/s=81.1
+step=236000/2000000 envs=8 episodes=1285 replay=30000 updates=58742 level=6 success=0.89 steps/s=81.1
+step=237000/2000000 envs=8 episodes=1295 replay=30000 updates=58992 level=6 success=0.91 steps/s=81.1
+step=238000/2000000 envs=8 episodes=1300 replay=30000 updates=59242 level=6 success=0.91 steps/s=81.0
+step=239000/2000000 envs=8 episodes=1307 replay=30000 updates=59492 level=6 success=0.92 steps/s=81.0
+step=240000/2000000 envs=8 episodes=1314 replay=30000 updates=59742 level=6 success=0.92 steps/s=81.0
+step=241000/2000000 envs=8 episodes=1324 replay=30000 updates=59992 level=6 success=0.93 steps/s=80.9
+step=242000/2000000 envs=8 episodes=1333 replay=30000 updates=60242 level=6 success=0.92 steps/s=80.9
+step=243000/2000000 envs=8 episodes=1341 replay=30000 updates=60492 level=6 success=0.92 steps/s=80.9
+step=244000/2000000 envs=8 episodes=1349 replay=30000 updates=60742 level=6 success=0.92 steps/s=80.9
+step=245000/2000000 envs=8 episodes=1353 replay=30000 updates=60992 level=6 success=0.92 steps/s=80.8
+step=246000/2000000 envs=8 episodes=1361 replay=30000 updates=61242 level=6 success=0.91 steps/s=80.8
+step=247000/2000000 envs=8 episodes=1370 replay=30000 updates=61492 level=6 success=0.9 steps/s=80.8
+step=248000/2000000 envs=8 episodes=1384 replay=30000 updates=61742 level=6 success=0.9 steps/s=80.7
+step=249000/2000000 envs=8 episodes=1394 replay=30000 updates=61992 level=6 success=0.9 steps/s=80.7
+step=250000/2000000 envs=8 episodes=1403 replay=30000 updates=62242 level=6 success=0.9 steps/s=80.6
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0250000.pt envs=8 replay=30000
+step=251000/2000000 envs=8 episodes=1412 replay=30000 updates=62492 level=6 success=0.92 steps/s=80.5
+step=252000/2000000 envs=8 episodes=1421 replay=30000 updates=62742 level=6 success=0.93 steps/s=80.5
+step=253000/2000000 envs=8 episodes=1429 replay=30000 updates=62992 level=6 success=0.93 steps/s=80.4
+step=254000/2000000 envs=8 episodes=1435 replay=30000 updates=63242 level=6 success=0.93 steps/s=80.4
+step=255000/2000000 envs=8 episodes=1441 replay=30000 updates=63492 level=6 success=0.93 steps/s=80.3
+step=256000/2000000 envs=8 episodes=1449 replay=30000 updates=63742 level=6 success=0.93 steps/s=80.3
+step=257000/2000000 envs=8 episodes=1457 replay=30000 updates=63992 level=6 success=0.92 steps/s=80.2
+step=258000/2000000 envs=8 episodes=1464 replay=30000 updates=64242 level=6 success=0.93 steps/s=80.1
+step=259000/2000000 envs=8 episodes=1469 replay=30000 updates=64492 level=6 success=0.93 steps/s=80.1
+step=260000/2000000 envs=8 episodes=1479 replay=30000 updates=64742 level=6 success=0.92 steps/s=80.0
+step=261000/2000000 envs=8 episodes=1486 replay=30000 updates=64992 level=6 success=0.92 steps/s=80.0
+step=262000/2000000 envs=8 episodes=1493 replay=30000 updates=65242 level=6 success=0.92 steps/s=79.9
+step=263000/2000000 envs=8 episodes=1503 replay=30000 updates=65492 level=6 success=0.91 steps/s=79.8
+step=264000/2000000 envs=8 episodes=1511 replay=30000 updates=65742 level=6 success=0.9 steps/s=79.8
+step=265000/2000000 envs=8 episodes=1520 replay=30000 updates=65992 level=6 success=0.89 steps/s=79.7
+step=266000/2000000 envs=8 episodes=1528 replay=30000 updates=66242 level=6 success=0.9 steps/s=79.7
+step=267000/2000000 envs=8 episodes=1538 replay=30000 updates=66492 level=6 success=0.9 steps/s=79.6
+step=268000/2000000 envs=8 episodes=1545 replay=30000 updates=66742 level=6 success=0.9 steps/s=79.6
+step=269000/2000000 envs=8 episodes=1552 replay=30000 updates=66992 level=6 success=0.92 steps/s=79.6
+step=270000/2000000 envs=8 episodes=1561 replay=30000 updates=67242 level=6 success=0.92 steps/s=79.5
+step=271000/2000000 envs=8 episodes=1568 replay=30000 updates=67492 level=6 success=0.91 steps/s=79.5
+step=272000/2000000 envs=8 episodes=1576 replay=30000 updates=67742 level=6 success=0.92 steps/s=79.4
+step=273000/2000000 envs=8 episodes=1579 replay=30000 updates=67992 level=6 success=0.92 steps/s=79.4
+step=274000/2000000 envs=8 episodes=1585 replay=30000 updates=68242 level=6 success=0.91 steps/s=79.4
+step=275000/2000000 envs=8 episodes=1591 replay=30000 updates=68492 level=6 success=0.9 steps/s=79.3
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0275000.pt envs=8 replay=30000
+step=276000/2000000 envs=8 episodes=1601 replay=30000 updates=68742 level=6 success=0.88 steps/s=79.2
+step=277000/2000000 envs=8 episodes=1606 replay=30000 updates=68992 level=6 success=0.88 steps/s=79.2
+step=278000/2000000 envs=8 episodes=1611 replay=30000 updates=69242 level=6 success=0.89 steps/s=79.2
+step=279000/2000000 envs=8 episodes=1618 replay=30000 updates=69492 level=6 success=0.88 steps/s=79.1
+step=280000/2000000 envs=8 episodes=1624 replay=30000 updates=69742 level=6 success=0.88 steps/s=79.1
+step=281000/2000000 envs=8 episodes=1633 replay=30000 updates=69992 level=6 success=0.86 steps/s=79.1
+step=282000/2000000 envs=8 episodes=1638 replay=30000 updates=70242 level=6 success=0.85 steps/s=79.1
+step=283000/2000000 envs=8 episodes=1642 replay=30000 updates=70492 level=6 success=0.86 steps/s=79.1
+step=284000/2000000 envs=8 episodes=1650 replay=30000 updates=70742 level=6 success=0.85 steps/s=79.0
+step=285000/2000000 envs=8 episodes=1659 replay=30000 updates=70992 level=6 success=0.84 steps/s=79.0
+step=286000/2000000 envs=8 episodes=1668 replay=30000 updates=71242 level=6 success=0.84 steps/s=79.0
+step=287000/2000000 envs=8 episodes=1677 replay=30000 updates=71492 level=6 success=0.85 steps/s=79.0
+step=288000/2000000 envs=8 episodes=1685 replay=30000 updates=71742 level=6 success=0.87 steps/s=78.9
+step=289000/2000000 envs=8 episodes=1691 replay=30000 updates=71992 level=6 success=0.87 steps/s=78.9
+step=290000/2000000 envs=8 episodes=1702 replay=30000 updates=72242 level=6 success=0.89 steps/s=78.9
+step=291000/2000000 envs=8 episodes=1711 replay=30000 updates=72492 level=6 success=0.89 steps/s=78.9
+step=292000/2000000 envs=8 episodes=1721 replay=30000 updates=72742 level=6 success=0.89 steps/s=78.8
+step=293000/2000000 envs=8 episodes=1727 replay=30000 updates=72992 level=6 success=0.9 steps/s=78.8
+step=294000/2000000 envs=8 episodes=1733 replay=30000 updates=73242 level=6 success=0.91 steps/s=78.8
+step=295000/2000000 envs=8 episodes=1737 replay=30000 updates=73492 level=6 success=0.92 steps/s=78.8
+step=296000/2000000 envs=8 episodes=1745 replay=30000 updates=73742 level=6 success=0.91 steps/s=78.8
+step=297000/2000000 envs=8 episodes=1751 replay=30000 updates=73992 level=6 success=0.89 steps/s=78.7
+step=298000/2000000 envs=8 episodes=1758 replay=30000 updates=74242 level=6 success=0.9 steps/s=78.7
+step=299000/2000000 envs=8 episodes=1763 replay=30000 updates=74492 level=6 success=0.91 steps/s=78.7
+step=300000/2000000 envs=8 episodes=1771 replay=30000 updates=74742 level=6 success=0.88 steps/s=78.7
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0300000.pt envs=8 replay=30000
+step=301000/2000000 envs=8 episodes=1779 replay=30000 updates=74992 level=6 success=0.87 steps/s=78.6
+step=302000/2000000 envs=8 episodes=1784 replay=30000 updates=75242 level=6 success=0.87 steps/s=78.6
+step=303000/2000000 envs=8 episodes=1790 replay=30000 updates=75492 level=6 success=0.87 steps/s=78.6
+step=304000/2000000 envs=8 episodes=1795 replay=30000 updates=75742 level=6 success=0.87 steps/s=78.6
+step=305000/2000000 envs=8 episodes=1802 replay=30000 updates=75992 level=6 success=0.85 steps/s=78.6
+step=306000/2000000 envs=8 episodes=1809 replay=30000 updates=76242 level=6 success=0.84 steps/s=78.6
+step=307000/2000000 envs=8 episodes=1819 replay=30000 updates=76492 level=6 success=0.84 steps/s=78.6
+step=308000/2000000 envs=8 episodes=1826 replay=30000 updates=76742 level=6 success=0.84 steps/s=78.6
+step=309000/2000000 envs=8 episodes=1831 replay=30000 updates=76992 level=6 success=0.83 steps/s=78.6
+step=310000/2000000 envs=8 episodes=1836 replay=30000 updates=77242 level=6 success=0.83 steps/s=78.6
+step=311000/2000000 envs=8 episodes=1838 replay=30000 updates=77492 level=6 success=0.82 steps/s=78.5
+step=312000/2000000 envs=8 episodes=1844 replay=30000 updates=77742 level=6 success=0.8 steps/s=78.5
+step=313000/2000000 envs=8 episodes=1850 replay=30000 updates=77992 level=6 success=0.83 steps/s=78.5
+step=314000/2000000 envs=8 episodes=1857 replay=30000 updates=78242 level=6 success=0.83 steps/s=78.5
+step=315000/2000000 envs=8 episodes=1865 replay=30000 updates=78492 level=6 success=0.81 steps/s=78.5
+step=316000/2000000 envs=8 episodes=1871 replay=30000 updates=78742 level=6 success=0.84 steps/s=78.5
+step=317000/2000000 envs=8 episodes=1876 replay=30000 updates=78992 level=6 success=0.85 steps/s=78.5
+step=318000/2000000 envs=8 episodes=1880 replay=30000 updates=79242 level=6 success=0.84 steps/s=78.5
+step=319000/2000000 envs=8 episodes=1887 replay=30000 updates=79492 level=6 success=0.81 steps/s=78.5
+step=320000/2000000 envs=8 episodes=1893 replay=30000 updates=79742 level=6 success=0.82 steps/s=78.5
+step=321000/2000000 envs=8 episodes=1899 replay=30000 updates=79992 level=6 success=0.83 steps/s=78.5
+step=322000/2000000 envs=8 episodes=1904 replay=30000 updates=80242 level=6 success=0.83 steps/s=78.5
+step=323000/2000000 envs=8 episodes=1909 replay=30000 updates=80492 level=6 success=0.82 steps/s=78.5
+step=324000/2000000 envs=8 episodes=1916 replay=30000 updates=80742 level=6 success=0.81 steps/s=78.5
+step=325000/2000000 envs=8 episodes=1925 replay=30000 updates=80992 level=6 success=0.81 steps/s=78.5
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0325000.pt envs=8 replay=30000
+step=326000/2000000 envs=8 episodes=1931 replay=30000 updates=81242 level=6 success=0.81 steps/s=78.4
+step=327000/2000000 envs=8 episodes=1937 replay=30000 updates=81492 level=6 success=0.79 steps/s=78.4
+step=328000/2000000 envs=8 episodes=1944 replay=30000 updates=81742 level=6 success=0.83 steps/s=78.4
+step=329000/2000000 envs=8 episodes=1949 replay=30000 updates=81992 level=6 success=0.82 steps/s=78.4
+step=330000/2000000 envs=8 episodes=1961 replay=30000 updates=82242 level=6 success=0.82 steps/s=78.4
+step=331000/2000000 envs=8 episodes=1966 replay=30000 updates=82492 level=6 success=0.82 steps/s=78.4
+step=332000/2000000 envs=8 episodes=1972 replay=30000 updates=82742 level=6 success=0.82 steps/s=78.3
+step=333000/2000000 envs=8 episodes=1976 replay=30000 updates=82992 level=6 success=0.82 steps/s=78.3
+step=334000/2000000 envs=8 episodes=1985 replay=30000 updates=83242 level=6 success=0.8 steps/s=78.3
+step=335000/2000000 envs=8 episodes=1993 replay=30000 updates=83492 level=6 success=0.81 steps/s=78.3
+step=336000/2000000 envs=8 episodes=2003 replay=30000 updates=83742 level=6 success=0.82 steps/s=78.3
+step=337000/2000000 envs=8 episodes=2009 replay=30000 updates=83992 level=6 success=0.84 steps/s=78.3
+step=338000/2000000 envs=8 episodes=2014 replay=30000 updates=84242 level=6 success=0.85 steps/s=78.3
+step=339000/2000000 envs=8 episodes=2021 replay=30000 updates=84492 level=6 success=0.85 steps/s=78.3
+step=340000/2000000 envs=8 episodes=2030 replay=30000 updates=84742 level=6 success=0.84 steps/s=78.3
+step=341000/2000000 envs=8 episodes=2036 replay=30000 updates=84992 level=6 success=0.85 steps/s=78.3
+step=342000/2000000 envs=8 episodes=2045 replay=30000 updates=85242 level=6 success=0.84 steps/s=78.3
+step=343000/2000000 envs=8 episodes=2054 replay=30000 updates=85492 level=6 success=0.84 steps/s=78.3
+step=344000/2000000 envs=8 episodes=2062 replay=30000 updates=85742 level=6 success=0.85 steps/s=78.3
+step=345000/2000000 envs=8 episodes=2069 replay=30000 updates=85992 level=6 success=0.85 steps/s=78.3
+step=346000/2000000 envs=8 episodes=2076 replay=30000 updates=86242 level=6 success=0.84 steps/s=78.3
+step=347000/2000000 envs=8 episodes=2085 replay=30000 updates=86492 level=6 success=0.88 steps/s=78.3
+step=348000/2000000 envs=8 episodes=2096 replay=30000 updates=86742 level=6 success=0.87 steps/s=78.2
+step=349000/2000000 envs=8 episodes=2100 replay=30000 updates=86992 level=6 success=0.87 steps/s=78.2
+step=350000/2000000 envs=8 episodes=2106 replay=30000 updates=87242 level=6 success=0.86 steps/s=78.2
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0350000.pt envs=8 replay=30000
+step=351000/2000000 envs=8 episodes=2112 replay=30000 updates=87492 level=6 success=0.87 steps/s=78.2
+step=352000/2000000 envs=8 episodes=2119 replay=30000 updates=87742 level=6 success=0.87 steps/s=78.2
+step=353000/2000000 envs=8 episodes=2126 replay=30000 updates=87992 level=6 success=0.88 steps/s=78.2
+step=354000/2000000 envs=8 episodes=2132 replay=30000 updates=88242 level=6 success=0.87 steps/s=78.2
+step=355000/2000000 envs=8 episodes=2139 replay=30000 updates=88492 level=6 success=0.87 steps/s=78.2
+step=356000/2000000 envs=8 episodes=2146 replay=30000 updates=88742 level=6 success=0.88 steps/s=78.1
+step=357000/2000000 envs=8 episodes=2152 replay=30000 updates=88992 level=6 success=0.87 steps/s=78.1
+step=358000/2000000 envs=8 episodes=2160 replay=30000 updates=89242 level=6 success=0.87 steps/s=78.1
+step=359000/2000000 envs=8 episodes=2168 replay=30000 updates=89492 level=6 success=0.88 steps/s=78.1
+step=360000/2000000 envs=8 episodes=2175 replay=30000 updates=89742 level=6 success=0.88 steps/s=78.1
+step=361000/2000000 envs=8 episodes=2182 replay=30000 updates=89992 level=6 success=0.87 steps/s=78.1
+step=362000/2000000 envs=8 episodes=2191 replay=30000 updates=90242 level=6 success=0.89 steps/s=78.1
+step=363000/2000000 envs=8 episodes=2200 replay=30000 updates=90492 level=6 success=0.88 steps/s=78.1
+step=364000/2000000 envs=8 episodes=2208 replay=30000 updates=90742 level=6 success=0.88 steps/s=78.1
+step=365000/2000000 envs=8 episodes=2214 replay=30000 updates=90992 level=6 success=0.87 steps/s=78.1
+step=366000/2000000 envs=8 episodes=2224 replay=30000 updates=91242 level=6 success=0.87 steps/s=78.0
+step=367000/2000000 envs=8 episodes=2231 replay=30000 updates=91492 level=6 success=0.89 steps/s=78.0
+step=368000/2000000 envs=8 episodes=2236 replay=30000 updates=91742 level=6 success=0.9 steps/s=78.0
+step=369000/2000000 envs=8 episodes=2246 replay=30000 updates=91992 level=6 success=0.88 steps/s=77.9
+step=370000/2000000 envs=8 episodes=2253 replay=30000 updates=92242 level=6 success=0.9 steps/s=77.9
+step=371000/2000000 envs=8 episodes=2260 replay=30000 updates=92492 level=6 success=0.89 steps/s=77.9
+step=372000/2000000 envs=8 episodes=2266 replay=30000 updates=92742 level=6 success=0.89 steps/s=77.9
+step=373000/2000000 envs=8 episodes=2271 replay=30000 updates=92992 level=6 success=0.88 steps/s=77.8
+step=374000/2000000 envs=8 episodes=2280 replay=30000 updates=93242 level=6 success=0.88 steps/s=77.8
+step=375000/2000000 envs=8 episodes=2288 replay=30000 updates=93492 level=6 success=0.87 steps/s=77.8
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0375000.pt envs=8 replay=30000
+step=376000/2000000 envs=8 episodes=2296 replay=30000 updates=93742 level=6 success=0.88 steps/s=77.7
+step=377000/2000000 envs=8 episodes=2303 replay=30000 updates=93992 level=6 success=0.88 steps/s=77.7
+step=378000/2000000 envs=8 episodes=2309 replay=30000 updates=94242 level=6 success=0.87 steps/s=77.7
+step=379000/2000000 envs=8 episodes=2313 replay=30000 updates=94492 level=6 success=0.87 steps/s=77.6
+step=380000/2000000 envs=8 episodes=2317 replay=30000 updates=94742 level=6 success=0.87 steps/s=77.6
+step=381000/2000000 envs=8 episodes=2325 replay=30000 updates=94992 level=6 success=0.85 steps/s=77.6
+step=382000/2000000 envs=8 episodes=2332 replay=30000 updates=95242 level=6 success=0.84 steps/s=77.6
+step=383000/2000000 envs=8 episodes=2340 replay=30000 updates=95492 level=6 success=0.84 steps/s=77.6
+step=384000/2000000 envs=8 episodes=2348 replay=30000 updates=95742 level=6 success=0.83 steps/s=77.6
+step=385000/2000000 envs=8 episodes=2354 replay=30000 updates=95992 level=6 success=0.83 steps/s=77.5
+step=386000/2000000 envs=8 episodes=2359 replay=30000 updates=96242 level=6 success=0.85 steps/s=77.5
+step=387000/2000000 envs=8 episodes=2363 replay=30000 updates=96492 level=6 success=0.84 steps/s=77.5
+step=388000/2000000 envs=8 episodes=2366 replay=30000 updates=96742 level=6 success=0.82 steps/s=77.5
+step=389000/2000000 envs=8 episodes=2370 replay=30000 updates=96992 level=6 success=0.82 steps/s=77.5
+step=390000/2000000 envs=8 episodes=2376 replay=30000 updates=97242 level=6 success=0.82 steps/s=77.5
+step=391000/2000000 envs=8 episodes=2385 replay=30000 updates=97492 level=6 success=0.82 steps/s=77.5
+step=392000/2000000 envs=8 episodes=2391 replay=30000 updates=97742 level=6 success=0.81 steps/s=77.5
+step=393000/2000000 envs=8 episodes=2398 replay=30000 updates=97992 level=6 success=0.82 steps/s=77.5
+step=394000/2000000 envs=8 episodes=2406 replay=30000 updates=98242 level=6 success=0.82 steps/s=77.4
+step=395000/2000000 envs=8 episodes=2415 replay=30000 updates=98492 level=6 success=0.81 steps/s=77.4
+step=396000/2000000 envs=8 episodes=2421 replay=30000 updates=98742 level=6 success=0.84 steps/s=77.4
+step=397000/2000000 envs=8 episodes=2426 replay=30000 updates=98992 level=6 success=0.85 steps/s=77.4
+step=398000/2000000 envs=8 episodes=2437 replay=30000 updates=99242 level=6 success=0.84 steps/s=77.4
+step=399000/2000000 envs=8 episodes=2445 replay=30000 updates=99492 level=6 success=0.87 steps/s=77.4
+step=400000/2000000 envs=8 episodes=2455 replay=30000 updates=99742 level=6 success=0.86 steps/s=77.4
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0400000.pt envs=8 replay=30000
+step=401000/2000000 envs=8 episodes=2462 replay=30000 updates=99992 level=6 success=0.86 steps/s=77.4
+step=402000/2000000 envs=8 episodes=2469 replay=30000 updates=100242 level=6 success=0.89 steps/s=77.4
+step=403000/2000000 envs=8 episodes=2479 replay=30000 updates=100492 level=6 success=0.9 steps/s=77.3
+step=404000/2000000 envs=8 episodes=2487 replay=30000 updates=100742 level=6 success=0.91 steps/s=77.3
+step=405000/2000000 envs=8 episodes=2500 replay=30000 updates=100992 level=6 success=0.92 steps/s=77.3
+step=406000/2000000 envs=8 episodes=2507 replay=30000 updates=101242 level=6 success=0.92 steps/s=77.3
+step=407000/2000000 envs=8 episodes=2515 replay=30000 updates=101492 level=6 success=0.93 steps/s=77.3
+step=408000/2000000 envs=8 episodes=2521 replay=30000 updates=101742 level=6 success=0.93 steps/s=77.3
+step=409000/2000000 envs=8 episodes=2529 replay=30000 updates=101992 level=6 success=0.92 steps/s=77.3
+step=410000/2000000 envs=8 episodes=2540 replay=30000 updates=102242 level=6 success=0.93 steps/s=77.2
+step=411000/2000000 envs=8 episodes=2547 replay=30000 updates=102492 level=6 success=0.91 steps/s=77.2
+step=412000/2000000 envs=8 episodes=2554 replay=30000 updates=102742 level=6 success=0.92 steps/s=77.2
+step=413000/2000000 envs=8 episodes=2558 replay=30000 updates=102992 level=6 success=0.92 steps/s=77.2
+step=414000/2000000 envs=8 episodes=2565 replay=30000 updates=103242 level=6 success=0.89 steps/s=77.2
+step=415000/2000000 envs=8 episodes=2573 replay=30000 updates=103492 level=6 success=0.91 steps/s=77.2
+step=416000/2000000 envs=8 episodes=2576 replay=30000 updates=103742 level=6 success=0.9 steps/s=77.2
+step=417000/2000000 envs=8 episodes=2586 replay=30000 updates=103992 level=6 success=0.89 steps/s=77.1
+step=418000/2000000 envs=8 episodes=2592 replay=30000 updates=104242 level=6 success=0.88 steps/s=77.1
+step=419000/2000000 envs=8 episodes=2596 replay=30000 updates=104492 level=6 success=0.88 steps/s=77.1
+step=420000/2000000 envs=8 episodes=2602 replay=30000 updates=104742 level=6 success=0.89 steps/s=77.1
+step=421000/2000000 envs=8 episodes=2608 replay=30000 updates=104992 level=6 success=0.89 steps/s=77.1
+step=422000/2000000 envs=8 episodes=2621 replay=30000 updates=105242 level=6 success=0.86 steps/s=77.0
+step=423000/2000000 envs=8 episodes=2632 replay=30000 updates=105492 level=6 success=0.88 steps/s=77.0
+step=424000/2000000 envs=8 episodes=2641 replay=30000 updates=105742 level=6 success=0.88 steps/s=77.0
+step=425000/2000000 envs=8 episodes=2646 replay=30000 updates=105992 level=6 success=0.9 steps/s=77.0
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0425000.pt envs=8 replay=30000
+step=426000/2000000 envs=8 episodes=2652 replay=30000 updates=106242 level=6 success=0.89 steps/s=76.9
+step=427000/2000000 envs=8 episodes=2661 replay=30000 updates=106492 level=6 success=0.89 steps/s=76.9
+step=428000/2000000 envs=8 episodes=2673 replay=30000 updates=106742 level=6 success=0.89 steps/s=76.9
+step=429000/2000000 envs=8 episodes=2687 replay=30000 updates=106992 level=6 success=0.92 steps/s=76.9
+step=430000/2000000 envs=8 episodes=2697 replay=30000 updates=107242 level=6 success=0.92 steps/s=76.8
+step=431000/2000000 envs=8 episodes=2704 replay=30000 updates=107492 level=6 success=0.92 steps/s=76.8
+step=432000/2000000 envs=8 episodes=2712 replay=30000 updates=107742 level=6 success=0.93 steps/s=76.8
+step=433000/2000000 envs=8 episodes=2717 replay=30000 updates=107992 level=6 success=0.94 steps/s=76.7
+step=434000/2000000 envs=8 episodes=2727 replay=30000 updates=108242 level=6 success=0.92 steps/s=76.7
+step=435000/2000000 envs=8 episodes=2736 replay=30000 updates=108492 level=6 success=0.92 steps/s=76.7
+step=436000/2000000 envs=8 episodes=2743 replay=30000 updates=108742 level=6 success=0.92 steps/s=76.7
+step=437000/2000000 envs=8 episodes=2747 replay=30000 updates=108992 level=6 success=0.92 steps/s=76.7
+step=438000/2000000 envs=8 episodes=2755 replay=30000 updates=109242 level=6 success=0.91 steps/s=76.6
+step=439000/2000000 envs=8 episodes=2761 replay=30000 updates=109492 level=6 success=0.92 steps/s=76.6
+step=440000/2000000 envs=8 episodes=2769 replay=30000 updates=109742 level=6 success=0.91 steps/s=76.6
+step=441000/2000000 envs=8 episodes=2778 replay=30000 updates=109992 level=6 success=0.91 steps/s=76.5
+step=442000/2000000 envs=8 episodes=2785 replay=30000 updates=110242 level=6 success=0.91 steps/s=76.5
+step=443000/2000000 envs=8 episodes=2789 replay=30000 updates=110492 level=6 success=0.9 steps/s=76.4
+step=444000/2000000 envs=8 episodes=2794 replay=30000 updates=110742 level=6 success=0.9 steps/s=76.4
+step=445000/2000000 envs=8 episodes=2800 replay=30000 updates=110992 level=6 success=0.89 steps/s=76.4
+step=446000/2000000 envs=8 episodes=2809 replay=30000 updates=111242 level=6 success=0.87 steps/s=76.4
+step=447000/2000000 envs=8 episodes=2815 replay=30000 updates=111492 level=6 success=0.87 steps/s=76.3
+step=448000/2000000 envs=8 episodes=2825 replay=30000 updates=111742 level=6 success=0.88 steps/s=76.3
+step=449000/2000000 envs=8 episodes=2828 replay=30000 updates=111992 level=6 success=0.88 steps/s=76.3
+step=450000/2000000 envs=8 episodes=2831 replay=30000 updates=112242 level=6 success=0.88 steps/s=76.3
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0450000.pt envs=8 replay=30000
+step=451000/2000000 envs=8 episodes=2836 replay=30000 updates=112492 level=6 success=0.88 steps/s=76.2
+step=452000/2000000 envs=8 episodes=2848 replay=30000 updates=112742 level=6 success=0.84 steps/s=76.1
+step=453000/2000000 envs=8 episodes=2858 replay=30000 updates=112992 level=6 success=0.86 steps/s=76.1
+step=454000/2000000 envs=8 episodes=2869 replay=30000 updates=113242 level=6 success=0.88 steps/s=76.0
+step=455000/2000000 envs=8 episodes=2875 replay=30000 updates=113492 level=6 success=0.88 steps/s=76.0
+step=456000/2000000 envs=8 episodes=2881 replay=30000 updates=113742 level=6 success=0.88 steps/s=75.9
+step=457000/2000000 envs=8 episodes=2887 replay=30000 updates=113992 level=6 success=0.87 steps/s=75.9
+step=458000/2000000 envs=8 episodes=2894 replay=30000 updates=114242 level=6 success=0.87 steps/s=75.9
+step=459000/2000000 envs=8 episodes=2905 replay=30000 updates=114492 level=6 success=0.88 steps/s=75.8
+step=460000/2000000 envs=8 episodes=2911 replay=30000 updates=114742 level=6 success=0.89 steps/s=75.8
+step=461000/2000000 envs=8 episodes=2918 replay=30000 updates=114992 level=6 success=0.89 steps/s=75.8
+step=462000/2000000 envs=8 episodes=2923 replay=30000 updates=115242 level=6 success=0.89 steps/s=75.8
+step=463000/2000000 envs=8 episodes=2929 replay=30000 updates=115492 level=6 success=0.88 steps/s=75.8
+step=464000/2000000 envs=8 episodes=2938 replay=30000 updates=115742 level=6 success=0.88 steps/s=75.8
+step=465000/2000000 envs=8 episodes=2948 replay=30000 updates=115992 level=6 success=0.88 steps/s=75.8
+step=466000/2000000 envs=8 episodes=2954 replay=30000 updates=116242 level=6 success=0.88 steps/s=75.8
+step=467000/2000000 envs=8 episodes=2959 replay=30000 updates=116492 level=6 success=0.88 steps/s=75.8
+step=468000/2000000 envs=8 episodes=2963 replay=30000 updates=116742 level=6 success=0.87 steps/s=75.8
+step=469000/2000000 envs=8 episodes=2974 replay=30000 updates=116992 level=6 success=0.85 steps/s=75.8
+step=470000/2000000 envs=8 episodes=2984 replay=30000 updates=117242 level=6 success=0.86 steps/s=75.7
+step=471000/2000000 envs=8 episodes=2993 replay=30000 updates=117492 level=6 success=0.86 steps/s=75.8
+step=472000/2000000 envs=8 episodes=3002 replay=30000 updates=117742 level=6 success=0.88 steps/s=75.7
+step=473000/2000000 envs=8 episodes=3008 replay=30000 updates=117992 level=6 success=0.88 steps/s=75.7
+step=474000/2000000 envs=8 episodes=3016 replay=30000 updates=118242 level=6 success=0.88 steps/s=75.7
+step=475000/2000000 envs=8 episodes=3027 replay=30000 updates=118492 level=6 success=0.89 steps/s=75.7
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0475000.pt envs=8 replay=30000
+step=476000/2000000 envs=8 episodes=3033 replay=30000 updates=118742 level=6 success=0.9 steps/s=75.7
+step=477000/2000000 envs=8 episodes=3040 replay=30000 updates=118992 level=6 success=0.9 steps/s=75.6
+step=478000/2000000 envs=8 episodes=3050 replay=30000 updates=119242 level=6 success=0.9 steps/s=75.6
+step=479000/2000000 envs=8 episodes=3056 replay=30000 updates=119492 level=6 success=0.9 steps/s=75.6
+step=480000/2000000 envs=8 episodes=3061 replay=30000 updates=119742 level=6 success=0.9 steps/s=75.6
+step=481000/2000000 envs=8 episodes=3067 replay=30000 updates=119992 level=6 success=0.92 steps/s=75.6
+step=482000/2000000 envs=8 episodes=3076 replay=30000 updates=120242 level=6 success=0.93 steps/s=75.6
+step=483000/2000000 envs=8 episodes=3084 replay=30000 updates=120492 level=6 success=0.92 steps/s=75.6
+step=484000/2000000 envs=8 episodes=3092 replay=30000 updates=120742 level=6 success=0.91 steps/s=75.6
+step=485000/2000000 envs=8 episodes=3100 replay=30000 updates=120992 level=6 success=0.91 steps/s=75.5
+step=486000/2000000 envs=8 episodes=3106 replay=30000 updates=121242 level=6 success=0.9 steps/s=75.5
+step=487000/2000000 envs=8 episodes=3111 replay=30000 updates=121492 level=6 success=0.89 steps/s=75.5
+step=488000/2000000 envs=8 episodes=3117 replay=30000 updates=121742 level=6 success=0.89 steps/s=75.5
+step=489000/2000000 envs=8 episodes=3126 replay=30000 updates=121992 level=6 success=0.89 steps/s=75.4
+step=490000/2000000 envs=8 episodes=3134 replay=30000 updates=122242 level=6 success=0.88 steps/s=75.4
+step=491000/2000000 envs=8 episodes=3144 replay=30000 updates=122492 level=6 success=0.89 steps/s=75.4
+step=492000/2000000 envs=8 episodes=3151 replay=30000 updates=122742 level=6 success=0.9 steps/s=75.4
+step=493000/2000000 envs=8 episodes=3157 replay=30000 updates=122992 level=6 success=0.89 steps/s=75.4
+step=494000/2000000 envs=8 episodes=3166 replay=30000 updates=123242 level=6 success=0.88 steps/s=75.4
+step=495000/2000000 envs=8 episodes=3177 replay=30000 updates=123492 level=6 success=0.87 steps/s=75.3
+step=496000/2000000 envs=8 episodes=3181 replay=30000 updates=123742 level=6 success=0.88 steps/s=75.3
+step=497000/2000000 envs=8 episodes=3184 replay=30000 updates=123992 level=6 success=0.87 steps/s=75.3
+step=498000/2000000 envs=8 episodes=3192 replay=30000 updates=124242 level=6 success=0.88 steps/s=75.3
+step=499000/2000000 envs=8 episodes=3200 replay=30000 updates=124492 level=6 success=0.86 steps/s=75.3
+step=500000/2000000 envs=8 episodes=3210 replay=30000 updates=124742 level=6 success=0.86 steps/s=75.3
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0500000.pt envs=8 replay=30000
+step=501000/2000000 envs=8 episodes=3221 replay=30000 updates=124992 level=6 success=0.87 steps/s=75.2
+step=502000/2000000 envs=8 episodes=3235 replay=30000 updates=125242 level=6 success=0.88 steps/s=75.2
+step=503000/2000000 envs=8 episodes=3244 replay=30000 updates=125492 level=6 success=0.89 steps/s=75.2
+step=504000/2000000 envs=8 episodes=3252 replay=30000 updates=125742 level=6 success=0.89 steps/s=75.2
+step=505000/2000000 envs=8 episodes=3256 replay=30000 updates=125992 level=6 success=0.9 steps/s=75.2
+step=506000/2000000 envs=8 episodes=3265 replay=30000 updates=126242 level=6 success=0.89 steps/s=75.1
+step=507000/2000000 envs=8 episodes=3275 replay=30000 updates=126492 level=6 success=0.89 steps/s=75.1
+step=508000/2000000 envs=8 episodes=3285 replay=30000 updates=126742 level=6 success=0.91 steps/s=75.1
+step=509000/2000000 envs=8 episodes=3292 replay=30000 updates=126992 level=6 success=0.91 steps/s=75.1
+step=510000/2000000 envs=8 episodes=3297 replay=30000 updates=127242 level=6 success=0.93 steps/s=75.0
+step=511000/2000000 envs=8 episodes=3302 replay=30000 updates=127492 level=6 success=0.93 steps/s=75.0
+step=512000/2000000 envs=8 episodes=3310 replay=30000 updates=127742 level=6 success=0.92 steps/s=75.0
+step=513000/2000000 envs=8 episodes=3321 replay=30000 updates=127992 level=6 success=0.91 steps/s=75.0
+step=514000/2000000 envs=8 episodes=3328 replay=30000 updates=128242 level=6 success=0.91 steps/s=74.9
+step=515000/2000000 envs=8 episodes=3336 replay=30000 updates=128492 level=6 success=0.91 steps/s=74.9
+step=516000/2000000 envs=8 episodes=3343 replay=30000 updates=128742 level=6 success=0.9 steps/s=74.9
+step=517000/2000000 envs=8 episodes=3351 replay=30000 updates=128992 level=6 success=0.88 steps/s=74.9
+step=518000/2000000 envs=8 episodes=3358 replay=30000 updates=129242 level=6 success=0.88 steps/s=74.8
+step=519000/2000000 envs=8 episodes=3365 replay=30000 updates=129492 level=6 success=0.9 steps/s=74.8
+step=520000/2000000 envs=8 episodes=3375 replay=30000 updates=129742 level=6 success=0.9 steps/s=74.8
+step=521000/2000000 envs=8 episodes=3382 replay=30000 updates=129992 level=6 success=0.89 steps/s=74.8
+step=522000/2000000 envs=8 episodes=3389 replay=30000 updates=130242 level=6 success=0.88 steps/s=74.7
+step=523000/2000000 envs=8 episodes=3393 replay=30000 updates=130492 level=6 success=0.88 steps/s=74.7
+step=524000/2000000 envs=8 episodes=3401 replay=30000 updates=130742 level=6 success=0.88 steps/s=74.7
+step=525000/2000000 envs=8 episodes=3411 replay=30000 updates=130992 level=6 success=0.89 steps/s=74.7
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0525000.pt envs=8 replay=30000
+step=526000/2000000 envs=8 episodes=3418 replay=30000 updates=131242 level=6 success=0.9 steps/s=74.6
+step=527000/2000000 envs=8 episodes=3422 replay=30000 updates=131492 level=6 success=0.9 steps/s=74.6
+step=528000/2000000 envs=8 episodes=3427 replay=30000 updates=131742 level=6 success=0.89 steps/s=74.6
+step=529000/2000000 envs=8 episodes=3433 replay=30000 updates=131992 level=6 success=0.88 steps/s=74.6
+step=530000/2000000 envs=8 episodes=3442 replay=30000 updates=132242 level=6 success=0.88 steps/s=74.6
+step=531000/2000000 envs=8 episodes=3446 replay=30000 updates=132492 level=6 success=0.87 steps/s=74.6
+step=532000/2000000 envs=8 episodes=3455 replay=30000 updates=132742 level=6 success=0.87 steps/s=74.5
+step=533000/2000000 envs=8 episodes=3463 replay=30000 updates=132992 level=6 success=0.88 steps/s=74.5
+step=534000/2000000 envs=8 episodes=3472 replay=30000 updates=133242 level=6 success=0.86 steps/s=74.5
+step=535000/2000000 envs=8 episodes=3485 replay=30000 updates=133492 level=6 success=0.88 steps/s=74.5
+step=536000/2000000 envs=8 episodes=3490 replay=30000 updates=133742 level=6 success=0.88 steps/s=74.5
+step=537000/2000000 envs=8 episodes=3496 replay=30000 updates=133992 level=6 success=0.87 steps/s=74.5
+step=538000/2000000 envs=8 episodes=3501 replay=30000 updates=134242 level=6 success=0.87 steps/s=74.5
+step=539000/2000000 envs=8 episodes=3506 replay=30000 updates=134492 level=6 success=0.87 steps/s=74.5
+step=540000/2000000 envs=8 episodes=3510 replay=30000 updates=134742 level=6 success=0.86 steps/s=74.5
+step=541000/2000000 envs=8 episodes=3520 replay=30000 updates=134992 level=6 success=0.85 steps/s=74.5
+step=542000/2000000 envs=8 episodes=3529 replay=30000 updates=135242 level=6 success=0.86 steps/s=74.5
+step=543000/2000000 envs=8 episodes=3539 replay=30000 updates=135492 level=6 success=0.86 steps/s=74.5
+step=544000/2000000 envs=8 episodes=3548 replay=30000 updates=135742 level=6 success=0.88 steps/s=74.5
+step=545000/2000000 envs=8 episodes=3559 replay=30000 updates=135992 level=6 success=0.88 steps/s=74.5
+step=546000/2000000 envs=8 episodes=3566 replay=30000 updates=136242 level=6 success=0.87 steps/s=74.5
+step=547000/2000000 envs=8 episodes=3574 replay=30000 updates=136492 level=6 success=0.9 steps/s=74.5
+step=548000/2000000 envs=8 episodes=3580 replay=30000 updates=136742 level=6 success=0.9 steps/s=74.5
+step=549000/2000000 envs=8 episodes=3589 replay=30000 updates=136992 level=6 success=0.89 steps/s=74.5
+step=550000/2000000 envs=8 episodes=3596 replay=30000 updates=137242 level=6 success=0.88 steps/s=74.5
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0550000.pt envs=8 replay=30000
+step=551000/2000000 envs=8 episodes=3603 replay=30000 updates=137492 level=6 success=0.89 steps/s=74.4
+step=552000/2000000 envs=8 episodes=3609 replay=30000 updates=137742 level=6 success=0.92 steps/s=74.4
+step=553000/2000000 envs=8 episodes=3616 replay=30000 updates=137992 level=6 success=0.91 steps/s=74.4
+step=554000/2000000 envs=8 episodes=3623 replay=30000 updates=138242 level=6 success=0.9 steps/s=74.4
+step=555000/2000000 envs=8 episodes=3625 replay=30000 updates=138492 level=6 success=0.9 steps/s=74.4
+step=556000/2000000 envs=8 episodes=3631 replay=30000 updates=138742 level=6 success=0.9 steps/s=74.4
+step=557000/2000000 envs=8 episodes=3640 replay=30000 updates=138992 level=6 success=0.89 steps/s=74.4
+step=558000/2000000 envs=8 episodes=3646 replay=30000 updates=139242 level=6 success=0.89 steps/s=74.4
+step=559000/2000000 envs=8 episodes=3654 replay=30000 updates=139492 level=6 success=0.89 steps/s=74.4
+step=560000/2000000 envs=8 episodes=3660 replay=30000 updates=139742 level=6 success=0.89 steps/s=74.4
+step=561000/2000000 envs=8 episodes=3667 replay=30000 updates=139992 level=6 success=0.89 steps/s=74.4
+step=562000/2000000 envs=8 episodes=3675 replay=30000 updates=140242 level=6 success=0.87 steps/s=74.4
+step=563000/2000000 envs=8 episodes=3685 replay=30000 updates=140492 level=6 success=0.87 steps/s=74.4
+step=564000/2000000 envs=8 episodes=3691 replay=30000 updates=140742 level=6 success=0.88 steps/s=74.4
+step=565000/2000000 envs=8 episodes=3699 replay=30000 updates=140992 level=6 success=0.88 steps/s=74.3
+step=566000/2000000 envs=8 episodes=3705 replay=30000 updates=141242 level=6 success=0.88 steps/s=74.3
+step=567000/2000000 envs=8 episodes=3710 replay=30000 updates=141492 level=6 success=0.88 steps/s=74.3
+step=568000/2000000 envs=8 episodes=3718 replay=30000 updates=141742 level=6 success=0.88 steps/s=74.3
+step=569000/2000000 envs=8 episodes=3726 replay=30000 updates=141992 level=6 success=0.89 steps/s=74.3
+step=570000/2000000 envs=8 episodes=3734 replay=30000 updates=142242 level=6 success=0.88 steps/s=74.3
+step=571000/2000000 envs=8 episodes=3741 replay=30000 updates=142492 level=6 success=0.9 steps/s=74.3
+step=572000/2000000 envs=8 episodes=3748 replay=30000 updates=142742 level=6 success=0.9 steps/s=74.3
+step=573000/2000000 envs=8 episodes=3758 replay=30000 updates=142992 level=6 success=0.89 steps/s=74.3
+step=574000/2000000 envs=8 episodes=3764 replay=30000 updates=143242 level=6 success=0.88 steps/s=74.2
+step=575000/2000000 envs=8 episodes=3770 replay=30000 updates=143492 level=6 success=0.89 steps/s=74.2
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0575000.pt envs=8 replay=30000
+step=576000/2000000 envs=8 episodes=3775 replay=30000 updates=143742 level=6 success=0.91 steps/s=74.2
+step=577000/2000000 envs=8 episodes=3786 replay=30000 updates=143992 level=6 success=0.88 steps/s=74.2
+step=578000/2000000 envs=8 episodes=3794 replay=30000 updates=144242 level=6 success=0.89 steps/s=74.1
+step=579000/2000000 envs=8 episodes=3803 replay=30000 updates=144492 level=6 success=0.88 steps/s=74.1
+step=580000/2000000 envs=8 episodes=3812 replay=30000 updates=144742 level=6 success=0.88 steps/s=74.1
+step=581000/2000000 envs=8 episodes=3822 replay=30000 updates=144992 level=6 success=0.9 steps/s=74.1
+step=582000/2000000 envs=8 episodes=3834 replay=30000 updates=145242 level=6 success=0.9 steps/s=74.1
+step=583000/2000000 envs=8 episodes=3841 replay=30000 updates=145492 level=6 success=0.9 steps/s=74.1
+step=584000/2000000 envs=8 episodes=3845 replay=30000 updates=145742 level=6 success=0.91 steps/s=74.1
+step=585000/2000000 envs=8 episodes=3850 replay=30000 updates=145992 level=6 success=0.89 steps/s=74.1
+step=586000/2000000 envs=8 episodes=3858 replay=30000 updates=146242 level=6 success=0.88 steps/s=74.1
+step=587000/2000000 envs=8 episodes=3868 replay=30000 updates=146492 level=6 success=0.89 steps/s=74.1
+step=588000/2000000 envs=8 episodes=3876 replay=30000 updates=146742 level=6 success=0.88 steps/s=74.1
+step=589000/2000000 envs=8 episodes=3885 replay=30000 updates=146992 level=6 success=0.91 steps/s=74.1
+step=590000/2000000 envs=8 episodes=3891 replay=30000 updates=147242 level=6 success=0.89 steps/s=74.1
+step=591000/2000000 envs=8 episodes=3896 replay=30000 updates=147492 level=6 success=0.9 steps/s=74.1
+step=592000/2000000 envs=8 episodes=3901 replay=30000 updates=147742 level=6 success=0.9 steps/s=74.1
+step=593000/2000000 envs=8 episodes=3908 replay=30000 updates=147992 level=6 success=0.88 steps/s=74.1
+step=594000/2000000 envs=8 episodes=3916 replay=30000 updates=148242 level=6 success=0.87 steps/s=74.1
+step=595000/2000000 envs=8 episodes=3923 replay=30000 updates=148492 level=6 success=0.87 steps/s=74.1
+step=596000/2000000 envs=8 episodes=3931 replay=30000 updates=148742 level=6 success=0.88 steps/s=74.1
+step=597000/2000000 envs=8 episodes=3941 replay=30000 updates=148992 level=6 success=0.86 steps/s=74.1
+step=598000/2000000 envs=8 episodes=3948 replay=30000 updates=149242 level=6 success=0.86 steps/s=74.1
+step=599000/2000000 envs=8 episodes=3956 replay=30000 updates=149492 level=6 success=0.88 steps/s=74.1
+step=600000/2000000 envs=8 episodes=3959 replay=30000 updates=149742 level=6 success=0.89 steps/s=74.1
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0600000.pt envs=8 replay=30000
+step=601000/2000000 envs=8 episodes=3964 replay=30000 updates=149992 level=6 success=0.88 steps/s=74.0
+step=602000/2000000 envs=8 episodes=3976 replay=30000 updates=150242 level=6 success=0.86 steps/s=74.0
+step=603000/2000000 envs=8 episodes=3987 replay=30000 updates=150492 level=6 success=0.86 steps/s=74.0
+step=604000/2000000 envs=8 episodes=3997 replay=30000 updates=150742 level=6 success=0.87 steps/s=74.0
+step=605000/2000000 envs=8 episodes=4003 replay=30000 updates=150992 level=6 success=0.88 steps/s=74.0
+step=606000/2000000 envs=8 episodes=4011 replay=30000 updates=151242 level=6 success=0.9 steps/s=74.0
+step=607000/2000000 envs=8 episodes=4015 replay=30000 updates=151492 level=6 success=0.92 steps/s=74.0
+step=608000/2000000 envs=8 episodes=4020 replay=30000 updates=151742 level=6 success=0.89 steps/s=74.0
+step=609000/2000000 envs=8 episodes=4027 replay=30000 updates=151992 level=6 success=0.88 steps/s=73.9
+step=610000/2000000 envs=8 episodes=4032 replay=30000 updates=152242 level=6 success=0.88 steps/s=73.9
+step=611000/2000000 envs=8 episodes=4038 replay=30000 updates=152492 level=6 success=0.88 steps/s=73.9
+step=612000/2000000 envs=8 episodes=4047 replay=30000 updates=152742 level=6 success=0.87 steps/s=73.9
+step=613000/2000000 envs=8 episodes=4052 replay=30000 updates=152992 level=6 success=0.87 steps/s=73.9
+step=614000/2000000 envs=8 episodes=4056 replay=30000 updates=153242 level=6 success=0.86 steps/s=73.9
+step=615000/2000000 envs=8 episodes=4062 replay=30000 updates=153492 level=6 success=0.86 steps/s=73.8
+step=616000/2000000 envs=8 episodes=4075 replay=30000 updates=153742 level=6 success=0.87 steps/s=73.8
+step=617000/2000000 envs=8 episodes=4086 replay=30000 updates=153992 level=6 success=0.88 steps/s=73.8
+step=618000/2000000 envs=8 episodes=4095 replay=30000 updates=154242 level=6 success=0.88 steps/s=73.8
+step=619000/2000000 envs=8 episodes=4103 replay=30000 updates=154492 level=6 success=0.88 steps/s=73.7
+step=620000/2000000 envs=8 episodes=4110 replay=30000 updates=154742 level=6 success=0.88 steps/s=73.7
+step=621000/2000000 envs=8 episodes=4119 replay=30000 updates=154992 level=6 success=0.89 steps/s=73.7
+step=622000/2000000 envs=8 episodes=4127 replay=30000 updates=155242 level=6 success=0.9 steps/s=73.7
+step=623000/2000000 envs=8 episodes=4136 replay=30000 updates=155492 level=6 success=0.9 steps/s=73.7
+step=624000/2000000 envs=8 episodes=4142 replay=30000 updates=155742 level=6 success=0.91 steps/s=73.7
+step=625000/2000000 envs=8 episodes=4145 replay=30000 updates=155992 level=6 success=0.91 steps/s=73.6
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0625000.pt envs=8 replay=30000
+step=626000/2000000 envs=8 episodes=4152 replay=30000 updates=156242 level=6 success=0.91 steps/s=73.6
+step=627000/2000000 envs=8 episodes=4160 replay=30000 updates=156492 level=6 success=0.91 steps/s=73.5
+step=628000/2000000 envs=8 episodes=4170 replay=30000 updates=156742 level=6 success=0.91 steps/s=73.5
+step=629000/2000000 envs=8 episodes=4176 replay=30000 updates=156992 level=6 success=0.92 steps/s=73.5
+step=630000/2000000 envs=8 episodes=4178 replay=30000 updates=157242 level=6 success=0.92 steps/s=73.5
+step=631000/2000000 envs=8 episodes=4184 replay=30000 updates=157492 level=6 success=0.9 steps/s=73.5
+step=632000/2000000 envs=8 episodes=4191 replay=30000 updates=157742 level=6 success=0.88 steps/s=73.5
+step=633000/2000000 envs=8 episodes=4201 replay=30000 updates=157992 level=6 success=0.86 steps/s=73.4
+step=634000/2000000 envs=8 episodes=4210 replay=30000 updates=158242 level=6 success=0.86 steps/s=73.5
+step=635000/2000000 envs=8 episodes=4215 replay=30000 updates=158492 level=6 success=0.87 steps/s=73.5
+step=636000/2000000 envs=8 episodes=4224 replay=30000 updates=158742 level=6 success=0.88 steps/s=73.5
+step=637000/2000000 envs=8 episodes=4232 replay=30000 updates=158992 level=6 success=0.87 steps/s=73.4
+step=638000/2000000 envs=8 episodes=4239 replay=30000 updates=159242 level=6 success=0.88 steps/s=73.4
+step=639000/2000000 envs=8 episodes=4245 replay=30000 updates=159492 level=6 success=0.88 steps/s=73.4
+step=640000/2000000 envs=8 episodes=4251 replay=30000 updates=159742 level=6 success=0.88 steps/s=73.4
+step=641000/2000000 envs=8 episodes=4258 replay=30000 updates=159992 level=6 success=0.87 steps/s=73.4
+step=642000/2000000 envs=8 episodes=4267 replay=30000 updates=160242 level=6 success=0.88 steps/s=73.4
+step=643000/2000000 envs=8 episodes=4276 replay=30000 updates=160492 level=6 success=0.87 steps/s=73.4
+step=644000/2000000 envs=8 episodes=4284 replay=30000 updates=160742 level=6 success=0.88 steps/s=73.4
+step=645000/2000000 envs=8 episodes=4295 replay=30000 updates=160992 level=6 success=0.9 steps/s=73.4
+step=646000/2000000 envs=8 episodes=4301 replay=30000 updates=161242 level=6 success=0.92 steps/s=73.3
+step=647000/2000000 envs=8 episodes=4310 replay=30000 updates=161492 level=6 success=0.9 steps/s=73.3
+step=648000/2000000 envs=8 episodes=4317 replay=30000 updates=161742 level=6 success=0.9 steps/s=73.3
+step=649000/2000000 envs=8 episodes=4325 replay=30000 updates=161992 level=6 success=0.88 steps/s=73.3
+step=650000/2000000 envs=8 episodes=4333 replay=30000 updates=162242 level=6 success=0.88 steps/s=73.3
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0650000.pt envs=8 replay=30000
+step=651000/2000000 envs=8 episodes=4337 replay=30000 updates=162492 level=6 success=0.89 steps/s=73.3
+step=652000/2000000 envs=8 episodes=4344 replay=30000 updates=162742 level=6 success=0.88 steps/s=73.3
+step=653000/2000000 envs=8 episodes=4351 replay=30000 updates=162992 level=6 success=0.88 steps/s=73.3
+step=654000/2000000 envs=8 episodes=4359 replay=30000 updates=163242 level=6 success=0.88 steps/s=73.3
+step=655000/2000000 envs=8 episodes=4368 replay=30000 updates=163492 level=6 success=0.89 steps/s=73.3
+step=656000/2000000 envs=8 episodes=4372 replay=30000 updates=163742 level=6 success=0.88 steps/s=73.3
+step=657000/2000000 envs=8 episodes=4378 replay=30000 updates=163992 level=6 success=0.87 steps/s=73.3
+step=658000/2000000 envs=8 episodes=4379 replay=30000 updates=164242 level=6 success=0.87 steps/s=73.3
+step=659000/2000000 envs=8 episodes=4383 replay=30000 updates=164492 level=6 success=0.85 steps/s=73.3
+step=660000/2000000 envs=8 episodes=4389 replay=30000 updates=164742 level=6 success=0.84 steps/s=73.3
+step=661000/2000000 envs=8 episodes=4395 replay=30000 updates=164992 level=6 success=0.81 steps/s=73.3
+step=662000/2000000 envs=8 episodes=4399 replay=30000 updates=165242 level=6 success=0.81 steps/s=73.3
+step=663000/2000000 envs=8 episodes=4403 replay=30000 updates=165492 level=6 success=0.81 steps/s=73.3
+step=664000/2000000 envs=8 episodes=4414 replay=30000 updates=165742 level=6 success=0.79 steps/s=73.3
+step=665000/2000000 envs=8 episodes=4422 replay=30000 updates=165992 level=6 success=0.78 steps/s=73.3
+step=666000/2000000 envs=8 episodes=4434 replay=30000 updates=166242 level=6 success=0.8 steps/s=73.2
+step=667000/2000000 envs=8 episodes=4442 replay=30000 updates=166492 level=6 success=0.81 steps/s=73.2
+step=668000/2000000 envs=8 episodes=4445 replay=30000 updates=166742 level=6 success=0.81 steps/s=73.2
+step=669000/2000000 envs=8 episodes=4453 replay=30000 updates=166992 level=6 success=0.81 steps/s=73.2
+step=670000/2000000 envs=8 episodes=4457 replay=30000 updates=167242 level=6 success=0.82 steps/s=73.2
+step=671000/2000000 envs=8 episodes=4466 replay=30000 updates=167492 level=6 success=0.8 steps/s=73.2
+step=672000/2000000 envs=8 episodes=4474 replay=30000 updates=167742 level=6 success=0.82 steps/s=73.2
+step=673000/2000000 envs=8 episodes=4482 replay=30000 updates=167992 level=6 success=0.83 steps/s=73.2
+step=674000/2000000 envs=8 episodes=4491 replay=30000 updates=168242 level=6 success=0.87 steps/s=73.2
+step=675000/2000000 envs=8 episodes=4504 replay=30000 updates=168492 level=6 success=0.88 steps/s=73.2
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0675000.pt envs=8 replay=30000
+step=676000/2000000 envs=8 episodes=4511 replay=30000 updates=168742 level=6 success=0.9 steps/s=73.2
+step=677000/2000000 envs=8 episodes=4522 replay=30000 updates=168992 level=6 success=0.93 steps/s=73.2
+step=678000/2000000 envs=8 episodes=4531 replay=30000 updates=169242 level=6 success=0.92 steps/s=73.2
+step=679000/2000000 envs=8 episodes=4540 replay=30000 updates=169492 level=6 success=0.92 steps/s=73.2
+step=680000/2000000 envs=8 episodes=4550 replay=30000 updates=169742 level=6 success=0.92 steps/s=73.2
+step=681000/2000000 envs=8 episodes=4561 replay=30000 updates=169992 level=6 success=0.94 steps/s=73.2
+step=682000/2000000 envs=8 episodes=4567 replay=30000 updates=170242 level=6 success=0.96 steps/s=73.2
+step=683000/2000000 envs=8 episodes=4576 replay=30000 updates=170492 level=6 success=0.95 steps/s=73.2
+step=684000/2000000 envs=8 episodes=4581 replay=30000 updates=170742 level=6 success=0.94 steps/s=73.1
+step=685000/2000000 envs=8 episodes=4589 replay=30000 updates=170992 level=6 success=0.94 steps/s=73.1
+step=686000/2000000 envs=8 episodes=4595 replay=30000 updates=171242 level=6 success=0.95 steps/s=73.1
+step=687000/2000000 envs=8 episodes=4602 replay=30000 updates=171492 level=6 success=0.95 steps/s=73.1
+step=688000/2000000 envs=8 episodes=4609 replay=30000 updates=171742 level=6 success=0.93 steps/s=73.1
+step=689000/2000000 envs=8 episodes=4616 replay=30000 updates=171992 level=6 success=0.91 steps/s=73.1
+step=690000/2000000 envs=8 episodes=4621 replay=30000 updates=172242 level=6 success=0.91 steps/s=73.1
+step=691000/2000000 envs=8 episodes=4625 replay=30000 updates=172492 level=6 success=0.91 steps/s=73.1
+step=692000/2000000 envs=8 episodes=4630 replay=30000 updates=172742 level=6 success=0.91 steps/s=73.1
+step=693000/2000000 envs=8 episodes=4644 replay=30000 updates=172992 level=6 success=0.87 steps/s=73.0
+step=694000/2000000 envs=8 episodes=4657 replay=30000 updates=173242 level=6 success=0.87 steps/s=73.0
+step=695000/2000000 envs=8 episodes=4665 replay=30000 updates=173492 level=6 success=0.87 steps/s=73.0
+step=696000/2000000 envs=8 episodes=4672 replay=30000 updates=173742 level=6 success=0.87 steps/s=73.0
+step=697000/2000000 envs=8 episodes=4679 replay=30000 updates=173992 level=6 success=0.89 steps/s=73.0
+step=698000/2000000 envs=8 episodes=4686 replay=30000 updates=174242 level=6 success=0.86 steps/s=73.0
+step=699000/2000000 envs=8 episodes=4693 replay=30000 updates=174492 level=6 success=0.86 steps/s=73.0
+step=700000/2000000 envs=8 episodes=4700 replay=30000 updates=174742 level=6 success=0.85 steps/s=73.0
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0700000.pt envs=8 replay=30000
+step=701000/2000000 envs=8 episodes=4702 replay=30000 updates=174992 level=6 success=0.85 steps/s=73.0
+step=702000/2000000 envs=8 episodes=4706 replay=30000 updates=175242 level=6 success=0.84 steps/s=73.0
+step=703000/2000000 envs=8 episodes=4714 replay=30000 updates=175492 level=6 success=0.85 steps/s=73.0
+step=704000/2000000 envs=8 episodes=4722 replay=30000 updates=175742 level=6 success=0.83 steps/s=73.0
+step=705000/2000000 envs=8 episodes=4732 replay=30000 updates=175992 level=6 success=0.84 steps/s=73.0
+step=706000/2000000 envs=8 episodes=4739 replay=30000 updates=176242 level=6 success=0.88 steps/s=73.0
+step=707000/2000000 envs=8 episodes=4753 replay=30000 updates=176492 level=6 success=0.87 steps/s=73.0
+step=708000/2000000 envs=8 episodes=4764 replay=30000 updates=176742 level=6 success=0.87 steps/s=72.9
+step=709000/2000000 envs=8 episodes=4771 replay=30000 updates=176992 level=6 success=0.87 steps/s=72.9
+step=710000/2000000 envs=8 episodes=4780 replay=30000 updates=177242 level=6 success=0.87 steps/s=72.9
+step=711000/2000000 envs=8 episodes=4791 replay=30000 updates=177492 level=6 success=0.89 steps/s=72.9
+step=712000/2000000 envs=8 episodes=4796 replay=30000 updates=177742 level=6 success=0.88 steps/s=72.9
+step=713000/2000000 envs=8 episodes=4803 replay=30000 updates=177992 level=6 success=0.89 steps/s=72.9
+step=714000/2000000 envs=8 episodes=4811 replay=30000 updates=178242 level=6 success=0.91 steps/s=72.9
+step=715000/2000000 envs=8 episodes=4822 replay=30000 updates=178492 level=6 success=0.92 steps/s=72.9
+step=716000/2000000 envs=8 episodes=4832 replay=30000 updates=178742 level=6 success=0.92 steps/s=72.9
+step=717000/2000000 envs=8 episodes=4839 replay=30000 updates=178992 level=6 success=0.92 steps/s=72.9
+step=718000/2000000 envs=8 episodes=4846 replay=30000 updates=179242 level=6 success=0.94 steps/s=72.9
+step=719000/2000000 envs=8 episodes=4851 replay=30000 updates=179492 level=6 success=0.93 steps/s=72.9
+step=720000/2000000 envs=8 episodes=4859 replay=30000 updates=179742 level=6 success=0.92 steps/s=72.9
+step=721000/2000000 envs=8 episodes=4867 replay=30000 updates=179992 level=6 success=0.91 steps/s=72.9
+step=722000/2000000 envs=8 episodes=4875 replay=30000 updates=180242 level=6 success=0.9 steps/s=72.9
+step=723000/2000000 envs=8 episodes=4882 replay=30000 updates=180492 level=6 success=0.91 steps/s=72.9
+step=724000/2000000 envs=8 episodes=4892 replay=30000 updates=180742 level=6 success=0.9 steps/s=72.8
+step=725000/2000000 envs=8 episodes=4899 replay=30000 updates=180992 level=6 success=0.91 steps/s=72.8
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0725000.pt envs=8 replay=30000
+step=726000/2000000 envs=8 episodes=4907 replay=30000 updates=181242 level=6 success=0.91 steps/s=72.8
+step=727000/2000000 envs=8 episodes=4918 replay=30000 updates=181492 level=6 success=0.91 steps/s=72.8
+step=728000/2000000 envs=8 episodes=4926 replay=30000 updates=181742 level=6 success=0.91 steps/s=72.8
+step=729000/2000000 envs=8 episodes=4939 replay=30000 updates=181992 level=6 success=0.9 steps/s=72.8
+step=730000/2000000 envs=8 episodes=4944 replay=30000 updates=182242 level=6 success=0.9 steps/s=72.7
+step=731000/2000000 envs=8 episodes=4948 replay=30000 updates=182492 level=6 success=0.9 steps/s=72.7
+step=732000/2000000 envs=8 episodes=4953 replay=30000 updates=182742 level=6 success=0.9 steps/s=72.7
+step=733000/2000000 envs=8 episodes=4959 replay=30000 updates=182992 level=6 success=0.89 steps/s=72.7
+step=734000/2000000 envs=8 episodes=4965 replay=30000 updates=183242 level=6 success=0.89 steps/s=72.7
+step=735000/2000000 envs=8 episodes=4978 replay=30000 updates=183492 level=6 success=0.89 steps/s=72.7
+step=736000/2000000 envs=8 episodes=4990 replay=30000 updates=183742 level=6 success=0.9 steps/s=72.7
+step=737000/2000000 envs=8 episodes=4996 replay=30000 updates=183992 level=6 success=0.9 steps/s=72.7
+step=738000/2000000 envs=8 episodes=5002 replay=30000 updates=184242 level=6 success=0.9 steps/s=72.6
+step=739000/2000000 envs=8 episodes=5008 replay=30000 updates=184492 level=6 success=0.91 steps/s=72.6
+step=740000/2000000 envs=8 episodes=5018 replay=30000 updates=184742 level=6 success=0.88 steps/s=72.6
+step=741000/2000000 envs=8 episodes=5026 replay=30000 updates=184992 level=6 success=0.89 steps/s=72.6
+step=742000/2000000 envs=8 episodes=5033 replay=30000 updates=185242 level=6 success=0.89 steps/s=72.6
+step=743000/2000000 envs=8 episodes=5039 replay=30000 updates=185492 level=6 success=0.9 steps/s=72.6
+step=744000/2000000 envs=8 episodes=5047 replay=30000 updates=185742 level=6 success=0.89 steps/s=72.6
+step=745000/2000000 envs=8 episodes=5055 replay=30000 updates=185992 level=6 success=0.88 steps/s=72.6
+step=746000/2000000 envs=8 episodes=5062 replay=30000 updates=186242 level=6 success=0.9 steps/s=72.6
+step=747000/2000000 envs=8 episodes=5069 replay=30000 updates=186492 level=6 success=0.9 steps/s=72.6
+step=748000/2000000 envs=8 episodes=5076 replay=30000 updates=186742 level=6 success=0.91 steps/s=72.6
+step=749000/2000000 envs=8 episodes=5085 replay=30000 updates=186992 level=6 success=0.9 steps/s=72.6
+step=750000/2000000 envs=8 episodes=5098 replay=30000 updates=187242 level=6 success=0.89 steps/s=72.6
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0750000.pt envs=8 replay=30000
+step=751000/2000000 envs=8 episodes=5105 replay=30000 updates=187492 level=6 success=0.89 steps/s=72.6
+step=752000/2000000 envs=8 episodes=5114 replay=30000 updates=187742 level=6 success=0.9 steps/s=72.6
+step=753000/2000000 envs=8 episodes=5128 replay=30000 updates=187992 level=6 success=0.93 steps/s=72.5
+step=754000/2000000 envs=8 episodes=5138 replay=30000 updates=188242 level=6 success=0.93 steps/s=72.5
+step=755000/2000000 envs=8 episodes=5150 replay=30000 updates=188492 level=6 success=0.94 steps/s=72.5
+step=756000/2000000 envs=8 episodes=5158 replay=30000 updates=188742 level=6 success=0.96 steps/s=72.5
+step=757000/2000000 envs=8 episodes=5169 replay=30000 updates=188992 level=6 success=0.97 steps/s=72.5
+step=758000/2000000 envs=8 episodes=5178 replay=30000 updates=189242 level=6 success=0.97 steps/s=72.5
+step=759000/2000000 envs=8 episodes=5189 replay=30000 updates=189492 level=6 success=0.98 steps/s=72.5
+step=760000/2000000 envs=8 episodes=5199 replay=30000 updates=189742 level=6 success=0.98 steps/s=72.5
+step=761000/2000000 envs=8 episodes=5207 replay=30000 updates=189992 level=6 success=0.98 steps/s=72.4
+step=762000/2000000 envs=8 episodes=5220 replay=30000 updates=190242 level=6 success=0.97 steps/s=72.4
+step=763000/2000000 envs=8 episodes=5237 replay=30000 updates=190492 level=6 success=0.96 steps/s=72.4
+step=764000/2000000 envs=8 episodes=5244 replay=30000 updates=190742 level=6 success=0.96 steps/s=72.4
+step=765000/2000000 envs=8 episodes=5250 replay=30000 updates=190992 level=6 success=0.96 steps/s=72.4
+step=766000/2000000 envs=8 episodes=5254 replay=30000 updates=191242 level=6 success=0.95 steps/s=72.3
+step=767000/2000000 envs=8 episodes=5263 replay=30000 updates=191492 level=6 success=0.93 steps/s=72.3
+step=768000/2000000 envs=8 episodes=5269 replay=30000 updates=191742 level=6 success=0.93 steps/s=72.3
+step=769000/2000000 envs=8 episodes=5283 replay=30000 updates=191992 level=6 success=0.92 steps/s=72.3
+step=770000/2000000 envs=8 episodes=5292 replay=30000 updates=192242 level=6 success=0.93 steps/s=72.3
+step=771000/2000000 envs=8 episodes=5299 replay=30000 updates=192492 level=6 success=0.93 steps/s=72.3
+step=772000/2000000 envs=8 episodes=5309 replay=30000 updates=192742 level=6 success=0.93 steps/s=72.3
+step=773000/2000000 envs=8 episodes=5315 replay=30000 updates=192992 level=6 success=0.92 steps/s=72.3
+step=774000/2000000 envs=8 episodes=5321 replay=30000 updates=193242 level=6 success=0.92 steps/s=72.3
+step=775000/2000000 envs=8 episodes=5327 replay=30000 updates=193492 level=6 success=0.93 steps/s=72.3
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0775000.pt envs=8 replay=30000
+step=776000/2000000 envs=8 episodes=5337 replay=30000 updates=193742 level=6 success=0.89 steps/s=72.2
+step=777000/2000000 envs=8 episodes=5344 replay=30000 updates=193992 level=6 success=0.89 steps/s=72.2
+step=778000/2000000 envs=8 episodes=5353 replay=30000 updates=194242 level=6 success=0.9 steps/s=72.2
+step=779000/2000000 envs=8 episodes=5358 replay=30000 updates=194492 level=6 success=0.89 steps/s=72.2
+step=780000/2000000 envs=8 episodes=5363 replay=30000 updates=194742 level=6 success=0.9 steps/s=72.2
+step=781000/2000000 envs=8 episodes=5369 replay=30000 updates=194992 level=6 success=0.9 steps/s=72.2
+step=782000/2000000 envs=8 episodes=5376 replay=30000 updates=195242 level=6 success=0.9 steps/s=72.2
+step=783000/2000000 envs=8 episodes=5386 replay=30000 updates=195492 level=6 success=0.89 steps/s=72.2
+step=784000/2000000 envs=8 episodes=5398 replay=30000 updates=195742 level=6 success=0.89 steps/s=72.2
+step=785000/2000000 envs=8 episodes=5407 replay=30000 updates=195992 level=6 success=0.89 steps/s=72.2
+step=786000/2000000 envs=8 episodes=5418 replay=30000 updates=196242 level=6 success=0.9 steps/s=72.2
+step=787000/2000000 envs=8 episodes=5427 replay=30000 updates=196492 level=6 success=0.9 steps/s=72.2
+step=788000/2000000 envs=8 episodes=5429 replay=30000 updates=196742 level=6 success=0.89 steps/s=72.2
+step=789000/2000000 envs=8 episodes=5436 replay=30000 updates=196992 level=6 success=0.93 steps/s=72.2
+step=790000/2000000 envs=8 episodes=5441 replay=30000 updates=197242 level=6 success=0.92 steps/s=72.2
+step=791000/2000000 envs=8 episodes=5452 replay=30000 updates=197492 level=6 success=0.89 steps/s=72.2
+step=792000/2000000 envs=8 episodes=5461 replay=30000 updates=197742 level=6 success=0.91 steps/s=72.2
+step=793000/2000000 envs=8 episodes=5473 replay=30000 updates=197992 level=6 success=0.9 steps/s=72.2
+step=794000/2000000 envs=8 episodes=5481 replay=30000 updates=198242 level=6 success=0.92 steps/s=72.2
+step=795000/2000000 envs=8 episodes=5491 replay=30000 updates=198492 level=6 success=0.92 steps/s=72.1
+step=796000/2000000 envs=8 episodes=5497 replay=30000 updates=198742 level=6 success=0.92 steps/s=72.1
+step=797000/2000000 envs=8 episodes=5502 replay=30000 updates=198992 level=6 success=0.91 steps/s=72.1
+step=798000/2000000 envs=8 episodes=5511 replay=30000 updates=199242 level=6 success=0.9 steps/s=72.1
+step=799000/2000000 envs=8 episodes=5516 replay=30000 updates=199492 level=6 success=0.88 steps/s=72.1
+step=800000/2000000 envs=8 episodes=5526 replay=30000 updates=199742 level=6 success=0.89 steps/s=72.1
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0800000.pt envs=8 replay=30000
+step=801000/2000000 envs=8 episodes=5534 replay=30000 updates=199992 level=6 success=0.9 steps/s=72.1
+step=802000/2000000 envs=8 episodes=5541 replay=30000 updates=200242 level=6 success=0.9 steps/s=72.1
+step=803000/2000000 envs=8 episodes=5548 replay=30000 updates=200492 level=6 success=0.9 steps/s=72.1
+step=804000/2000000 envs=8 episodes=5553 replay=30000 updates=200742 level=6 success=0.92 steps/s=72.1
+step=805000/2000000 envs=8 episodes=5556 replay=30000 updates=200992 level=6 success=0.9 steps/s=72.1
+step=806000/2000000 envs=8 episodes=5560 replay=30000 updates=201242 level=6 success=0.89 steps/s=72.1
+step=807000/2000000 envs=8 episodes=5566 replay=30000 updates=201492 level=6 success=0.88 steps/s=72.1
+step=808000/2000000 envs=8 episodes=5578 replay=30000 updates=201742 level=6 success=0.87 steps/s=72.0
+step=809000/2000000 envs=8 episodes=5586 replay=30000 updates=201992 level=6 success=0.87 steps/s=72.0
+step=810000/2000000 envs=8 episodes=5593 replay=30000 updates=202242 level=6 success=0.88 steps/s=72.0
+step=811000/2000000 envs=8 episodes=5600 replay=30000 updates=202492 level=6 success=0.88 steps/s=72.0
+step=812000/2000000 envs=8 episodes=5607 replay=30000 updates=202742 level=6 success=0.88 steps/s=72.0
+step=813000/2000000 envs=8 episodes=5615 replay=30000 updates=202992 level=6 success=0.89 steps/s=72.0
+step=814000/2000000 envs=8 episodes=5619 replay=30000 updates=203242 level=6 success=0.89 steps/s=72.0
+step=815000/2000000 envs=8 episodes=5622 replay=30000 updates=203492 level=6 success=0.88 steps/s=72.0
+step=816000/2000000 envs=8 episodes=5628 replay=30000 updates=203742 level=6 success=0.87 steps/s=72.0
+step=817000/2000000 envs=8 episodes=5638 replay=30000 updates=203992 level=6 success=0.85 steps/s=72.0
+step=818000/2000000 envs=8 episodes=5646 replay=30000 updates=204242 level=6 success=0.85 steps/s=72.0
+step=819000/2000000 envs=8 episodes=5652 replay=30000 updates=204492 level=6 success=0.85 steps/s=72.0
+step=820000/2000000 envs=8 episodes=5661 replay=30000 updates=204742 level=6 success=0.88 steps/s=72.0
+step=821000/2000000 envs=8 episodes=5670 replay=30000 updates=204992 level=6 success=0.89 steps/s=72.0
+step=822000/2000000 envs=8 episodes=5681 replay=30000 updates=205242 level=6 success=0.88 steps/s=71.9
+step=823000/2000000 envs=8 episodes=5687 replay=30000 updates=205492 level=6 success=0.88 steps/s=71.9
+step=824000/2000000 envs=8 episodes=5698 replay=30000 updates=205742 level=6 success=0.88 steps/s=71.9
+step=825000/2000000 envs=8 episodes=5708 replay=30000 updates=205992 level=6 success=0.88 steps/s=71.9
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0825000.pt envs=8 replay=30000
+step=826000/2000000 envs=8 episodes=5711 replay=30000 updates=206242 level=6 success=0.89 steps/s=71.9
+step=827000/2000000 envs=8 episodes=5712 replay=30000 updates=206492 level=6 success=0.88 steps/s=71.9
+step=828000/2000000 envs=8 episodes=5712 replay=30000 updates=206742 level=6 success=0.88 steps/s=71.9
+step=829000/2000000 envs=8 episodes=5717 replay=30000 updates=206992 level=6 success=0.85 steps/s=71.9
+step=830000/2000000 envs=8 episodes=5726 replay=30000 updates=207242 level=6 success=0.83 steps/s=71.9
+step=831000/2000000 envs=8 episodes=5732 replay=30000 updates=207492 level=6 success=0.84 steps/s=71.9
+step=832000/2000000 envs=8 episodes=5741 replay=30000 updates=207742 level=6 success=0.87 steps/s=71.8
+step=833000/2000000 envs=8 episodes=5747 replay=30000 updates=207992 level=6 success=0.85 steps/s=71.8
+step=834000/2000000 envs=8 episodes=5754 replay=30000 updates=208242 level=6 success=0.84 steps/s=71.8
+step=835000/2000000 envs=8 episodes=5763 replay=30000 updates=208492 level=6 success=0.83 steps/s=71.8
+step=836000/2000000 envs=8 episodes=5771 replay=30000 updates=208742 level=6 success=0.84 steps/s=71.8
+step=837000/2000000 envs=8 episodes=5777 replay=30000 updates=208992 level=6 success=0.84 steps/s=71.8
+step=838000/2000000 envs=8 episodes=5784 replay=30000 updates=209242 level=6 success=0.84 steps/s=71.8
+step=839000/2000000 envs=8 episodes=5786 replay=30000 updates=209492 level=6 success=0.84 steps/s=71.8
+step=840000/2000000 envs=8 episodes=5790 replay=30000 updates=209742 level=6 success=0.83 steps/s=71.8
+step=841000/2000000 envs=8 episodes=5795 replay=30000 updates=209992 level=6 success=0.81 steps/s=71.8
+step=842000/2000000 envs=8 episodes=5801 replay=30000 updates=210242 level=6 success=0.79 steps/s=71.8
+step=843000/2000000 envs=8 episodes=5812 replay=30000 updates=210492 level=6 success=0.8 steps/s=71.8
+step=844000/2000000 envs=8 episodes=5821 replay=30000 updates=210742 level=6 success=0.84 steps/s=71.8
+step=845000/2000000 envs=8 episodes=5828 replay=30000 updates=210992 level=6 success=0.85 steps/s=71.8
+step=846000/2000000 envs=8 episodes=5836 replay=30000 updates=211242 level=6 success=0.86 steps/s=71.8
+step=847000/2000000 envs=8 episodes=5843 replay=30000 updates=211492 level=6 success=0.86 steps/s=71.8
+step=848000/2000000 envs=8 episodes=5850 replay=30000 updates=211742 level=6 success=0.87 steps/s=71.8
+step=849000/2000000 envs=8 episodes=5858 replay=30000 updates=211992 level=6 success=0.87 steps/s=71.8
+step=850000/2000000 envs=8 episodes=5870 replay=30000 updates=212242 level=6 success=0.86 steps/s=71.8
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0850000.pt envs=8 replay=30000
+step=851000/2000000 envs=8 episodes=5878 replay=30000 updates=212492 level=6 success=0.87 steps/s=71.8
+step=852000/2000000 envs=8 episodes=5889 replay=30000 updates=212742 level=6 success=0.88 steps/s=71.8
+step=853000/2000000 envs=8 episodes=5902 replay=30000 updates=212992 level=6 success=0.91 steps/s=71.8
+step=854000/2000000 envs=8 episodes=5912 replay=30000 updates=213242 level=6 success=0.91 steps/s=71.8
+step=855000/2000000 envs=8 episodes=5920 replay=30000 updates=213492 level=6 success=0.93 steps/s=71.8
+step=856000/2000000 envs=8 episodes=5924 replay=30000 updates=213742 level=6 success=0.93 steps/s=71.8
+step=857000/2000000 envs=8 episodes=5932 replay=30000 updates=213992 level=6 success=0.91 steps/s=71.8
+step=858000/2000000 envs=8 episodes=5936 replay=30000 updates=214242 level=6 success=0.9 steps/s=71.8
+step=859000/2000000 envs=8 episodes=5943 replay=30000 updates=214492 level=6 success=0.89 steps/s=71.8
+step=860000/2000000 envs=8 episodes=5951 replay=30000 updates=214742 level=6 success=0.9 steps/s=71.8
+step=861000/2000000 envs=8 episodes=5966 replay=30000 updates=214992 level=6 success=0.9 steps/s=71.8
+step=862000/2000000 envs=8 episodes=5975 replay=30000 updates=215242 level=6 success=0.9 steps/s=71.8
+step=863000/2000000 envs=8 episodes=5984 replay=30000 updates=215492 level=6 success=0.91 steps/s=71.8
+step=864000/2000000 envs=8 episodes=5996 replay=30000 updates=215742 level=6 success=0.92 steps/s=71.8
+step=865000/2000000 envs=8 episodes=6004 replay=30000 updates=215992 level=6 success=0.92 steps/s=71.8
+step=866000/2000000 envs=8 episodes=6009 replay=30000 updates=216242 level=6 success=0.92 steps/s=71.8
+step=867000/2000000 envs=8 episodes=6019 replay=30000 updates=216492 level=6 success=0.91 steps/s=71.7
+step=868000/2000000 envs=8 episodes=6032 replay=30000 updates=216742 level=6 success=0.92 steps/s=71.7
+step=869000/2000000 envs=8 episodes=6041 replay=30000 updates=216992 level=6 success=0.93 steps/s=71.7
+step=870000/2000000 envs=8 episodes=6051 replay=30000 updates=217242 level=6 success=0.94 steps/s=71.7
+step=871000/2000000 envs=8 episodes=6058 replay=30000 updates=217492 level=6 success=0.93 steps/s=71.7
+step=872000/2000000 envs=8 episodes=6067 replay=30000 updates=217742 level=6 success=0.92 steps/s=71.7
+step=873000/2000000 envs=8 episodes=6072 replay=30000 updates=217992 level=6 success=0.93 steps/s=71.7
+step=874000/2000000 envs=8 episodes=6078 replay=30000 updates=218242 level=6 success=0.93 steps/s=71.7
+step=875000/2000000 envs=8 episodes=6086 replay=30000 updates=218492 level=6 success=0.92 steps/s=71.6
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0875000.pt envs=8 replay=30000
+step=876000/2000000 envs=8 episodes=6094 replay=30000 updates=218742 level=6 success=0.9 steps/s=71.6
+step=877000/2000000 envs=8 episodes=6101 replay=30000 updates=218992 level=6 success=0.9 steps/s=71.6
+step=878000/2000000 envs=8 episodes=6103 replay=30000 updates=219242 level=6 success=0.91 steps/s=71.6
+step=879000/2000000 envs=8 episodes=6112 replay=30000 updates=219492 level=6 success=0.89 steps/s=71.6
+step=880000/2000000 envs=8 episodes=6120 replay=30000 updates=219742 level=6 success=0.9 steps/s=71.6
+step=881000/2000000 envs=8 episodes=6134 replay=30000 updates=219992 level=6 success=0.89 steps/s=71.6
+step=882000/2000000 envs=8 episodes=6144 replay=30000 updates=220242 level=6 success=0.89 steps/s=71.6
+step=883000/2000000 envs=8 episodes=6153 replay=30000 updates=220492 level=6 success=0.89 steps/s=71.6
+step=884000/2000000 envs=8 episodes=6158 replay=30000 updates=220742 level=6 success=0.9 steps/s=71.6
+step=885000/2000000 envs=8 episodes=6166 replay=30000 updates=220992 level=6 success=0.9 steps/s=71.5
+step=886000/2000000 envs=8 episodes=6173 replay=30000 updates=221242 level=6 success=0.89 steps/s=71.5
+step=887000/2000000 envs=8 episodes=6183 replay=30000 updates=221492 level=6 success=0.88 steps/s=71.5
+step=888000/2000000 envs=8 episodes=6191 replay=30000 updates=221742 level=6 success=0.9 steps/s=71.5
+step=889000/2000000 envs=8 episodes=6199 replay=30000 updates=221992 level=6 success=0.9 steps/s=71.5
+step=890000/2000000 envs=8 episodes=6210 replay=30000 updates=222242 level=6 success=0.91 steps/s=71.5
+step=891000/2000000 envs=8 episodes=6214 replay=30000 updates=222492 level=6 success=0.91 steps/s=71.5
+step=892000/2000000 envs=8 episodes=6224 replay=30000 updates=222742 level=6 success=0.91 steps/s=71.5
+step=893000/2000000 envs=8 episodes=6233 replay=30000 updates=222992 level=6 success=0.92 steps/s=71.5
+step=894000/2000000 envs=8 episodes=6241 replay=30000 updates=223242 level=6 success=0.9 steps/s=71.5
+step=895000/2000000 envs=8 episodes=6250 replay=30000 updates=223492 level=6 success=0.9 steps/s=71.5
+step=896000/2000000 envs=8 episodes=6259 replay=30000 updates=223742 level=6 success=0.9 steps/s=71.5
+step=897000/2000000 envs=8 episodes=6265 replay=30000 updates=223992 level=6 success=0.89 steps/s=71.5
+step=898000/2000000 envs=8 episodes=6275 replay=30000 updates=224242 level=6 success=0.92 steps/s=71.4
+step=899000/2000000 envs=8 episodes=6280 replay=30000 updates=224492 level=6 success=0.92 steps/s=71.4
+step=900000/2000000 envs=8 episodes=6289 replay=30000 updates=224742 level=6 success=0.9 steps/s=71.4
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0900000.pt envs=8 replay=30000
+step=901000/2000000 envs=8 episodes=6298 replay=30000 updates=224992 level=6 success=0.91 steps/s=71.4
+step=902000/2000000 envs=8 episodes=6307 replay=30000 updates=225242 level=6 success=0.91 steps/s=71.4
+step=903000/2000000 envs=8 episodes=6314 replay=30000 updates=225492 level=6 success=0.91 steps/s=71.4
+step=904000/2000000 envs=8 episodes=6322 replay=30000 updates=225742 level=6 success=0.91 steps/s=71.4
+step=905000/2000000 envs=8 episodes=6330 replay=30000 updates=225992 level=6 success=0.9 steps/s=71.4
+step=906000/2000000 envs=8 episodes=6334 replay=30000 updates=226242 level=6 success=0.9 steps/s=71.4
+step=907000/2000000 envs=8 episodes=6337 replay=30000 updates=226492 level=6 success=0.9 steps/s=71.4
+step=908000/2000000 envs=8 episodes=6340 replay=30000 updates=226742 level=6 success=0.9 steps/s=71.4
+step=909000/2000000 envs=8 episodes=6344 replay=30000 updates=226992 level=6 success=0.89 steps/s=71.4
+step=910000/2000000 envs=8 episodes=6353 replay=30000 updates=227242 level=6 success=0.88 steps/s=71.4
+step=911000/2000000 envs=8 episodes=6364 replay=30000 updates=227492 level=6 success=0.86 steps/s=71.4
+step=912000/2000000 envs=8 episodes=6373 replay=30000 updates=227742 level=6 success=0.86 steps/s=71.4
+step=913000/2000000 envs=8 episodes=6380 replay=30000 updates=227992 level=6 success=0.87 steps/s=71.4
+step=914000/2000000 envs=8 episodes=6388 replay=30000 updates=228242 level=6 success=0.89 steps/s=71.4
+step=915000/2000000 envs=8 episodes=6401 replay=30000 updates=228492 level=6 success=0.87 steps/s=71.4
+step=916000/2000000 envs=8 episodes=6410 replay=30000 updates=228742 level=6 success=0.88 steps/s=71.4
+step=917000/2000000 envs=8 episodes=6419 replay=30000 updates=228992 level=6 success=0.89 steps/s=71.4
+step=918000/2000000 envs=8 episodes=6425 replay=30000 updates=229242 level=6 success=0.89 steps/s=71.4
+step=919000/2000000 envs=8 episodes=6432 replay=30000 updates=229492 level=6 success=0.88 steps/s=71.4
+step=920000/2000000 envs=8 episodes=6441 replay=30000 updates=229742 level=6 success=0.89 steps/s=71.3
+step=921000/2000000 envs=8 episodes=6451 replay=30000 updates=229992 level=6 success=0.91 steps/s=71.3
+step=922000/2000000 envs=8 episodes=6458 replay=30000 updates=230242 level=6 success=0.94 steps/s=71.3
+step=923000/2000000 envs=8 episodes=6465 replay=30000 updates=230492 level=6 success=0.93 steps/s=71.3
+step=924000/2000000 envs=8 episodes=6470 replay=30000 updates=230742 level=6 success=0.93 steps/s=71.3
+step=925000/2000000 envs=8 episodes=6478 replay=30000 updates=230992 level=6 success=0.9 steps/s=71.3
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0925000.pt envs=8 replay=30000
+step=926000/2000000 envs=8 episodes=6485 replay=30000 updates=231242 level=6 success=0.9 steps/s=71.3
+step=927000/2000000 envs=8 episodes=6494 replay=30000 updates=231492 level=6 success=0.9 steps/s=71.3
+step=928000/2000000 envs=8 episodes=6507 replay=30000 updates=231742 level=6 success=0.89 steps/s=71.3
+step=929000/2000000 envs=8 episodes=6521 replay=30000 updates=231992 level=6 success=0.89 steps/s=71.3
+step=930000/2000000 envs=8 episodes=6529 replay=30000 updates=232242 level=6 success=0.9 steps/s=71.3
+step=931000/2000000 envs=8 episodes=6537 replay=30000 updates=232492 level=6 success=0.92 steps/s=71.3
+step=932000/2000000 envs=8 episodes=6547 replay=30000 updates=232742 level=6 success=0.92 steps/s=71.3
+step=933000/2000000 envs=8 episodes=6557 replay=30000 updates=232992 level=6 success=0.92 steps/s=71.3
+step=934000/2000000 envs=8 episodes=6566 replay=30000 updates=233242 level=6 success=0.93 steps/s=71.3
+step=935000/2000000 envs=8 episodes=6574 replay=30000 updates=233492 level=6 success=0.94 steps/s=71.3
+step=936000/2000000 envs=8 episodes=6583 replay=30000 updates=233742 level=6 success=0.96 steps/s=71.3
+step=937000/2000000 envs=8 episodes=6594 replay=30000 updates=233992 level=6 success=0.96 steps/s=71.3
+step=938000/2000000 envs=8 episodes=6604 replay=30000 updates=234242 level=6 success=0.96 steps/s=71.3
+step=939000/2000000 envs=8 episodes=6611 replay=30000 updates=234492 level=6 success=0.96 steps/s=71.3
+step=940000/2000000 envs=8 episodes=6618 replay=30000 updates=234742 level=6 success=0.96 steps/s=71.2
+step=941000/2000000 envs=8 episodes=6627 replay=30000 updates=234992 level=6 success=0.95 steps/s=71.2
+step=942000/2000000 envs=8 episodes=6634 replay=30000 updates=235242 level=6 success=0.93 steps/s=71.2
+step=943000/2000000 envs=8 episodes=6643 replay=30000 updates=235492 level=6 success=0.93 steps/s=71.2
+step=944000/2000000 envs=8 episodes=6650 replay=30000 updates=235742 level=6 success=0.93 steps/s=71.2
+step=945000/2000000 envs=8 episodes=6663 replay=30000 updates=235992 level=6 success=0.93 steps/s=71.2
+step=946000/2000000 envs=8 episodes=6671 replay=30000 updates=236242 level=6 success=0.92 steps/s=71.2
+step=947000/2000000 envs=8 episodes=6680 replay=30000 updates=236492 level=6 success=0.91 steps/s=71.2
+step=948000/2000000 envs=8 episodes=6691 replay=30000 updates=236742 level=6 success=0.93 steps/s=71.2
+step=949000/2000000 envs=8 episodes=6700 replay=30000 updates=236992 level=6 success=0.93 steps/s=71.2
+step=950000/2000000 envs=8 episodes=6708 replay=30000 updates=237242 level=6 success=0.93 steps/s=71.1
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0950000.pt envs=8 replay=30000
+step=951000/2000000 envs=8 episodes=6715 replay=30000 updates=237492 level=6 success=0.93 steps/s=71.1
+step=952000/2000000 envs=8 episodes=6721 replay=30000 updates=237742 level=6 success=0.93 steps/s=71.1
+step=953000/2000000 envs=8 episodes=6729 replay=30000 updates=237992 level=6 success=0.93 steps/s=71.1
+step=954000/2000000 envs=8 episodes=6743 replay=30000 updates=238242 level=6 success=0.92 steps/s=71.1
+step=955000/2000000 envs=8 episodes=6752 replay=30000 updates=238492 level=6 success=0.92 steps/s=71.1
+step=956000/2000000 envs=8 episodes=6760 replay=30000 updates=238742 level=6 success=0.92 steps/s=71.1
+step=957000/2000000 envs=8 episodes=6768 replay=30000 updates=238992 level=6 success=0.94 steps/s=71.1
+step=958000/2000000 envs=8 episodes=6780 replay=30000 updates=239242 level=6 success=0.93 steps/s=71.1
+step=959000/2000000 envs=8 episodes=6789 replay=30000 updates=239492 level=6 success=0.93 steps/s=71.1
+step=960000/2000000 envs=8 episodes=6797 replay=30000 updates=239742 level=6 success=0.93 steps/s=71.1
+step=961000/2000000 envs=8 episodes=6806 replay=30000 updates=239992 level=6 success=0.94 steps/s=71.0
+step=962000/2000000 envs=8 episodes=6815 replay=30000 updates=240242 level=6 success=0.94 steps/s=71.0
+step=963000/2000000 envs=8 episodes=6825 replay=30000 updates=240492 level=6 success=0.94 steps/s=71.0
+step=964000/2000000 envs=8 episodes=6835 replay=30000 updates=240742 level=6 success=0.96 steps/s=71.0
+step=965000/2000000 envs=8 episodes=6839 replay=30000 updates=240992 level=6 success=0.96 steps/s=71.0
+step=966000/2000000 envs=8 episodes=6847 replay=30000 updates=241242 level=6 success=0.95 steps/s=71.0
+step=967000/2000000 envs=8 episodes=6858 replay=30000 updates=241492 level=6 success=0.93 steps/s=71.0
+step=968000/2000000 envs=8 episodes=6863 replay=30000 updates=241742 level=6 success=0.92 steps/s=71.0
+step=969000/2000000 envs=8 episodes=6870 replay=30000 updates=241992 level=6 success=0.92 steps/s=71.0
+step=970000/2000000 envs=8 episodes=6876 replay=30000 updates=242242 level=6 success=0.92 steps/s=71.0
+step=971000/2000000 envs=8 episodes=6884 replay=30000 updates=242492 level=6 success=0.9 steps/s=70.9
+step=972000/2000000 envs=8 episodes=6900 replay=30000 updates=242742 level=6 success=0.89 steps/s=70.9
+step=973000/2000000 envs=8 episodes=6911 replay=30000 updates=242992 level=6 success=0.89 steps/s=70.9
+step=974000/2000000 envs=8 episodes=6923 replay=30000 updates=243242 level=6 success=0.9 steps/s=70.9
+step=975000/2000000 envs=8 episodes=6933 replay=30000 updates=243492 level=6 success=0.91 steps/s=70.9
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_0975000.pt envs=8 replay=30000
+step=976000/2000000 envs=8 episodes=6943 replay=30000 updates=243742 level=6 success=0.91 steps/s=70.9
+step=977000/2000000 envs=8 episodes=6953 replay=30000 updates=243992 level=6 success=0.91 steps/s=70.9
+step=978000/2000000 envs=8 episodes=6963 replay=30000 updates=244242 level=6 success=0.93 steps/s=70.8
+step=979000/2000000 envs=8 episodes=6971 replay=30000 updates=244492 level=6 success=0.93 steps/s=70.8
+step=980000/2000000 envs=8 episodes=6978 replay=30000 updates=244742 level=6 success=0.94 steps/s=70.8
+step=981000/2000000 envs=8 episodes=6983 replay=30000 updates=244992 level=6 success=0.95 steps/s=70.8
+step=982000/2000000 envs=8 episodes=6993 replay=30000 updates=245242 level=6 success=0.95 steps/s=70.8
+step=983000/2000000 envs=8 episodes=6999 replay=30000 updates=245492 level=6 success=0.95 steps/s=70.8
+step=984000/2000000 envs=8 episodes=7007 replay=30000 updates=245742 level=6 success=0.94 steps/s=70.8
+step=985000/2000000 envs=8 episodes=7015 replay=30000 updates=245992 level=6 success=0.92 steps/s=70.8
+step=986000/2000000 envs=8 episodes=7024 replay=30000 updates=246242 level=6 success=0.92 steps/s=70.8
+step=987000/2000000 envs=8 episodes=7029 replay=30000 updates=246492 level=6 success=0.91 steps/s=70.8
+step=988000/2000000 envs=8 episodes=7038 replay=30000 updates=246742 level=6 success=0.91 steps/s=70.8
+step=989000/2000000 envs=8 episodes=7046 replay=30000 updates=246992 level=6 success=0.91 steps/s=70.7
+step=990000/2000000 envs=8 episodes=7054 replay=30000 updates=247242 level=6 success=0.9 steps/s=70.7
+step=991000/2000000 envs=8 episodes=7062 replay=30000 updates=247492 level=6 success=0.9 steps/s=70.7
+step=992000/2000000 envs=8 episodes=7069 replay=30000 updates=247742 level=6 success=0.89 steps/s=70.7
+step=993000/2000000 envs=8 episodes=7080 replay=30000 updates=247992 level=6 success=0.89 steps/s=70.7
+step=994000/2000000 envs=8 episodes=7085 replay=30000 updates=248242 level=6 success=0.89 steps/s=70.7
+step=995000/2000000 envs=8 episodes=7089 replay=30000 updates=248492 level=6 success=0.88 steps/s=70.7
+step=996000/2000000 envs=8 episodes=7092 replay=30000 updates=248742 level=6 success=0.88 steps/s=70.7
+step=997000/2000000 envs=8 episodes=7098 replay=30000 updates=248992 level=6 success=0.87 steps/s=70.7
+step=998000/2000000 envs=8 episodes=7110 replay=30000 updates=249242 level=6 success=0.86 steps/s=70.7
+step=999000/2000000 envs=8 episodes=7121 replay=30000 updates=249492 level=6 success=0.87 steps/s=70.7
+step=1000000/2000000 envs=8 episodes=7127 replay=30000 updates=249742 level=6 success=0.88 steps/s=70.7
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_1000000.pt envs=8 replay=30000
+step=1001000/2000000 envs=8 episodes=7133 replay=30000 updates=249992 level=6 success=0.88 steps/s=70.7
+step=1002000/2000000 envs=8 episodes=7141 replay=30000 updates=250242 level=6 success=0.87 steps/s=70.7
+step=1003000/2000000 envs=8 episodes=7148 replay=30000 updates=250492 level=6 success=0.87 steps/s=70.7
+step=1004000/2000000 envs=8 episodes=7153 replay=30000 updates=250742 level=6 success=0.87 steps/s=70.7
+step=1005000/2000000 envs=8 episodes=7162 replay=30000 updates=250992 level=6 success=0.86 steps/s=70.7
+step=1006000/2000000 envs=8 episodes=7168 replay=30000 updates=251242 level=6 success=0.86 steps/s=70.7
+step=1007000/2000000 envs=8 episodes=7174 replay=30000 updates=251492 level=6 success=0.86 steps/s=70.7
+step=1008000/2000000 envs=8 episodes=7181 replay=30000 updates=251742 level=6 success=0.86 steps/s=70.7
+step=1009000/2000000 envs=8 episodes=7192 replay=30000 updates=251992 level=6 success=0.86 steps/s=70.7
+step=1010000/2000000 envs=8 episodes=7198 replay=30000 updates=252242 level=6 success=0.88 steps/s=70.7
+step=1011000/2000000 envs=8 episodes=7205 replay=30000 updates=252492 level=6 success=0.88 steps/s=70.7
+step=1012000/2000000 envs=8 episodes=7212 replay=30000 updates=252742 level=6 success=0.88 steps/s=70.7
+step=1013000/2000000 envs=8 episodes=7216 replay=30000 updates=252992 level=6 success=0.89 steps/s=70.7
+step=1014000/2000000 envs=8 episodes=7228 replay=30000 updates=253242 level=6 success=0.86 steps/s=70.7
+step=1015000/2000000 envs=8 episodes=7234 replay=30000 updates=253492 level=6 success=0.86 steps/s=70.7
+step=1016000/2000000 envs=8 episodes=7243 replay=30000 updates=253742 level=6 success=0.87 steps/s=70.7
+step=1017000/2000000 envs=8 episodes=7255 replay=30000 updates=253992 level=6 success=0.89 steps/s=70.7
+step=1018000/2000000 envs=8 episodes=7262 replay=30000 updates=254242 level=6 success=0.88 steps/s=70.7
+step=1019000/2000000 envs=8 episodes=7268 replay=30000 updates=254492 level=6 success=0.88 steps/s=70.7
+step=1020000/2000000 envs=8 episodes=7273 replay=30000 updates=254742 level=6 success=0.89 steps/s=70.7
+step=1021000/2000000 envs=8 episodes=7282 replay=30000 updates=254992 level=6 success=0.88 steps/s=70.7
+step=1022000/2000000 envs=8 episodes=7291 replay=30000 updates=255242 level=6 success=0.9 steps/s=70.7
+step=1023000/2000000 envs=8 episodes=7302 replay=30000 updates=255492 level=6 success=0.91 steps/s=70.7
+step=1024000/2000000 envs=8 episodes=7311 replay=30000 updates=255742 level=6 success=0.9 steps/s=70.7
+step=1025000/2000000 envs=8 episodes=7325 replay=30000 updates=255992 level=6 success=0.93 steps/s=70.7
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_1025000.pt envs=8 replay=30000
+step=1026000/2000000 envs=8 episodes=7331 replay=30000 updates=256242 level=6 success=0.93 steps/s=70.7
+step=1027000/2000000 envs=8 episodes=7339 replay=30000 updates=256492 level=6 success=0.93 steps/s=70.7
+step=1028000/2000000 envs=8 episodes=7345 replay=30000 updates=256742 level=6 success=0.93 steps/s=70.7
+step=1029000/2000000 envs=8 episodes=7354 replay=30000 updates=256992 level=6 success=0.91 steps/s=70.7
+step=1030000/2000000 envs=8 episodes=7364 replay=30000 updates=257242 level=6 success=0.92 steps/s=70.7
+step=1031000/2000000 envs=8 episodes=7374 replay=30000 updates=257492 level=6 success=0.91 steps/s=70.7
+step=1032000/2000000 envs=8 episodes=7385 replay=30000 updates=257742 level=6 success=0.91 steps/s=70.7
+step=1033000/2000000 envs=8 episodes=7400 replay=30000 updates=257992 level=6 success=0.92 steps/s=70.7
+step=1034000/2000000 envs=8 episodes=7411 replay=30000 updates=258242 level=6 success=0.93 steps/s=70.7
+step=1035000/2000000 envs=8 episodes=7422 replay=30000 updates=258492 level=6 success=0.93 steps/s=70.7
+step=1036000/2000000 envs=8 episodes=7427 replay=30000 updates=258742 level=6 success=0.93 steps/s=70.7
+step=1037000/2000000 envs=8 episodes=7433 replay=30000 updates=258992 level=6 success=0.93 steps/s=70.7
+step=1038000/2000000 envs=8 episodes=7437 replay=30000 updates=259242 level=6 success=0.94 steps/s=70.7
+step=1039000/2000000 envs=8 episodes=7448 replay=30000 updates=259492 level=6 success=0.92 steps/s=70.7
+step=1040000/2000000 envs=8 episodes=7457 replay=30000 updates=259742 level=6 success=0.94 steps/s=70.6
+step=1041000/2000000 envs=8 episodes=7466 replay=30000 updates=259992 level=6 success=0.93 steps/s=70.6
+step=1042000/2000000 envs=8 episodes=7473 replay=30000 updates=260242 level=6 success=0.94 steps/s=70.6
+step=1043000/2000000 envs=8 episodes=7480 replay=30000 updates=260492 level=6 success=0.93 steps/s=70.6
+step=1044000/2000000 envs=8 episodes=7490 replay=30000 updates=260742 level=6 success=0.93 steps/s=70.6
+step=1045000/2000000 envs=8 episodes=7496 replay=30000 updates=260992 level=6 success=0.93 steps/s=70.6
+step=1046000/2000000 envs=8 episodes=7501 replay=30000 updates=261242 level=6 success=0.93 steps/s=70.6
+step=1047000/2000000 envs=8 episodes=7508 replay=30000 updates=261492 level=6 success=0.92 steps/s=70.6
+step=1048000/2000000 envs=8 episodes=7517 replay=30000 updates=261742 level=6 success=0.89 steps/s=70.6
+step=1049000/2000000 envs=8 episodes=7527 replay=30000 updates=261992 level=6 success=0.88 steps/s=70.6
+step=1050000/2000000 envs=8 episodes=7531 replay=30000 updates=262242 level=6 success=0.88 steps/s=70.6
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_1050000.pt envs=8 replay=30000
+step=1051000/2000000 envs=8 episodes=7535 replay=30000 updates=262492 level=6 success=0.88 steps/s=70.6
+step=1052000/2000000 envs=8 episodes=7538 replay=30000 updates=262742 level=6 success=0.87 steps/s=70.6
+step=1053000/2000000 envs=8 episodes=7546 replay=30000 updates=262992 level=6 success=0.86 steps/s=70.6
+step=1054000/2000000 envs=8 episodes=7557 replay=30000 updates=263242 level=6 success=0.85 steps/s=70.6
+step=1055000/2000000 envs=8 episodes=7562 replay=30000 updates=263492 level=6 success=0.86 steps/s=70.6
+step=1056000/2000000 envs=8 episodes=7569 replay=30000 updates=263742 level=6 success=0.85 steps/s=70.6
+step=1057000/2000000 envs=8 episodes=7575 replay=30000 updates=263992 level=6 success=0.85 steps/s=70.6
+step=1058000/2000000 envs=8 episodes=7585 replay=30000 updates=264242 level=6 success=0.85 steps/s=70.6
+step=1059000/2000000 envs=8 episodes=7596 replay=30000 updates=264492 level=6 success=0.85 steps/s=70.6
+step=1060000/2000000 envs=8 episodes=7609 replay=30000 updates=264742 level=6 success=0.85 steps/s=70.6
+step=1061000/2000000 envs=8 episodes=7617 replay=30000 updates=264992 level=6 success=0.88 steps/s=70.6
+step=1062000/2000000 envs=8 episodes=7624 replay=30000 updates=265242 level=6 success=0.88 steps/s=70.6
+step=1063000/2000000 envs=8 episodes=7630 replay=30000 updates=265492 level=6 success=0.89 steps/s=70.6
+step=1064000/2000000 envs=8 episodes=7636 replay=30000 updates=265742 level=6 success=0.88 steps/s=70.6
+step=1065000/2000000 envs=8 episodes=7644 replay=30000 updates=265992 level=6 success=0.91 steps/s=70.6
+step=1066000/2000000 envs=8 episodes=7650 replay=30000 updates=266242 level=6 success=0.91 steps/s=70.6
+step=1067000/2000000 envs=8 episodes=7655 replay=30000 updates=266492 level=6 success=0.9 steps/s=70.6
+step=1068000/2000000 envs=8 episodes=7661 replay=30000 updates=266742 level=6 success=0.9 steps/s=70.6
+step=1069000/2000000 envs=8 episodes=7670 replay=30000 updates=266992 level=6 success=0.9 steps/s=70.6
+step=1070000/2000000 envs=8 episodes=7680 replay=30000 updates=267242 level=6 success=0.89 steps/s=70.6
+step=1071000/2000000 envs=8 episodes=7690 replay=30000 updates=267492 level=6 success=0.91 steps/s=70.6
+step=1072000/2000000 envs=8 episodes=7699 replay=30000 updates=267742 level=6 success=0.91 steps/s=70.6
+step=1073000/2000000 envs=8 episodes=7708 replay=30000 updates=267992 level=6 success=0.92 steps/s=70.6
+step=1074000/2000000 envs=8 episodes=7716 replay=30000 updates=268242 level=6 success=0.91 steps/s=70.6
+step=1075000/2000000 envs=8 episodes=7725 replay=30000 updates=268492 level=6 success=0.9 steps/s=70.6
+saved /home/c211/jxf/rl/outputs/serial_hybrid_keypoint_jacobian_auto_chain/s0_seed11001_l6_actor_only_reweighted_reward_2000k/checkpoints/step_1075000.pt envs=8 replay=30000
+step=1076000/2000000 envs=8 episodes=7736 replay=30000 updates=268742 level=6 success=0.9 steps/s=70.6
+step=1077000/2000000 envs=8 episodes=7745 replay=30000 updates=268992 level=6 success=0.92 steps/s=70.6
+step=1078000/2000000 envs=8 episodes=7752 replay=30000 updates=269242 level=6 success=0.94 steps/s=70.6

@@ -19,8 +19,6 @@ def _vectorized_replay_rewards(
     lambda_self: float,
     reward_gamma: float,
     reward_parameters: dict[str, float],
-    steps: np.ndarray | None = None,
-    reward_horizon: int = 500,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Recompute replay rewards for a whole batch without Python row loops.
 
@@ -36,18 +34,16 @@ def _vectorized_replay_rewards(
     p = {
         "d_safe": 0.12, "d_self_safe": 0.005,
         "joint_precision_temperature": 2.0,
-        "hold_reward_scale": 0.0,
+        "hold_reward_scale": 0.15,
         "leave_joint_tolerance_penalty": 0.0,
         "keypoint_pose_reward": True,
-        "keypoint_tracking_scale": 0.20,
-        "keypoint_progress_scale": 10.0,
-        "keypoint_precision_reward_scale": 0.0,
+        "keypoint_tracking_scale": 0.05,
+        "keypoint_progress_scale": 20.0,
+        "keypoint_precision_reward_scale": 0.05,
         "precision_position_scale": 0.03,
         "precision_orientation_scale": 0.09,
         "precision_stop_cost_weight": 0.10,
         "success_bonus": 20.0, "velocity_cost_weight": 0.04,
-        "occupancy_compensation_scale": 0.15,
-        "maximum_terminal_compensation": 15.0,
         "smooth_cost_weight": 0.01, "hard_failure_penalty": 20.0,
         "timeout_penalty": 2.0,
         "safety_risk_weight": 2.0, "safety_clearance_weight": 8.0,
@@ -88,21 +84,6 @@ def _vectorized_replay_rewards(
         * np.clip(r[:, 15], 0.0, 1.0)
     )
     task_reached = r[:, 5] != 0.0
-    if steps is None:
-        remaining_steps = np.zeros(len(r), dtype=np.float64)
-    else:
-        transition_steps = np.asarray(steps, dtype=np.int64).reshape(-1)
-        if len(transition_steps) != len(r):
-            raise ValueError("replay step count must match the reward batch")
-        remaining_steps = np.maximum(
-            int(reward_horizon) - (transition_steps + 1), 0,
-        )
-    terminal_occupancy_compensation = np.minimum(
-        float(p["maximum_terminal_compensation"]),
-        float(p["occupancy_compensation_scale"])
-        * (1.0 - float(reward_gamma) ** remaining_steps)
-        / (1.0 - float(reward_gamma)),
-    ) * task_reached
     hard_failure = r[:, 6] != 0.0
     obstacle_collision = r[:, 7] != 0.0
     timeout = r[:, 22] != 0.0
@@ -119,7 +100,6 @@ def _vectorized_replay_rewards(
         - velocity_cost
         - smooth_cost
         + float(p["success_bonus"]) * task_reached
-        + terminal_occupancy_compensation
     )
 
     clearance = np.clip(
@@ -1628,15 +1608,9 @@ class HomotopyReplayBuffer:
             dtype=np.float64,
             count=len(rows),
         )
-        steps = np.fromiter(
-            (part.step[index] for _, part, index, _ in rows),
-            dtype=np.int64,
-            count=len(rows),
-        )
         rewards, costs = _vectorized_replay_rewards(
             raw, dones, scene_xi, lambda_self, self.reward_gamma,
-            self.reward_parameters, steps=steps,
-            reward_horizon=self.reward_horizon,
+            self.reward_parameters,
         )
         observations = self._gather_rows(rows, "obs")
         actions = self._gather_rows(rows, "action")

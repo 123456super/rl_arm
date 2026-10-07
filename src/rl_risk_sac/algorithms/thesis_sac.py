@@ -179,6 +179,7 @@ class ThesisSACAgent:
         *,
         update_actor: bool = True,
         reference_observations: torch.Tensor | None = None,
+        collect_diagnostics: bool = True,
     ) -> dict[str, float]:
         with torch.no_grad():
             next_action, next_log_prob = self.actor.sample(batch.next_observations)
@@ -190,9 +191,11 @@ class ThesisSACAgent:
                 next_q - self.alpha.detach() * next_log_prob
             )
 
+        q1_prediction = self.q1(batch.observations, batch.actions)
+        q2_prediction = self.q2(batch.observations, batch.actions)
         q_loss = F.smooth_l1_loss(
-            self.q1(batch.observations, batch.actions), target
-        ) + F.smooth_l1_loss(self.q2(batch.observations, batch.actions), target)
+            q1_prediction, target
+        ) + F.smooth_l1_loss(q2_prediction, target)
         self.q_optimizer.zero_grad(set_to_none=True)
         q_loss.backward()
         critic_gradient_norm = torch.nn.utils.clip_grad_norm_(
@@ -304,29 +307,30 @@ class ThesisSACAgent:
             self.alpha_optimizer.zero_grad(set_to_none=True)
             alpha_loss.backward()
             self.alpha_optimizer.step()
-            self.last_actor_metrics = {
-                "actor_loss": float(actor_loss.detach().cpu()),
-                "actor_sac_loss": float(actor_sac_loss.detach().cpu()),
-                "policy_churn_kl": float(policy_churn_kl.detach().cpu()),
-                "policy_churn_penalty": float(policy_churn_penalty.detach().cpu()),
-                "policy_churn_to_sac_ratio": float(
-                    policy_churn_to_sac_ratio.cpu()
-                ),
-                "chain_pcr_effective_coefficient": float(
-                    effective_pcr_coefficient.detach().cpu()
-                ),
-                "chain_pcr_sac_loss_ema": self.chain_pcr_sac_loss_ema,
-                "chain_pcr_loss_ema": self.chain_pcr_loss_ema,
-                "alpha_loss": float(alpha_loss.detach().cpu()),
-            }
-        else:
-            with torch.no_grad():
-                action = self.actor.deterministic(batch.observations)
-                q1 = self.q1(batch.observations, action)
-                q2 = self.q2(batch.observations, action)
+            if collect_diagnostics:
+                self.last_actor_metrics = {
+                    "actor_loss": float(actor_loss.detach().cpu()),
+                    "actor_sac_loss": float(actor_sac_loss.detach().cpu()),
+                    "policy_churn_kl": float(policy_churn_kl.detach().cpu()),
+                    "policy_churn_penalty": float(policy_churn_penalty.detach().cpu()),
+                    "policy_churn_to_sac_ratio": float(
+                        policy_churn_to_sac_ratio.cpu()
+                    ),
+                    "chain_pcr_effective_coefficient": float(
+                        effective_pcr_coefficient.detach().cpu()
+                    ),
+                    "chain_pcr_sac_loss_ema": self.chain_pcr_sac_loss_ema,
+                    "chain_pcr_loss_ema": self.chain_pcr_loss_ema,
+                    "alpha_loss": float(alpha_loss.detach().cpu()),
+                }
 
         soft_update(self.q1, self.target_q1, self.tau)
         soft_update(self.q2, self.target_q2, self.tau)
+        if not collect_diagnostics:
+            return {}
+        if not actor_updated:
+            q1 = q1_prediction
+            q2 = q2_prediction
         return {
             "critic_loss": float(q_loss.detach().cpu()),
             **self.last_actor_metrics,

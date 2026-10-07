@@ -141,6 +141,44 @@ def test_actor_can_be_frozen_while_fresh_critics_warm_up():
     assert metrics["critic_gradient_norm"] > 0.0
 
 
+def test_update_can_skip_diagnostics_without_skipping_critic_update(monkeypatch):
+    config = load_config(
+        Path(__file__).resolve().parents[2]
+        / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+    )
+    config["device"] = "cpu"
+    config["sac"]["hidden_dims"] = [8, 8]
+    agent = ThesisSACAgent(4, 2, config)
+    critic_before = {
+        key: value.detach().clone() for key, value in agent.q1.state_dict().items()
+    }
+    monkeypatch.setattr(
+        agent.actor,
+        "deterministic",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Critic-only update must not run a diagnostic Actor forward"
+        ),
+    )
+    batch = Batch(
+        observations=torch.randn(16, 4),
+        actions=torch.tanh(torch.randn(16, 2)),
+        rewards=torch.randn(16, 1),
+        costs=torch.zeros(16, 1),
+        next_observations=torch.randn(16, 4),
+        dones=torch.zeros(16, 1),
+    )
+
+    metrics = agent.update(
+        batch, update_actor=False, collect_diagnostics=False,
+    )
+
+    assert metrics == {}
+    assert any(
+        not torch.equal(critic_before[key], value)
+        for key, value in agent.q1.state_dict().items()
+    )
+
+
 def test_chain_pcr_uses_separate_reference_states_and_one_update_lag():
     config = load_config(
         Path(__file__).resolve().parents[2]
@@ -315,8 +353,10 @@ def test_hybrid_keypoint_auto_chain_contract_is_162d():
         root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
     )
     assert config["thesis"]["observation"]["hybrid_explicit_pose_error"] is True
-    assert config["thesis"]["reward"]["keypoint_tracking_scale"] == .20
-    assert config["thesis"]["reward"]["keypoint_precision_reward_scale"] == .20
+    assert config["thesis"]["reward"]["keypoint_tracking_scale"] == .05
+    assert config["thesis"]["reward"]["keypoint_progress_scale"] == 20.0
+    assert config["thesis"]["reward"]["keypoint_precision_reward_scale"] == .05
+    assert config["thesis"]["reward"]["hold_reward_scale"] == .15
     assert config["sac"]["chain_pcr_auto_enabled"] is True
     assert config["sac"]["chain_pcr_target_ratio"] == .003
     env = ThesisHomotopyEnv(config)
@@ -481,7 +521,9 @@ def test_keypoint_near_goal_precision_requires_position_and_orientation():
         keypoint_tracking_scale=0.0, keypoint_progress_scale=0.0,
         joint_position_tolerance=.10, joint_orientation_tolerance=.30,
     )
-    baseline, _ = homotopy_reward(**common)
+    baseline, _ = homotopy_reward(
+        **common, keypoint_precision_reward_scale=0.0,
+    )
     rewarded, fields = homotopy_reward(
         **common, keypoint_precision_reward_scale=.20,
     )
@@ -491,7 +533,7 @@ def test_keypoint_near_goal_precision_requires_position_and_orientation():
     assert rewarded - baseline == pytest.approx(.20 * expected_quality)
 
 
-def test_success_compensates_discounted_remaining_positive_occupancy():
+def test_success_adds_only_the_fixed_bonus():
     common = dict(
         rho_position=.01, next_rho_position=.009,
         rho_orientation=.09, next_rho_orientation=.08,
@@ -500,74 +542,12 @@ def test_success_compensates_discounted_remaining_positive_occupancy():
         obstacle_collision=False, risk_max=0.0, distance_min=.8, xi=1.0,
         keypoint_pose_reward=True, keypoint_tracking_quality=.8,
         keypoint_distance=.03, next_keypoint_distance=.025,
-        gamma=.99, horizon=500, remaining_steps=100,
-        occupancy_compensation_scale=.15,
-        maximum_terminal_compensation=15.0,
+        success_bonus=20.0,
     )
-    running, running_fields = homotopy_reward(**common, task_reached=False)
-    succeeded, success_fields = homotopy_reward(**common, task_reached=True)
-    expected = .15 * (1.0 - .99**100) / (1.0 - .99)
-    assert running_fields["terminal_occupancy_compensation"] == 0.0
-    assert success_fields["terminal_occupancy_compensation"] == pytest.approx(expected)
-    assert succeeded - running == pytest.approx(20.0 + expected)
-
-    capped, capped_fields = homotopy_reward(
-        **{**common, "remaining_steps": 499}, task_reached=True,
-    )
-    without_compensation, _ = homotopy_reward(
-        **{
-            **common,
-            "remaining_steps": 499,
-            "occupancy_compensation_scale": 0.0,
-        },
-        task_reached=True,
-    )
-    expected_499 = .15 * (1.0 - .99**499) / .01
-    assert capped_fields["terminal_occupancy_compensation"] == pytest.approx(
-        expected_499
-    )
-    assert capped_fields["terminal_occupancy_compensation"] <= 15.0
-    assert capped - without_compensation == pytest.approx(expected_499)
-
-    _, explicitly_capped = homotopy_reward(
-        **{
-            **common,
-            "remaining_steps": 499,
-            "occupancy_compensation_scale": .30,
-        },
-        task_reached=True,
-    )
-    assert explicitly_capped["terminal_occupancy_compensation"] == 15.0
-
-
-def test_replay_success_compensation_matches_scalar_remaining_steps():
-    parameters = {
-        "occupancy_compensation_scale": .15,
-        "maximum_terminal_compensation": 15.0,
-    }
-    raw = np.zeros((1, 29), dtype=np.float32)
-    raw[0, 5] = 1.0
-    raw[0, 12] = .8
-    raw[0, 18] = .25
-    raw[0, 24:26] = [.01, .10]
-    replay_reward, _ = _vectorized_replay_rewards(
-        raw, np.ones((1, 1)), np.ones(1), 0.0, .99, parameters,
-        steps=np.asarray([399]), reward_horizon=500,
-    )
-    scalar_reward, fields = homotopy_reward(
-        rho_position=0.0, next_rho_position=0.0,
-        rho_orientation=0.0, next_rho_orientation=0.0,
-        smooth_velocity=0.0, velocity_magnitude=0.0,
-        orientation_scale=1.0, task_reached=True, hard_failure=False,
-        obstacle_collision=False, risk_max=0.0, distance_min=.8, xi=1.0,
-        joint_position_tolerance=.01, joint_orientation_tolerance=.10,
-        gamma=.99, horizon=500, remaining_steps=100,
-        **parameters,
-    )
-    assert fields["terminal_occupancy_compensation"] == pytest.approx(
-        .15 * (1.0 - .99**100) / .01
-    )
-    assert replay_reward[0] == pytest.approx(scalar_reward, abs=1e-7)
+    running, _ = homotopy_reward(**common, task_reached=False)
+    succeeded, fields = homotopy_reward(**common, task_reached=True)
+    assert succeeded - running == pytest.approx(20.0)
+    assert "terminal_occupancy_compensation" not in fields
 
 
 def test_keypoint_replay_reward_matches_scalar_and_uses_29_fields():
@@ -828,6 +808,7 @@ def test_progress_is_positive_and_terminal_penalties_are_bounded():
         next_rho_orientation=1.2, smooth_velocity=0.0, velocity_magnitude=0.0,
         orientation_scale=1.0, task_reached=False,
         risk_max=0.0, distance_min=.8, xi=1.0, gamma=.99, horizon=240,
+        keypoint_precision_reward_scale=0.0,
     )
     wait_step, wait_fields = homotopy_reward(
         **common, hard_failure=False, obstacle_collision=False,
@@ -1277,7 +1258,7 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
     assert thesis["reward"]["joint_orientation_tolerance_rad"] == .10
     assert thesis["reward"]["leave_tolerance_multiplier"] == 1.0
     assert thesis["reward"]["leave_joint_tolerance_penalty"] == .20
-    assert thesis["reward"]["hold_reward_scale"] == .05
+    assert thesis["reward"]["hold_reward_scale"] == .15
     assert thesis["reward"]["joint_precision_temperature"] == 2.0
     assert "orientation_sigma_rad" not in thesis["reward"]
     assert "nominal_controller" not in thesis
@@ -1298,8 +1279,6 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
     assert settings["replay_current_intermediate"] == .80
     assert settings["replay_current_recovery"] == .80
     assert thesis["reward"]["precision_stop_cost_weight"] == .10
-    assert thesis["reward"]["occupancy_compensation_scale"] == .15
-    assert thesis["reward"]["maximum_terminal_compensation"] == 15.0
     assert thesis["precision_boundary_replay"] == {
         "enabled": True,
         "fraction": .20,
@@ -3108,6 +3087,7 @@ def test_pose_hold_and_exit_rewards_match_replay(before, after, expected, succes
         hold_reward_scale=.05,
         leave_joint_tolerance_penalty=.20,
         keypoint_tracking_scale=0.0,
+        keypoint_precision_reward_scale=0.0,
     )
     reward, fields = homotopy_reward(
         rho_position=float(raw[0, 0]), next_rho_position=float(raw[0, 1]),
@@ -3133,7 +3113,9 @@ def test_joint_precision_quality_uses_sum_and_temperature():
     )
     assert fields["joint_precision_quality"] == pytest.approx(np.exp(-1.))
     assert fields["next_joint_precision_quality"] == pytest.approx(np.exp(-.75))
-    assert fields["keypoint_precision_reward"] == 0.0
+    assert fields["keypoint_precision_reward"] == pytest.approx(
+        .05 * np.exp(-.75)
+    )
 
 
 def test_initial_goal_curriculum_samples_locally():

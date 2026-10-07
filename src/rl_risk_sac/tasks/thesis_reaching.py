@@ -586,7 +586,6 @@ def homotopy_reward(
     d_self_safe: float = 0.005,
     gamma: float = 0.99,
     horizon: int = 500,
-    remaining_steps: int = 0,
     position_sigma: float = 0.20,
     orientation_sigma: float = 1.00,
     micro_power: float = 4.0,
@@ -604,7 +603,7 @@ def homotopy_reward(
     joint_orientation_tolerance: float = 0.03,
     leave_tolerance_multiplier: float = 2.0,
     leave_joint_tolerance_penalty: float = 0.0,
-    hold_reward_scale: float = 0.0,
+    hold_reward_scale: float = 0.15,
     partial_precision_reward_scale: float = 0.0,
     position_progress_scale: float = 2.0,
     orientation_progress_scale: float = 2.0,
@@ -621,13 +620,11 @@ def homotopy_reward(
     keypoint_tracking_quality: float = 0.0,
     keypoint_distance: float = 0.0,
     next_keypoint_distance: float = 0.0,
-    keypoint_tracking_scale: float = 0.20,
+    keypoint_tracking_scale: float = 0.05,
     keypoint_tracking_sigma: float = 0.05,
-    keypoint_progress_scale: float = 10.0,
-    keypoint_precision_reward_scale: float = 0.0,
+    keypoint_progress_scale: float = 20.0,
+    keypoint_precision_reward_scale: float = 0.05,
     success_bonus: float = 20.0,
-    occupancy_compensation_scale: float = 0.15,
-    maximum_terminal_compensation: float = 15.0,
     velocity_cost_weight: float = 0.04,
     smooth_cost_weight: float = 0.01,
     hard_failure_penalty: float = 20.0,
@@ -645,8 +642,6 @@ def homotopy_reward(
         raise ValueError("gamma must be in (0, 1)")
     if horizon < 1:
         raise ValueError("horizon must be positive")
-    if not 0 <= int(remaining_steps) <= horizon:
-        raise ValueError("remaining_steps must be in [0, horizon]")
     eta = float(np.clip(orientation_scale, 0.0, 1.0))
     if min(
         position_sigma, orientation_sigma, fine_position_sigma,
@@ -684,8 +679,6 @@ def homotopy_reward(
         keypoint_progress_scale,
         keypoint_precision_reward_scale,
         success_bonus,
-        occupancy_compensation_scale,
-        maximum_terminal_compensation,
         hard_failure_penalty,
         timeout_penalty,
     ) < 0.0:
@@ -827,15 +820,6 @@ def homotopy_reward(
     keypoint_precision_reward = (
         keypoint_precision_reward_scale * keypoint_precision_quality
     )
-    discounted_remaining_occupancy = (
-        occupancy_compensation_scale
-        * (1.0 - gamma ** int(remaining_steps))
-        / (1.0 - gamma)
-    )
-    terminal_occupancy_compensation = (
-        min(maximum_terminal_compensation, discounted_remaining_occupancy)
-        * float(task_reached)
-    )
     r_goal = (
         keypoint_tracking_reward
         + keypoint_progress_reward
@@ -846,7 +830,6 @@ def homotopy_reward(
         - velocity_cost
         - smooth_cost
         + success_bonus * float(task_reached)
-        + terminal_occupancy_compensation
     )
     if d_safe <= 0.0 or d_self_safe <= 0.0:
         raise ValueError("safety distances must be positive")
@@ -942,9 +925,6 @@ def homotopy_reward(
         "keypoint_progress_reward": float(keypoint_progress_reward),
         "keypoint_precision_quality": float(keypoint_precision_quality),
         "keypoint_precision_reward": float(keypoint_precision_reward),
-        "terminal_occupancy_compensation": float(
-            terminal_occupancy_compensation
-        ),
         "pose_potential": float(pose_potential),
         "next_pose_potential": float(next_pose_potential),
         "pose_potential_progress": pose_potential_progress,

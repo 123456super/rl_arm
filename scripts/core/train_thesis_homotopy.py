@@ -5,11 +5,20 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import random
 from datetime import datetime
 from pathlib import Path
 import sys
 import time
+
+# PyBullet workers are process-parallel.  Giving every process a full BLAS
+# thread pool causes severe oversubscription and steadily reduces throughput.
+for thread_variable in (
+    "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+):
+    os.environ[thread_variable] = "1"
 
 import numpy as np
 import torch
@@ -31,6 +40,30 @@ HYBRID_KEYPOINT_AUTO_CHAIN_PROTOCOL = (
 SUPPORTED_PROTOCOLS = frozenset((
     HYBRID_KEYPOINT_AUTO_CHAIN_PROTOCOL,
 ))
+
+
+def physical_cpu_ids(count: int) -> list[int] | None:
+    """Choose one allowed logical CPU from each distinct physical core."""
+    if not hasattr(os, "sched_getaffinity"):
+        return None
+    allowed = sorted(os.sched_getaffinity(0))
+    selected: list[int] = []
+    seen: set[tuple[str, str, str]] = set()
+    for cpu in allowed:
+        topology = Path(f"/sys/devices/system/cpu/cpu{cpu}/topology")
+        try:
+            package = (topology / "physical_package_id").read_text().strip()
+            die_path = topology / "die_id"
+            die = die_path.read_text().strip() if die_path.exists() else "0"
+            core = (topology / "core_id").read_text().strip()
+        except OSError:
+            selected = allowed
+            break
+        key = (package, die, core)
+        if key not in seen:
+            seen.add(key)
+            selected.append(cpu)
+    return selected[:count] if len(selected) >= count else None
 
 
 def validate_training_architecture(config: dict) -> None:
@@ -1306,6 +1339,7 @@ def run_parallel_s0(
     transition_fields: list[str], update_fields: list[str],
     progress_fields: list[str], total_steps: int, max_stage_steps: int,
     save_interval: int, progress_interval: int, log_flush_interval: int,
+    update_log_interval: int,
     batch_size: int, update_after: int, num_envs: int,
     updates_per_transition: float,
     orientation_curriculum: dict, full_scale_min_transitions: int,
@@ -1319,7 +1353,10 @@ def run_parallel_s0(
         int(child.generate_state(1, dtype=np.uint32)[0]) for child in seed_children
     ]
     env_template.close()
-    pool = ParallelThesisEnvPool(config, worker_seeds)
+    worker_cpu_ids = physical_cpu_ids(num_envs)
+    pool = ParallelThesisEnvPool(
+        config, worker_seeds, cpu_ids=worker_cpu_ids,
+    )
     workers: list[dict | None] = [None] * num_envs
     counters.setdefault("next_episode_id", counters["episodes"])
     manual_promotion = bool(orientation_curriculum.get("manual_promotion", False))
@@ -1655,12 +1692,20 @@ def run_parallel_s0(
                     s0_current_fraction=current_fraction,
                     lambda_self=curriculum.lambda_self,
                 )
-                last_update = agent.update(
+                next_update = int(counters["updates"]) + 1
+                collect_diagnostics = (
+                    next_update == 1 or next_update % update_log_interval == 0
+                )
+                update_metrics = agent.update(
                     batch,
                     update_actor=update_actor,
                     reference_observations=reference_observations,
+                    collect_diagnostics=collect_diagnostics,
                 )
-                counters["updates"] += 1
+                counters["updates"] = next_update
+                if not collect_diagnostics:
+                    continue
+                last_update = update_metrics
                 update_writer.writerow({
                     "global_step": counters["global_step"],
                     "stage_step": counters["stage_step"],
@@ -1945,9 +1990,6 @@ def run_parallel_s0(
                         "keypoint_progress_reward": info["keypoint_progress_reward"],
                         "keypoint_precision_quality": info["keypoint_precision_quality"],
                         "keypoint_precision_reward": info["keypoint_precision_reward"],
-                        "terminal_occupancy_compensation": info[
-                            "terminal_occupancy_compensation"
-                        ],
                         "pose_potential": info["pose_potential"],
                         "next_pose_potential": info["next_pose_potential"],
                         "pose_potential_progress": info["pose_potential_progress"],
@@ -2522,7 +2564,9 @@ def main() -> None:
         replay.reward_parameters.update({
             key: env.reward_parameters[key]
             for key in ("joint_precision_temperature", "hold_reward_scale",
-                        "leave_joint_tolerance_penalty", "leave_tolerance_multiplier")
+                        "leave_joint_tolerance_penalty", "leave_tolerance_multiplier",
+                        "keypoint_tracking_scale", "keypoint_progress_scale",
+                        "keypoint_precision_reward_scale")
         })
     elif args.initialize_actor_from:
         start_level = int(args.start_level)
@@ -2883,7 +2927,6 @@ def main() -> None:
                          "next_keypoint_distance", "keypoint_progress",
                          "keypoint_tracking_reward", "keypoint_progress_reward",
                          "keypoint_precision_quality", "keypoint_precision_reward",
-                         "terminal_occupancy_compensation",
                          "pose_potential", "next_pose_potential", "pose_potential_progress",
                          "position_progress", "orientation_progress",
                          "orientation_error_progress", "orientation_absolute_penalty",
@@ -2993,6 +3036,9 @@ def main() -> None:
     log_flush_interval = int(config["train"].get("log_flush_interval", 100))
     if log_flush_interval < 1:
         raise ValueError("train.log_flush_interval must be positive")
+    update_log_interval = int(config["train"]["update_log_interval"])
+    if update_log_interval < 1:
+        raise ValueError("train.update_log_interval must be positive")
     batch_size = 8 if args.validation_mode else int(config["sac"]["batch_size"])
     update_after = 8 if args.validation_mode else int(config["sac"]["update_after"])
     updates_per_transition = float(config["sac"].get("updates_per_transition", 1.0))
@@ -3021,7 +3067,8 @@ def main() -> None:
             progress_fields=progress_fields, total_steps=total_steps,
             max_stage_steps=max_stage_steps, save_interval=save_interval,
             progress_interval=progress_interval,
-            log_flush_interval=log_flush_interval, batch_size=batch_size,
+            log_flush_interval=log_flush_interval,
+            update_log_interval=update_log_interval, batch_size=batch_size,
             update_after=update_after, num_envs=num_envs,
             updates_per_transition=updates_per_transition,
             orientation_curriculum=orientation_curriculum,
@@ -3218,36 +3265,44 @@ def main() -> None:
                         s0_current_fraction=replay_current_fraction,
                         lambda_self=curriculum.lambda_self,
                     )
-                    last_update = agent.update(
+                    next_update = int(counters["updates"]) + 1
+                    collect_diagnostics = (
+                        next_update == 1 or next_update % update_log_interval == 0
+                    )
+                    update_metrics = agent.update(
                         batch,
                         update_actor=update_actor,
                         reference_observations=reference_observations,
+                        collect_diagnostics=collect_diagnostics,
                     )
-                    counters["updates"] += 1
-                    update_writer.writerow({
-                        "global_step": counters["global_step"], "stage_step": counters["stage_step"],
-                        "stage_total_step": counters["stage_total_step"],
-                        "update": counters["updates"], **last_update,
-                        "sample_none": replay.last_sample_counts["none"],
-                        "sample_static": replay.last_sample_counts["static"],
-                        "sample_dynamic": replay.last_sample_counts["dynamic"],
-                        "sample_orientation_anchor": replay.last_orientation_sample_counts["anchor"],
-                        "sample_orientation_current": replay.last_orientation_sample_counts["current"],
-                        "sample_orientation_historical": replay.last_orientation_sample_counts["historical"],
-                        "sample_current_success": replay.last_orientation_sample_counts["current_success"],
-                        "sample_current_recent": replay.last_orientation_sample_counts["current_recent"],
-                        "sample_previous_level": replay.last_orientation_sample_counts["previous"],
-                        "sample_semantic_long_term": replay.last_orientation_sample_counts.get("semantic_long_term", 0),
-                        "sample_precision_boundary": replay.last_orientation_sample_counts.get("precision_boundary", 0),
-                        "sample_precision_strict_exit": replay.last_precision_sample_counts["strict_exit"],
-                        "sample_precision_inside_hold": replay.last_precision_sample_counts["inside_hold"],
-                        "sample_precision_position_only_inside": replay.last_precision_sample_counts["position_only_inside"],
-                        "sample_precision_orientation_only_inside": replay.last_precision_sample_counts["orientation_only_inside"],
-                        "sample_precision_position_boundary": replay.last_precision_sample_counts["position_boundary"],
-                        "critic_gradient_norm": last_update["critic_gradient_norm"],
-                        "actor_gradient_norm": last_update["actor_gradient_norm"],
-                        "actor_updated": last_update["actor_updated"],
-                    })
+                    counters["updates"] = next_update
+                    if collect_diagnostics:
+                        last_update = update_metrics
+                        update_writer.writerow({
+                            "global_step": counters["global_step"],
+                            "stage_step": counters["stage_step"],
+                            "stage_total_step": counters["stage_total_step"],
+                            "update": counters["updates"], **last_update,
+                            "sample_none": replay.last_sample_counts["none"],
+                            "sample_static": replay.last_sample_counts["static"],
+                            "sample_dynamic": replay.last_sample_counts["dynamic"],
+                            "sample_orientation_anchor": replay.last_orientation_sample_counts["anchor"],
+                            "sample_orientation_current": replay.last_orientation_sample_counts["current"],
+                            "sample_orientation_historical": replay.last_orientation_sample_counts["historical"],
+                            "sample_current_success": replay.last_orientation_sample_counts["current_success"],
+                            "sample_current_recent": replay.last_orientation_sample_counts["current_recent"],
+                            "sample_previous_level": replay.last_orientation_sample_counts["previous"],
+                            "sample_semantic_long_term": replay.last_orientation_sample_counts.get("semantic_long_term", 0),
+                            "sample_precision_boundary": replay.last_orientation_sample_counts.get("precision_boundary", 0),
+                            "sample_precision_strict_exit": replay.last_precision_sample_counts["strict_exit"],
+                            "sample_precision_inside_hold": replay.last_precision_sample_counts["inside_hold"],
+                            "sample_precision_position_only_inside": replay.last_precision_sample_counts["position_only_inside"],
+                            "sample_precision_orientation_only_inside": replay.last_precision_sample_counts["orientation_only_inside"],
+                            "sample_precision_position_boundary": replay.last_precision_sample_counts["position_boundary"],
+                            "critic_gradient_norm": last_update["critic_gradient_norm"],
+                            "actor_gradient_norm": last_update["actor_gradient_norm"],
+                            "actor_updated": last_update["actor_updated"],
+                        })
                 transition_writer.writerow({
                     "global_step": counters["global_step"], "stage_step": counters["stage_step"],
                     "stage_total_step": counters["stage_total_step"],
@@ -3292,9 +3347,6 @@ def main() -> None:
                     "keypoint_progress_reward": info["keypoint_progress_reward"],
                     "keypoint_precision_quality": info["keypoint_precision_quality"],
                     "keypoint_precision_reward": info["keypoint_precision_reward"],
-                    "terminal_occupancy_compensation": info[
-                        "terminal_occupancy_compensation"
-                    ],
                     "pose_potential": info["pose_potential"],
                     "next_pose_potential": info["next_pose_potential"],
                     "pose_potential_progress": info["pose_potential_progress"],

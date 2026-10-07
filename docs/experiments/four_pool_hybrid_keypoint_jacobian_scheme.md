@@ -156,31 +156,27 @@ Auto-PCR 对 Actor 加 `KL(old Gaussian || current Gaussian)`，比较 tanh 前�
 precision_quality(s) = exp(-(rho_p(s)/eps_p + rho_R(s)/eps_R)/2)
 I_current = (rho_p(current) <= eps_p and rho_R(current) <= eps_R)
 I_next = (rho_p(next) <= eps_p and rho_R(next) <= eps_R)
-hold_reward = .05 * (I_current and I_next and not terminal_collision_or_hard_failure)
+hold_reward = .15 * (I_current and I_next and not terminal_collision_or_hard_failure)
 leave_penalty = .20 * (I_current and not I_next)
 velocity_cost = clip(mean((qdot_after/0.7)^2), 0, 1)
 smooth_cost = clip(mean(((qdot_after-qdot_before)/0.7)^2), 0, 1)
 precision_proximity = exp(-rho_p_next/.03) * exp(-rho_R_next/.09)
 precision_stop_cost = .10 * precision_proximity * velocity_magnitude
-remaining_steps = horizon - episode_step
-terminal_occupancy_compensation = task_reached * min(
-    15, .15*(1-.99^remaining_steps)/(1-.99))
-r_goal = .20*T + 10*(D_KP(current)-D_KP(next))
-         + .20*precision_quality(next)
+r_goal = .05*T + 20*(D_KP(current)-D_KP(next))
+         + .05*precision_quality(next)
          - .04*velocity_cost - .01*smooth_cost
          - precision_stop_cost
          + hold_reward - leave_penalty
          + 20*task_reached
-         + terminal_occupancy_compensation
 r = r_goal - hard_penalty - timeout_guard
            - external_safety_penalty - self_safety_penalty - terminal_guard
 ```
 
-精度质量的 temperature 为 2，`use_episode_tolerance_for_joint_precision: true`，因此升档会改变 eps_p/eps_R。关键点质量和联合精度质量都提供有界正状态奖励。外到内不领取保持奖励，内到内固定奖励 .05，内到外罚 .20；不按保持步数递增，不新增 observation。停止成本权重为 `.10`，按下一状态与目标的接近程度连续生效，不做严格区门控。第 5 个连续严格命中 step 仍给予原成功奖励 20，并额外补偿成功终止后放弃的正占用价值；补偿尺度 `.15`、上限 `15`，仅在 `task_reached` 的终止 transition 生效。所有非成功 transition 的奖励保持不变。`orientation_scale` 和整数 level index 不直接进入 reward 公式；L4--L6 只有位置 tolerance 变化。关键点 progress 使用直接距离差，不乘 gamma。
+精度质量的 temperature 为 2，`use_episode_tolerance_for_joint_precision: true`，因此升档会改变 eps_p/eps_R。关键点质量和联合精度质量各以 `.05` 权重提供有界正状态奖励；关键点 progress 权重为 `20`。外到内不领取保持奖励，内到内固定奖励 `.15`，内到外罚 `.20`；不按保持步数递增，不新增 observation。停止成本权重为 `.10`，按下一状态与目标的接近程度连续生效，不做严格区门控。第 5 个连续严格命中 step 给予成功奖励 20。`orientation_scale` 和整数 level index 不直接进入 reward 公式；L4--L6 只有位置 tolerance 变化。关键点 progress 使用直接距离差，不乘 gamma。
 
 硬失败（自碰撞、环境碰撞、关节越界）罚 20；未成功且无硬失败的 timeout 罚 2。外部/自碰撞安全组都为 `(2*risk+8*clearance_violation)/10`，分别再乘 `xi*.05`、`lambda_self*.05`；风险与距离违例均裁剪到 `[0,1]`。`clearance_violation=clip((safe_distance-min_distance)/safe_distance,0,1)`，外部/自安全距离分别 `.12/.005 m`。终止障碍碰撞且非硬失败的 terminal guard 罚 20。
 
-配置和日志仍保留 position/orientation shaping、fine reward、partial precision 和 joint-precision progress 等诊断项，但这些项不进入 unified-keypoint 的 `r_goal`。`keypoint_precision_reward` 是 `.20*precision_quality(next)`。leave-tolerance 惩罚只判断严格边界（倍率 1）。
+配置和日志仍保留 position/orientation shaping、fine reward、partial precision 和 joint-precision progress 等诊断项，但这些项不进入 unified-keypoint 的 `r_goal`。`keypoint_precision_reward` 是 `.05*precision_quality(next)`。leave-tolerance 惩罚只判断严格边界（倍率 1）。
 
 Replay 每条保存 observation、action、next observation、done、episode/step 和 29 个 raw 特征。训练抽样时重新计算 reward，安全权重采用当前 curriculum；精度阈值读取该 transition 保存的 episode 合同，**不是把所有历史样本重新标成新档位成功**。当前 SAC 是 reward-only，Batch 的 cost 不对应另一套 cost Critic。
 
