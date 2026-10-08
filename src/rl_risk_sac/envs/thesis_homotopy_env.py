@@ -1005,11 +1005,24 @@ class ThesisHomotopyEnv(gym.Env):
                 continue
             ik_validation = self.robot.check_pose_ik(
                 target_position, target_quaternion,
-                position_tolerance=self.position_tolerance,
-                orientation_tolerance=self.orientation_tolerance,
+                position_tolerance=float(self.contract.position_tolerance),
+                orientation_tolerance=float(self.contract.orientation_tolerance),
                 rest_pose=initial_q,
             )
-            if not bool(ik_validation["reachable"]):
+            # Keep the acceptance contract explicit.  The IK helper already
+            # applies these thresholds, but checking the returned FK residuals
+            # here prevents a future helper change from silently widening L6.
+            position_error = float(ik_validation["position_error_m"])
+            orientation_error = float(ik_validation["orientation_error_rad"])
+            if (
+                not bool(ik_validation["reachable"])
+                or not bool(ik_validation["finite"])
+                or not bool(ik_validation["within_limits"])
+                or not np.isfinite(position_error)
+                or not np.isfinite(orientation_error)
+                or position_error > float(self.contract.position_tolerance)
+                or orientation_error > float(self.contract.orientation_tolerance)
+            ):
                 continue
             candidate = np.asarray(ik_validation["q_ik"], dtype=np.float32)
             self._set_joint_state(candidate)
@@ -1199,7 +1212,7 @@ class ThesisHomotopyEnv(gym.Env):
         return observation
 
     def reset_bad_state(self, center: dict[str, Any], contract: dict[str, Any]):
-        """Restart a perturbed, reachable local state without resetting its clock."""
+        """Restart a perturbed local state, optionally with a fresh clock."""
         self.configure_episode(**contract)
         if self.contract.scene != "none":
             raise ValueError("bad-state starts support obstacle-free S0 only")
@@ -1210,7 +1223,9 @@ class ThesisHomotopyEnv(gym.Env):
             if key.startswith(("task_space_", "selected_task_space_", "goal_proposal_",
                                "goal_accept_", "goal_resample_")) or key in ("contract", "rng_state"):
                 snapshot[key] = current[key]
-        if not 0 <= int(snapshot["step_count"]) < self.horizon:
+        if bool(center.get("reset_episode_clock", False)):
+            snapshot["step_count"] = 0
+        elif not 0 <= int(snapshot["step_count"]) < self.horizon:
             raise ValueError("bad-state start has no remaining episode budget")
         reference = np.asarray(center["observation"])
         for _ in range(64):
@@ -1222,13 +1237,26 @@ class ThesisHomotopyEnv(gym.Env):
             if (np.any(q < lower) or np.any(q > upper) or
                     np.any(np.abs(qdot) > self.velocity_limits)):
                 continue
-            self.goal_position = (np.asarray(snapshot["goal_position"]) +
-                                  self.rng.uniform(-.004, .004, 3)).astype(np.float32)
-            rotation = p.getQuaternionFromEuler(self.rng.uniform(-.012, .012, 3).tolist())
-            self.goal_quaternion = np.asarray(p.multiplyTransforms(
-                [0., 0., 0.], snapshot["goal_quaternion"],
-                [0., 0., 0.], rotation,
-            )[1], dtype=np.float32)
+            if bool(center.get("preserve_goal", False)):
+                # Online far-distance restarts must solve the original task:
+                # only the robot state is locally perturbed.  Legacy frozen
+                # bad-state banks retain their original goal perturbation.
+                self.goal_position = np.asarray(
+                    snapshot["goal_position"], dtype=np.float32,
+                ).copy()
+                self.goal_quaternion = np.asarray(
+                    snapshot["goal_quaternion"], dtype=np.float32,
+                ).copy()
+            else:
+                self.goal_position = (np.asarray(snapshot["goal_position"]) +
+                                      self.rng.uniform(-.004, .004, 3)).astype(np.float32)
+                rotation = p.getQuaternionFromEuler(
+                    self.rng.uniform(-.012, .012, 3).tolist()
+                )
+                self.goal_quaternion = np.asarray(p.multiplyTransforms(
+                    [0., 0., 0.], snapshot["goal_quaternion"],
+                    [0., 0., 0.], rotation,
+                )[1], dtype=np.float32)
             self._set_joint_state(q, qdot)
             p.performCollisionDetection(physicsClientId=self.client_id)
             if self._collision_events()["self_collision"]:

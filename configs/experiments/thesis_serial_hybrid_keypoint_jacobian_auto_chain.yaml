@@ -181,6 +181,14 @@ thesis:
         beta: 0.6
         improvement_weight: 0.5
         score_floor: 0.01
+    # Training only: timed-out L6 D7--D9 trajectories contribute their final
+    # states as fresh 500-step starts. Evaluation always uses normal starts.
+    far_distance_timeout_restarts:
+      enabled: true
+      level_index: 6
+      minimum_position_bin: 7
+      target_transition_fraction: 0.15
+      capacity_per_cell: 8
     levels:
     - goal_scale: 1.0
       target_distance_min_m: 0.03

@@ -85,6 +85,7 @@ def validate_training_architecture(config: dict) -> None:
         or not sac.get("chain_pcr_auto_enabled", False)
     ):
         raise ValueError("only Hybrid Keypoint + Jacobian + Auto-PCR is supported")
+    far_timeout_restart_settings(config)
 
 
 def file_sha256(path: Path) -> str:
@@ -221,6 +222,63 @@ def accrue_update_credit(counters: dict, updates_per_transition: float) -> int:
     return due
 
 
+def far_timeout_restart_settings(config: dict) -> dict[str, object] | None:
+    """Validate the training-only L6 far-timeout restart contract."""
+    raw = config.get("thesis", {}).get("joint_pose_curriculum", {}).get(
+        "far_distance_timeout_restarts", {}
+    )
+    if not bool(raw.get("enabled", False)):
+        return None
+    settings: dict[str, object] = {
+        "level_index": int(raw.get("level_index", 6)),
+        "minimum_position_bin": int(raw.get("minimum_position_bin", 7)),
+        "target_transition_fraction": float(
+            raw.get("target_transition_fraction", .15)
+        ),
+        "capacity_per_cell": int(raw.get("capacity_per_cell", 8)),
+    }
+    sampling = config["thesis"]["joint_pose_curriculum"]["task_space_sampling"]
+    level_count = len(config["thesis"]["joint_pose_curriculum"]["levels"])
+    position_bins = int(sampling.get("position_bins", 10))
+    if not 0 <= int(settings["level_index"]) < level_count:
+        raise ValueError("far restart level_index is outside the pose curriculum")
+    if not 0 <= int(settings["minimum_position_bin"]) < position_bins:
+        raise ValueError("far restart minimum_position_bin is outside task-space bins")
+    if not 0.0 < float(settings["target_transition_fraction"]) < 1.0:
+        raise ValueError("far restart target transition fraction must be in (0, 1)")
+    if int(settings["capacity_per_cell"]) < 1:
+        raise ValueError("far restart capacity_per_cell must be positive")
+    return settings
+
+
+def add_far_timeout_center(
+    state: dict, center: dict, settings: dict[str, object],
+) -> None:
+    """Insert a failed-episode center into a bounded pose-cell FIFO bank."""
+    key = f"{int(center['position_bin'])}:{int(center['orientation_bin'])}"
+    cells = state.setdefault("cells", {})
+    entries = cells.setdefault(key, [])
+    entries.append(center)
+    capacity = int(settings["capacity_per_cell"])
+    if len(entries) > capacity:
+        del entries[:-capacity]
+    state["bank_size"] = sum(len(values) for values in cells.values())
+    state["nonempty_cells"] = sum(bool(values) for values in cells.values())
+
+
+def sample_far_timeout_center(
+    state: dict, rng: np.random.Generator,
+) -> tuple[dict, str] | None:
+    """Sample cells uniformly, then a center uniformly within the cell."""
+    cells = state.get("cells", {})
+    keys = sorted(key for key, values in cells.items() if values)
+    if not keys:
+        return None
+    key = keys[int(rng.integers(len(keys)))]
+    values = cells[key]
+    return values[int(rng.integers(len(values)))], key
+
+
 def save_checkpoint(path: Path, agent, replay, curriculum, counters, config, env, active_episode) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({
@@ -349,12 +407,37 @@ def checkpoint_curriculum(config: dict, state: dict) -> HomotopyCurriculum:
 
 def validate_serial_stage_transition(
     config: dict, checkpoint_state: dict, destination_stage: str,
+    s0_evaluation: Path | None = None, checkpoint_source: Path | None = None,
 ) -> None:
-    """Validate S0->S1 or S1->S2 with the formal latest completion gate."""
+    """Validate a serial handoff using the stage-specific completion evidence."""
     source_stage = str(checkpoint_state["curriculum"]["stage"])
     expected = {"s1": "s0", "s2": "s1"}.get(destination_stage)
     if expected is None or source_stage != expected:
         raise ValueError(f"invalid stage transition {source_stage}->{destination_stage}")
+    # S0 completion is an evaluation gate.  Re-running S0 solely to make
+    # curriculum bookkeeping reach an internal flag is not part of the
+    # experiment protocol; require the immutable frozen-evaluation manifest
+    # instead and verify that it names this exact checkpoint.
+    if destination_stage == "s1":
+        if s0_evaluation is None:
+            raise ValueError(
+                "S0->S1 requires --s0-evaluation pointing to the passed frozen-evaluation JSON"
+            )
+        try:
+            evaluation = json.loads(s0_evaluation.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(f"cannot read S0 evaluation manifest: {s0_evaluation}") from error
+        checkpoint = Path(str(evaluation.get("checkpoint", "")))
+        checkpoint = checkpoint if checkpoint.is_absolute() else (ROOT / checkpoint)
+        checkpoint_sha = hashlib.sha256(checkpoint.read_bytes()).hexdigest() if checkpoint.exists() else ""
+        if not bool(evaluation.get("passed")):
+            raise ValueError("S0 frozen evaluation manifest is not passed")
+        if checkpoint_source is None or checkpoint.resolve() != checkpoint_source.resolve():
+            raise ValueError("S0 evaluation manifest does not name the resumed checkpoint")
+        if evaluation.get("checkpoint_sha256") and evaluation["checkpoint_sha256"] != checkpoint_sha:
+            raise ValueError("S0 evaluation manifest checkpoint SHA-256 does not match the file")
+        return
+
     curriculum = checkpoint_curriculum(config, checkpoint_state["curriculum"])
     thesis = config["thesis"]
     complete = curriculum.stage_complete(
@@ -1356,7 +1439,6 @@ def run_parallel_s0(
     updates_per_transition: float,
     orientation_curriculum: dict, full_scale_min_transitions: int,
     pose_full_scale_min_transitions: int, loaded_checkpoint_state: dict | None,
-    bad_state_starts: dict | None = None, bad_state_fraction: float = .25,
 ) -> None:
     """Run synchronous multi-process S0 collection with one centralized learner."""
     stream_seed = int(config["_rng_stream_seeds"]["environment"])
@@ -1390,20 +1472,34 @@ def run_parallel_s0(
     last_saved_step = -1
     best_probes: dict[str, dict[str, object]] = dict(counters.get("probe_best", {}))
     counters["probe_best"] = best_probes
-    targeted = None
-    target_rng = np.random.default_rng(stream_seed ^ 0xBAD57A7E)
-    if bad_state_starts is not None:
-        targeted = counters.setdefault("bad_state_sampling", {
-            "source_checkpoint": bad_state_starts["source_checkpoint"],
-            "fraction": bad_state_fraction, "starts": 0,
-            "targeted_transitions": 0, "normal_transitions": 0,
-            "normal_length_ema": max(1., counters["global_step"] / max(1, counters["episodes"])),
-            "targeted_length_ema": float(np.mean([
-                config["thesis"]["horizon"] - c["step"] for c in bad_state_starts["centers"]
-            ])),
+    far_settings = far_timeout_restart_settings(config)
+    far_restart = None
+    far_rng = np.random.default_rng(stream_seed ^ 0xFA257A11)
+    if far_settings is not None:
+        far_restart = counters.setdefault("far_timeout_restarts", {
+            "version": 1,
+            "settings": dict(far_settings),
+            "cells": {},
+            "bank_size": 0,
+            "nonempty_cells": 0,
+            "candidates": 0,
+            "promoted_centers": 0,
+            "starts": 0,
+            "restart_transitions": 0,
+            "normal_transitions": 0,
+            "normal_length_ema": (
+                max(1., counters["global_step"] / counters["episodes"])
+                if counters["episodes"] > 0
+                else float(config["thesis"]["horizon"])
+            ),
+            "restart_length_ema": float(config["thesis"]["horizon"]),
         })
-        if "rng_state" in targeted:
-            target_rng.bit_generator.state = targeted["rng_state"]
+        if far_restart.get("settings") != dict(far_settings):
+            raise ValueError(
+                "cannot silently change far-distance timeout restart settings"
+            )
+        if "rng_state" in far_restart:
+            far_rng.bit_generator.state = far_restart["rng_state"]
 
     if loaded_checkpoint_state is not None:
         saved_workers = loaded_checkpoint_state["parallel_workers"]
@@ -1422,7 +1518,7 @@ def run_parallel_s0(
 
     def reset_idle() -> None:
         requests: dict[int, dict] = {}
-        targeted_requests: dict[int, tuple[dict, dict]] = {}
+        restart_requests: dict[int, tuple[dict, dict]] = {}
         metadata: dict[int, dict] = {}
         for index, worker in enumerate(workers):
             if worker is not None:
@@ -1453,31 +1549,44 @@ def run_parallel_s0(
                 "episode_id": episode_id, "return": 0.0, "length": 0,
                 "episode_used_warmup": False, "final": {},
                 "pose_phase_complete_at_start": curriculum.pose_phase_complete,
+                "pose_level_index": int(curriculum.orientation.level_index),
                 "self_weight_full_at_start": bool(np.isclose(
                     curriculum.lambda_self, curriculum.self_safety.end,
                     rtol=0.0, atol=1e-12,
                 )),
             }
-            if targeted is not None:
-                normal_length = targeted["normal_length_ema"]
-                bad_length = targeted["targeted_length_ema"]
-                probability = bad_state_fraction * normal_length / (
-                    (1. - bad_state_fraction) * bad_length + bad_state_fraction * normal_length
-                )
-                if target_rng.random() < probability:
-                    center_index = int(target_rng.integers(len(bad_state_starts["centers"])))
-                    center = bad_state_starts["centers"][center_index]
-                    targeted_requests[index] = (center, contract)
-                    del requests[index]
-                    metadata[index].update({"length": int(center["step"]),
-                                            "start_step": int(center["step"]),
-                                            "bad_state_start": True,
-                                            "frontier_center": center_index})
-                    targeted["starts"] += 1
-                targeted["rng_state"] = target_rng.bit_generator.state
+            far_active = (
+                far_restart is not None
+                and int(curriculum.orientation.level_index)
+                == int(far_settings["level_index"])
+                and not orientation_anchor
+            )
+            if far_active:
+                sampled = sample_far_timeout_center(far_restart, far_rng)
+                if sampled is not None:
+                    normal_length = float(far_restart["normal_length_ema"])
+                    restart_length = float(far_restart["restart_length_ema"])
+                    fraction = float(far_settings["target_transition_fraction"])
+                    probability = fraction * normal_length / (
+                        (1. - fraction) * restart_length
+                        + fraction * normal_length
+                    )
+                    if far_rng.random() < probability:
+                        center, cell = sampled
+                        restart_requests[index] = (center, contract)
+                        del requests[index]
+                        metadata[index].update({
+                            "length": 0,
+                            "start_step": 0,
+                            "far_timeout_restart": True,
+                            "far_restart_cell": cell,
+                            "far_restart_source_step": int(center["step"]),
+                        })
+                        far_restart["starts"] += 1
+                far_restart["rng_state"] = far_rng.bit_generator.state
         for index, (observation, _) in pool.reset_many(requests).items():
             workers[index] = {**metadata[index], "observation": observation}
-        for index, (observation, _) in pool.reset_bad_states_many(targeted_requests).items():
+        for index, (observation, _) in pool.reset_bad_states_many(restart_requests).items():
             workers[index] = {**metadata[index], "observation": observation}
 
     def write_progress(writer: csv.DictWriter, started: float) -> None:
@@ -1494,10 +1603,18 @@ def run_parallel_s0(
             "stage_total_step": counters["stage_total_step"], "episodes": counters["episodes"],
             "replay_size": len(replay), "updates": counters["updates"],
             "alpha": last_update.get("alpha", float(agent.alpha.detach().cpu())),
-            "bad_state_starts": 0 if targeted is None else targeted["starts"],
-            "bad_state_transitions": 0 if targeted is None else targeted["targeted_transitions"],
-            "bad_state_transition_fraction": 0. if targeted is None else (
-                targeted["targeted_transitions"] / max(1, targeted["targeted_transitions"] + targeted["normal_transitions"])
+            "far_restart_bank_size": 0 if far_restart is None else far_restart["bank_size"],
+            "far_restart_nonempty_cells": 0 if far_restart is None else far_restart["nonempty_cells"],
+            "far_restart_candidates": 0 if far_restart is None else far_restart["candidates"],
+            "far_restart_promoted_centers": 0 if far_restart is None else far_restart["promoted_centers"],
+            "far_restart_starts": 0 if far_restart is None else far_restart["starts"],
+            "far_restart_transitions": 0 if far_restart is None else far_restart["restart_transitions"],
+            "far_restart_transition_fraction": 0. if far_restart is None else (
+                far_restart["restart_transitions"] / max(
+                    1,
+                    far_restart["restart_transitions"]
+                    + far_restart["normal_transitions"],
+                )
             ),
             "critic_loss": last_update.get("critic_loss", ""),
             "actor_loss": last_update.get("actor_loss", ""),
@@ -1900,11 +2017,71 @@ def run_parallel_s0(
                 perform_deferred_updates()
                 results = pool.recv_steps()
 
+                # A normal far-distance timeout contributes its exact terminal
+                # state.  Restarts themselves never recursively refill the
+                # bank.  The selected state later receives a fresh 500-step
+                # episode clock in reset_bad_state().
+                far_timeout_indices: list[int] = []
+                if far_restart is not None:
+                    for index in selected:
+                        worker = workers[index]
+                        _, _, _, _, truncated, info = results[index]
+                        if (
+                            truncated
+                            and not info["task_reached"]
+                            and not info["hard_failure"]
+                            and not worker.get("far_timeout_restart", False)
+                            and int(worker.get("pose_level_index", -1))
+                            == int(far_settings["level_index"])
+                            and int(info.get("sampled_target_position_bin", -1))
+                            >= int(far_settings["minimum_position_bin"])
+                        ):
+                            far_timeout_indices.append(index)
+                    if far_timeout_indices:
+                        timeout_states = pool.states(far_timeout_indices)
+                        for index in far_timeout_indices:
+                            worker = workers[index]
+                            result = results[index]
+                            info = result[5]
+                            state = timeout_states[index]
+                            step = int(state["step_count"])
+                            center = {
+                                "episode": int(worker["episode_id"]),
+                                "step": step,
+                                "rho_R": float(info["next_rho_orientation"]),
+                                "rho_p": float(info["next_rho_position"]),
+                                "position_bin": int(
+                                    info["sampled_target_position_bin"]
+                                ),
+                                "orientation_bin": int(
+                                    info["sampled_target_orientation_bin"]
+                                ),
+                                "observation": np.asarray(
+                                    result[0], dtype=np.float32,
+                                ).copy(),
+                                "state": state,
+                                "preserve_goal": True,
+                                "reset_episode_clock": True,
+                            }
+                            far_restart["candidates"] += 1
+                            add_far_timeout_center(
+                                far_restart, center, far_settings,
+                            )
+                            far_restart["promoted_centers"] += 1
+
                 for index in selected:
                     worker = workers[index]
-                    if targeted is not None:
-                        key = "targeted_transitions" if worker.get("bad_state_start", False) else "normal_transitions"
-                        targeted[key] += 1
+                    if (
+                        far_restart is not None
+                        and int(worker.get("pose_level_index", -1))
+                        == int(far_settings["level_index"])
+                    ):
+                        key = (
+                            "restart_transitions"
+                            if worker.get("far_timeout_restart", False)
+                            else "normal_transitions"
+                        )
+                        far_restart[key] += 1
                     next_observation, reward, _, terminated, truncated, info = results[index]
                     curriculum.record_transition(
                         worker["goal_scale"], worker["orientation_scale"],
@@ -1918,21 +2095,6 @@ def run_parallel_s0(
                         orientation_anchor=worker["orientation_anchor"],
                         curriculum_level=int(curriculum.orientation.level_index),
                     )
-                    if worker.get("bad_state_start", False) and replay.four_pool_enabled:
-                        error = np.asarray(info["orientation_error_vector"], dtype=float)
-                        angular_velocity = np.asarray(info["ee_angular_velocity"], dtype=float)
-                        norm = np.linalg.norm(error) * np.linalg.norm(angular_velocity)
-                        alignment = (float(np.dot(error, angular_velocity) / norm)
-                                     if norm > 1e-8 else None)
-                        replay.add_frontier_from_recent(
-                            worker["episode_id"], worker["frontier_center"],
-                            worker["start_step"], recovered=False, alignment=alignment,
-                        )
-                        if (terminated or truncated) and info["task_reached"]:
-                            replay.add_frontier_from_recent(
-                                worker["episode_id"], worker["frontier_center"],
-                                worker["start_step"], recovered=True,
-                            )
                     record_keypoint_reward_statistics(
                         counters, info,
                         enabled=bool(config["thesis"]["reward"].get(
@@ -1958,7 +2120,9 @@ def run_parallel_s0(
                         "stage_step": counters["stage_step"],
                         "stage_total_step": counters["stage_total_step"],
                         "episode": worker["episode_id"], "episode_step": worker["length"],
-                        "bad_state_start": int(worker.get("bad_state_start", False)),
+                        "far_timeout_restart": int(
+                            worker.get("far_timeout_restart", False)
+                        ),
                         "scene": worker["scene"], "xi": worker["xi"],
                         "lambda_self": worker["lambda_self"], "strict": int(worker["strict"]),
                         "reward": reward, "r_goal": info["r_goal"],
@@ -2146,10 +2310,18 @@ def run_parallel_s0(
                             "self_safety_full_weight_steps": curriculum.self_safety.full_weight_steps,
                         })
                         counters["episodes"] += 1
-                        if targeted is not None:
-                            key = "targeted_length_ema" if worker.get("bad_state_start", False) else "normal_length_ema"
+                        if (
+                            far_restart is not None
+                            and int(worker.get("pose_level_index", -1))
+                            == int(far_settings["level_index"])
+                        ):
+                            key = (
+                                "restart_length_ema"
+                                if worker.get("far_timeout_restart", False)
+                                else "normal_length_ema"
+                            )
                             length = worker["length"] - worker.get("start_step", 0)
-                            targeted[key] = .95 * targeted[key] + .05 * length
+                            far_restart[key] = .95 * far_restart[key] + .05 * length
                         workers[index] = None
                         if (
                             evaluate_during_training
@@ -2277,35 +2449,11 @@ def main() -> None:
     parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
     parser.add_argument("--stage", choices=("s0", "s1", "s2"))
     parser.add_argument("--resume", help="complete checkpoint from the preceding block or stage")
-    parser.add_argument("--bad-state-starts", type=Path, help="complete frozen-event start bank for targeted S0 continuation")
-    parser.add_argument("--four-pool-seed", type=Path,
-                        help="immutable frozen-1M anchor/frontier seed for a new four-pool branch")
-    parser.add_argument("--bad-state-fraction", type=float, default=.25,
-                        help="target rollout transition fraction (default: 0.25); start probability adapts to rollout length")
     parser.add_argument(
-        "--approve-orientation-promotion", action="store_true",
+        "--s0-evaluation",
         help=(
-            "on an S0 resume, manually approve promotion using the latest "
-            "25k checkpoint probe; the completed current level must still "
-            "satisfy its minimum transition budget"
-        ),
-    )
-    parser.add_argument(
-        "--promote-to-level", type=int, metavar="LEVEL",
-        help=(
-            "on an S0 resume, explicitly skip to the specified harder pose "
-            "level after the current level has completed its minimum budget"
-        ),
-    )
-    parser.add_argument(
-        "--promoted-current-fraction", type=float, metavar="FRACTION",
-        help="current-level replay share after four-pool promotion (default: 0.5)",
-    )
-    parser.add_argument(
-        "--allow-early-promotion", action="store_true",
-        help=(
-            "allow --promote-to-level before the current level reaches its "
-            "minimum transition budget; the override is recorded in the checkpoint"
+            "passed frozen-evaluation JSON for the S0->S1 handoff; the JSON "
+            "must name the resumed checkpoint and contain passed=true"
         ),
     )
     parser.add_argument(
@@ -2321,6 +2469,10 @@ def main() -> None:
     )
     parser.add_argument("--steps", type=int, help="override this block's environment steps")
     parser.add_argument("--run-name")
+    parser.add_argument(
+        "--output-dir",
+        help="override train.output_dir for this run (keeps S1/S2 outputs separate from S0)",
+    )
     parser.add_argument("--seed", type=int, help="override training seed")
     parser.add_argument(
         "--num-envs", type=int,
@@ -2328,27 +2480,14 @@ def main() -> None:
     )
     parser.add_argument("--validation-mode", action="store_true", help="small replay/batch for implementation checks only")
     args = parser.parse_args()
-    if args.approve_orientation_promotion and not args.resume:
-        parser.error("--approve-orientation-promotion requires --resume")
-    if args.promote_to_level is not None and not args.resume:
-        parser.error("--promote-to-level requires --resume")
-    if args.promoted_current_fraction is not None:
-        if args.promote_to_level != 1:
-            parser.error("--promoted-current-fraction requires --promote-to-level 1")
-        if not 0. <= args.promoted_current_fraction <= 1.:
-            parser.error("--promoted-current-fraction must be in [0, 1]")
-    if args.allow_early_promotion and args.promote_to_level is None:
-        parser.error("--allow-early-promotion requires --promote-to-level")
-    if args.approve_orientation_promotion and args.promote_to_level is not None:
-        parser.error(
-            "--approve-orientation-promotion and --promote-to-level are mutually exclusive"
-        )
     restart_flags = [args.resume, args.initialize_actor_from]
     if sum(value is not None for value in restart_flags) > 1:
         parser.error("--resume and --initialize-actor-from are mutually exclusive")
     if (args.initialize_actor_from is None) != (args.start_level is None):
         parser.error("--initialize-actor-from and --start-level must be used together")
     config = load_config(ROOT / args.config)
+    if args.output_dir:
+        config["train"]["output_dir"] = args.output_dir
     thesis = config["thesis"]
     stage = args.stage or str(thesis["stage"])
     try:
@@ -2362,14 +2501,6 @@ def main() -> None:
         parser.error("parallel environment collection currently supports S0 only")
     if args.initialize_actor_from and stage != "s0":
         parser.error("--initialize-actor-from currently supports S0 only")
-    if args.bad_state_starts and (stage != "s0" or not args.resume or num_envs < 2):
-        parser.error("--bad-state-starts requires parallel S0 --resume")
-    if args.bad_state_starts and (args.promote_to_level is not None or args.approve_orientation_promotion):
-        parser.error("targeted continuation cannot be combined with level promotion")
-    if args.four_pool_seed and (not args.bad_state_starts or not args.resume or stage != "s0"):
-        parser.error("--four-pool-seed requires targeted S0 continuation from the complete 1M checkpoint")
-    if not 0. < args.bad_state_fraction < 1.:
-        parser.error("--bad-state-fraction must be in (0, 1)")
     if thesis.get("protocol") not in SUPPORTED_PROTOCOLS:
         parser.error(
             "the serial trainer only supports protocols "
@@ -2546,7 +2677,12 @@ def main() -> None:
         if state["rng_stream_seeds"] != stream_seeds:
             raise ValueError("checkpoint RNG stream derivation does not match the current trainer")
         if {("s0", "s1"), ("s1", "s2")}.intersection({(previous_stage, stage)}):
-            validate_serial_stage_transition(config, state, stage)
+            validate_serial_stage_transition(
+                config, state, stage,
+                s0_evaluation=(ROOT / args.s0_evaluation).resolve()
+                if args.s0_evaluation else None,
+                checkpoint_source=Path(checkpoint_source).resolve(),
+            )
             agent.load_state_dict(state["agent"]); replay.load_state_dict(state["replay"])
             curriculum.inherit_task_state(state["curriculum"])
             if previous_stage == "s1":
@@ -2628,187 +2764,6 @@ def main() -> None:
             current_level=int(state["curriculum"]["orientation"].level_index),
         )
     curriculum.configure_orientation_retention(orientation_curriculum)
-    bad_state_starts = None
-    previous_sampling = counters.get("bad_state_sampling")
-    four_pool_promotion = (
-        replay.four_pool_enabled and args.promote_to_level == 1
-        and curriculum.orientation.level_index == 0
-    )
-    if args.promoted_current_fraction is not None and not four_pool_promotion:
-        raise ValueError("--promoted-current-fraction requires four-pool L0 to L1 promotion")
-    if previous_sampling and not args.bad_state_starts and not four_pool_promotion:
-        raise ValueError("resuming targeted training requires --bad-state-starts")
-    if args.bad_state_starts:
-        bad_state_starts = torch.load(args.bad_state_starts, map_location="cpu", weights_only=False)
-        expected_source = previous_sampling["source_checkpoint"] if previous_sampling else args.resume
-        if Path(bad_state_starts["source_checkpoint"]).resolve() != Path(expected_source).resolve():
-            raise ValueError("bad-state bank was collected from a different source checkpoint")
-        if previous_sampling and previous_sampling["fraction"] != args.bad_state_fraction:
-            raise ValueError("cannot silently change the targeted sampling fraction on resume")
-        if curriculum.orientation.level_index != 0 or resume_mode != "same_stage_continuation":
-            raise ValueError("bad-state bank requires a same-stage S0 level-0 continuation")
-        if state["config"]["thesis"] != thesis or state["config"]["sac"] != config["sac"]:
-            raise ValueError("targeted continuation must retain checkpoint environment and SAC settings")
-        if not bad_state_starts.get("centers") or not env.hybrid_explicit_pose_error:
-            raise ValueError("expected a nonempty hybrid/keypoint bad-state bank")
-        for center in bad_state_starts["centers"]:
-            snapshot = center["state"]
-            if (np.asarray(center["observation"]).shape != (obs_dim,) or
-                    not .6 <= center["rho_R"] <= 1. or snapshot["contract"].scene != "none" or
-                    int(center["step"]) != int(snapshot["step_count"]) or
-                    not 0 <= int(center["step"]) < env.horizon):
-                raise ValueError("invalid bad-state snapshot/band/episode clock")
-            for key, shape in (("q", (6,)), ("qdot", (6,)), ("goal_position", (3,)),
-                               ("goal_quaternion", (4,)), ("goal_joint_positions", (6,))):
-                value = np.asarray(snapshot[key])
-                if value.shape != shape or not np.isfinite(value).all():
-                    raise ValueError(f"invalid bad-state {key}")
-    if args.four_pool_seed:
-        if replay.four_pool_enabled:
-            raise ValueError("four-pool replay is already loaded from the checkpoint")
-        seed_bank = torch.load(args.four_pool_seed, map_location="cpu", weights_only=False)
-        if Path(seed_bank["source_checkpoint"]).resolve() != Path(args.resume).resolve():
-            raise ValueError("four-pool seed must originate from this complete 1M checkpoint")
-        if seed_bank["source_sha256"] != file_sha256(Path(args.resume)):
-            raise ValueError("four-pool seed frozen actor hash does not match the resumed checkpoint")
-        if Path(seed_bank["bad_state_starts"]).resolve() != args.bad_state_starts.resolve():
-            raise ValueError("four-pool seed must use the selected 85-state bank")
-        replay.configure_four_pool(seed_bank, source=str(args.four_pool_seed.resolve()))
-        counters["four_pool_seed"] = str(args.four_pool_seed.resolve())
-    elif replay.four_pool_enabled:
-        if not four_pool_promotion and (
-            not args.bad_state_starts or counters.get("four_pool_seed") != replay.four_pool_source
-        ):
-            raise ValueError("resuming a four-pool branch requires its original bad-state bank")
-    if args.approve_orientation_promotion:
-        if stage != "s0" or not bool(
-            orientation_curriculum.get("manual_promotion", False)
-        ):
-            raise ValueError(
-                "--approve-orientation-promotion requires S0 manual-promotion mode"
-            )
-        latest = counters.get("last_manual_pose_probe")
-        if not isinstance(latest, dict):
-            raise ValueError(
-                "checkpoint has no manual pose probe; finish a 25k boundary first"
-            )
-        if int(latest["orientation_level_index"]) != curriculum.orientation.level_index:
-            raise ValueError("latest manual pose probe belongs to a different level")
-        if (
-            curriculum.orientation.current_level_steps
-            < curriculum.orientation.min_transitions_per_level
-        ):
-            raise ValueError(
-                "manual promotion requires the full per-level transition budget: "
-                f"{curriculum.orientation.current_level_steps}/"
-                f"{curriculum.orientation.min_transitions_per_level}"
-            )
-        metrics = latest["metrics"]
-        if not bool(latest.get("passed", False)):
-            raise ValueError(
-                "manual promotion requires the latest frozen probe to pass "
-                "both the current-level and previous-level retention gates"
-            )
-        if curriculum.orientation.level_index > 0 and (
-            "retention_passed" not in latest
-            or "previous_metrics" not in latest
-        ):
-            raise ValueError(
-                "manual promotion requires a fresh cross-level frozen probe; "
-                "the checkpoint predates retention-gate reporting"
-            )
-        if not bool(latest.get(
-            "retention_passed", curriculum.orientation.level_index == 0,
-        )):
-            raise ValueError(
-                "manual promotion blocked by the previous-level retention gate"
-            )
-        previous_metrics = latest.get("previous_metrics")
-        curriculum.record_orientation_probe(
-            success_rate=float(metrics["success_rate"]),
-            collision_rate=float(metrics["collision_rate"]),
-            joint_limit_rate=float(metrics["joint_limit_rate"]),
-            previous_success_rate=(
-                None if previous_metrics is None
-                else float(previous_metrics["success_rate"])
-            ),
-            previous_collision_rate=(
-                None if previous_metrics is None
-                else float(previous_metrics["collision_rate"])
-            ),
-            previous_joint_limit_rate=(
-                None if previous_metrics is None
-                else float(previous_metrics["joint_limit_rate"])
-            ),
-            confirmation_passed=True,
-            retention_passed=bool(latest.get("retention_passed", True)),
-            recovery_required=False,
-            passed=True,
-        )
-        previous_level = curriculum.orientation.level_index
-        if not curriculum.advance_orientation_if_ready():
-            raise ValueError(
-                "manual promotion could not advance (already final level or "
-                "online prerequisites are incomplete)"
-            )
-        replay.begin_orientation_level(curriculum.orientation.level_index)
-        counters.setdefault("manual_promotions", []).append({
-            "from_level": int(previous_level),
-            "to_level": int(curriculum.orientation.level_index),
-            "approved_from_global_step": int(latest["global_step"]),
-            "measured_passed": bool(latest["passed"]),
-            "measured_metrics": dict(metrics),
-        })
-        # A boundary checkpoint may contain partial old-level episodes. They
-        # cannot continue after promotion because their task contract differs.
-        active_episode = None
-        if loaded_checkpoint_state is not None:
-            for saved in loaded_checkpoint_state.get("parallel_workers", []):
-                saved["active"] = False
-                saved["episode"] = None
-                saved["observation"] = None
-    elif args.promote_to_level is not None:
-        if stage != "s0" or not bool(
-            orientation_curriculum.get("manual_promotion", False)
-        ):
-            raise ValueError("--promote-to-level requires S0 manual-promotion mode")
-        previous_level = int(curriculum.orientation.level_index)
-        target_level = int(args.promote_to_level)
-        previous_steps = int(curriculum.orientation.current_level_steps)
-        early_promotion = bool(
-            previous_steps < curriculum.orientation.min_transitions_per_level
-        )
-        curriculum.manually_advance_orientation_to(
-            target_level, allow_early=bool(args.allow_early_promotion),
-        )
-        if four_pool_promotion:
-            replay.promote_four_pool_to_history(
-                curriculum.orientation.level_index,
-                current_fraction=(.5 if args.promoted_current_fraction is None
-                                  else args.promoted_current_fraction),
-            )
-            counters["bad_state_sampling_previous_level"] = counters.pop("bad_state_sampling")
-        else:
-            replay.begin_orientation_level(curriculum.orientation.level_index)
-        counters.setdefault("manual_promotions", []).append({
-            "from_level": previous_level,
-            "to_level": target_level,
-            "skipped_levels": list(range(previous_level + 1, target_level)),
-            "source_level_steps": previous_steps,
-            "source_minimum_level_steps": int(
-                curriculum.orientation.min_transitions_per_level
-            ),
-            "early_promotion": early_promotion,
-            "decision": "explicit_target_level",
-            "measured_passed": None,
-            "measured_metrics": None,
-        })
-        active_episode = None
-        if loaded_checkpoint_state is not None:
-            for saved in loaded_checkpoint_state.get("parallel_workers", []):
-                saved["active"] = False
-                saved["episode"] = None
-                saved["observation"] = None
     semantic_config = thesis["semantic_long_term_replay"]
     semantic_enabled = bool(semantic_config["enabled"]) and stage == "s0"
     pose_contract = curriculum.pose_contract()
@@ -2832,7 +2787,7 @@ def main() -> None:
         orientation_min=float(pose_contract.get("target_orientation_min_rad", 0.0)),
         orientation_max=float(pose_contract.get("target_orientation_max_rad", 1.0)),
         seed=stream_seeds["replay"] ^ 0x5EED5EED,
-        reset_on_contract_change=args.promote_to_level is not None,
+        reset_on_contract_change=False,
     )
     if num_envs > 1:
         if stage != "s0":
@@ -2854,9 +2809,8 @@ def main() -> None:
         "resume": checkpoint_source, "resume_mode": resume_mode, "config": str(args.config),
         "initialize_actor_from": args.initialize_actor_from,
         "start_level": args.start_level,
-        "bad_state_starts": None if args.bad_state_starts is None else str(args.bad_state_starts.resolve()),
-        "bad_state_target_transition_fraction": None if bad_state_starts is None else args.bad_state_fraction,
-        "four_pool_seed": counters.get("four_pool_seed"),
+        "legacy_s0_targeted_sampling": False,
+        "legacy_s0_four_pool": False,
         "semantic_long_term_replay": {
             "enabled": semantic_enabled,
             "fraction": float(semantic_config["fraction"]),
@@ -2876,9 +2830,7 @@ def main() -> None:
             "position_boundary_low_ratio": replay.precision_position_boundary_low,
             "position_boundary_high_ratio": replay.precision_position_boundary_high,
         },
-        "approve_orientation_promotion": bool(args.approve_orientation_promotion),
-        "promote_to_level": args.promote_to_level,
-        "allow_early_promotion": bool(args.allow_early_promotion),
+        "manual_promotion": bool(orientation_curriculum.get("manual_promotion", False)),
         "urdf_sha256": file_sha256(ROOT / config["robot"]["urdf"]),
         "joint_names": config["robot"]["joint_names"], "tool_link_name": config["robot"]["tool_link_name"],
         "observation_dim": obs_dim, "action_dim": action_dim, "external_collision_bodies": [],
@@ -2929,7 +2881,7 @@ def main() -> None:
                    "s0_phase", "pose_phase_complete",
                    "self_safety_eligible_steps", "self_safety_full_weight_steps"])
     transition_fields = ["global_step", "stage_step", "stage_total_step", "episode", "episode_step", "scene", "xi", "lambda_self", "strict",
-                         "bad_state_start",
+                         "far_timeout_restart",
                          "reward", "r_goal", "c_proximity", "hard_penalty", "timeout_penalty", "safety_penalty",
                          "external_safety_penalty", "self_safety_penalty",
                          "terminal_guard_penalty", "clearance_violation", "risk_max", "d_min", "goal_scale",
@@ -2994,7 +2946,10 @@ def main() -> None:
     ]
     progress_fields = [
         "global_step", "stage_step", "stage_total_step", "episodes", "replay_size", "updates", "alpha",
-        "bad_state_starts", "bad_state_transitions", "bad_state_transition_fraction",
+        "far_restart_bank_size", "far_restart_nonempty_cells",
+        "far_restart_candidates", "far_restart_promoted_centers",
+        "far_restart_starts", "far_restart_transitions",
+        "far_restart_transition_fraction",
         "critic_loss", "actor_loss", "actor_sac_loss", "policy_churn_kl",
         "policy_churn_penalty", "policy_churn_to_sac_ratio",
         "chain_pcr_effective_coefficient",
@@ -3098,7 +3053,6 @@ def main() -> None:
             full_scale_min_transitions=full_scale_min_transitions,
             pose_full_scale_min_transitions=pose_full_scale_min_transitions,
             loaded_checkpoint_state=loaded_checkpoint_state,
-            bad_state_starts=bad_state_starts, bad_state_fraction=args.bad_state_fraction,
         )
         return
     with log_path.open("w", newline="", encoding="utf-8") as handle, \

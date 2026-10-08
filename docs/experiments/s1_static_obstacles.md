@@ -6,19 +6,20 @@
 
 ## 阶段边界与启动
 
-S1 在通过正式完成 gate 的 S0 完整 checkpoint 上继续训练同一个 Hybrid Keypoint + Jacobian + Auto-PCR SAC agent，加入单个静止的外部球形障碍物。每个 episode 的场景概率为 none 25%、static 75%、dynamic 0%；none 用来保留无障碍 6D 到达。S1 不引入动态障碍物，也不改变网络输入输出、奖励定义或 SAC 超参数。
+S1 在通过冻结评估 gate 的 S0 完整 checkpoint 上继续训练同一个 Hybrid Keypoint + Jacobian + Auto-PCR SAC agent，加入单个静止的外部球形障碍物。每个 episode 的场景概率为 none 25%、static 75%、dynamic 0%；none 用来保留无障碍 6D 到达。S1 不引入动态障碍物，也不改变网络输入输出、奖励定义或 SAC 超参数。冻结评估 JSON 必须以 `passed=true` 命名所恢复的 checkpoint，并在启动时通过 `--s0-evaluation` 提交；不再要求为内部课程字段额外续训 S0。
 
 ```bash
 python scripts/core/train_thesis_homotopy.py \
   --config configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml \
   --stage s1 \
   --resume /absolute/path/to/completed-s0/checkpoints/step_XXXXXXX.pt \
+  --s0-evaluation /absolute/path/to/s0/evaluations/step_XXXXXXX_level6_seed31001.json \
   --seed 11001 \
   --num-envs 1 \
   --run-name s1_seed11001
 ```
 
-须使用完整的 `step_*.pt`，不能用 actor-only checkpoint。训练器核验来源阶段、protocol、seed/RNG stream 和 S0 最终的 P8 frozen probe、P7 retention、自安全完成 gate；Actor、双 Critic、target Critic、温度 α、优化器及 replay 一起恢复。任务课程和 self-safety 状态继承；static 同伦状态在 S1 初始化。S1/S2 目前只支持单环境采样，配置中的 `train.num_envs: 8` 仅用于 S0，显式指定 S1 多环境会报错。示例路径需换成真实完成 S0 gate 的 checkpoint。
+须使用完整的 `step_*.pt`，不能用 actor-only checkpoint。训练器核验来源阶段、protocol、seed/RNG stream，以及冻结评估 JSON 的 `passed`、checkpoint 路径和 SHA-256；Actor、双 Critic、target Critic、温度 α、优化器及 replay 一起恢复。任务课程和 self-safety 状态继承；static 同伦状态在 S1 初始化。S1/S2 目前只支持单环境采样，配置中的 `train.num_envs: 8` 仅用于 S0，显式指定 S1 多环境会报错。
 
 ## 固定合同
 

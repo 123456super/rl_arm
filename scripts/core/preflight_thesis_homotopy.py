@@ -279,15 +279,25 @@ def goal_kinematics_audit(config: dict, samples: int) -> tuple[dict, list[dict]]
                 )
                 _, info = env.reset(seed=int(config["seed"]) + sample)
                 validation = info["goal_ik_validation"]
+                position_tolerance = float(env.contract.position_tolerance)
+                orientation_tolerance = float(env.contract.orientation_tolerance)
                 rows.append({
                     "sample": sample,
                     "level": level_index,
                     "accepted": bool(validation["reachable"]),
                     "attempts": int(info["goal_sample_attempts"]),
+                    "position_tolerance_m": position_tolerance,
+                    "orientation_tolerance_rad": orientation_tolerance,
                     "ik_finite": bool(validation["finite"]),
                     "ik_within_limits": bool(validation["within_limits"]),
                     "position_error_m": float(validation["position_error_m"]),
                     "orientation_error_rad": float(validation["orientation_error_rad"]),
+                    "strict_fk_ok": bool(
+                        validation["finite"]
+                        and validation["within_limits"]
+                        and validation["position_error_m"] <= position_tolerance
+                        and validation["orientation_error_rad"] <= orientation_tolerance
+                    ),
                     "target_distance_m": float(info.get("sampled_target_distance_m", 0.0)),
                     "target_orientation_rad": float(info.get("sampled_target_orientation_rad", 0.0)),
                 })
@@ -296,8 +306,15 @@ def goal_kinematics_audit(config: dict, samples: int) -> tuple[dict, list[dict]]
                 rows.append({
                     "sample": sample, "level": level_index, "accepted": False,
                     "attempts": int(config["thesis"].get("goal_sample_max_attempts", 10000)),
+                    "position_tolerance_m": float(level.get(
+                        "position_tolerance_m", config["thesis"]["position_tolerance"]
+                    )),
+                    "orientation_tolerance_rad": float(level.get(
+                        "orientation_tolerance_rad", config["thesis"]["orientation_tolerance"]
+                    )),
                     "ik_finite": False, "ik_within_limits": False,
                     "position_error_m": float("inf"), "orientation_error_rad": float("inf"),
+                    "strict_fk_ok": False,
                     "target_distance_m": float("nan"), "target_orientation_rad": float("nan"),
                 })
     finally:
@@ -308,8 +325,17 @@ def goal_kinematics_audit(config: dict, samples: int) -> tuple[dict, list[dict]]
         "reset_failures": failures,
         "acceptance_rate": float(len(accepted) / samples),
         "thresholds": {
-            "position_error_m": float(config["thesis"]["position_tolerance"]),
-            "orientation_error_rad": float(config["thesis"]["orientation_tolerance"]),
+            "by_level": {
+                str(index): {
+                    "position_error_m": float(level.get(
+                        "position_tolerance_m", config["thesis"]["position_tolerance"]
+                    )),
+                    "orientation_error_rad": float(level.get(
+                        "orientation_tolerance_rad", config["thesis"]["orientation_tolerance"]
+                    )),
+                }
+                for index, level in enumerate(levels)
+            }
         },
         "attempts": {
             "median": float(np.median([row["attempts"] for row in rows])),
@@ -320,6 +346,190 @@ def goal_kinematics_audit(config: dict, samples: int) -> tuple[dict, list[dict]]
             "position_error_m": float(max(row["position_error_m"] for row in accepted)) if accepted else None,
             "orientation_error_rad": float(max(row["orientation_error_rad"] for row in accepted)) if accepted else None,
         },
+        "accepted_strict_fk_rate": float(
+            np.mean([row["strict_fk_ok"] for row in accepted])
+        ) if accepted else 0.0,
+    }
+    return summary, rows
+
+
+def task_space_cell_audit(
+    config: dict,
+    level_index: int = 6,
+    seed: int | None = None,
+    resets_per_cell: int = 1,
+) -> tuple[dict, list[dict]]:
+    """Audit every balanced L6 task-space cell under the strict IK contract.
+
+    Each trial fixes one valid initial robot configuration and lets the normal
+    sampler spend at most ``goal_sample_max_attempts`` proposals in that cell.
+    A failed trial is therefore a cell that had no strict IK/self-clearance
+    witness for that audited reset, not a claim about all possible robot
+    configurations.
+    """
+    if resets_per_cell < 1:
+        raise ValueError("resets_per_cell must be positive")
+    levels = config["thesis"].get("joint_pose_curriculum", {}).get("levels", [])
+    if not levels:
+        raise ValueError("joint_pose_curriculum.levels is required for cell audit")
+    if level_index < 0 or level_index >= len(levels):
+        raise ValueError(f"level_index must be in [0, {len(levels) - 1}]")
+    level = levels[level_index]
+    position_bins = int(config["thesis"]["joint_pose_curriculum"]["task_space_sampling"]["position_bins"])
+    orientation_bins = int(config["thesis"]["joint_pose_curriculum"]["task_space_sampling"]["orientation_bins"])
+    max_attempts = int(config["thesis"].get("goal_sample_max_attempts", 10000))
+    base_seed = int(config["seed"] if seed is None else seed)
+    env = ThesisHomotopyEnv(config)
+    rows: list[dict] = []
+    try:
+        env.configure_episode(
+            "none", xi=1.0, strict=True,
+            goal_scale=float(level["goal_scale"]),
+            position_tolerance=float(level["position_tolerance_m"]),
+            orientation_tolerance=float(level["orientation_tolerance_rad"]),
+            target_distance_min_m=float(level["target_distance_min_m"]),
+            target_distance_max_m=float(level["target_distance_max_m"]),
+            target_orientation_min_rad=float(level["target_orientation_min_rad"]),
+            target_orientation_max_rad=float(level["target_orientation_max_rad"]),
+        )
+        for position_bin in range(position_bins):
+            for orientation_bin in range(orientation_bins):
+                flat_bin = position_bin * orientation_bins + orientation_bin
+                for trial in range(resets_per_cell):
+                    env.rng = np.random.default_rng(
+                        base_seed + flat_bin * resets_per_cell + trial
+                    )
+                    env._selected_task_space_position_bin = position_bin
+                    env._selected_task_space_orientation_bin = orientation_bin
+                    proposal_before = int(env.goal_proposal_counts[flat_bin])
+                    try:
+                        env._sample_valid_reset()
+                    except RuntimeError as error:
+                        rows.append({
+                            "level": level_index,
+                            "position_bin": position_bin,
+                            "orientation_bin": orientation_bin,
+                            "trial": trial,
+                            "accepted": False,
+                            "strict_ik_feasible": False,
+                            "failure_stage": "reset",
+                            "failure_detail": str(error),
+                            "attempts": int(env.goal_proposal_counts[flat_bin] - proposal_before),
+                            "max_attempts": max_attempts,
+                            "position_error_m": float("inf"),
+                            "orientation_error_rad": float("inf"),
+                            "target_distance_m": float("nan"),
+                            "target_orientation_rad": float("nan"),
+                        })
+                        continue
+                    try:
+                        env._sample_goal_pose()
+                    except RuntimeError as error:
+                        rows.append({
+                            "level": level_index,
+                            "position_bin": position_bin,
+                            "orientation_bin": orientation_bin,
+                            "trial": trial,
+                            "accepted": False,
+                            "strict_ik_feasible": False,
+                            "failure_stage": "goal_sampling",
+                            "failure_detail": str(error),
+                            "attempts": int(env.goal_proposal_counts[flat_bin] - proposal_before),
+                            "max_attempts": max_attempts,
+                            "position_error_m": float("inf"),
+                            "orientation_error_rad": float("inf"),
+                            "target_distance_m": float("nan"),
+                            "target_orientation_rad": float("nan"),
+                        })
+                        continue
+                    validation = env.goal_ik_validation
+                    rows.append({
+                        "level": level_index,
+                        "position_bin": position_bin,
+                        "orientation_bin": orientation_bin,
+                        "trial": trial,
+                        "accepted": True,
+                        "strict_ik_feasible": True,
+                        "failure_stage": None,
+                        "failure_detail": None,
+                        "attempts": int(env.goal_proposal_counts[flat_bin] - proposal_before),
+                        "max_attempts": max_attempts,
+                        "position_error_m": float(validation["position_error_m"]),
+                        "orientation_error_rad": float(validation["orientation_error_rad"]),
+                        "target_distance_m": float(env.sampled_target_distance_m),
+                        "target_orientation_rad": float(env.sampled_target_orientation_rad),
+                    })
+    finally:
+        env.close()
+    accepted = [row for row in rows if row["accepted"]]
+    failed = [row for row in rows if not row["accepted"]]
+    cell_summary: dict[str, dict] = {}
+    for position_bin in range(position_bins):
+        for orientation_bin in range(orientation_bins):
+            key = f"{position_bin}:{orientation_bin}"
+            subset = [
+                row for row in rows
+                if row["position_bin"] == position_bin
+                and row["orientation_bin"] == orientation_bin
+            ]
+            cell_summary[key] = {
+                "position_bin": position_bin,
+                "orientation_bin": orientation_bin,
+                "trials": len(subset),
+                "accepted_trials": int(sum(row["accepted"] for row in subset)),
+                "failed_trials": int(sum(not row["accepted"] for row in subset)),
+                "min_attempts_to_accept": (
+                    int(min(row["attempts"] for row in subset if row["accepted"]))
+                    if any(row["accepted"] for row in subset) else None
+                ),
+                "max_attempts_to_accept": (
+                    int(max(row["attempts"] for row in subset if row["accepted"]))
+                    if any(row["accepted"] for row in subset) else None
+                ),
+            }
+    summary = {
+        "level": level_index,
+        "position_bins": position_bins,
+        "orientation_bins": orientation_bins,
+        "cells": position_bins * orientation_bins,
+        "resets_per_cell": resets_per_cell,
+        "goal_sample_max_attempts": max_attempts,
+        "thresholds": {
+            "position_error_m": float(level["position_tolerance_m"]),
+            "orientation_error_rad": float(level["orientation_tolerance_rad"]),
+        },
+        "accepted_trials": len(accepted),
+        "failed_trials": len(failed),
+        "accepted_rate": float(len(accepted) / max(len(rows), 1)),
+        "accepted_fk_position_max_m": (
+            float(max(row["position_error_m"] for row in accepted))
+            if accepted else None
+        ),
+        "accepted_fk_orientation_max_rad": (
+            float(max(row["orientation_error_rad"] for row in accepted))
+            if accepted else None
+        ),
+        "failed_cells": [
+            key for key, value in cell_summary.items()
+            if value["accepted_trials"] == 0
+        ],
+        "goal_sampling_failed_cells": [
+            key for key, value in cell_summary.items()
+            if value["accepted_trials"] == 0
+            and all(
+                row["failure_stage"] == "goal_sampling"
+                for row in rows
+                if row["position_bin"] == value["position_bin"]
+                and row["orientation_bin"] == value["orientation_bin"]
+            )
+        ],
+        "cell_summary": cell_summary,
+        "interpretation": (
+            "A failed cell had no strict IK/self-clearance witness within "
+            "goal_sample_max_attempts for the audited reset(s). It is a "
+            "current-constraint infeasibility flag, not a global proof over "
+            "all possible initial joint configurations."
+        ),
     }
     return summary, rows
 
@@ -600,12 +810,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "mode",
-        choices=("reward", "goal", "contact", "self-contact", "feasibility", "checkpoint"),
+        choices=("reward", "goal", "cells", "contact", "self-contact", "feasibility", "checkpoint"),
     )
     parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
     parser.add_argument("--output", required=True)
     parser.add_argument("--checkpoint")
     parser.add_argument("--samples", type=int, default=100)
+    parser.add_argument("--level", type=int, default=6)
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--resets-per-cell", type=int, default=1)
     args = parser.parse_args()
     config = load_config(ROOT / args.config)
     output = ROOT / args.output
@@ -613,6 +826,11 @@ def main() -> None:
         summary, rows = reward_audit(config, args.samples)
     elif args.mode == "goal":
         summary, rows = goal_kinematics_audit(config, args.samples)
+    elif args.mode == "cells":
+        summary, rows = task_space_cell_audit(
+            config, level_index=args.level, seed=args.seed,
+            resets_per_cell=args.resets_per_cell,
+        )
     elif args.mode == "contact":
         summary, rows = contact_geometry_audit(config, args.samples)
     elif args.mode == "self-contact":

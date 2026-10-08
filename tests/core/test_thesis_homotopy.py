@@ -58,18 +58,72 @@ def test_bad_state_reset_preserves_clock_contract_and_local_neighborhood():
             "state": env.episode_state_dict(), "observation": observation,
             "rho_R": info["orientation_error_norm"],
             "rho_p": info["goal_error_norm"],
+            "preserve_goal": True,
         }
+        goal_position = env.goal_position.copy()
+        goal_quaternion = env.goal_quaternion.copy()
         first, _ = env.reset_bad_state(center, contract)
         assert env.step_count == 90
         assert env.contract.lambda_self == .2
+        np.testing.assert_array_equal(env.goal_position, goal_position)
+        np.testing.assert_array_equal(env.goal_quaternion, goal_quaternion)
         assert not env._collision_events()["self_collision"]
         assert not np.array_equal(first, observation)
         second, _ = env.reset_bad_state(center, contract)
         assert env.step_count == 90
         assert not np.array_equal(first, second)
         assert np.sqrt(np.mean((second[21:75] - observation[21:75]) ** 2)) <= .18
+        terminal_state = copy.deepcopy(center["state"])
+        terminal_state["step_count"] = env.horizon
+        fresh_episode_center = {
+            **center,
+            "state": terminal_state,
+            "step": env.horizon,
+            "reset_episode_clock": True,
+        }
+        env.reset_bad_state(fresh_episode_center, contract)
+        assert env.step_count == 0
+        np.testing.assert_array_equal(env.goal_position, goal_position)
+        np.testing.assert_array_equal(env.goal_quaternion, goal_quaternion)
     finally:
         env.close()
+
+
+def test_l6_far_timeout_restart_settings_and_balanced_bank():
+    config = load_config(
+        Path(__file__).resolve().parents[2]
+        / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+    )
+    settings = thesis_trainer.far_timeout_restart_settings(config)
+    assert settings == {
+        "level_index": 6,
+        "minimum_position_bin": 7,
+        "target_transition_fraction": .15,
+        "capacity_per_cell": 8,
+    }
+
+    state = {}
+    for index in range(10):
+        thesis_trainer.add_far_timeout_center(
+            state,
+            {"position_bin": 7, "orientation_bin": 2, "index": index},
+            settings,
+        )
+    thesis_trainer.add_far_timeout_center(
+        state,
+        {"position_bin": 8, "orientation_bin": 4, "index": 10},
+        settings,
+    )
+    assert state["bank_size"] == 9
+    assert state["nonempty_cells"] == 2
+    assert [center["index"] for center in state["cells"]["7:2"]] == list(
+        range(2, 10)
+    )
+    sampled = thesis_trainer.sample_far_timeout_center(
+        state, np.random.default_rng(11001),
+    )
+    assert sampled is not None
+    assert sampled[1] in {"7:2", "8:4"}
 
 
 def test_damped_least_squares_velocity_tracks_twist_and_is_bounded():
@@ -2830,15 +2884,27 @@ def test_sampled_goal_passes_pose_ik_fk_round_trip():
     config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
     env = ThesisHomotopyEnv(config)
     try:
-        env.configure_episode("none", xi=1.0, strict=True)
-        _, info = env.reset(seed=20260915)
-        validation = info["goal_ik_validation"]
-        assert validation["reachable"]
-        assert validation["within_limits"]
-        assert validation["position_error_m"] <= 0.01
-        assert validation["orientation_error_rad"] <= 0.05
-        assert info["goal_sample_attempts"] >= 1
-        assert info["self_d_min"] >= env.d_self_safe
+        l6 = config["thesis"]["joint_pose_curriculum"]["levels"][-1]
+        env.configure_episode(
+            "none", xi=1.0, strict=True,
+            goal_scale=float(l6["goal_scale"]),
+            position_tolerance=float(l6["position_tolerance_m"]),
+            orientation_tolerance=float(l6["orientation_tolerance_rad"]),
+            target_distance_min_m=float(l6["target_distance_min_m"]),
+            target_distance_max_m=float(l6["target_distance_max_m"]),
+            target_orientation_min_rad=float(l6["target_orientation_min_rad"]),
+            target_orientation_max_rad=float(l6["target_orientation_max_rad"]),
+        )
+        for seed in range(20260915, 20260925):
+            _, info = env.reset(seed=seed)
+            validation = info["goal_ik_validation"]
+            assert validation["reachable"]
+            assert validation["finite"]
+            assert validation["within_limits"]
+            assert validation["position_error_m"] <= env.contract.position_tolerance + 1e-12
+            assert validation["orientation_error_rad"] <= env.contract.orientation_tolerance + 1e-12
+            assert info["goal_sample_attempts"] >= 1
+            assert info["self_d_min"] >= env.d_self_safe
     finally:
         env.close()
 
