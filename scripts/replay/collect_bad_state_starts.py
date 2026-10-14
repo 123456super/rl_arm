@@ -25,7 +25,7 @@ def main() -> None:
     args = parser.parse_args()
     if args.output.exists():
         parser.error(f"output exists: {args.output}")
-    config = load_config(ROOT / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(ROOT / "configs/experiments/paper_full.yaml")
     config["device"] = "cpu"
     torch.set_num_threads(1)
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=False)

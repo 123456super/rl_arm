@@ -97,7 +97,7 @@ def main():
     if args.num_envs < 1:
         parser.error("--num-envs must be positive")
     torch.set_num_threads(1)
-    config = load_config(ROOT / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(ROOT / "configs/experiments/paper_full.yaml")
     config["device"] = "cpu"
     bank = torch.load(args.starts, map_location="cpu", weights_only=False)
     if Path(bank["source_checkpoint"]).resolve() != args.baseline.resolve():

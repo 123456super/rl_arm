@@ -1,7 +1,7 @@
 # 算法配置。该文件集中放风险建模、动作平滑、任务奖励和 SAC 超参数。
 risk:
   # 安全距离阈值，d_min 小于该值计为安全距离违反。
-  d_safe: 0.12
+  d_safe: 0.05
   # 单侧胶囊体几何标定裕量。运行时从原始胶囊间隙中扣除该值，得到供
   # 风险、TTC、预测、cost 和 Safety-QP 使用的保守距离；原始距离另行记录。
   geometry_margin: 0.04
@@ -60,7 +60,7 @@ sac:
   tau: 0.005
   actor_lr: 0.0003
   critic_lr: 0.0003
-  alpha_lr: 0.0003
+  alpha_lr: 0.00003
   lambda_lr: 0.01
   # episode 平均 cost 的指数滑动平均系数，用于更新拉格朗日乘子。
   cost_ema_rho: 0.05
@@ -78,5 +78,7 @@ sac:
   # raw penalizes all predicted risk; excess penalizes only the positive gap
   # over current risk and is the preferred non-duplicative training signal.
   predictive_risk_penalty_mode: raw
-  initial_alpha: 0.2
+  initial_alpha: 0.02
+  target_entropy: -3.0
+  min_alpha: 0.003
   initial_lambda: 0.1

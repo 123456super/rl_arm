@@ -14,11 +14,11 @@ python scripts/core/train_thesis_homotopy.py \
   --stage s2 \
   --resume /absolute/path/to/completed-s1/checkpoints/step_XXXXXXX.pt \
   --seed 11001 \
-  --num-envs 1 \
+  --num-envs 8 \
   --run-name s2_seed11001
 ```
 
-须使用 S1 的完整 `step_*.pt`，不能用 actor-only checkpoint。训练器要求来源 stage=s1、protocol 和 seed/RNG stream 相符、static 已 strict 且 replay 已 strictify、static strict transitions 至少 25k。Actor、双 Critic、双 target Critic、温度 α、优化器、replay、任务与 self-safety 课程继承；static scene 状态也继承。dynamic 同伦状态在 S2 初始化。S1/S2 都只支持单环境运行；显式指定多环境被拒绝。示例路径须替换为通过 S1 gate 的真实 checkpoint。
+须使用 S1 的完整 `step_*.pt`，不能用 actor-only checkpoint。训练器要求来源 stage=s1、protocol 和 seed/RNG stream 相符、static 已 strict 且 replay 已 strictify、static strict transitions 至少 25k。Actor、双 Critic、双 target Critic、温度 α、优化器、replay、任务与 self-safety 课程继承；static scene 状态也继承。dynamic 同伦状态在 S2 初始化。S2 支持多进程环境采样，推荐 `--num-envs 8`；阶段切换时为 dynamic 场景重新初始化 worker 状态。示例路径须替换为通过 S1 gate 的真实 checkpoint。
 
 ## 网络、任务与采样合同
 
@@ -30,7 +30,7 @@ S2 沿用 S1 的 162 维观测和 6 维归一化关节速度动作，不迁移�
 
 ## 动态球体的生成与运动
 
-障碍物为无质量、半径 0.075 m 的球体，速度标称 0.1 m/s。reset 时从 `x=[0.22,0.72]`、`z=[0.18,0.62]` m 和一侧 `|y|=[0.42,0.62]` m 抽取初始位置；在对侧 `|y|=[0.24,0.48]` m 内抽取 waypoint，初始速度指向 waypoint。初始机器人胶囊最小表面距离须不小于 `d_safe=0.12 m`、无 PyBullet 接触，最多重抽 100 次。
+障碍物为无质量、半径 0.075 m 的球体，速度标称 0.1 m/s。reset 时从 `x=[0.22,0.72]`、`z=[0.18,0.62]` m 和一侧 `|y|=[0.42,0.62]` m 抽取初始位置；在对侧 `|y|=[0.24,0.48]` m 内抽取 waypoint，初始速度指向 waypoint。初始机器人胶囊最小表面距离须不小于 `d_safe=0.05 m`、无 PyBullet 接触，最多重抽 100 次。
 
 waypoint 只用于确定初速度；此后每个物理子步按 `position += velocity * (1/240 s)` 推进，越过 x=[0.22,0.72]、y=[-0.62,0.62]、z=[0.18,0.62] m 的边界时镜像位置并反转对应速度分量。static episode 仍按 S1 的静止球模型运行，none 则无外部球体。动态 TTC 和风险由球与机器人最近点的相对运动计算，不表示模型显式预测未来轨迹。
 
@@ -47,7 +47,7 @@ xi = min(1, 0.02 + 0.98 * eligible_steps / 50_000)
 奖励继续使用 `pose_objective: unified_keypoint`：三关键点 tracking、关键点误差 progress、关键点精度奖励，减速度和动作平滑代价，成功 +20；hard failure -20，未成功 timeout -2；另有自安全代价与当前场景的外部安全项。升档通过 transition 保存的位置/姿态 tolerance 影响精度项，档位编号和 `orientation_scale` 不直接进入 reward 公式。过去位置/姿态 progress 等诊断字段仍记录，但不作为当前 `r_goal` 的额外加项。
 
 ```text
-clearance = clip((0.12 - min_distance) / 0.12, 0, 1)
+clearance = clip((0.05 - min_distance) / 0.05, 0, 1)
 external_penalty = xi * 0.05 * (2 * risk_max + 8 * clearance) / 10
 reward = r_goal - external_penalty - self_penalty - hard_failure_penalty
          - timeout_penalty - terminal_obstacle_guard

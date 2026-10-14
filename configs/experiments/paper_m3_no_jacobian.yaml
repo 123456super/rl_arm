@@ -1,8 +1,7 @@
-# Hybrid Keypoint + Jacobian + Auto-PCR: the only supported experiment.
-# Common robot/runtime defaults are retained; no legacy experiment is included.
+M3 ablation: remove keypoint Jacobian information while retaining the zero slot.
 includes:
-  - ../default.yaml
-
+- ../default.yaml
+- paper_auto_promotion_protocol.yaml
 seed: 11001
 device: cuda:auto
 robot:
@@ -25,7 +24,7 @@ thesis:
   joint_motor_force: 90.0
   obstacle_radius: 0.075
   obstacle_speed: 0.1
-  d_safe: 0.12
+  d_safe: 0.05
   position_tolerance: 0.05
   orientation_tolerance: 0.1
   goal_sample_max_attempts: 10000
@@ -84,14 +83,20 @@ thesis:
     - 1.0
     - 1.0
     - 1.0
-    min_transitions_per_level: 100000
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    min_transitions_per_level: 0
     success_window: 100
     success_floor: 0.85
-    full_scale_min_transitions: 25000
+    full_scale_min_transitions: 0
   orientation_curriculum:
     start_scale: 0.0
-    # L4--L6 have the same full orientation objective; replay uses the
-    # curriculum level index to distinguish these precision-only levels.
     end_scale: 1.0
     levels:
     - 0.0
@@ -101,9 +106,17 @@ thesis:
     - 1.0
     - 1.0
     - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
     tolerance_start: 0.3
     tolerance_end: 0.1
-    min_transitions_per_level: 100000
+    min_transitions_per_level: 300000
     success_window: 100
     success_floor: 0.85
     anchor_probability: 0.0
@@ -131,29 +144,24 @@ thesis:
       current_capacity: 30000
       current_success_capacity: 15000
       history_capacity_per_level: 3000
-    deterministic_probe_required: true
-    deterministic_probe_episodes: 1000
-    deterministic_probe_seed: 31001
     deterministic_probe_success_floor: 0.85
+    deterministic_probe_min_seed_success_floor: 0.8
+    deterministic_probe_seed: 31001
     deterministic_probe_bin_success_floor: 0.6
     deterministic_probe_position_bins: 10
     deterministic_probe_orientation_bins: 10
     deterministic_previous_success_floor: 0.8
-    deterministic_probe_collision_ceiling: 0.05
-    deterministic_previous_collision_ceiling: 0.05
+    deterministic_previous_collision_ceiling: 0.1
     retention_recovery_success_floor: 0.9
     retention_recovery_collision_ceiling: 0.05
-    deterministic_confirmation_episodes: 1000
-    deterministic_confirmation_seed: 51001
-    deterministic_probe_interval_transitions: 100000
-    cross_level_probe_enabled: true
-    manual_promotion: true
+    deterministic_confirmation_seed: 31001
     manual_probe_interval_transitions: 25000
     rollback_patience: 3
     rollback_success_drop: 0.1
     rollback_actor_lr_factor: 1.0
-    full_scale_min_transitions: 25000
+    full_scale_min_transitions: 0
   joint_pose_curriculum:
+    cross_level_replay: false
     task_space_sampling:
       balanced_bins: true
       position_bins: 10
@@ -181,11 +189,9 @@ thesis:
         beta: 0.6
         improvement_weight: 0.5
         score_floor: 0.01
-    # Training only: timed-out L6 D7--D9 trajectories contribute their final
-    # states as fresh 500-step starts. Evaluation always uses normal starts.
     far_distance_timeout_restarts:
-      enabled: true
-      level_index: 6
+      enabled: false
+      level_index: 14
       minimum_position_bin: 7
       target_transition_fraction: 0.15
       capacity_per_cell: 8
@@ -239,8 +245,64 @@ thesis:
       target_orientation_max_rad: 3.141592
       position_tolerance_m: 0.01
       orientation_tolerance_rad: 0.1
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.5
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.005
+      orientation_tolerance_rad: 0.1
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.5
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.0025
+      orientation_tolerance_rad: 0.1
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.5
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.002
+      orientation_tolerance_rad: 0.1
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.5
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.0015
+      orientation_tolerance_rad: 0.1
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.5
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.001
+      orientation_tolerance_rad: 0.1
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.5
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.001
+      orientation_tolerance_rad: 0.05
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.5
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.001
+      orientation_tolerance_rad: 0.025
+    - goal_scale: 1.0
+      target_distance_min_m: 0.03
+      target_distance_max_m: 0.5
+      target_orientation_min_rad: 0.03
+      target_orientation_max_rad: 3.141592
+      position_tolerance_m: 0.001
+      orientation_tolerance_rad: 0.01
   semantic_long_term_replay:
-    enabled: true
+    enabled: false
     fraction: 0.2
     position_bins: 10
     orientation_bins: 10
@@ -298,23 +360,27 @@ thesis:
     ee_linear_speed_m_s: 0.02
     ee_angular_speed_rad_s: 0.1
   observation:
+    ablation_variant: m3_no_jacobian
     include_orientation_error_vector: false
-    keypoint_jacobian_pose: true
+    # Keep the 54-D Jacobian slot in the Actor input, but fill it with zeros;
+    # Critics still receive the shared 108-D state after dropping [21:75].
+    jacobian_actor_only: true
+    keypoint_jacobian_pose: false
     keypoint_cube_side_m: 0.5
     keypoint_error_scale_m: 0.65
     keypoint_jacobian_scale: 1.1
     hybrid_explicit_pose_error: true
 train:
-  total_steps: 200000
+  cpu_affinity: false
+  total_steps: 8000000
   max_stage_steps: 10000000
   num_envs: 8
-  evaluate_during_training: false
   actor_initialization_critic_warmup_transitions: 5000
   save_interval: 25000
   progress_interval: 1000
   log_flush_interval: 100
   update_log_interval: 10
-  output_dir: outputs/serial_hybrid_keypoint_jacobian_auto_chain
+  output_dir: outputs/retrain_20261013/m3_no_jacobian
   plateau:
     comparison_blocks: 2
     min_current_episodes_per_block: 100
@@ -338,7 +404,7 @@ sac:
   tau: 0.005
   actor_lr: 0.0001
   critic_lr: 0.0001
-  alpha_lr: 0.0003
+  alpha_lr: 3.0e-05
   batch_size: 1024
   updates_per_transition: 0.25
   warmup_steps: 3000
@@ -346,7 +412,9 @@ sac:
   hidden_dims:
   - 256
   - 256
-  initial_alpha: 0.2
+  initial_alpha: 0.02
+  target_entropy: -3.0
+  min_alpha: 0.003
   critic_gradient_clip: 10.0
   actor_gradient_clip: 10.0
   actor_update_interval: 2

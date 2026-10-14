@@ -310,7 +310,7 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--actor", required=True)
-    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
     parser.add_argument("--level-index", type=int, required=True)
     parser.add_argument("--episodes", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=31001)

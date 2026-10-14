@@ -32,7 +32,7 @@ def main() -> None:
     if args.output.exists():
         parser.error("refusing to overwrite an existing seed")
     torch.set_num_threads(1)
-    config = load_config(ROOT / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(ROOT / "configs/experiments/paper_full.yaml")
     config["device"] = "cpu"
     source = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     bank = torch.load(args.bad_state_starts, map_location="cpu", weights_only=False)

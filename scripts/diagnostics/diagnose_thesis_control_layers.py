@@ -71,7 +71,7 @@ def run(env: ThesisHomotopyEnv, contract: dict[str, float], episodes: int, seed:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
     parser.add_argument("--levels", nargs="+", type=int, default=[15, 20, 24])
     parser.add_argument("--episodes", type=int, default=50)
     parser.add_argument("--seed", type=int, default=91001)

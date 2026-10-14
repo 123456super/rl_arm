@@ -247,7 +247,7 @@ def main() -> None:
         description="Replay a thesis checkpoint in PyBullet and capture report figures"
     )
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
     parser.add_argument("--scene", choices=("none", "static", "dynamic"), default="none")
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--seed", type=int, default=61001)

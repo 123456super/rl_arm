@@ -286,7 +286,7 @@ def analyze_group(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
     parser.add_argument("--checkpoint", action="append", type=parse_checkpoint, required=True)
     parser.add_argument("--reference", required=True, help="label of the reference checkpoint")
     parser.add_argument("--states-per-group", type=int, default=4096)

@@ -337,7 +337,7 @@ def compute_thesis_geometry(
     closest_point_velocities: np.ndarray,
     *,
     obstacle_radius: float = 0.075,
-    d_safe: float = 0.12,
+    d_safe: float = 0.05,
     ttc_max: float = 3.0,
     eps_norm: float = 1e-8,
     eps_v: float = 1e-4,
@@ -582,7 +582,7 @@ def homotopy_reward(
     self_risk_max: float = 0.0,
     self_distance_min: float = SELF_DISTANCE_UPPER,
     lambda_self: float = 0.0,
-    d_safe: float = 0.12,
+    d_safe: float = 0.05,
     d_self_safe: float = 0.005,
     gamma: float = 0.99,
     horizon: int = 500,
@@ -845,9 +845,10 @@ def homotopy_reward(
     terminal_transition = bool(
         task_reached or hard_failure or terminal_obstacle_collision or timeout
     )
-    if terminal_transition:
-        next_joint_bottleneck_potential = 0.0
-    joint_bottleneck_shaping_reward = float(
+    # Bottleneck shaping is a non-terminal process signal. Terminal outcomes
+    # are handled by their dedicated success, failure, collision and timeout
+    # terms, avoiding a proximity-dependent terminal penalty or bonus.
+    joint_bottleneck_shaping_reward = 0.0 if terminal_transition else float(
         gamma * next_joint_bottleneck_potential
         - joint_bottleneck_potential
     )

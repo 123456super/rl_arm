@@ -60,7 +60,7 @@
 | 仿真/控制 | 物理步长 `1/240 s`，每动作 12 个子步，控制周期 `0.05 s` |
 | Episode horizon | `500` 控制 step，最多 25 s；冻结评估可单独覆盖 |
 | 动作尺度/电机力 | 每关节目标速度尺度 `0.7 rad/s`；motor force `90`。动作尺度与 qdot observation 归一化尺度分离。 |
-| 外部安全距离 | `d_safe=0.12 m`；障碍半径 `0.075 m`，速度配置 `0.1 m/s` |
+| 外部安全距离 | `d_safe=0.05 m`；障碍半径 `0.075 m`，速度配置 `0.1 m/s` |
 | 自碰撞 | 安全距离 `0.005 m`、查询距离 `0.25 m`、TTC 上限 `3 s` |
 | 自安全课程 | `lambda_self` 从 `0.2` 到 `1.0`，ramp `50k`，满权重最少 `25k` transition；实际进度由课程门控 |
 | 自安全 QP | `self_safety_projection.enabled: false`，当前不投影动作 |

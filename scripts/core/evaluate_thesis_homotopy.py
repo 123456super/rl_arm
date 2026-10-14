@@ -17,17 +17,20 @@ import torch
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _json_default(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
 from rl_risk_sac.algorithms.thesis_sac import ThesisSACAgent
 from rl_risk_sac.envs.parallel_thesis_env import ParallelThesisEnvPool
-from rl_risk_sac.envs.thesis_homotopy_env import ThesisHomotopyEnv
 from rl_risk_sac.utils.config import load_config
-from scripts.core.train_thesis_homotopy import (
-    run_deterministic_pose_probe,
-    run_parallel_deterministic_pose_probe,
-)
 
 
 MOTION_METRICS = (
@@ -159,13 +162,41 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def main() -> None:
+def _evaluation_backend(config: dict, variant: str):
+    """Select the environment/probe implementation from one eval entrypoint."""
+    if variant == "auto":
+        configured = str(
+            config.get("thesis", {}).get("observation", {}).get(
+                "ablation_variant", ""
+            )
+        ).lower()
+        variant = "reduced" if (
+            configured in {"m3_no_jacobian", "kp_sac"}
+        ) else "standard"
+    if variant == "reduced":
+        from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import ThesisHomotopyEnv
+        from scripts.core.train_thesis_homotopy_reduced_observation import (
+            run_deterministic_pose_probe, run_parallel_deterministic_pose_probe,
+        )
+    else:
+        from rl_risk_sac.envs.thesis_homotopy_env import ThesisHomotopyEnv
+        from scripts.core.train_thesis_homotopy import (
+            run_deterministic_pose_probe, run_parallel_deterministic_pose_probe,
+        )
+    return ThesisHomotopyEnv, run_deterministic_pose_probe, run_parallel_deterministic_pose_probe, variant
+
+
+def main(default_variant: str = "auto") -> None:
     parser = argparse.ArgumentParser(
         description="Parallel frozen-policy evaluation for a V13.5 checkpoint"
     )
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument(
-        "--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        "--variant", choices=("auto", "standard", "reduced"), default=default_variant,
+        help="evaluation backend; auto infers reduced keypoint observations from the config",
+    )
+    parser.add_argument(
+        "--config", default="configs/experiments/paper_full.yaml"
     )
     parser.add_argument(
         "--level-index", type=int,
@@ -178,6 +209,13 @@ def main() -> None:
     parser.add_argument(
         "--scene", choices=("auto", "none", "static", "dynamic"), default="auto",
         help="auto maps complete S0/S1/S2 checkpoints to none/static/dynamic",
+    )
+    parser.add_argument(
+        "--blocking-obstacles", action="store_true",
+        help=(
+            "for static evaluation, place the sphere on intermediate capsules "
+            "of the straight reset-to-goal path"
+        ),
     )
     parser.add_argument("--device", choices=("cpu", "cuda:auto"), default="cpu")
     parser.add_argument(
@@ -210,7 +248,9 @@ def main() -> None:
     if not config_path.is_absolute():
         config_path = ROOT / config_path
     config = load_config(config_path)
+    ThesisHomotopyEnv, run_deterministic_pose_probe, run_parallel_deterministic_pose_probe, variant = _evaluation_backend(config, args.variant)
     config["device"] = args.device
+    config["thesis"]["blocking_obstacle_mode"] = bool(args.blocking_obstacles)
     if args.max_episode_steps is not None:
         config["thesis"]["horizon"] = args.max_episode_steps
     env = ThesisHomotopyEnv(config)
@@ -236,6 +276,8 @@ def main() -> None:
         scene = {"s0": "none", "s1": "static", "s2": "dynamic"}.get(
             checkpoint_stage, "none"
         )
+    if args.blocking_obstacles and scene != "static":
+        parser.error("--blocking-obstacles is only supported for static evaluation")
     level_index = args.level_index
     if level_index is None and isinstance(state, dict) and "curriculum" in state:
         orientation = state["curriculum"].get("orientation")
@@ -318,6 +360,7 @@ def main() -> None:
         "num_envs": num_envs,
         "worker_start_method": start_method if num_envs > 1 else None,
         "worker_cpu_ids": cpu_ids,
+        "evaluation_variant": variant,
         "elapsed_seconds": time.perf_counter() - started,
         "success_floor": threshold["success"],
         "bin_success_floor": float(settings["deterministic_probe_bin_success_floor"]),
@@ -341,9 +384,9 @@ def main() -> None:
     if output.exists():
         raise FileExistsError(f"refusing to overwrite {output}")
     output.write_text(
-        json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        json.dumps(metrics, ensure_ascii=False, indent=2, default=_json_default) + "\n", encoding="utf-8"
     )
-    print(json.dumps(metrics, ensure_ascii=False))
+    print(json.dumps(metrics, ensure_ascii=False, default=_json_default))
 
 
 if __name__ == "__main__":

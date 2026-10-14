@@ -163,8 +163,8 @@ class HomotopyCurriculum:
             raise ValueError("goal_success_floor must be in [0, 1]")
         if goal_success_window < 1:
             raise ValueError("goal_success_window must be positive")
-        if goal_full_scale_min_steps < 1:
-            raise ValueError("goal_full_scale_min_steps must be positive")
+        if goal_full_scale_min_steps < 0:
+            raise ValueError("goal_full_scale_min_steps must be non-negative")
         levels = tuple(float(value) for value in (
             goal_levels if goal_levels is not None else (goal_start_scale, goal_end_scale)
         ))
@@ -179,8 +179,8 @@ class HomotopyCurriculum:
             raise ValueError(
                 f"goal_levels must be {qualifier} from start_scale to end_scale"
             )
-        if goal_min_transitions_per_level < 1:
-            raise ValueError("goal_min_transitions_per_level must be positive")
+        if goal_min_transitions_per_level < 0:
+            raise ValueError("goal_min_transitions_per_level must be non-negative")
         if not 0.0 <= orientation_start_scale <= orientation_end_scale:
             raise ValueError("orientation scales must satisfy 0 <= start <= end")
         if not 0.0 < orientation_tolerance_end <= orientation_tolerance_start <= np.pi:
@@ -203,10 +203,10 @@ class HomotopyCurriculum:
             raise ValueError(
                 "orientation_levels must be non-decreasing from start_scale to end_scale"
             )
-        if orientation_min_transitions_per_level < 1:
-            raise ValueError("orientation_min_transitions_per_level must be positive")
-        if orientation_full_scale_min_steps < 1:
-            raise ValueError("orientation_full_scale_min_steps must be positive")
+        if orientation_min_transitions_per_level < 0:
+            raise ValueError("orientation_min_transitions_per_level must be non-negative")
+        if orientation_full_scale_min_steps < 0:
+            raise ValueError("orientation_full_scale_min_steps must be non-negative")
         self.orientation_full_scale_min_steps = int(orientation_full_scale_min_steps)
         if not 0.0 <= orientation_anchor_probability < 1.0:
             raise ValueError("orientation_anchor_probability must be in [0, 1)")
@@ -456,8 +456,15 @@ class HomotopyCurriculum:
 
     def _orientation_online_ready(self) -> bool:
         if self.joint_pose_levels and "target_distance_max_m" in self.joint_pose_levels[0]:
+            # The rolling online window is retained as a diagnostic.  When
+            # deterministic promotion is enabled, the fixed multi-seed probe
+            # is the promotion gate and replaces this online criterion.
+            rate = self.orientation_success_rate
             return bool(
-                self.orientation.current_level_steps
+                len(self.orientation.outcomes) == self.orientation.outcomes.maxlen
+                and rate is not None
+                and rate >= self.orientation.floor
+                and self.orientation.current_level_steps
                 >= self.orientation.min_transitions_per_level
             )
         rate = self.orientation_success_rate
@@ -480,23 +487,18 @@ class HomotopyCurriculum:
     ) -> bool:
         if not self.orientation.deterministic_probe_required:
             return False
-        if (self.orientation_at_full_scale
-                and self.orientation.full_scale_steps < int(minimum_full_pose_steps)):
-            return False
+        # `minimum_full_pose_steps` is retained for checkpoint compatibility,
+        # but ablation promotion no longer imposes a hidden warm-up budget.
         # The first probe cannot advance a level until the online and anchor
         # windows pass, so running it earlier only burns evaluation episodes.
         task_space_curriculum = bool(
             self.joint_pose_levels
             and "target_distance_max_m" in self.joint_pose_levels[0]
         )
-        if (not task_space_curriculum
-                and self.orientation.deterministic_probe_attempts == 0
-                and not self._orientation_online_ready()):
-            return False
         last = self.orientation.deterministic_probe_level_steps
-        minimum = max(int(interval_transitions), self.orientation.min_transitions_per_level)
+        minimum = int(interval_transitions)
         return bool(
-            self.orientation.current_level_steps >= minimum
+            self.orientation.current_level_steps >= max(minimum, int(self.orientation.min_transitions_per_level))
             and (last < 0 or self.orientation.current_level_steps - last >= int(interval_transitions))
         )
 
@@ -540,10 +542,13 @@ class HomotopyCurriculum:
         )
 
     def advance_orientation_if_ready(self) -> bool:
-        if self.orientation_at_full_scale or not self._orientation_online_ready():
+        if self.orientation_at_full_scale:
             return False
         if (self.orientation.deterministic_probe_required
                 and not self.orientation.deterministic_probe_passed):
+            return False
+        if (not self.orientation.deterministic_probe_required
+                and not self._orientation_online_ready()):
             return False
         self.orientation.eligible_steps += self.orientation.current_level_steps
         self.orientation.level_index += 1
@@ -922,6 +927,7 @@ class HomotopyCurriculum:
     def finish_episode(
         self, scene: str, position_reached: bool, task_reached: bool, transitions: int,
         *, orientation_anchor: bool = False, curriculum_eligible: bool = True,
+        allow_orientation_promotion: bool = True,
         pose_phase_complete_at_start: bool | None = None,
         self_weight_full_at_start: bool | None = None,
     ) -> dict[str, Any]:
@@ -959,6 +965,13 @@ class HomotopyCurriculum:
                         self.orientation.current_level_steps += int(transitions)
                         self.orientation.outcomes.append(bool(task_reached))
                         orientation_rate = float(np.mean(self.orientation.outcomes))
+                        # In online-promotion mode the rolling success window
+                        # is the promotion event for task-space precision
+                        # levels.  Previously this branch only recorded the
+                        # rate and returned, leaving advancement exclusively
+                        # to the deterministic-probe path.
+                        if allow_orientation_promotion and self.advance_orientation_if_ready():
+                            orientation_rate = None
                 if (curriculum_eligible and not orientation_anchor
                         and pose_phase_complete_at_episode_start):
                     self.self_safety.eligible_steps += int(transitions)
@@ -1040,7 +1053,7 @@ class HomotopyCurriculum:
                         self.orientation.anchor_outcomes.append(bool(position_reached))
                     orientation_rate = float(np.mean(self.orientation.outcomes))
                     anchor_rate = self.orientation_anchor_success_rate
-                    if self.advance_orientation_if_ready():
+                    if allow_orientation_promotion and self.advance_orientation_if_ready():
                         orientation_rate = None
         if scene == "none":
             return {
@@ -1143,8 +1156,20 @@ class HomotopyCurriculum:
         self.goal = copy.deepcopy(state["goal"])
         self.orientation = copy.deepcopy(state["orientation"])
         self.joint_pose_levels = tuple(copy.deepcopy(state.get("joint_pose_levels", ())))
+        # Promotion gates belong to the active experiment protocol.  Restore
+        # learned counters/outcomes from the checkpoint, but do not let an old
+        # checkpoint silently reset a newly configured per-level minimum.
+        self.goal.min_transitions_per_level = configured_goal.min_transitions_per_level
+        self.orientation.min_transitions_per_level = configured_orientation.min_transitions_per_level
+        self.orientation.deterministic_probe_required = (
+            configured_orientation.deterministic_probe_required
+        )
         saved_level_count = len(self.orientation.levels)
         configured_level_count = len(configured_orientation.levels)
+        if configured_level_count < saved_level_count:
+            raise ValueError(
+                "configured curriculum cannot remove levels present in the checkpoint"
+            )
         if saved_level_count < configured_level_count:
             if tuple(self.orientation.levels) != tuple(
                 configured_orientation.levels[:saved_level_count]
@@ -1166,6 +1191,36 @@ class HomotopyCurriculum:
                 )
             # Preserve all learned curriculum counters while exposing appended
             # precision levels to checkpoints created under the shorter chain.
+            self.goal.levels = configured_goal.levels
+            self.goal.end = configured_goal.end
+            self.orientation.levels = configured_orientation.levels
+            self.orientation.end = configured_orientation.end
+            self.joint_pose_levels = tuple(configured_pose_levels)
+        elif saved_level_count == configured_level_count:
+            # A checkpoint may have been created before the contracts of
+            # *future* precision levels were revised.  The active and already
+            # visited prefix must remain identical, but unvisited levels must
+            # come from the current configuration rather than silently
+            # retaining stale contracts serialized in the checkpoint.
+            active_count = int(self.orientation.level_index) + 1
+            if tuple(self.orientation.levels[:active_count]) != tuple(
+                configured_orientation.levels[:active_count]
+            ):
+                raise ValueError(
+                    "checkpoint active curriculum levels do not match the current contract"
+                )
+            if tuple(self.goal.levels[:active_count]) != tuple(
+                configured_goal.levels[:active_count]
+            ):
+                raise ValueError(
+                    "checkpoint active goal levels do not match the current contract"
+                )
+            if tuple(self.joint_pose_levels[:active_count]) != tuple(
+                configured_pose_levels[:active_count]
+            ):
+                raise ValueError(
+                    "checkpoint active pose levels do not match the current contract"
+                )
             self.goal.levels = configured_goal.levels
             self.goal.end = configured_goal.end
             self.orientation.levels = configured_orientation.levels

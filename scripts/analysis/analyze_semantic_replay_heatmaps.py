@@ -228,7 +228,7 @@ def draw_heatmap(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
     parser.add_argument("--actor-400k", required=True)
     parser.add_argument("--actor-425k", required=True)
     parser.add_argument("--checkpoint-400k", required=True)

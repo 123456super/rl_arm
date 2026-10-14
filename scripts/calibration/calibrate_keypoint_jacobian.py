@@ -23,7 +23,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--config",
-        default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml",
+        default="configs/experiments/paper_full.yaml",
     )
     parser.add_argument("--samples", type=int, default=100_000)
     parser.add_argument("--seed", type=int, default=81001)

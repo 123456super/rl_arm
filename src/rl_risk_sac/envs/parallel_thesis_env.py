@@ -2,12 +2,34 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import os
+import time
 from multiprocessing.connection import Connection
 from typing import Any, Collection
 
 import numpy as np
 
 from rl_risk_sac.envs.thesis_homotopy_env import ThesisHomotopyEnv
+
+
+def _environment_class(config: dict[str, Any]):
+    """Select the reduced-observation environment when it is requested.
+
+    The regular parallel pool is also used by the full and reward/replay
+    ablation trainers. Reduced-observation variants
+    have a separate environment/task implementation because their observation
+    the Base variant is 108D while M3 keeps the full 162D Actor layout with a
+    zero Jacobian slot. Keeping the selection here makes every spawned worker
+    use the same variant as the learner-side environment template.
+    """
+    variant = str(config.get("thesis", {}).get("observation", {}).get(
+        "ablation_variant", "full"
+    ))
+    if variant in {"m3_no_jacobian", "kp_sac"}:
+        from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import (
+            ThesisHomotopyEnv as AblationThesisHomotopyEnv,
+        )
+        return AblationThesisHomotopyEnv
+    return ThesisHomotopyEnv
 
 
 def _worker(
@@ -19,7 +41,7 @@ def _worker(
 ) -> None:
     if cpu_id is not None and hasattr(os, "sched_setaffinity"):
         os.sched_setaffinity(0, {int(cpu_id)})
-    env = ThesisHomotopyEnv(config)
+    env = _environment_class(config)(config)
     env.rng = np.random.default_rng(seed)
     try:
         connection.send(("ready", env.observation_space.shape[0], env.action_space.shape[0]))
@@ -31,7 +53,13 @@ def _worker(
                 observation, info = env.reset(seed=reset_seed)
                 connection.send((observation, info))
             elif command == "step":
+                profile_started = time.perf_counter() if os.environ.get("THESIS_PROFILE") == "1" else None
                 result = env.step(payload)
+                if profile_started is not None:
+                    observation, reward, cost, terminated, truncated, info = result
+                    info = dict(info)
+                    info["_profile_env_step_s"] = time.perf_counter() - profile_started
+                    result = (observation, reward, cost, terminated, truncated, info)
                 if step_info_keys is not None:
                     observation, reward, cost, terminated, truncated, info = result
                     info = {key: info[key] for key in step_info_keys}

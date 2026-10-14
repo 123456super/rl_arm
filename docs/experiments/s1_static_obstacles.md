@@ -19,7 +19,7 @@ python scripts/core/train_thesis_homotopy.py \
   --run-name s1_seed11001
 ```
 
-须使用完整的 `step_*.pt`，不能用 actor-only checkpoint。训练器核验来源阶段、protocol、seed/RNG stream，以及冻结评估 JSON 的 `passed`、checkpoint 路径和 SHA-256；Actor、双 Critic、target Critic、温度 α、优化器及 replay 一起恢复。任务课程和 self-safety 状态继承；static 同伦状态在 S1 初始化。S1/S2 目前只支持单环境采样，配置中的 `train.num_envs: 8` 仅用于 S0，显式指定 S1 多环境会报错。
+须使用完整的 `step_*.pt`，不能用 actor-only checkpoint。训练器核验来源阶段、protocol、seed/RNG stream，以及冻结评估 JSON 的 `passed`、checkpoint 路径和 SHA-256；Actor、双 Critic、target Critic、温度 α、优化器及 replay 一起恢复。任务课程和 self-safety 状态继承；static 同伦状态在 S1 初始化。S1 现在支持与 S0 相同的多进程环境采样；推荐 `--num-envs 8`，阶段切换时会从 checkpoint 恢复策略/replay/curriculum，并为 S1 重新初始化 worker 场景状态。
 
 ## 固定合同
 
@@ -41,7 +41,7 @@ python scripts/core/train_thesis_homotopy.py \
 
 ## 静态障碍物和安全课程
 
-每个 static reset 最多尝试 100 个候选。障碍物为半径 0.075 m 的无质量球体，球心从 `x=[0.22,0.72]`、`y=[-0.48,0.48]`、`z=[0.18,0.62]` m 均匀采样，整个 episode 速度为零；候选距目标位置小于 0.15 m、初始机器人胶囊距离小于 `d_safe=0.12 m` 或 PyBullet 已接触时会被拒绝。固定球体仍会随机器人运动产生非零相对接近速度和变化的 TTC。
+每个 static reset 最多尝试 100 个候选。训练和 blocking frozen evaluation 使用半径 0.075 m 的无质量球体，将球心放在 reset→goal 直线关节路径的中间 capsule witness 上，同时保证 reset/goal 两端均不小于 `d_safe=0.05 m`；因此策略必须绕行。若没有可行 witness，才回退到原有的安全随机候选。整个 episode 速度为零；固定球体仍会随机器人运动产生非零相对接近速度和变化的 TTC。
 
 static 初始化 `xi=0.02`、成功率门槛 0.90、`strict=false`。最近 100 个 static episode 的 task-reached 比例达门槛后，按合格 episode 的 transitions 累计：
 
@@ -56,7 +56,7 @@ xi = min(1, 0.02 + 0.98 * eligible_steps / 50_000)
 当前 `pose_objective: unified_keypoint`，实际 `r_goal` 使用三关键点 tracking (`0.2 * quality`)、关键点距离进度 (`10 * progress`)、关键点精度 (`0.2 * quality`)，再扣速度与动作平滑代价；成功加 20。升档通过每个 episode 保存的位置/姿态 tolerance 改变精度项，档位编号和 `orientation_scale` 不直接进入 reward 公式。位置、姿态等历史诊断列仍在日志，但不能误写为当前 `r_goal` 的额外双指数 progress 项。hard failure 扣 20、未成功 timeout 扣 2。自安全 penalty 继续生效；外部项为：
 
 ```text
-clearance = clip((0.12 - min_distance) / 0.12, 0, 1)
+clearance = clip((0.05 - min_distance) / 0.05, 0, 1)
 external_penalty = xi * 0.05 * (2 * risk_max + 8 * clearance) / 10
 reward = r_goal - external_penalty - self_penalty - hard_failure_penalty
          - timeout_penalty - terminal_obstacle_guard
@@ -75,3 +75,5 @@ S1 complete = static.strict
 ```
 
 训练日志需要分别检查 static 的到达率、碰撞率、timeout、`xi` 和 strict 转换，及 none 的成功率是否回退；查看 `sample_none/static/dynamic`、replay redistribution、strictify 统计与 checkpoint 的阶段课程状态。该 gate 是代码中的阶段交接条件，不自动证明在独立 frozen evaluation 中的泛化成功率或 S0 能力完全保持。
+
+独立静态评估可加 `--blocking-obstacles`。该模式将球体放在 reset 到目标的直线关节路径中间的胶囊 witness 上，同时保证 reset 和目标状态均保持 `d_safe` 间距；它用于验证策略是否真的绕障，而不是只在远离机械臂的位置经过障碍物。普通随机静态评估仍使用默认采样。

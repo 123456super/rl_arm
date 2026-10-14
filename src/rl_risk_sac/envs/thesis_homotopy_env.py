@@ -111,7 +111,10 @@ class ThesisHomotopyEnv(gym.Env):
         self.motor_force = float(thesis.get("joint_motor_force", 90.0))
         self.obstacle_radius = float(thesis.get("obstacle_radius", 0.075))
         self.obstacle_speed = float(thesis.get("obstacle_speed", 0.1))
-        self.d_safe = float(thesis.get("d_safe", 0.12))
+        self.blocking_obstacle_mode = bool(
+            thesis.get("blocking_obstacle_mode", False)
+        )
+        self.d_safe = float(thesis.get("d_safe", 0.05))
         self_collision_config = thesis.get("self_collision", {})
         self.d_self_safe = float(self_collision_config.get("safe_distance_m", 0.005))
         self.self_query_distance = float(self_collision_config.get("query_distance_m", 0.25))
@@ -1058,16 +1061,74 @@ class ThesisHomotopyEnv(gym.Env):
         self._disable_obstacle()
         if self.contract.scene == "none":
             return
+        blocking_candidates: list[np.ndarray] = []
+        if self.contract.scene == "static" and self.blocking_obstacle_mode:
+            # Build witnesses on the straight joint-space path from reset to
+            # the sampled goal.  A sphere centered on an intermediate capsule
+            # blocks that nominal path while remaining clear of both endpoints.
+            initial_q, initial_qdot = self.robot.joint_state_exact()
+            path_states: list[list[Any]] = []
+            for fraction in np.linspace(0.20, 0.80, 13):
+                self._set_joint_state(
+                    initial_q + float(fraction) * (self.goal_joint_positions - initial_q)
+                )
+                path_states.append(self.robot.capsules())
+            self._set_joint_state(initial_q, initial_qdot)
+            for capsules in path_states:
+                for capsule in capsules:
+                    for candidate in (capsule.start, capsule.end,
+                                      0.5 * (capsule.start + capsule.end)):
+                        candidate = np.asarray(candidate, dtype=np.float32)
+                        if compute_thesis_geometry(
+                                capsules, candidate, np.zeros(3, dtype=np.float32),
+                                self._closest_point_velocities(candidate),
+                                obstacle_radius=self.obstacle_radius,
+                                d_safe=self.d_safe,
+                            ).distance_min <= 0.0:
+                            blocking_candidates.append(candidate)
+            # Keep only witnesses clear of both reset endpoints; otherwise a
+            # deliberately blocking sphere would invalidate the reset itself.
+            self._set_joint_state(self.goal_joint_positions)
+            goal_capsules = self.robot.capsules()
+            self._set_joint_state(initial_q, initial_qdot)
+            initial_capsules = self.robot.capsules()
+            endpoint_candidates: list[np.ndarray] = []
+            for candidate in blocking_candidates:
+                if np.linalg.norm(candidate - self.goal_position) < 0.15:
+                    continue
+                initial_geometry = compute_thesis_geometry(
+                    initial_capsules, candidate, np.zeros(3, dtype=np.float32),
+                    self._closest_point_velocities(candidate),
+                    obstacle_radius=self.obstacle_radius, d_safe=self.d_safe,
+                )
+                goal_geometry = compute_thesis_geometry(
+                    goal_capsules, candidate, np.zeros(3, dtype=np.float32),
+                    self._closest_point_velocities(candidate),
+                    obstacle_radius=self.obstacle_radius, d_safe=self.d_safe,
+                )
+                if (
+                    initial_geometry.distance_min >= self.d_safe
+                    and goal_geometry.distance_min >= self.d_safe
+                ):
+                    endpoint_candidates.append(candidate)
+            blocking_candidates = endpoint_candidates
+            self._set_joint_state(initial_q, initial_qdot)
+            if blocking_candidates:
+                order = self.rng.permutation(len(blocking_candidates))
+                blocking_candidates = [blocking_candidates[int(i)] for i in order]
         for _ in range(100):
             if self.contract.scene == "static":
-                position = np.asarray(
-                    [
-                        self.rng.uniform(0.22, 0.72),
-                        self.rng.uniform(-0.48, 0.48),
-                        self.rng.uniform(0.18, 0.62),
-                    ],
-                    dtype=np.float32,
-                )
+                if blocking_candidates:
+                    position = blocking_candidates.pop()
+                else:
+                    position = np.asarray(
+                        [
+                            self.rng.uniform(0.22, 0.72),
+                            self.rng.uniform(-0.48, 0.48),
+                            self.rng.uniform(0.18, 0.62),
+                        ],
+                        dtype=np.float32,
+                    )
                 velocity = np.zeros(3, dtype=np.float32)
                 if np.linalg.norm(position - self.goal_position) < 0.15:
                     continue

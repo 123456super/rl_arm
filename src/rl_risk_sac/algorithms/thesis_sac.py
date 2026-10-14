@@ -100,16 +100,57 @@ class ThesisSACAgent:
             "chain_pcr_sac_loss_ema": 0.0,
             "chain_pcr_loss_ema": 0.0,
             "alpha_loss": 0.0,
+            "policy_entropy": 0.0,
         }
-        self.target_entropy = -float(action_dim)
-        self.actor = GaussianActor(obs_dim, action_dim, hidden).to(self.device)
+        # The original fixed ``-action_dim`` target is a reasonable generic
+        # SAC default, but it is too aggressive for this task: once the
+        # policy finds a locally good reaching action it drives alpha toward
+        # zero and stops discovering alternate obstacle-avoidance routes.
+        self.target_entropy = float(
+            sac.get("target_entropy", -0.5 * float(action_dim))
+        )
+        self.min_alpha = float(sac.get("min_alpha", 3.0e-3))
+        if not np.isfinite(self.target_entropy) or self.target_entropy >= 0.0:
+            raise ValueError("target_entropy must be finite and negative")
+        if not np.isfinite(self.min_alpha) or self.min_alpha <= 0.0:
+            raise ValueError("min_alpha must be finite and positive")
+        observation_config = config.get("thesis", {}).get("observation", {})
+        self.jacobian_actor_only = bool(
+            observation_config.get("jacobian_actor_only", False)
+        )
+        observation_variant = str(
+            observation_config.get("ablation_variant", "full")
+        )
+        # Full observation prefix: q(6), qdot(6), keypoint error(9), then
+        # flattened keypoint Jacobian(54). Critics drop exactly that slice.
+        self.jacobian_slice = (21, 75)
+        if self.jacobian_actor_only:
+            if (
+                not bool(observation_config.get("keypoint_jacobian_pose", False))
+                and observation_variant != "m3_no_jacobian"
+            ):
+                raise ValueError(
+                    "jacobian_actor_only requires keypoint_jacobian_pose unless "
+                    "the M3 zero-Jacobian ablation is selected"
+                )
+            start, end = self.jacobian_slice
+            if obs_dim < end:
+                raise ValueError(
+                    "jacobian_actor_only requires the full 162D observation"
+                )
+            self.actor_obs_dim = int(obs_dim)
+            self.critic_obs_dim = int(obs_dim - (end - start))
+        else:
+            self.actor_obs_dim = int(obs_dim)
+            self.critic_obs_dim = int(obs_dim)
+        self.actor = GaussianActor(self.actor_obs_dim, action_dim, hidden).to(self.device)
         self.chain_reference_actor = (
             self.frozen_actor_copy() if self.chain_pcr_enabled else None
         )
-        self.q1 = QNetwork(obs_dim, action_dim, hidden).to(self.device)
-        self.q2 = QNetwork(obs_dim, action_dim, hidden).to(self.device)
-        self.target_q1 = QNetwork(obs_dim, action_dim, hidden).to(self.device)
-        self.target_q2 = QNetwork(obs_dim, action_dim, hidden).to(self.device)
+        self.q1 = QNetwork(self.critic_obs_dim, action_dim, hidden).to(self.device)
+        self.q2 = QNetwork(self.critic_obs_dim, action_dim, hidden).to(self.device)
+        self.target_q1 = QNetwork(self.critic_obs_dim, action_dim, hidden).to(self.device)
+        self.target_q2 = QNetwork(self.critic_obs_dim, action_dim, hidden).to(self.device)
         hard_update(self.q1, self.target_q1)
         hard_update(self.q2, self.target_q2)
         self.actor_optimizer = torch.optim.Adam(
@@ -120,7 +161,7 @@ class ThesisSACAgent:
             lr=float(sac["critic_lr"]),
         )
         self.log_alpha = torch.tensor(
-            np.log(float(sac.get("initial_alpha", 0.2))),
+            np.log(max(float(sac.get("initial_alpha", 0.02)), self.min_alpha)),
             device=self.device,
             dtype=torch.float32,
             requires_grad=True,
@@ -173,6 +214,15 @@ class ThesisSACAgent:
             )
         return action.cpu().numpy()
 
+    def _critic_observation(self, observations: torch.Tensor) -> torch.Tensor:
+        """Remove the Jacobian augmentation before every critic evaluation."""
+        if not self.jacobian_actor_only:
+            return observations
+        start, end = self.jacobian_slice
+        if observations.shape[-1] < end:
+            raise ValueError("critic observation is missing the Jacobian slice")
+        return torch.cat((observations[..., :start], observations[..., end:]), dim=-1)
+
     def update(
         self,
         batch: Batch,
@@ -183,16 +233,18 @@ class ThesisSACAgent:
     ) -> dict[str, float]:
         with torch.no_grad():
             next_action, next_log_prob = self.actor.sample(batch.next_observations)
+            next_critic_observations = self._critic_observation(batch.next_observations)
             next_q = torch.min(
-                self.target_q1(batch.next_observations, next_action),
-                self.target_q2(batch.next_observations, next_action),
+                self.target_q1(next_critic_observations, next_action),
+                self.target_q2(next_critic_observations, next_action),
             )
             target = batch.rewards + self.gamma * (1.0 - batch.dones) * (
                 next_q - self.alpha.detach() * next_log_prob
             )
 
-        q1_prediction = self.q1(batch.observations, batch.actions)
-        q2_prediction = self.q2(batch.observations, batch.actions)
+        critic_observations = self._critic_observation(batch.observations)
+        q1_prediction = self.q1(critic_observations, batch.actions)
+        q2_prediction = self.q2(critic_observations, batch.actions)
         q_loss = F.smooth_l1_loss(
             q1_prediction, target
         ) + F.smooth_l1_loss(q2_prediction, target)
@@ -213,8 +265,8 @@ class ThesisSACAgent:
             if self.chain_pcr_enabled and reference_observations is None:
                 raise ValueError("CHAIN-PCR actor update requires a reference batch")
             action, log_prob = self.actor.sample(batch.observations)
-            q1 = self.q1(batch.observations, action)
-            q2 = self.q2(batch.observations, action)
+            q1 = self.q1(critic_observations, action)
+            q2 = self.q2(critic_observations, action)
             actor_sac_loss = (
                 self.alpha.detach() * log_prob - torch.min(q1, q2)
             ).mean()
@@ -307,6 +359,12 @@ class ThesisSACAgent:
             self.alpha_optimizer.zero_grad(set_to_none=True)
             alpha_loss.backward()
             self.alpha_optimizer.step()
+            # Keep entropy regularisation active throughout strict blocking.
+            # Without this bound, the adaptive temperature can decay by many
+            # orders of magnitude over a long run even when exploration is
+            # still required.
+            with torch.no_grad():
+                self.log_alpha.clamp_(min=float(np.log(self.min_alpha)))
             if collect_diagnostics:
                 self.last_actor_metrics = {
                     "actor_loss": float(actor_loss.detach().cpu()),
@@ -322,6 +380,7 @@ class ThesisSACAgent:
                     "chain_pcr_sac_loss_ema": self.chain_pcr_sac_loss_ema,
                     "chain_pcr_loss_ema": self.chain_pcr_loss_ema,
                     "alpha_loss": float(alpha_loss.detach().cpu()),
+                    "policy_entropy": float((-log_prob.detach()).mean().cpu()),
                 }
 
         soft_update(self.q1, self.target_q1, self.tau)
@@ -381,6 +440,7 @@ class ThesisSACAgent:
         ):
             module.load_state_dict(state[key])
         self.log_alpha.data.copy_(state["log_alpha"].to(self.device))
+        self.log_alpha.data.clamp_(min=float(np.log(self.min_alpha)))
         self.update_steps = int(state["update_steps"])
         self.last_actor_metrics = {
             key: float(state.get("last_actor_metrics", {}).get(key, 0.0))
@@ -389,7 +449,7 @@ class ThesisSACAgent:
                 "policy_churn_penalty", "policy_churn_to_sac_ratio",
                 "chain_pcr_effective_coefficient",
                 "chain_pcr_sac_loss_ema", "chain_pcr_loss_ema",
-                "alpha_loss",
+                "alpha_loss", "policy_entropy",
             )
         }
         if self.chain_reference_actor is not None:

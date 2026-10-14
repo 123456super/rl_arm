@@ -264,7 +264,7 @@ def decide_s0_stop(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Pre-registered S0 two-block stop analysis")
-    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
     parser.add_argument("--blocks", nargs=2, required=True, metavar=("PREVIOUS", "CURRENT"))
     parser.add_argument("--output", required=True)
     args = parser.parse_args()

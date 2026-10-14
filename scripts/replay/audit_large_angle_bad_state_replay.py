@@ -215,7 +215,7 @@ def main():
     if args.output.exists():
         raise FileExistsError(args.output)
     torch.set_num_threads(1)
-    config = load_config(ROOT / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(ROOT / "configs/experiments/paper_full.yaml")
     config["device"] = "cpu"
     checkpoint = args.run / "checkpoints/step_1000000.pt"
     state = torch.load(checkpoint, map_location="cpu", weights_only=False)

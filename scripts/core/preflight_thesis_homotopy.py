@@ -812,7 +812,7 @@ def main() -> None:
         "mode",
         choices=("reward", "goal", "cells", "contact", "self-contact", "feasibility", "checkpoint"),
     )
-    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
     parser.add_argument("--output", required=True)
     parser.add_argument("--checkpoint")
     parser.add_argument("--samples", type=int, default=100)

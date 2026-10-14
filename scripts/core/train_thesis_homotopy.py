@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from dataclasses import asdict, is_dataclass
 import hashlib
 import json
 import os
@@ -22,6 +23,12 @@ for thread_variable in (
 
 import numpy as np
 import torch
+
+# Four concurrent experiments otherwise each create a large native thread
+# pool (PyTorch defaults to the host core count).  Keep learner threading
+# bounded so the environment workers and the other seeds are not starved.
+torch.set_num_threads(6)
+torch.set_num_interop_threads(1)
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
@@ -71,10 +78,14 @@ def validate_training_architecture(config: dict) -> None:
     thesis = config["thesis"]
     observation = thesis.get("observation", {})
     reward = thesis.get("reward", {})
+    pose_curriculum = thesis.get("joint_pose_curriculum", {})
+    replay_curriculum = thesis.get("orientation_curriculum", {})
+    semantic_replay = thesis.get("semantic_long_term_replay", {})
     sac = config["sac"]
     if (
         thesis.get("protocol") not in SUPPORTED_PROTOCOLS
         or not observation.get("keypoint_jacobian_pose", True)
+        or not observation.get("jacobian_actor_only", False)
         or not observation.get("hybrid_explicit_pose_error", True)
         or observation.get("include_orientation_error_vector", False)
         or reward.get("pose_objective", "unified_keypoint") != "unified_keypoint"
@@ -83,8 +94,21 @@ def validate_training_architecture(config: dict) -> None:
         or reward.get("pose_balanced_rtpc_reward", False)
         or not sac.get("chain_pcr_enabled", False)
         or not sac.get("chain_pcr_auto_enabled", False)
+        or pose_curriculum.get("cross_level_replay", True)
+        or any(
+            float(replay_curriculum.get(key, 0.0)) != 0.0
+            for key in (
+                "replay_anchor_fraction",
+                "replay_anchor_intermediate",
+                "replay_anchor_recovery",
+            )
+        )
+        or bool(semantic_replay.get("enabled", False))
     ):
-        raise ValueError("only Hybrid Keypoint + Jacobian + Auto-PCR is supported")
+        raise ValueError(
+            "formal Full/M1/M2 training requires Actor-only Jacobian, "
+            "same-level-only replay, and no semantic replay"
+        )
     far_timeout_restart_settings(config)
 
 
@@ -300,6 +324,10 @@ def save_parallel_checkpoint(
     pool: ParallelThesisEnvPool, workers: list[dict | None],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if getattr(pool, "_pending_step_indices", None) is not None:
+        raise RuntimeError(
+            "cannot snapshot parallel environments while steps are pending"
+        )
     environment_states = pool.states()
     parallel_workers = []
     for index, worker in enumerate(workers):
@@ -614,6 +642,19 @@ def scalar_probe_metrics(metrics: dict[str, object]) -> dict[str, object]:
     }
 
 
+def summary_json_default(value):
+    """Convert checkpoint/runtime objects that may appear in summary state."""
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"Unsupported summary value: {type(value).__name__}")
+
+
 def summarize_pose_probe_outcomes(
     values: np.ndarray,
     *,
@@ -631,6 +672,7 @@ def summarize_pose_probe_outcomes(
         "joint_limit_rate": float(np.mean(values[:, 2])),
         "timeout_rate": float(np.mean(values[:, 3])),
         "mean_position_error_m": float(np.mean(values[:, 4])),
+        "p95_position_error_m": float(np.quantile(values[:, 4], .95)),
         "mean_orientation_error_rad": float(np.mean(values[:, 5])),
         "p95_orientation_error_rad": float(np.quantile(values[:, 5], .95)),
         "mean_minimum_self_distance_m": float(np.mean(values[:, 6])),
@@ -646,6 +688,15 @@ def summarize_pose_probe_outcomes(
             if large_angle_steps else 0.0
         ),
     }
+    if values.shape[1] > 10:
+        result["mean_episode_steps"] = float(np.mean(values[:, 10]))
+        successful = values[:, 0] > 0
+        result["mean_success_steps"] = float(np.mean(values[successful, 10])) if successful.any() else None
+        # Failure names identify the constraint that remains unsatisfied.
+        result["terminal_position_only_rate"] = float(np.mean((values[:, 11] == 0) & (values[:, 12] > 0)))
+        result["terminal_orientation_only_rate"] = float(np.mean((values[:, 11] > 0) & (values[:, 12] == 0)))
+        result["terminal_joint_failure_rate"] = float(np.mean((values[:, 11] == 0) & (values[:, 12] == 0)))
+        result["terminal_joint_pose_rate"] = float(np.mean((values[:, 11] > 0) & (values[:, 12] > 0)))
     if keypoint_statistics is not None:
         result.update(keypoint_statistics)
     if not has_bins:
@@ -658,6 +709,22 @@ def summarize_pose_probe_outcomes(
     ]
     result["minimum_bin_success_rate"] = min(bin_rates)
     result["bin_success_rates"] = bin_rates
+    result["bin_indices"] = ordered_bins
+    result["bin_episode_counts"] = [int(np.sum(bin_indices == index)) for index in ordered_bins]
+    cell_array = np.asarray(bin_rates, dtype=np.float64)
+    result["mean_cell_success_rate"] = float(np.mean(cell_array))
+    result["cell_success_p10"] = float(np.quantile(cell_array, 0.10))
+    result["worst_10_cells_mean_success_rate"] = float(np.mean(np.sort(cell_array)[:min(10, cell_array.size)]))
+    # Retained for backward-compatible diagnostics; P10 is the primary cell metric.
+    result["cell_fraction_success_at_least_0_6"] = float(np.mean(cell_array >= .6))
+    distance_index = bin_indices // orientation_bins
+    result["distance_bin_success_rates"] = [float(np.mean(values[distance_index == i, 0])) for i in sorted(set(distance_index))]
+    orientation_index = bin_indices % orientation_bins
+    result["orientation_bin_success_rates"] = [float(np.mean(values[orientation_index == i, 0])) for i in sorted(set(orientation_index))]
+    far = distance_index >= 7
+    if far.any():
+        result["success_rate_d7_d9"] = float(np.mean(values[far, 0]))
+        result["timeout_rate_d7_d9"] = float(np.mean(values[far, 3]))
     result["weak_bin_count_below_0_6"] = int(np.sum(np.asarray(bin_rates) < .60))
     strict_bin_rates = [
         float(np.mean(values[bin_indices == index, 8])) for index in ordered_bins
@@ -808,11 +875,13 @@ def run_deterministic_pose_probe(
             minimum_self_distance = float("inf")
             self_violation = False
             strict_pose_hit = False
+            episode_steps = 0
             episode_start_keypoint_distance: float | None = None
             while not (terminated or truncated):
                 observation, _, _, terminated, truncated, info = probe_env.step(
                     agent.select_action(observation, deterministic=True)
                 )
+                episode_steps += 1
                 _record_keypoint_probe_step(keypoint_accumulator, info)
                 if episode_start_keypoint_distance is None:
                     # The first transition exposes D_KP,t, which is the reset
@@ -849,7 +918,9 @@ def run_deterministic_pose_probe(
                 float(info["next_rho_orientation"]),
                 minimum_self_distance, float(self_violation),
                 float(strict_pose_hit),
-                float(bin_index),
+                float(bin_index), float(episode_steps),
+                float(info["next_rho_position"] <= position_tolerance),
+                float(info["next_rho_orientation"] <= orientation_tolerance),
             ))
             keypoint_accumulator["episode_end_distances"].append(
                 float(info["next_keypoint_distance"])
@@ -920,7 +991,7 @@ def run_parallel_deterministic_pose_probe(
                 "minimum_self_distance": float("inf"),
                 "self_violation": False,
                 "strict_pose_hit": False,
-                "bin_index": -1,
+                "bin_index": -1, "episode_steps": 0,
             }
         if assignments:
             contracts = {}
@@ -964,6 +1035,7 @@ def run_parallel_deterministic_pose_probe(
                     0.0, next_orientation - previous_orientation
                 )
             state = active[index]
+            state["episode_steps"] += 1
             _record_keypoint_probe_step(keypoint_accumulator, info)
             if "start_keypoint_distance" not in state:
                 state["start_keypoint_distance"] = float(info["keypoint_distance"])
@@ -993,7 +1065,9 @@ def run_parallel_deterministic_pose_probe(
                 float(state["minimum_self_distance"]),
                 float(state["self_violation"]),
                 float(state["strict_pose_hit"]),
-                float(state["bin_index"]),
+                float(state["bin_index"]), float(state["episode_steps"]),
+                float(info["next_rho_position"] <= position_tolerance),
+                float(info["next_rho_orientation"] <= orientation_tolerance),
             )
             keypoint_accumulator["episode_start_distances"].append(
                 float(state["start_keypoint_distance"])
@@ -1020,169 +1094,93 @@ def run_parallel_deterministic_pose_probe(
 
 def deterministic_contract_passed(
     metrics: dict[str, float], success_floor: float, collision_ceiling: float,
-    bin_success_floor: float | None = None,
+    bin_success_floor: float | None = None, *, min_seed_success_floor: float | None = None,
+    timeout_ceiling: float | None = None, success_only: bool = False,
 ) -> bool:
-    return bool(
-        metrics["success_rate"] >= float(success_floor)
+    """Evaluate the fixed deterministic promotion contract."""
+    success = float(metrics["success_rate"])
+    success_gate = bool(
+        success >= float(success_floor)
         and (
-            bin_success_floor is None
-            or metrics.get("minimum_bin_success_rate", 0.0) >= float(bin_success_floor)
+            min_seed_success_floor is None
+            or float(metrics.get("min_seed_success_rate", success))
+            >= float(min_seed_success_floor)
         )
-        and metrics["collision_rate"] <= float(collision_ceiling)
-        and metrics["joint_limit_rate"] == 0.0
     )
+    if success_only:
+        return success_gate
+    return bool(
+        success_gate
+        and float(metrics.get("collision_rate", 0.0)) <= float(collision_ceiling)
+        and float(metrics.get("joint_limit_rate", 0.0)) <= 0.0
+        and (
+            timeout_ceiling is None
+            or float(metrics.get("timeout_rate", 0.0)) <= float(timeout_ceiling)
+        )
+    )
+
+
+def _aggregate_deterministic_probe(results: list[dict[str, object]]) -> dict[str, object]:
+    if not results:
+        raise ValueError("deterministic probe requires at least one seed")
+    out = dict(results[0])
+    for key in ("mean_position_error_m", "mean_orientation_error_rad", "p95_position_error_m", "p95_orientation_error_rad", "mean_episode_steps", "mean_success_steps", "minimum_bin_success_rate", "cell_success_p10", "worst_10_cells_mean_success_rate", "terminal_position_only_rate", "terminal_orientation_only_rate", "terminal_joint_failure_rate", "terminal_joint_pose_rate"):
+        vals = [float(r[key]) for r in results if key in r and np.isfinite(float(r[key]))]
+        if vals: out[key] = float(np.mean(vals))
+    successes = [float(r["success_rate"]) for r in results]
+    out["seed_results"] = results
+    out["seed_success_rates"] = successes
+    out["mean_success_rate"] = float(np.mean(successes))
+    out["min_seed_success_rate"] = float(np.min(successes))
+    out["max_collision_rate"] = float(max(float(r["collision_rate"]) for r in results))
+    out["max_joint_limit_rate"] = float(max(float(r["joint_limit_rate"]) for r in results))
+    out["max_timeout_rate"] = float(max(float(r["timeout_rate"]) for r in results))
+    out["success_rate"] = out["mean_success_rate"]
+    out["collision_rate"] = out["max_collision_rate"]
+    out["joint_limit_rate"] = out["max_joint_limit_rate"]
+    out["timeout_rate"] = out["max_timeout_rate"]
+    return out
 
 
 def run_pose_promotion_probe(
     agent: ThesisSACAgent, config: dict, curriculum: HomotopyCurriculum,
     settings: dict, pool: ParallelThesisEnvPool | None = None,
 ) -> dict[str, object]:
-    """Screen cheaply, then confirm current performance and previous-level retention."""
-    screen_episodes = int(settings["deterministic_probe_episodes"])
-    screen_seed = int(settings["deterministic_probe_seed"])
-    current_floor = float(settings["deterministic_probe_success_floor"])
-    previous_floor = float(settings["deterministic_previous_success_floor"])
-    current_collision_ceiling = float(
-        settings["deterministic_probe_collision_ceiling"]
-    )
-    previous_collision_ceiling = float(
-        settings["deterministic_previous_collision_ceiling"]
-    )
-    recovery_success_floor = float(
-        settings.get("retention_recovery_success_floor", 0.90)
-    )
-    recovery_collision_ceiling = float(
-        settings.get("retention_recovery_collision_ceiling", 0.05)
-    )
-    runner = (
-        run_deterministic_pose_probe
-        if pool is None else
-        lambda agent, config, **kwargs: run_parallel_deterministic_pose_probe(
-            agent, pool, config, **kwargs,
-        )
-    )
-    saved_pool_states = None if pool is None else pool.states()
-    evaluation_actor = (
-        FrozenActorEvaluator(agent)
-        if hasattr(agent, "frozen_actor_copy") else agent
-    )
+    """Run three-seed 300-episode screening, then three-seed confirmation."""
+    screen_episodes = int(settings.get("deterministic_probe_episodes", 300))
+    seeds = settings.get("deterministic_probe_seeds", [31001, 31002, 31003])
+    if isinstance(seeds, str): seeds = [int(x) for x in seeds.split(",") if x.strip()]
+    seeds = [int(x) for x in seeds]
+    floor = float(settings.get("deterministic_probe_success_floor", 0.95))
+    min_floor = float(settings.get("deterministic_probe_min_seed_success_floor", 0.90))
+    collision = float(settings.get("deterministic_probe_collision_ceiling", 0.10))
+    timeout = float(settings.get("deterministic_probe_timeout_ceiling", 0.05))
+    success_only = bool(settings.get("deterministic_success_only", False))
+    runner = run_deterministic_pose_probe if pool is None else lambda a, c, **kw: run_parallel_deterministic_pose_probe(a, pool, c, **kw)
+    saved = None if pool is None else pool.states()
+    actor = FrozenActorEvaluator(agent) if hasattr(agent, "frozen_actor_copy") else agent
     try:
-        current_contract = curriculum.pose_contract()
-        current = runner(
-            evaluation_actor, config, episodes=screen_episodes, seed=screen_seed,
-            **current_contract,
-        )
-        task_space_probe = "target_distance_max_m" in current_contract
-        cross_level: dict[str, dict[str, object]] = {}
-        if bool(settings.get("cross_level_probe_enabled", False)):
-            pose_levels = config["thesis"]["joint_pose_curriculum"]["levels"]
-            orientation_levels = config["thesis"]["orientation_curriculum"]["levels"]
-            for index, level in enumerate(pose_levels):
-                label = f"P{index + 1}"
-                if index == int(curriculum.orientation.level_index):
-                    cross_level[label] = current
-                    continue
-                cross_level[label] = runner(
-                    evaluation_actor, config,
-                    episodes=screen_episodes, seed=screen_seed,
-                    goal_scale=float(level["goal_scale"]),
-                    orientation_scale=float(orientation_levels[index]),
-                    position_tolerance=float(level["position_tolerance_m"]),
-                    orientation_tolerance=float(level["orientation_tolerance_rad"]),
-                    target_distance_min_m=float(level["target_distance_min_m"]),
-                    target_distance_max_m=float(level["target_distance_max_m"]),
-                    target_orientation_min_rad=float(level["target_orientation_min_rad"]),
-                    target_orientation_max_rad=float(level["target_orientation_max_rad"]),
-                )
-        has_previous = curriculum.orientation.level_index > 0
-        previous = None
-        if has_previous:
-            previous_label = f"P{int(curriculum.orientation.level_index)}"
-            if previous_label in cross_level:
-                previous = cross_level[previous_label]
-            else:
-                previous = runner(
-                    evaluation_actor, config,
-                    episodes=screen_episodes, seed=screen_seed,
-                    **curriculum.pose_contract(previous=True),
-                )
-        screen_current_passed = deterministic_contract_passed(
-            current, current_floor, current_collision_ceiling,
-            settings.get("deterministic_probe_bin_success_floor") if task_space_probe else None,
-        )
-        screen_previous_passed = bool(
-            previous is None
-            or deterministic_contract_passed(
-                previous, previous_floor, previous_collision_ceiling,
-            )
-        )
-        screen_passed = bool(screen_current_passed and screen_previous_passed)
+        contract = curriculum.pose_contract()
+        screen_per_seed = [runner(actor, config, episodes=screen_episodes, seed=seed, **contract) for seed in seeds]
+        current = _aggregate_deterministic_probe(screen_per_seed)
+        screen_passed = deterministic_contract_passed(current, floor, collision, min_seed_success_floor=min_floor, timeout_ceiling=timeout, success_only=success_only)
         confirmation_current = None
-        confirmation_previous = None
+        confirmation_per_seed = None
         confirmation_passed = False
-        if screen_passed and not task_space_probe:
-            confirmation_episodes = int(settings["deterministic_confirmation_episodes"])
-            confirmation_seed = int(settings["deterministic_confirmation_seed"])
-            confirmation_current = runner(
-                evaluation_actor, config, episodes=confirmation_episodes,
-                seed=confirmation_seed, **curriculum.pose_contract(),
-            )
-            if has_previous:
-                confirmation_previous = runner(
-                    evaluation_actor, config, episodes=confirmation_episodes,
-                    seed=confirmation_seed, **curriculum.pose_contract(previous=True),
-                )
-            confirmation_current_passed = deterministic_contract_passed(
-                confirmation_current, current_floor, current_collision_ceiling,
-            )
-            confirmation_previous_passed = bool(
-                confirmation_previous is None
-                or deterministic_contract_passed(
-                    confirmation_previous, previous_floor,
-                    previous_collision_ceiling,
-                )
-            )
-            confirmation_passed = bool(
-                confirmation_current_passed and confirmation_previous_passed
-            )
-        else:
-            confirmation_current_passed = bool(screen_current_passed if task_space_probe else False)
-            confirmation_previous_passed = bool(screen_previous_passed if task_space_probe else False)
-            if task_space_probe:
-                confirmation_passed = bool(screen_passed)
+        if screen_passed:
+            episodes = int(settings.get("deterministic_confirmation_episodes", 1000))
+            cseeds = settings.get("deterministic_confirmation_seeds", seeds)
+            if isinstance(cseeds, str): cseeds = [int(x) for x in cseeds.split(",") if x.strip()]
+            confirmation_per_seed = [runner(actor, config, episodes=episodes, seed=int(seed), **contract) for seed in cseeds]
+            confirmation_current = _aggregate_deterministic_probe(confirmation_per_seed)
+            confirmation_passed = deterministic_contract_passed(confirmation_current, floor, collision, min_seed_success_floor=min_floor, timeout_ceiling=timeout, success_only=success_only)
     finally:
-        if pool is not None and saved_pool_states is not None:
-            pool.restore_many(saved_pool_states)
-    recorded_previous = (
-        confirmation_previous
-        if confirmation_previous is not None
-        else previous
-    )
-    recovery_required = bool(
-        recorded_previous is not None
-        and (
-            recorded_previous["success_rate"] < recovery_success_floor
-            or recorded_previous["collision_rate"] > recovery_collision_ceiling
-            or recorded_previous["joint_limit_rate"] > 0.0
-        )
-    )
-    return {
-        "current": current,
-        "cross_level": cross_level,
-        "previous": previous,
-        "screen_passed": screen_passed,
-        "confirmation_current": confirmation_current,
-        "confirmation_previous": confirmation_previous,
-        "confirmation_passed": confirmation_passed,
-        "retention_passed": (
-            confirmation_previous_passed
-            if confirmation_previous is not None
-            else screen_previous_passed
-        ),
-        "recovery_required": recovery_required,
-        "passed": confirmation_passed,
-    }
-
+        if pool is not None and saved is not None: pool.restore_many(saved)
+    return {"current": current, "current_per_seed": screen_per_seed, "cross_level": {}, "previous": None,
+            "screen_passed": bool(screen_passed), "confirmation_current": confirmation_current,
+            "confirmation_per_seed": confirmation_per_seed, "confirmation_previous": None,
+            "confirmation_passed": bool(confirmation_passed), "retention_passed": True,
+            "recovery_required": False, "passed": bool(confirmation_passed)}
 
 def pose_probe_audit_fields(
     result: dict[str, object], settings: dict,
@@ -1198,6 +1196,11 @@ def pose_probe_audit_fields(
     if not isinstance(cross_level, dict):
         cross_level = {}
     return {
+        "probe_seeds": json.dumps(result.get("current", {}).get("seed_success_rates", [])),
+        "probe_mean_success_rate": float(result["current"].get("mean_success_rate", result["current"]["success_rate"])),
+        "probe_min_seed_success_rate": float(result["current"].get("min_seed_success_rate", result["current"]["success_rate"])),
+        "probe_max_collision_rate": float(result["current"].get("max_collision_rate", result["current"]["collision_rate"])),
+        "probe_max_timeout_rate": float(result["current"].get("max_timeout_rate", result["current"].get("timeout_rate", 0.0))),
         "previous_success_rate": metric(previous, "success_rate"),
         "previous_collision_rate": metric(previous, "collision_rate"),
         "previous_joint_limit_rate": metric(previous, "joint_limit_rate"),
@@ -1218,6 +1221,9 @@ def pose_probe_audit_fields(
             confirmation_previous, "joint_limit_rate"
         ),
         "confirmation_passed": int(bool(result["confirmation_passed"])),
+        "confirmation_seed_success_rates": json.dumps(
+            [] if confirmation_current is None else confirmation_current.get("seed_success_rates", [])
+        ),
         "retention_passed": int(bool(result["retention_passed"])),
         "recovery_required": int(bool(result["recovery_required"])),
         "cross_level_success_rates": json.dumps({
@@ -1439,15 +1445,27 @@ def run_parallel_s0(
     updates_per_transition: float,
     orientation_curriculum: dict, full_scale_min_transitions: int,
     pose_full_scale_min_transitions: int, loaded_checkpoint_state: dict | None,
+    stage: str = "s0",
 ) -> None:
-    """Run synchronous multi-process S0 collection with one centralized learner."""
+    """Run synchronous multi-process collection with one centralized learner."""
+    profile_enabled = os.environ.get("THESIS_PROFILE") == "1"
+    profile = {
+        "env_step_s": 0.0, "env_step_count": 0,
+        "worker_wait_s": 0.0, "worker_wait_count": 0,
+        "replay_sample_s": 0.0, "replay_sample_count": 0,
+        "sac_update_s": 0.0, "sac_update_count": 0,
+    }
     stream_seed = int(config["_rng_stream_seeds"]["environment"])
     seed_children = np.random.SeedSequence(stream_seed).spawn(num_envs)
     worker_seeds = [
         int(child.generate_state(1, dtype=np.uint32)[0]) for child in seed_children
     ]
     env_template.close()
-    worker_cpu_ids = physical_cpu_ids(num_envs)
+    worker_cpu_ids = (
+        physical_cpu_ids(num_envs)
+        if bool(config["train"].get("cpu_affinity", False))
+        else None
+    )
     pool = ParallelThesisEnvPool(
         config, worker_seeds, cpu_ids=worker_cpu_ids,
     )
@@ -1472,7 +1490,9 @@ def run_parallel_s0(
     last_saved_step = -1
     best_probes: dict[str, dict[str, object]] = dict(counters.get("probe_best", {}))
     counters["probe_best"] = best_probes
-    far_settings = far_timeout_restart_settings(config)
+    # Far-timeout bad-state restarts are an obstacle-free S0 mechanism.
+    # Static/dynamic stages must always reset through their scene generator.
+    far_settings = far_timeout_restart_settings(config) if stage == "s0" else None
     far_restart = None
     far_rng = np.random.default_rng(stream_seed ^ 0xFA257A11)
     if far_settings is not None:
@@ -1501,7 +1521,12 @@ def run_parallel_s0(
         if "rng_state" in far_restart:
             far_rng.bit_generator.state = far_restart["rng_state"]
 
-    if loaded_checkpoint_state is not None:
+    can_restore_workers = bool(
+        loaded_checkpoint_state is not None
+        and "parallel_workers" in loaded_checkpoint_state
+        and str(loaded_checkpoint_state.get("curriculum", {}).get("stage", stage)) == stage
+    )
+    if can_restore_workers:
         saved_workers = loaded_checkpoint_state["parallel_workers"]
         states = {index: saved["environment"] for index, saved in enumerate(saved_workers)}
         restored_observations = pool.restore_many(states)
@@ -1595,6 +1620,12 @@ def run_parallel_s0(
             float(np.mean(curriculum.orientation.outcomes))
             if curriculum.orientation.outcomes else ""
         )
+        scene_name = {"s1": "static", "s2": "dynamic"}.get(stage)
+        scene_state = None if scene_name is None else curriculum.states[scene_name]
+        scene_rate = (
+            "" if scene_state is None or not scene_state.outcomes
+            else float(np.mean(scene_state.outcomes))
+        )
         replay_mix = curriculum.orientation_replay_mix
         storage = replay.orientation_storage_counts()
         elapsed = max(time.perf_counter() - started, 1e-9)
@@ -1651,6 +1682,10 @@ def run_parallel_s0(
             "position_tolerance": curriculum.position_tolerance,
             "orientation_tolerance": curriculum.orientation_tolerance,
             "rolling_orientation_success_rate": orientation_rate,
+            "rolling_scene_success_rate": scene_rate,
+            "scene_strict": "" if scene_state is None else int(scene_state.strict),
+            "scene_strict_steps": "" if scene_state is None else int(scene_state.strict_steps),
+            "scene_eligible_steps": "" if scene_state is None else int(scene_state.eligible_steps),
             "orientation_eligible_steps": curriculum.orientation.eligible_steps,
             "orientation_level_index": curriculum.orientation.level_index,
             "orientation_level_steps": curriculum.orientation.current_level_steps,
@@ -1737,7 +1772,8 @@ def run_parallel_s0(
             f"step={counters['stage_step']}/{total_steps} envs={num_envs} "
             f"episodes={counters['episodes']} replay={len(replay)} "
             f"updates={counters['updates']} level={curriculum.orientation.level_index} "
-            f"success={orientation_rate} steps/s={row['steps_per_second']:.1f}",
+            f"success={scene_rate if scene_name is not None else orientation_rate} "
+            f"steps/s={row['steps_per_second']:.1f}",
             flush=True,
         )
 
@@ -1755,11 +1791,32 @@ def run_parallel_s0(
             "global_step", "stage_step", "stage_total_step", "orientation_level_index",
             "orientation_scale", "orientation_level_steps", "episodes", "seed",
             "success_rate", "collision_rate", "joint_limit_rate", "timeout_rate",
+            "probe_seeds", "probe_mean_success_rate", "probe_min_seed_success_rate",
+            "probe_max_collision_rate", "probe_max_timeout_rate", "confirmation_seed_success_rates",
+            "mean_success_rate", "min_seed_success_rate", "max_collision_rate",
+            "max_timeout_rate", "max_joint_limit_rate", "seed_success_rates",
+            "seed_results",
             "mean_position_error_m", "mean_orientation_error_rad",
             "p95_orientation_error_rad",
             "mean_minimum_self_distance_m", "self_violation_rate",
             "strict_pose_hit_rate", "minimum_bin_success_rate",
             "minimum_bin_strict_pose_hit_rate",
+            "p95_position_error_m", "mean_episode_steps", "mean_success_steps",
+            "terminal_position_only_rate", "terminal_orientation_only_rate",
+            "terminal_joint_failure_rate",
+            "terminal_joint_pose_rate", "bin_indices", "bin_episode_counts",
+            "mean_cell_success_rate", "cell_success_p10", "worst_10_cells_mean_success_rate", "cell_fraction_success_at_least_0_6",
+            "distance_bin_success_rates", "orientation_bin_success_rates",
+            "success_rate_d7_d9", "timeout_rate_d7_d9",
+            "keypoint_step_count", "keypoint_distance_mean_m",
+            "keypoint_next_distance_mean_m", "keypoint_tracking_quality_mean",
+            "keypoint_precision_quality_mean", "keypoint_precision_reward_mean",
+            "joint_bottleneck_shaping_reward_mean", "keypoint_progress_mean_m",
+            "keypoint_progress_positive_ratio", "jacobian_clip_ratio_mean",
+            "keypoint_episode_start_distance_mean_m",
+            "keypoint_episode_end_distance_mean_m",
+            "keypoint_episode_distance_reduction_mean_m",
+            "keypoint_episode_improvement_ratio",
             "weak_bin_count_below_0_6", "success_rate_o0_o4",
             "success_rate_o5_o6", "success_rate_o7_o9",
             "timeout_rate_o0_o4", "timeout_rate_o5_o6", "timeout_rate_o7_o9",
@@ -1799,13 +1856,14 @@ def run_parallel_s0(
                 )
                 update_actor = actor_updates_enabled(counters)
                 reference_observations = None
+                sample_started = time.perf_counter() if profile_enabled else None
                 if (
                     agent.chain_pcr_enabled
                     and update_actor
                     and (agent.update_steps + 1) % agent.actor_update_interval == 0
                 ):
                     reference_batch = replay.sample(
-                        "s0", curriculum.xi_map(), batch_size,
+                        stage, curriculum.xi_map(), batch_size,
                         orientation_scale=curriculum.orientation.scale,
                         curriculum_level=curriculum.orientation.level_index,
                         s0_anchor_fraction=anchor_fraction,
@@ -1814,23 +1872,30 @@ def run_parallel_s0(
                     )
                     reference_observations = reference_batch.observations
                 batch = replay.sample(
-                    "s0", curriculum.xi_map(), batch_size,
+                    stage, curriculum.xi_map(), batch_size,
                     orientation_scale=curriculum.orientation.scale,
                     curriculum_level=curriculum.orientation.level_index,
                     s0_anchor_fraction=anchor_fraction,
                     s0_current_fraction=current_fraction,
                     lambda_self=curriculum.lambda_self,
                 )
+                if sample_started is not None:
+                    profile["replay_sample_s"] += time.perf_counter() - sample_started
+                    profile["replay_sample_count"] += 1
                 next_update = int(counters["updates"]) + 1
                 collect_diagnostics = (
                     next_update == 1 or next_update % update_log_interval == 0
                 )
+                update_started = time.perf_counter() if profile_enabled else None
                 update_metrics = agent.update(
                     batch,
                     update_actor=update_actor,
                     reference_observations=reference_observations,
                     collect_diagnostics=collect_diagnostics,
                 )
+                if update_started is not None:
+                    profile["sac_update_s"] += time.perf_counter() - update_started
+                    profile["sac_update_count"] += 1
                 counters["updates"] = next_update
                 if not collect_diagnostics:
                     continue
@@ -1956,6 +2021,14 @@ def run_parallel_s0(
                     advanced = curriculum.advance_orientation_if_ready()
                     if advanced:
                         replay.begin_orientation_level(curriculum.orientation.level_index)
+                        # A promotion changes action scaling, reward and
+                        # terminal semantics.  Any worker still executing an
+                        # episode from the previous level must be reset before
+                        # collecting another transition; otherwise its old-MDP
+                        # transition would be written into the new current pool.
+                        for worker_index, worker in enumerate(workers):
+                            if worker is not None:
+                                workers[worker_index] = None
                         contract = curriculum.pose_contract()
                         replay.update_semantic_bounds(
                             distance_min=contract["target_distance_min_m"],
@@ -2015,7 +2088,16 @@ def run_parallel_s0(
                     actions.update(zip(policy_indices, selected_actions))
                 pool.send_steps(actions)
                 perform_deferred_updates()
+                recv_started = time.perf_counter() if profile_enabled else None
                 results = pool.recv_steps()
+                if recv_started is not None:
+                    profile["worker_wait_s"] += time.perf_counter() - recv_started
+                    profile["worker_wait_count"] += 1
+                    for result in results.values():
+                        step_time = result[5].get("_profile_env_step_s")
+                        if step_time is not None:
+                            profile["env_step_s"] += float(step_time)
+                            profile["env_step_count"] += 1
 
                 # A normal far-distance timeout contributes its exact terminal
                 # state.  Restarts themselves never recursively refill the
@@ -2110,7 +2192,7 @@ def run_parallel_s0(
                     counters["stage_total_step"] += 1
                     updates_due = (
                         accrue_update_credit(counters, updates_per_transition)
-                        if replay.has_training_batch("s0", batch_size, update_after) else 0
+                        if replay.has_training_batch(stage, batch_size, update_after) else 0
                     )
                     counters["parallel_updates_due"] = (
                         int(counters.get("parallel_updates_due", 0)) + updates_due
@@ -2235,11 +2317,15 @@ def run_parallel_s0(
                         "sample_dynamic": replay.last_sample_counts["dynamic"],
                     })
                     if terminated or truncated:
+                        level_before_episode = curriculum.orientation.level_index
                         update = curriculum.finish_episode(
                             worker["scene"], bool(info["position_reached"]),
                             bool(info["task_reached"]), worker["length"],
                             orientation_anchor=worker["orientation_anchor"],
                             curriculum_eligible=not worker["episode_used_warmup"],
+                            # Promotion is performed only by the deterministic
+                            # three-seed probe/confirmation gate below.
+                            allow_orientation_promotion=False,
                             pose_phase_complete_at_start=worker[
                                 "pose_phase_complete_at_start"
                             ],
@@ -2247,6 +2333,21 @@ def run_parallel_s0(
                                 "self_weight_full_at_start"
                             ],
                         )
+                        if curriculum.orientation.level_index != level_before_episode:
+                            replay.begin_orientation_level(
+                                curriculum.orientation.level_index
+                            )
+                            promoted_contract = curriculum.pose_contract()
+                            replay.update_semantic_bounds(
+                                distance_min=promoted_contract["target_distance_min_m"],
+                                distance_max=promoted_contract["target_distance_max_m"],
+                                orientation_min=promoted_contract[
+                                    "target_orientation_min_rad"
+                                ],
+                                orientation_max=promoted_contract[
+                                    "target_orientation_max_rad"
+                                ],
+                            )
                         episode_writer.writerow({
                             "episode": worker["episode_id"],
                             "global_step": counters["global_step"],
@@ -2382,17 +2483,22 @@ def run_parallel_s0(
                     counters["checkpoint_index"] += 1
                     counters["replay_redistributions"] = replay.redistribution_count
                     checkpoint = checkpoints / f"step_{counters['stage_step']:07d}.pt"
-                    save_parallel_checkpoint(
-                        checkpoint, agent, replay, curriculum, counters, config, pool, workers,
-                    )
-                    agent.save_actor(
-                        checkpoints / f"actor_step_{counters['stage_step']:07d}.pt"
-                    )
+                    try:
+                        save_parallel_checkpoint(
+                            checkpoint, agent, replay, curriculum, counters, config, pool, workers,
+                        )
+                        agent.save_actor(
+                            checkpoints / f"actor_step_{counters['stage_step']:07d}.pt"
+                        )
+                    except (BrokenPipeError, EOFError, OSError, RuntimeError) as save_error:
+                        # Preserve the original worker failure; a dead worker
+                        # cannot answer the environment-state snapshot request.
+                        print(f"checkpoint save skipped after worker failure: {save_error}", flush=True)
             finally:
                 pool.close()
 
     summary = {
-        "stage": "s0", **counters, "replay_size": len(replay),
+        "stage": stage, **counters, "replay_size": len(replay),
         "xi": curriculum.xi_map(), "replay_orientation_storage": replay.orientation_storage_counts(),
         "max_stage_steps": max_stage_steps,
         "stage_budget_exhausted": counters["stage_total_step"] >= max_stage_steps,
@@ -2439,14 +2545,30 @@ def run_parallel_s0(
             full_scale_min_transitions, pose_full_scale_min_transitions,
         ),
     }
+    if profile_enabled:
+        profile_summary = {
+            "enabled": True,
+            "env_step_mean_s": profile["env_step_s"] / max(1, profile["env_step_count"]),
+            "worker_wait_mean_s": profile["worker_wait_s"] / max(1, profile["worker_wait_count"]),
+            "replay_sample_mean_s": profile["replay_sample_s"] / max(1, profile["replay_sample_count"]),
+            "sac_update_mean_s": profile["sac_update_s"] / max(1, profile["sac_update_count"]),
+            **profile,
+        }
+        (output / "timing_profile.json").write_text(
+            json.dumps(profile_summary, indent=2), encoding="utf-8",
+        )
+        summary["timing_profile"] = profile_summary
     (output / "summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8",
+        json.dumps(
+            summary, ensure_ascii=False, indent=2,
+            default=summary_json_default,
+        ), encoding="utf-8",
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train Hybrid Keypoint + Jacobian + Auto-PCR (S0 -> S1 -> S2)")
-    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
     parser.add_argument("--stage", choices=("s0", "s1", "s2"))
     parser.add_argument("--resume", help="complete checkpoint from the preceding block or stage")
     parser.add_argument(
@@ -2483,13 +2605,19 @@ def main() -> None:
     restart_flags = [args.resume, args.initialize_actor_from]
     if sum(value is not None for value in restart_flags) > 1:
         parser.error("--resume and --initialize-actor-from are mutually exclusive")
-    if (args.initialize_actor_from is None) != (args.start_level is None):
-        parser.error("--initialize-actor-from and --start-level must be used together")
+    if args.initialize_actor_from is None and args.start_level is not None:
+        parser.error("--start-level requires --initialize-actor-from")
     config = load_config(ROOT / args.config)
     if args.output_dir:
         config["train"]["output_dir"] = args.output_dir
     thesis = config["thesis"]
     stage = args.stage or str(thesis["stage"])
+    if args.initialize_actor_from is not None and stage == "s0" and args.start_level is None:
+        parser.error("S0 actor initialization requires --start-level")
+    # Static obstacle episodes in S1/S2 must exercise a real detour.  The
+    # environment uses this flag only for scene == "static"; none/dynamic
+    # episodes retain their normal generators.
+    thesis["blocking_obstacle_mode"] = stage in {"s1", "s2"}
     try:
         num_envs = resolve_num_envs(
             stage, args.num_envs, int(config["train"].get("num_envs", 1)),
@@ -2497,10 +2625,6 @@ def main() -> None:
         )
     except ValueError as error:
         parser.error(str(error))
-    if num_envs > 1 and stage != "s0":
-        parser.error("parallel environment collection currently supports S0 only")
-    if args.initialize_actor_from and stage != "s0":
-        parser.error("--initialize-actor-from currently supports S0 only")
     if thesis.get("protocol") not in SUPPORTED_PROTOCOLS:
         parser.error(
             "the serial trainer only supports protocols "
@@ -2554,6 +2678,11 @@ def main() -> None:
             storage_scale or int(replay_storage["history_capacity_per_level"])
         ),
         s0_joint_pose=bool(thesis.get("joint_pose_curriculum")),
+        cross_level_replay=bool(
+            thesis.get("joint_pose_curriculum", {}).get(
+                "cross_level_replay", False
+            )
+        ),
         s0_success_fraction=float(orientation_curriculum["replay_success_fraction"]),
         s0_success_schedule=orientation_curriculum.get("replay_success_schedule"),
         s0_success_capacity=(
@@ -2574,11 +2703,11 @@ def main() -> None:
     replay.rng = np.random.default_rng(stream_seeds["replay"])
     goal_curriculum = thesis["goal_curriculum"]
     full_scale_min_transitions = int(goal_curriculum["full_scale_min_transitions"])
-    if full_scale_min_transitions < 1:
-        raise ValueError("goal_curriculum.full_scale_min_transitions must be positive")
+    if full_scale_min_transitions < 0:
+        raise ValueError("goal_curriculum.full_scale_min_transitions must be non-negative")
     pose_full_scale_min_transitions = int(orientation_curriculum["full_scale_min_transitions"])
-    if pose_full_scale_min_transitions < 1:
-        raise ValueError("orientation_curriculum.full_scale_min_transitions must be positive")
+    if pose_full_scale_min_transitions < 0:
+        raise ValueError("orientation_curriculum.full_scale_min_transitions must be non-negative")
     curriculum = HomotopyCurriculum(
         stage,
         seed=stream_seeds["curriculum"],
@@ -2716,7 +2845,7 @@ def main() -> None:
         # Historical transitions are relabeled using the active reward scheme.
         replay.reward_parameters.update({
             key: env.reward_parameters[key]
-            for key in ("joint_precision_temperature", "hold_reward_scale",
+            for key in ("d_safe", "joint_precision_temperature", "hold_reward_scale",
                         "leave_joint_tolerance_penalty", "leave_tolerance_multiplier",
                         "keypoint_tracking_scale", "keypoint_progress_scale",
                         "keypoint_precision_reward_scale",
@@ -2724,12 +2853,7 @@ def main() -> None:
                         "joint_bottleneck_temperature")
         })
     elif args.initialize_actor_from:
-        start_level = int(args.start_level)
-        maximum_level = len(thesis["joint_pose_curriculum"]["levels"]) - 1
-        if not 0 <= start_level <= maximum_level:
-            raise ValueError(
-                f"--start-level must be in [0, {maximum_level}], got {start_level}"
-            )
+        start_level = None
         initialized_actor = load_reference_actor(
             agent, ROOT / args.initialize_actor_from
         )
@@ -2737,9 +2861,16 @@ def main() -> None:
         # PCR must begin from the imported policy, not the random actor that
         # existed when the new agent was constructed.
         agent.reset_chain_reference_actor()
-        if start_level > curriculum.orientation.level_index:
-            curriculum.manually_advance_orientation_to(start_level, allow_early=True)
-        replay.begin_orientation_level(curriculum.orientation.level_index)
+        if stage == "s0":
+            start_level = int(args.start_level)
+            maximum_level = len(thesis["joint_pose_curriculum"]["levels"]) - 1
+            if not 0 <= start_level <= maximum_level:
+                raise ValueError(
+                    f"--start-level must be in [0, {maximum_level}], got {start_level}"
+                )
+            if start_level > curriculum.orientation.level_index:
+                curriculum.manually_advance_orientation_to(start_level, allow_early=True)
+            replay.begin_orientation_level(curriculum.orientation.level_index)
         # An imported actor should collect the new reward contract immediately;
         # only critic updates retain the normal update_after replay warm-up.
         counters["random_steps_used"] = int(config["sac"]["warmup_steps"])
@@ -2790,18 +2921,15 @@ def main() -> None:
         reset_on_contract_change=False,
     )
     if num_envs > 1:
-        if stage != "s0":
-            raise ValueError("parallel environment collection currently supports S0 only")
         if loaded_checkpoint_state is not None:
             checkpoint_num_envs = int(loaded_checkpoint_state.get("parallel_num_envs", 1))
-            if checkpoint_num_envs != num_envs:
+            same_stage_resume = str(
+                loaded_checkpoint_state.get("curriculum", {}).get("stage", stage)
+            ) == stage
+            if same_stage_resume and "parallel_workers" in loaded_checkpoint_state and checkpoint_num_envs != num_envs:
                 raise ValueError(
                     f"parallel checkpoint uses {checkpoint_num_envs} environments, "
                     f"requested {num_envs}"
-                )
-            if "parallel_workers" not in loaded_checkpoint_state:
-                raise ValueError(
-                    "a single-environment checkpoint cannot resume a parallel run"
                 )
 
     manifest = {
@@ -2839,6 +2967,7 @@ def main() -> None:
             config["train"].get("evaluate_during_training", False)
         ),
         "num_envs": num_envs,
+        "blocking_obstacle_mode": bool(thesis.get("blocking_obstacle_mode", False)),
         "parallel_execution": {
             "mode": (
                 "pipelined_environment_step_and_learner_update"
@@ -2932,7 +3061,7 @@ def main() -> None:
         "policy_churn_penalty", "policy_churn_to_sac_ratio",
         "chain_pcr_effective_coefficient",
         "chain_pcr_sac_loss_ema", "chain_pcr_loss_ema",
-        "alpha_loss", "alpha",
+        "alpha_loss", "policy_entropy", "alpha",
         "q1_mean", "q2_mean", "target_mean", "sample_none", "sample_static", "sample_dynamic",
         "sample_orientation_anchor", "sample_orientation_current", "sample_orientation_historical",
         "sample_current_success", "sample_current_recent", "sample_previous_level",
@@ -2966,6 +3095,7 @@ def main() -> None:
         "rolling_goal_success_rate", "goal_eligible_steps",
         "goal_full_scale_steps", "s0_goal_gate_eligible",
         "orientation_scale", "position_tolerance", "orientation_tolerance", "rolling_orientation_success_rate",
+        "rolling_scene_success_rate", "scene_strict", "scene_strict_steps", "scene_eligible_steps",
         "orientation_eligible_steps", "orientation_level_index", "orientation_level_steps",
         "rolling_anchor_position_success_rate", "rolling_previous_pose_success_rate",
         "sample_orientation_anchor",
@@ -3053,6 +3183,7 @@ def main() -> None:
             full_scale_min_transitions=full_scale_min_transitions,
             pose_full_scale_min_transitions=pose_full_scale_min_transitions,
             loaded_checkpoint_state=loaded_checkpoint_state,
+            stage=stage,
         )
         return
     with log_path.open("w", newline="", encoding="utf-8") as handle, \
@@ -3070,11 +3201,32 @@ def main() -> None:
             "orientation_level_index", "orientation_scale",
             "orientation_level_steps", "episodes", "seed", "success_rate",
             "collision_rate", "joint_limit_rate", "timeout_rate",
+            "probe_seeds", "probe_mean_success_rate", "probe_min_seed_success_rate",
+            "probe_max_collision_rate", "probe_max_timeout_rate", "confirmation_seed_success_rates",
+            "mean_success_rate", "min_seed_success_rate", "max_collision_rate",
+            "max_timeout_rate", "max_joint_limit_rate", "seed_success_rates",
+            "seed_results",
             "mean_position_error_m", "mean_orientation_error_rad",
             "p95_orientation_error_rad",
             "mean_minimum_self_distance_m", "self_violation_rate",
             "strict_pose_hit_rate", "minimum_bin_success_rate",
             "minimum_bin_strict_pose_hit_rate",
+            "p95_position_error_m", "mean_episode_steps", "mean_success_steps",
+            "terminal_position_only_rate", "terminal_orientation_only_rate",
+            "terminal_joint_failure_rate",
+            "terminal_joint_pose_rate", "bin_indices", "bin_episode_counts",
+            "mean_cell_success_rate", "cell_success_p10", "worst_10_cells_mean_success_rate", "cell_fraction_success_at_least_0_6",
+            "distance_bin_success_rates", "orientation_bin_success_rates",
+            "success_rate_d7_d9", "timeout_rate_d7_d9",
+            "keypoint_step_count", "keypoint_distance_mean_m",
+            "keypoint_next_distance_mean_m", "keypoint_tracking_quality_mean",
+            "keypoint_precision_quality_mean", "keypoint_precision_reward_mean",
+            "joint_bottleneck_shaping_reward_mean", "keypoint_progress_mean_m",
+            "keypoint_progress_positive_ratio", "jacobian_clip_ratio_mean",
+            "keypoint_episode_start_distance_mean_m",
+            "keypoint_episode_end_distance_mean_m",
+            "keypoint_episode_distance_reduction_mean_m",
+            "keypoint_episode_improvement_ratio",
             "weak_bin_count_below_0_6", "success_rate_o0_o4",
             "success_rate_o5_o6", "success_rate_o7_o9",
             "timeout_rate_o0_o4", "timeout_rate_o5_o6", "timeout_rate_o7_o9",
@@ -3575,12 +3727,29 @@ def main() -> None:
                                   "final": final, "episode_used_warmup": episode_used_warmup,
                                   "environment": env.episode_state_dict()}
                 break
+            level_before_episode = curriculum.orientation.level_index
             update = curriculum.finish_episode(
                 scene, bool(final.get("position_reached", False)),
                 bool(final.get("task_reached", False)), episode_length,
                 orientation_anchor=orientation_anchor,
                 curriculum_eligible=not episode_used_warmup,
+                # Promotion is performed only by the deterministic
+                # three-seed probe/confirmation gate below.
+                allow_orientation_promotion=False,
             )
+            if curriculum.orientation.level_index != level_before_episode:
+                replay.begin_orientation_level(curriculum.orientation.level_index)
+                promoted_contract = curriculum.pose_contract()
+                replay.update_semantic_bounds(
+                    distance_min=promoted_contract["target_distance_min_m"],
+                    distance_max=promoted_contract["target_distance_max_m"],
+                    orientation_min=promoted_contract[
+                        "target_orientation_min_rad"
+                    ],
+                    orientation_max=promoted_contract[
+                        "target_orientation_max_rad"
+                    ],
+                )
             if (
                 evaluate_during_training
                 and not manual_promotion
@@ -3858,7 +4027,13 @@ def main() -> None:
                    full_scale_min_transitions, pose_full_scale_min_transitions
                ),
                "strict_steps": {k: v.strict_steps for k, v in curriculum.states.items()}}
-    (output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    (output / "summary.json").write_text(
+        json.dumps(
+            summary, ensure_ascii=False, indent=2,
+            default=summary_json_default,
+        ),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

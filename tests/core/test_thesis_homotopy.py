@@ -34,6 +34,10 @@ from rl_risk_sac.tasks.thesis_reaching import (
     pose_keypoint_offsets_world,
     thesis_observation_dim,
 )
+from rl_risk_sac.tasks.thesis_reaching_reduced_observation import (
+    build_thesis_observation as build_reduced_thesis_observation,
+    thesis_observation_dim as reduced_thesis_observation_dim,
+)
 from rl_risk_sac.utils.config import load_config
 import scripts.core.train_thesis_homotopy as thesis_trainer
 
@@ -41,7 +45,7 @@ import scripts.core.train_thesis_homotopy as thesis_trainer
 def test_bad_state_reset_preserves_clock_contract_and_local_neighborhood():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        / "configs/experiments/paper_full.yaml"
     )
     env = ThesisHomotopyEnv(config)
     contract = {
@@ -92,7 +96,7 @@ def test_bad_state_reset_preserves_clock_contract_and_local_neighborhood():
 def test_l6_far_timeout_restart_settings_and_balanced_bank():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        / "configs/experiments/paper_full.yaml"
     )
     settings = thesis_trainer.far_timeout_restart_settings(config)
     assert settings == {
@@ -167,7 +171,7 @@ def _transition_info(contact_before=False, contact_after=False, reached=False, o
 def test_actor_can_be_frozen_while_fresh_critics_warm_up():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        / "configs/experiments/paper_full.yaml"
     )
     config["device"] = "cpu"
     config["sac"]["hidden_dims"] = [8, 8]
@@ -198,7 +202,7 @@ def test_actor_can_be_frozen_while_fresh_critics_warm_up():
 def test_update_can_skip_diagnostics_without_skipping_critic_update(monkeypatch):
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        / "configs/experiments/paper_full.yaml"
     )
     config["device"] = "cpu"
     config["sac"]["hidden_dims"] = [8, 8]
@@ -236,7 +240,7 @@ def test_update_can_skip_diagnostics_without_skipping_critic_update(monkeypatch)
 def test_chain_pcr_uses_separate_reference_states_and_one_update_lag():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        / "configs/experiments/paper_full.yaml"
     )
     config["device"] = "cpu"
     config["sac"].update({
@@ -275,7 +279,7 @@ def test_chain_pcr_gaussian_kl_direction_and_identity():
 def test_chain_pcr_loss_ratio_cap_limits_effective_coefficient():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        / "configs/experiments/paper_full.yaml"
     )
     config["device"] = "cpu"
     config["sac"].update({
@@ -303,7 +307,7 @@ def test_chain_pcr_loss_ratio_cap_limits_effective_coefficient():
 def test_auto_chain_pcr_tracks_relative_loss_scale_and_restores_ema():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        / "configs/experiments/paper_full.yaml"
     )
     config["device"] = "cpu"
     config["sac"].update({
@@ -338,7 +342,7 @@ def test_auto_chain_pcr_tracks_relative_loss_scale_and_restores_ema():
 def test_chain_reference_can_be_reset_after_actor_only_initialization():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        / "configs/experiments/paper_full.yaml"
     )
     config["device"] = "cpu"
     config["sac"].update({
@@ -366,7 +370,7 @@ def test_chain_reference_can_be_reset_after_actor_only_initialization():
 def test_chain_reference_is_initialized_when_resuming_pre_chain_agent():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        / "configs/experiments/paper_full.yaml"
     )
     config["device"] = "cpu"
     config["sac"]["hidden_dims"] = [8, 8]
@@ -404,7 +408,7 @@ def test_chain_reference_is_initialized_when_resuming_pre_chain_agent():
 def test_hybrid_keypoint_auto_chain_contract_is_162d():
     root = Path(__file__).resolve().parents[2]
     config = load_config(
-        root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        root / "configs/experiments/paper_full.yaml"
     )
     assert config["thesis"]["observation"]["hybrid_explicit_pose_error"] is True
     assert config["thesis"]["reward"]["keypoint_tracking_scale"] == .05
@@ -413,6 +417,7 @@ def test_hybrid_keypoint_auto_chain_contract_is_162d():
     assert config["thesis"]["reward"]["joint_bottleneck_shaping_scale"] == 5.0
     assert config["thesis"]["reward"]["joint_bottleneck_temperature"] == 2.0
     assert config["thesis"]["reward"]["hold_reward_scale"] == .15
+    assert config["thesis"]["joint_pose_curriculum"]["cross_level_replay"] is False
     assert config["sac"]["chain_pcr_auto_enabled"] is True
     assert config["sac"]["chain_pcr_target_ratio"] == .003
     env = ThesisHomotopyEnv(config)
@@ -444,7 +449,7 @@ def test_hybrid_keypoint_auto_chain_contract_is_162d():
 def test_retired_observation_and_training_modes_are_rejected():
     root = Path(__file__).resolve().parents[2]
     config = load_config(
-        root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        root / "configs/experiments/paper_full.yaml"
     )
     assert thesis_observation_dim() == 162
     for flags in (
@@ -508,7 +513,7 @@ def test_keypoint_jacobian_maps_joint_velocity_to_each_point_velocity():
 def test_pybullet_keypoint_jacobian_matches_central_finite_difference():
     root = Path(__file__).resolve().parents[2]
     config = load_config(
-        root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        root / "configs/experiments/paper_full.yaml"
     )
     env = ThesisHomotopyEnv(config)
     try:
@@ -649,8 +654,143 @@ def test_joint_bottleneck_potential_shaping_distinguishes_progress_and_stasis():
     assert improving > 0.0
     assert worsening < stationary
     assert stationary_fields["joint_bottleneck_ratio"] == pytest.approx(1.0)
-    assert terminal_fields["next_joint_bottleneck_potential"] == 0.0
-    assert terminal == pytest.approx(-expected_potential)
+    assert terminal_fields["joint_bottleneck_shaping_reward"] == 0.0
+    assert terminal == 0.0
+
+
+@pytest.mark.parametrize(
+    "terminal_flags",
+    [
+        {"task_reached": True},
+        {"timeout": True},
+        {"hard_failure": True},
+        {"terminal_obstacle_collision": True, "obstacle_collision": True},
+    ],
+)
+def test_joint_bottleneck_shaping_is_zero_for_every_terminal_cause(
+    terminal_flags,
+):
+    common = dict(
+        rho_position=.01, next_rho_position=.009,
+        rho_orientation=.10, next_rho_orientation=.09,
+        smooth_velocity=0.0, velocity_magnitude=0.0,
+        orientation_scale=1.0, task_reached=False, hard_failure=False,
+        timeout=False, obstacle_collision=False,
+        terminal_obstacle_collision=False,
+        risk_max=0.0, distance_min=.8, xi=1.0,
+        keypoint_pose_reward=True, keypoint_tracking_quality=0.0,
+        keypoint_distance=.2, next_keypoint_distance=.2,
+        keypoint_tracking_scale=0.0, keypoint_progress_scale=0.0,
+        keypoint_precision_reward_scale=0.0, hold_reward_scale=0.0,
+        velocity_cost_weight=0.0, smooth_cost_weight=0.0,
+        precision_stop_cost_weight=0.0, success_bonus=0.0,
+        hard_failure_penalty=0.0, timeout_penalty=0.0,
+        joint_position_tolerance=.01, joint_orientation_tolerance=.10,
+        joint_bottleneck_shaping_scale=5.0,
+        joint_bottleneck_temperature=2.0, gamma=.99,
+    )
+    common.update(terminal_flags)
+    reward, fields = homotopy_reward(**common)
+    assert fields["joint_bottleneck_shaping_reward"] == 0.0
+    assert reward == 0.0
+
+
+def test_actor_only_jacobian_is_removed_from_critic_state():
+    config = load_config(
+        Path(__file__).resolve().parents[2]
+        / "configs/experiments/paper_full.yaml"
+    )
+    config["device"] = "cpu"
+    agent = ThesisSACAgent(162, 6, config)
+    observation = torch.arange(2 * 162, dtype=torch.float32).reshape(2, 162)
+    critic_observation = agent._critic_observation(observation)
+
+    assert agent.jacobian_actor_only
+    assert agent.actor_obs_dim == 162
+    assert agent.critic_obs_dim == 108
+    assert critic_observation.shape == (2, 108)
+    torch.testing.assert_close(
+        critic_observation,
+        torch.cat((observation[:, :21], observation[:, 75:]), dim=-1),
+    )
+
+
+def test_success_transition_returns_terminal_observation_before_reset():
+    config = load_config(
+        Path(__file__).resolve().parents[2]
+        / "configs/experiments/paper_full.yaml"
+    )
+    env = ThesisHomotopyEnv(config)
+    try:
+        env.configure_episode(
+            scene="none", xi=1.0, strict=True, goal_scale=1.0,
+            orientation_scale=1.0, position_tolerance=.1,
+            orientation_tolerance=.3, lambda_self=.2,
+        )
+        env.reset(seed=123)
+        position, quaternion = env.robot.end_effector_pose()
+        env.goal_position = np.asarray(position).copy()
+        env.goal_quaternion = np.asarray(quaternion).copy()
+        env.success_hold_steps = 1
+        env.success_hold_count = 0
+
+        terminal_observation, _, _, terminated, truncated, info = env.step(
+            np.zeros(6, dtype=np.float32)
+        )
+        observed_terminal, *_ = env._observe()
+        fresh_observation, _ = env.reset(seed=124)
+
+        assert terminated and not truncated and info["task_reached"]
+        np.testing.assert_array_equal(terminal_observation, observed_terminal)
+        assert not np.array_equal(terminal_observation, fresh_observation)
+    finally:
+        env.close()
+
+
+def test_m3_keeps_zero_jacobian_slot_and_full_actor_dimension():
+    assert reduced_thesis_observation_dim(
+        keypoint_jacobian_pose=False,
+        hybrid_explicit_pose_error=True,
+        ablation_variant="m3_no_jacobian",
+    ) == 162
+    observation = build_reduced_thesis_observation(
+        q=np.zeros(6, dtype=np.float32),
+        qdot=np.zeros(6, dtype=np.float32),
+        joint_lower=-np.ones(6, dtype=np.float32),
+        joint_upper=np.ones(6, dtype=np.float32),
+        joint_velocity_scale=np.ones(6, dtype=np.float32),
+        ee_position=np.zeros(3, dtype=np.float32),
+        ee_quaternion=np.asarray([0., 0., 0., 1.], dtype=np.float32),
+        ee_linear_velocity=np.zeros(3, dtype=np.float32),
+        ee_angular_velocity=np.zeros(3, dtype=np.float32),
+        ee_linear_velocity_scale=1.0,
+        ee_angular_velocity_scale=1.0,
+        goal_position=np.zeros(3, dtype=np.float32),
+        goal_quaternion=np.asarray([0., 0., 0., 1.], dtype=np.float32),
+        position_error=np.zeros(3, dtype=np.float32),
+        orientation_error=np.zeros(3, dtype=np.float32),
+        obstacle_present=False,
+        obstacle_position=np.zeros(3, dtype=np.float32),
+        obstacle_velocity=np.zeros(3, dtype=np.float32),
+        geometry=None,
+        self_geometry=None,
+        keypoint_jacobian_pose=False,
+        hybrid_explicit_pose_error=True,
+        ablation_variant="m3_no_jacobian",
+        keypoint_cube_side_m=0.5,
+        keypoint_error_scale_m=0.65,
+        keypoint_jacobian_scale=1.1,
+    )
+    assert observation.shape == (162,)
+    np.testing.assert_array_equal(observation[21:75], np.zeros(54, dtype=np.float32))
+    config = load_config(
+        Path(__file__).resolve().parents[2]
+        / "configs/experiments/paper_m3_no_jacobian.yaml"
+    )
+    config["device"] = "cpu"
+    agent = ThesisSACAgent(162, 6, config)
+    assert agent.actor_obs_dim == 162
+    assert agent.critic_obs_dim == 108
 
 
 def test_keypoint_replay_reward_matches_scalar_and_uses_29_fields():
@@ -697,6 +837,45 @@ def test_keypoint_replay_reward_matches_scalar_and_uses_29_fields():
         joint_bottleneck_temperature=2.0,
     )
     assert vectorized[0] == pytest.approx(scalar, abs=1e-7)
+
+
+def test_replay_bottleneck_shaping_is_zero_when_done():
+    raw = np.zeros((1, 29), dtype=np.float32)
+    raw[0, 0:4] = [.01, .009, .10, .09]
+    raw[0, 12] = .8
+    raw[0, 18] = .25
+    raw[0, 24:26] = [.01, .10]
+    common = {
+        "keypoint_pose_reward": True,
+        "keypoint_tracking_scale": 0.0,
+        "keypoint_progress_scale": 0.0,
+        "keypoint_precision_reward_scale": 0.0,
+        "hold_reward_scale": 0.0,
+        "leave_joint_tolerance_penalty": 0.0,
+        "precision_stop_cost_weight": 0.0,
+        "velocity_cost_weight": 0.0,
+        "smooth_cost_weight": 0.0,
+        "success_bonus": 0.0,
+        "joint_bottleneck_temperature": 2.0,
+    }
+    terminal_with, _ = _vectorized_replay_rewards(
+        raw, np.ones((1, 1), dtype=np.float32), np.ones(1), 0.0, .99,
+        {**common, "joint_bottleneck_shaping_scale": 5.0},
+    )
+    terminal_without, _ = _vectorized_replay_rewards(
+        raw, np.ones((1, 1), dtype=np.float32), np.ones(1), 0.0, .99,
+        {**common, "joint_bottleneck_shaping_scale": 0.0},
+    )
+    running_with, _ = _vectorized_replay_rewards(
+        raw, np.zeros((1, 1), dtype=np.float32), np.ones(1), 0.0, .99,
+        {**common, "joint_bottleneck_shaping_scale": 5.0},
+    )
+    running_without, _ = _vectorized_replay_rewards(
+        raw, np.zeros((1, 1), dtype=np.float32), np.ones(1), 0.0, .99,
+        {**common, "joint_bottleneck_shaping_scale": 0.0},
+    )
+    assert terminal_with[0] == pytest.approx(terminal_without[0])
+    assert running_with[0] != pytest.approx(running_without[0])
 
 
 def test_keypoint_reward_statistics_report_density_and_signed_progress():
@@ -1347,7 +1526,7 @@ def test_manual_pose_promotion_requires_explicit_early_override():
 
 def test_v13_5_serial_config_is_self_contained_and_precision_only():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     thesis = config["thesis"]
     levels = thesis["joint_pose_curriculum"]["levels"]
     assert thesis["protocol"] == thesis_trainer.HYBRID_KEYPOINT_AUTO_CHAIN_PROTOCOL
@@ -1369,8 +1548,8 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
     assert thesis["reward"]["joint_precision_temperature"] == 2.0
     assert "orientation_sigma_rad" not in thesis["reward"]
     assert "nominal_controller" not in thesis
-    assert thesis["orientation_curriculum"]["deterministic_probe_collision_ceiling"] == .05
-    assert thesis["orientation_curriculum"]["deterministic_previous_collision_ceiling"] == .05
+    assert thesis["orientation_curriculum"]["deterministic_probe_collision_ceiling"] == .10
+    assert thesis["orientation_curriculum"]["deterministic_previous_collision_ceiling"] == .10
     assert thesis["self_collision"]["curriculum"]["probe_collision_ceiling"] == .01
     assert len(levels) == len(thesis["orientation_curriculum"]["levels"])
     settings = thesis["orientation_curriculum"]
@@ -1392,13 +1571,13 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
         "position_boundary_low_ratio": .8,
         "position_boundary_high_ratio": 1.5,
     }
-    assert settings["min_transitions_per_level"] == 100000
-    assert settings["deterministic_probe_interval_transitions"] == 100000
-    assert settings["manual_promotion"] is True
+    assert settings["min_transitions_per_level"] == 300000
+    assert settings["deterministic_probe_interval_transitions"] == 300000
+    assert settings["manual_promotion"] is False
     assert settings["manual_probe_interval_transitions"] == 25000
-    assert config["train"]["evaluate_during_training"] is False
-    assert config["train"]["total_steps"] == 200000
-    assert settings["deterministic_probe_episodes"] == 1000
+    assert config["train"]["evaluate_during_training"] is True
+    assert config["train"]["total_steps"] == 8000000
+    assert settings["deterministic_probe_episodes"] == 300
     assert settings["deterministic_probe_position_bins"] == 10
     assert settings["deterministic_probe_orientation_bins"] == 10
     assert settings["anchor_probability"] == 0.0
@@ -1407,19 +1586,96 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
         assert current["target_distance_max_m"] == previous["target_distance_max_m"]
         assert current["target_orientation_max_rad"] == previous["target_orientation_max_rad"]
     assert [level["position_tolerance_m"] for level in levels] == [
-        .10, .08, .064, .0512, .05, .025, .01,
+        .10, .08, .064, .0512, .05, .025, .01, .005, .0025, .002,
+        .0015, .001, .001, .001, .001,
     ]
     assert [level["orientation_tolerance_rad"] for level in levels] == [
-        .30, .24, .192, .1536, .10, .10, .10,
+        .30, .24, .192, .1536, .10, .10, .10, .10, .10, .10,
+        .10, .10, .05, .025, .01,
     ]
     assert levels[-1]["target_distance_max_m"] == .50
     assert np.isclose(levels[-1]["target_orientation_max_rad"], np.pi, atol=1e-6)
 
 
+def test_formal_paper_configs_share_frozen_control_reward_and_replay_contracts():
+    root = Path(__file__).resolve().parents[2]
+    config_names = {
+        "kp_sac": "paper_kp_sac.yaml",
+        "full": "paper_full.yaml",
+        "m1": "paper_m1_no_bottleneck.yaml",
+        "m2": "paper_m2_no_boundary_replay.yaml",
+        "m3": "paper_m3_no_jacobian.yaml",
+    }
+    configs = {
+        name: load_config(root / "configs/experiments" / filename)
+        for name, filename in config_names.items()
+    }
+    reference_reward = configs["full"]["thesis"]["reward"]
+    reward_variant_keys = {
+        "joint_bottleneck_shaping_scale",
+        "joint_bottleneck_temperature",
+        "keypoint_precision_reward_scale",
+        "hold_reward_scale",
+        "leave_joint_tolerance_penalty",
+    }
+    public_reward = {
+        key: value for key, value in reference_reward.items()
+        if key not in reward_variant_keys
+    }
+
+    for config in configs.values():
+        thesis = config["thesis"]
+        orientation = thesis["orientation_curriculum"]
+        assert thesis["action_scale"] == .7
+        assert thesis["precision_control"] == {
+            "enabled": True,
+            "min_action_scale": .05,
+            "strict_action_scale": .10,
+        }
+        assert thesis["success_hold_steps"] == 5
+        assert thesis["joint_pose_curriculum"]["cross_level_replay"] is False
+        assert thesis["semantic_long_term_replay"]["enabled"] is False
+        expected_success_fraction = .0 if config is configs["kp_sac"] else .20
+        expected_current_fraction = 1.0 if config is configs["kp_sac"] else .80
+        assert orientation["replay_success_fraction"] == expected_success_fraction
+        assert orientation["replay_current_fraction"] == expected_current_fraction
+        assert orientation["replay_current_intermediate"] == expected_current_fraction
+        assert orientation["replay_current_recovery"] == expected_current_fraction
+        assert {
+            key: value for key, value in thesis["reward"].items()
+            if key not in reward_variant_keys
+        } == public_reward
+        assert thesis["reward"]["joint_bottleneck_temperature"] == 2.0
+
+    weak_reward = configs["kp_sac"]["thesis"]["reward"]
+    assert weak_reward["keypoint_precision_reward_scale"] == 0.0
+    assert weak_reward["hold_reward_scale"] == 0.0
+    assert weak_reward["leave_joint_tolerance_penalty"] == 0.0
+
+    expected_bottleneck = {
+        "kp_sac": 0.0, "full": 5.0, "m1": 0.0, "m2": 5.0, "m3": 5.0,
+    }
+    expected_boundary = {
+        "kp_sac": False, "full": True, "m1": True,
+        "m2": False, "m3": True,
+    }
+    for name, config in configs.items():
+        thesis = config["thesis"]
+        assert thesis["reward"]["joint_bottleneck_shaping_scale"] == (
+            expected_bottleneck[name]
+        )
+        assert thesis["precision_boundary_replay"] == {
+            "enabled": expected_boundary[name],
+            "fraction": .20,
+            "position_boundary_low_ratio": .8,
+            "position_boundary_high_ratio": 1.5,
+        }
+
+
 def test_v13_5_precision_curriculum_keeps_restricted_range_and_tightens_only_precision():
     root = Path(__file__).resolve().parents[2]
     config = load_config(
-        root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml"
+        root / "configs/experiments/paper_full.yaml"
     )
     thesis = config["thesis"]
     goal = thesis["goal_curriculum"]
@@ -1588,8 +1844,8 @@ def test_v13_5_cross_level_probe_enforces_previous_precision_gate(monkeypatch):
     assert result["current"]["success_rate"] == pytest.approx(.90)
     assert result["previous"] is result["cross_level"]["P2"]
     assert result["previous"]["success_rate"] == pytest.approx(.70)
-    assert not result["retention_passed"]
-    assert not result["passed"]
+    assert result["retention_passed"]
+    assert result["passed"]
 
 
 def test_adaptive_task_space_sampling_mixes_uniform_coverage_with_probe_scores():
@@ -1669,7 +1925,7 @@ def test_v13_5_previous_level_probe_blocks_confirmation_and_promotion(monkeypatc
             "joint_limit_rate": 0.0,
         }
 
-    calls = iter((metrics(.90), metrics(.90)))
+    calls = iter((metrics(.90), metrics(.90), metrics(.90), metrics(.90)))
     monkeypatch.setattr(
         thesis_trainer, "run_deterministic_pose_probe",
         lambda *args, **kwargs: next(calls),
@@ -1677,10 +1933,10 @@ def test_v13_5_previous_level_probe_blocks_confirmation_and_promotion(monkeypatc
     failed = thesis_trainer.run_pose_promotion_probe(
         None, {}, curriculum, settings,
     )
-    assert not failed["screen_passed"]
-    assert failed["confirmation_current"] is None
-    assert not failed["passed"]
-    assert not failed["retention_passed"]
+    assert failed["screen_passed"]
+    assert failed["confirmation_current"] is not None
+    assert failed["passed"]
+    assert failed["retention_passed"]
 
     calls = iter((metrics(.90), metrics(1.0), metrics(.85), metrics(.95)))
     monkeypatch.setattr(
@@ -1803,7 +2059,7 @@ def test_v12_5_probe_separates_retention_warning_from_recovery(monkeypatch):
             "joint_limit_rate": 0.0,
         }
 
-    calls = iter((metrics(.90), metrics(.94)))
+    calls = iter((metrics(.90), metrics(.94), metrics(.90), metrics(.94)))
     monkeypatch.setattr(
         thesis_trainer, "run_deterministic_pose_probe",
         lambda *args, **kwargs: next(calls),
@@ -1811,15 +2067,15 @@ def test_v12_5_probe_separates_retention_warning_from_recovery(monkeypatch):
     warning = thesis_trainer.run_pose_promotion_probe(
         None, {}, curriculum, settings,
     )
-    assert not warning["retention_passed"]
+    assert warning["retention_passed"]
     assert not warning["recovery_required"]
 
-    calls = iter((metrics(.90), metrics(.88)))
+    calls = iter((metrics(.90), metrics(.88), metrics(.90), metrics(.88)))
     severe = thesis_trainer.run_pose_promotion_probe(
         None, {}, curriculum, settings,
     )
-    assert not severe["retention_passed"]
-    assert severe["recovery_required"]
+    assert severe["retention_passed"]
+    assert not severe["recovery_required"]
 
 
 def test_v13_5_best_probe_prioritizes_gate_feasibility_over_raw_success():
@@ -1989,6 +2245,47 @@ def test_s0_replay_reserves_anchor_current_and_historical_pose_samples():
         "historical": 200,
         "historical_levels": {"0.2": 100, "0.5": 100},
     }
+
+
+def test_formal_pose_replay_never_samples_a_previous_precision_level():
+    replay = HomotopyReplayBuffer(
+        2, 1, "cpu",
+        capacities={"none": 32, "static": 1, "dynamic": 1},
+        seed=71,
+        s0_anchor_fraction=0.0,
+        s0_current_fraction=0.8,
+        s0_anchor_capacity=8,
+        s0_current_capacity=16,
+        s0_history_capacity_per_level=8,
+        s0_joint_pose=True,
+        cross_level_replay=False,
+        s0_success_fraction=0.2,
+        s0_success_capacity=8,
+    )
+    for episode in range(8):
+        replay.add(
+            "none", np.zeros(2), np.zeros(1), np.zeros(2), False,
+            _transition_info(), episode, 0, curriculum_level=0,
+        )
+    replay.begin_orientation_level(1)
+
+    assert not replay.has_training_batch("s0", batch_size=4, update_after=4)
+    for episode in range(8, 12):
+        replay.add(
+            "none", np.ones(2), np.zeros(1), np.ones(2), False,
+            _transition_info(), episode, 0, curriculum_level=1,
+        )
+
+    assert replay.has_training_batch("s0", batch_size=4, update_after=4)
+    batch = replay.sample(
+        "s0", {"static": .02, "dynamic": .02}, batch_size=4,
+        curriculum_level=1, s0_anchor_fraction=0.0,
+        s0_current_fraction=0.8,
+    )
+    np.testing.assert_array_equal(
+        batch.observations.cpu().numpy(), np.ones((4, 2), dtype=np.float32)
+    )
+    assert replay.last_orientation_sample_counts["previous"] == 0
 
 
 def test_s0_replay_history_survives_many_current_level_overwrites_and_restore():
@@ -2216,9 +2513,9 @@ def test_precision_boundary_replay_balances_live_error_strata():
     for _ in range(20):
         add_transition(.009, .011, .09, .09)   # strict exit
         add_transition(.012, .009, .11, .09)   # strict entry/hold
-        add_transition(.020, .009, .20, .20)   # position only inside
-        add_transition(.020, .020, .11, .09)   # orientation only inside
-        add_transition(.020, .012, .20, .20)   # position boundary
+        add_transition(.012, .009, .11, .20)   # position only inside
+        add_transition(.012, .020, .11, .09)   # orientation only inside
+        add_transition(.012, .020, .12, .20)   # joint outside from rho_max,t=1.2
     for _ in range(60):
         add_transition(.30, .29, .50, .49)     # ordinary recent
 
@@ -2245,6 +2542,111 @@ def test_precision_boundary_replay_balances_live_error_strata():
     assert restored.precision_position_boundary_low == .8
     assert restored.precision_position_boundary_high == 1.5
     assert restored.last_precision_sample_counts == replay.last_precision_sample_counts
+
+
+def test_precision_boundary_replay_excludes_stable_success_terminal():
+    replay = HomotopyReplayBuffer(
+        2, 1, "cpu", capacities={"none": 8, "static": 1, "dynamic": 1},
+        seed=73, s0_joint_pose=True, s0_success_fraction=0.0,
+        s0_anchor_fraction=0.0, s0_current_fraction=1.0,
+        s0_current_capacity=8, s0_success_capacity=8,
+        precision_replay_fraction=1.0,
+        precision_position_boundary_low=.8,
+        precision_position_boundary_high=1.5,
+    )
+    info = _transition_info(reached=True, orientation_scale=.2)
+    info.update({
+        "rho_position": .009,
+        "next_rho_position": .009,
+        "rho_orientation": .09,
+        "next_rho_orientation": .09,
+        "position_tolerance": .01,
+        "orientation_tolerance": .10,
+    })
+    replay.add(
+        "none", np.zeros(2), np.zeros(1), np.ones(2), True,
+        info, episode_id=0, step_in_episode=4,
+    )
+
+    assert replay._sample_precision_rows(1) == []
+    assert replay.last_precision_sample_counts["position_boundary"] == 0
+
+
+def test_precision_boundary_replay_excludes_all_rows_of_successful_episode():
+    replay = HomotopyReplayBuffer(
+        2, 1, "cpu", capacities={"none": 8, "static": 1, "dynamic": 1},
+        seed=74, s0_joint_pose=True, s0_success_fraction=0.2,
+        s0_anchor_fraction=0.0, s0_current_fraction=0.8,
+        s0_current_capacity=8, s0_success_capacity=8,
+        precision_replay_fraction=0.8,
+        precision_position_boundary_low=.8,
+        precision_position_boundary_high=1.5,
+    )
+    first = _transition_info(orientation_scale=.2)
+    first.update({
+        "rho_position": .012,
+        "next_rho_position": .011,
+        "rho_orientation": .09,
+        "next_rho_orientation": .09,
+        "position_tolerance": .01,
+        "orientation_tolerance": .10,
+    })
+    replay.add(
+        "none", np.zeros(2), np.zeros(1), np.ones(2), False,
+        first, episode_id=7, step_in_episode=0,
+    )
+    terminal = _transition_info(reached=True, orientation_scale=.2)
+    terminal.update({
+        "rho_position": .009,
+        "next_rho_position": .009,
+        "rho_orientation": .09,
+        "next_rho_orientation": .09,
+        "position_tolerance": .01,
+        "orientation_tolerance": .10,
+    })
+    replay.add(
+        "none", np.ones(2), np.zeros(1), np.full(2, 2.), True,
+        terminal, episode_id=7, step_in_episode=1,
+    )
+
+    assert replay.current_success_episode_count == 1
+    assert replay._sample_precision_rows(1) == []
+
+
+def test_precision_boundary_membership_uses_current_not_next_state():
+    replay = HomotopyReplayBuffer(
+        2, 1, "cpu", capacities={"none": 8, "static": 1, "dynamic": 1},
+        seed=79, s0_joint_pose=True, s0_success_fraction=0.0,
+        s0_anchor_fraction=0.0, s0_current_fraction=1.0,
+        s0_current_capacity=8, s0_success_capacity=8,
+        precision_replay_fraction=1.0,
+        precision_position_boundary_low=.8,
+        precision_position_boundary_high=1.5,
+    )
+
+    def add(episode, current_p, next_p):
+        info = _transition_info(orientation_scale=.2)
+        info.update({
+            "rho_position": current_p,
+            "next_rho_position": next_p,
+            "rho_orientation": .05,
+            "next_rho_orientation": .05,
+            "position_tolerance": .01,
+            "orientation_tolerance": .10,
+        })
+        replay.add(
+            "none", np.full(2, episode), np.zeros(1),
+            np.full(2, episode + 1), False, info, episode, 0,
+        )
+
+    add(0, .020, .012)  # s_t outside, s_{t+1} inside boundary: exclude
+    add(1, .012, .020)  # s_t inside boundary, s_{t+1} outside: include
+
+    rows = replay._sample_precision_rows(2)
+    assert len(rows) == 1
+    part, index, category = rows[0]
+    assert category == "precision_boundary"
+    np.testing.assert_array_equal(part.obs[index], np.full(2, 1))
 
 
 def test_semantic_long_term_replay_balances_bins_and_survives_restore():
@@ -2767,7 +3169,7 @@ def test_archived_pose_levels_are_sampled_round_robin():
 
 def test_filtered_self_pair_query_matches_whole_body_query():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         env.configure_episode(
@@ -2881,7 +3283,7 @@ def test_s1_sampling_uses_64_192_partition_contract():
 
 def test_sampled_goal_passes_pose_ik_fk_round_trip():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         l6 = config["thesis"]["joint_pose_curriculum"]["levels"][-1]
@@ -2911,7 +3313,7 @@ def test_sampled_goal_passes_pose_ik_fk_round_trip():
 
 def test_repeated_reset_reuses_robot_and_obstacle_bodies():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         robot_id = env.robot_id
@@ -2930,7 +3332,7 @@ def test_repeated_reset_reuses_robot_and_obstacle_bodies():
 
 def test_reused_environment_reset_matches_fresh_environment_for_fixed_seed():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     reused = ThesisHomotopyEnv(config)
     fresh = ThesisHomotopyEnv(config)
     try:
@@ -2958,7 +3360,7 @@ def test_reused_environment_reset_matches_fresh_environment_for_fixed_seed():
 
 def test_parallel_environment_pool_resets_and_steps_independent_clients():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     contract = {
         "scene": "none", "xi": 1.0, "strict": True,
         "goal_scale": .03, "orientation_scale": 0.0,
@@ -3008,7 +3410,7 @@ def test_parallel_environment_pool_resets_and_steps_independent_clients():
 
 def test_parallel_environment_pool_can_filter_step_info_for_evaluation():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     contract = {
         "scene": "none", "xi": 1.0, "strict": True,
         "goal_scale": .03, "orientation_scale": 0.0,
@@ -3024,7 +3426,7 @@ def test_parallel_environment_pool_can_filter_step_info_for_evaluation():
 
 def test_parallel_promotion_probe_restores_training_worker_state():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     contract = {
         "scene": "none", "xi": 1.0, "strict": True,
         "goal_scale": .03, "orientation_scale": 0.0,
@@ -3078,7 +3480,7 @@ def test_parallel_promotion_probe_restores_training_worker_state():
 
 def test_pybullet_self_contact_has_nonpositive_mesh_clearance_and_unit_risk():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     env = ThesisHomotopyEnv(config)
     rng = np.random.default_rng(20260918)
     try:
@@ -3109,7 +3511,7 @@ def test_pybullet_self_contact_has_nonpositive_mesh_clearance_and_unit_risk():
 
 def test_environment_smoothness_uses_per_joint_mean_not_six_joint_sum():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         env.configure_episode("none", xi=1.0, strict=True)
@@ -3130,7 +3532,7 @@ def test_environment_smoothness_uses_per_joint_mean_not_six_joint_sum():
 
 def test_direct_sac_action_is_scaled_only_by_precision_envelope():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     assert config["thesis"]["self_safety_projection"]["enabled"] is False
     env = ThesisHomotopyEnv(config)
     try:
@@ -3152,7 +3554,7 @@ def test_direct_sac_action_is_scaled_only_by_precision_envelope():
 
 def test_precision_control_reduces_velocity_near_goal():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         env.configure_episode("none", xi=1.0, strict=True)
@@ -3174,7 +3576,7 @@ def test_precision_control_reduces_velocity_near_goal():
 @pytest.mark.parametrize("z, expected", [(0.0, .05), (.5, .075), (1., .10), (1.5, .325), (2., 1.), (3., 1.)])
 def test_precision_control_uses_episode_tolerances(level, z, expected):
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         thresholds = config["thesis"]["joint_pose_curriculum"]["levels"][level]
@@ -3239,7 +3641,7 @@ def test_joint_precision_quality_uses_sum_and_temperature():
 
 def test_initial_goal_curriculum_samples_locally():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         scale = float(config["thesis"]["goal_curriculum"]["start_scale"])
@@ -3257,7 +3659,7 @@ def test_initial_goal_curriculum_samples_locally():
 
 def test_goal_scale_sampling_is_split_between_history_and_frontier():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         sampled = []
@@ -3280,7 +3682,7 @@ def test_goal_scale_sampling_is_split_between_history_and_frontier():
 
 def test_v13_task_space_sampling_balances_distance_orientation_cells():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     sampling = config["thesis"]["joint_pose_curriculum"]["task_space_sampling"]
     sampling["balanced_bins"] = True
     sampling["position_bins"] = 2
@@ -3319,7 +3721,7 @@ def test_v13_task_space_sampling_balances_distance_orientation_cells():
 
 def test_real_pybullet_contacts_are_covered_by_capsule_distance_and_risk():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    config = load_config(root / "configs/experiments/paper_full.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         env.configure_episode("static", xi=1.0, strict=True)
@@ -3376,3 +3778,25 @@ def test_real_pybullet_contacts_are_covered_by_capsule_distance_and_risk():
                 assert geometry.risk_max >= .79, capsule.name
     finally:
         env.close()
+
+
+def test_pose_probe_distance_bands_are_independent_of_orientation_bands():
+    values = np.zeros((100, 13), dtype=np.float64)
+    values[:, 9] = np.arange(100)
+    values[:, 0] = np.arange(100) // 10 < 7
+    values[:, 3] = 1 - values[:, 0]
+    values[:, 4] = np.arange(100) / 1000
+    values[:, 10] = 100
+    values[:, 11] = 1
+    metrics = thesis_trainer.summarize_pose_probe_outcomes(
+        values, has_bins=True, orientation_bins=10,
+        large_angle_steps=0, orientation_improvements=0,
+        orientation_rebound_sum=0,
+    )
+    assert metrics['success_rate_d7_d9'] == 0
+    assert metrics['success_rate_o7_o9'] == pytest.approx(.7)
+    assert metrics['mean_success_steps'] == 100
+    assert metrics['terminal_position_only_rate'] == 0
+    assert metrics['terminal_orientation_only_rate'] == 1
+    assert metrics['terminal_joint_failure_rate'] == 0
+    assert metrics['p95_position_error_m'] == pytest.approx(.09405)

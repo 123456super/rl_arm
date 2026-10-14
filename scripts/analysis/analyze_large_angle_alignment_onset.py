@@ -329,7 +329,7 @@ def analyze(episodes: list[dict], transitions: list[dict], *, action_scale: floa
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--config", default="configs/experiments/thesis_serial_hybrid_keypoint_jacobian_auto_chain.yaml")
+    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
     parser.add_argument("--output", required=True)
     parser.add_argument("--seed", type=int, default=51001)
     parser.add_argument("--num-envs", type=int, default=8)

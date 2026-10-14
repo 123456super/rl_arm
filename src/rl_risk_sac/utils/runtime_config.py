@@ -242,6 +242,8 @@ class SACRuntimeConfig:
     predictive_risk_penalty_mode: str
     initial_alpha: float
     initial_lambda: float
+    target_entropy: float = -3.0
+    min_alpha: float = 3.0e-3
 
 
 @dataclass(frozen=True)
@@ -512,6 +514,8 @@ class RuntimeConfig:
                 predictive_risk_penalty_mode=str(sac["predictive_risk_penalty_mode"]),
                 initial_alpha=float(sac["initial_alpha"]),
                 initial_lambda=float(sac["initial_lambda"]),
+                target_entropy=float(sac.get("target_entropy", -3.0)),
+                min_alpha=float(sac.get("min_alpha", 3.0e-3)),
             ),
             train=TrainRuntimeConfig(
                 method=str(train["method"]),

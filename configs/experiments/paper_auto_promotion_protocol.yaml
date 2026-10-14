@@ -1,0 +1,28 @@
+# Shared deterministic promotion protocol for automatic S0 curricula.
+# Included by KP-SAC, Full, and M1-M3.
+thesis:
+  orientation_curriculum:
+    deterministic_probe_required: true
+    deterministic_probe_episodes: 300
+    deterministic_probe_seeds: [31001, 31002, 31003]
+    deterministic_probe_success_floor: 0.85
+    deterministic_probe_min_seed_success_floor: 0.80
+    # For the restarted paper suite, promotion is decided only by the
+    # three-seed mean and per-seed success floors.  Collision, timeout and
+    # joint-limit statistics remain logged for analysis but do not block a
+    # curriculum transition.
+    deterministic_success_only: true
+    deterministic_probe_collision_ceiling: 0.10
+    deterministic_probe_timeout_ceiling: 0.05
+    deterministic_confirmation_episodes: 1000
+    deterministic_confirmation_seeds: [31001, 31002, 31003]
+    # Reserved final-test seeds. These seeds are never used for promotion or
+    # confirmation decisions.
+    deterministic_test_seeds: [41001, 41002, 41003]
+    deterministic_probe_interval_transitions: 300000
+    cross_level_probe_enabled: false
+    manual_promotion: false
+train:
+  # Let the OS schedule environment workers; do not pin them to CPU IDs.
+  cpu_affinity: false
+  evaluate_during_training: true
