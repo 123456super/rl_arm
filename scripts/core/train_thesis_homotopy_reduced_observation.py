@@ -28,7 +28,13 @@ import torch
 # pool (PyTorch defaults to the host core count).  Keep learner threading
 # bounded so the environment workers and the other seeds are not starved.
 torch.set_num_threads(6)
-torch.set_num_interop_threads(1)
+try:
+    # Frozen evaluation can import this module after torch has initialized
+    # parallel work; keep the existing inter-op pool in that case.
+    torch.set_num_interop_threads(1)
+except RuntimeError as exc:
+    if "after parallel work has started" not in str(exc):
+        raise
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))

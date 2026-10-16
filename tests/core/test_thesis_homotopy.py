@@ -1576,7 +1576,7 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
     assert settings["manual_promotion"] is False
     assert settings["manual_probe_interval_transitions"] == 25000
     assert config["train"]["evaluate_during_training"] is True
-    assert config["train"]["total_steps"] == 8000000
+    assert config["train"]["total_steps"] == 6000000
     assert settings["deterministic_probe_episodes"] == 300
     assert settings["deterministic_probe_position_bins"] == 10
     assert settings["deterministic_probe_orientation_bins"] == 10

@@ -372,8 +372,8 @@ thesis:
     hybrid_explicit_pose_error: true
 train:
   cpu_affinity: false
-  total_steps: 8000000
-  max_stage_steps: 10000000
+  total_steps: 6000000
+  max_stage_steps: 6000000
   num_envs: 8
   actor_initialization_critic_warmup_transitions: 5000
   save_interval: 25000

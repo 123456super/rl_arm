@@ -52,7 +52,7 @@ r_{b,t}=(1-d_t)[\gamma\Phi_b(s_{t+1})-\Phi_b(s_t)],
 
 ## 3. 实验结构
 
-每个正式方法使用训练种子 `11001` 和 `11002`，每个种子的训练预算统一为 `8,000,000 transition`，从随机初始化开始。Hybrid KP-SAC-Base、Full 和 M1–M3 共用相同的 L0–L14 课程、自动升档、probe、确认评估和最终冻结评估协议；具体奖励与 replay 差异按表和实验协议冻结。
+Hybrid KP-SAC-Base 与 Full 使用训练种子 `11001` 和 `11002`；M1、M2、M3 使用预先指定的单一训练种子 `11001`。所有运行的训练预算统一为 `6,000,000 transition`，从随机初始化开始。Hybrid KP-SAC-Base、Full 和 M1–M3 共用相同的 L0–L14 课程、自动升档、probe、确认评估和最终冻结评估协议；具体奖励与 replay 差异按表和实验协议冻结。单种子消融用于机制归因和失败模式分析，不用于估计跨随机种子的方差。
 
 | 方法 | 验证内容 |
 |---|---|
@@ -68,7 +68,7 @@ r_{b,t}=(1-d_t)[\gamma\Phi_b(s_{t+1})-\Phi_b(s_t)],
 
 ## 4. 结果解释顺序
 
-先分别使用每个训练种子 8M 结束时的最终冻结 Actor，在 L6、L9、L11、L12、L13、L14 上评估，再跨两个训练种子汇总均值和离散程度；不挑选最佳 seed。Hybrid KP-SAC-Base 与 Full 的主比较解释为完整 Direction–Objective–Data 框架的整体收益；M1–M3 只用于 Full 家族内部归因。具体而言，Jacobian、Bottleneck 与 Boundary Replay 的增量作用分别由 Full–M3、Full–M1 和 Full–M2 验证；M1/M2 不用于声称完整 Objective/Data 模块的单项效果。同步记录每个方法首次通过各档位所需的 `T_Lk`，未通过时保持当前档位，达到 L14 后保持 L14 至 8M 结束。随后用 M1–M3 的失败模式归因：方向失配、terminal position-only / orientation-only / joint failure，以及边界附近误差反弹或保持失败。
+Full 与 Hybrid KP-SAC-Base 分别使用两个训练种子在 6M 结束时的最终冻结 Actor，在 L6、L9、L11、L12、L13、L14 上评估并汇总均值和离散程度；M1–M3 使用预先指定的 `11001` 单种子最终 Actor，采用相同冻结评估，但不估计跨种子方差，也不挑选最佳 seed。Hybrid KP-SAC-Base 与 Full 的主比较解释为完整 Direction–Objective–Data 框架的整体收益；M1–M3 只用于 Full 家族内部归因。具体而言，Jacobian、Bottleneck 与 Boundary Replay 的增量作用分别由 Full–M3、Full–M1 和 Full–M2 验证；M1/M2 不用于声称完整 Objective/Data 模块的单项效果。同步记录每个方法首次通过各档位所需的 `T_Lk`，未通过时保持当前档位，达到 L14 后保持 L14 至 6M 结束。随后用 M1–M3 的失败模式归因：方向失配、terminal position-only / orientation-only / joint failure，以及边界附近误差反弹或保持失败。
 
 所有局部分析统一使用
 
@@ -113,8 +113,8 @@ Jacobian 只作为 Actor augmentation；Critic 使用去除 Jacobian 后的公�
 ## 5. 执行顺序
 
 1. 使用五个正式配置从随机初始化训练；
-2. 完成两个训练种子和统一 deterministic probe / confirmation；
-3. 在 L6、L9、L11、L12、L13、L14 对所有方法的最终 8M Actor 做 1000 episodes 冻结测试；
+2. 完成 Full/Base 的两个训练种子，以及 M1–M3 预先指定的 `11001` 单种子，并使用统一 deterministic probe / confirmation；
+3. 在 L6、L11、L14 对所有方法的最终 6M Actor 做 1000 episodes 冻结测试；通过宽松、中等和严格三个代表档位保留精度曲线逻辑，升档 probe/confirmation 仍按原协议执行；
 4. 先完成 Hybrid KP-SAC-Base 与 Full 的整体主比较，再用 M1–M3 做 Full 家族内部归因；Full–M1、Full–M2、Full–M3 分别验证 Bottleneck、Boundary Replay、Jacobian，M1/M2 不代表删除完整 Objective/Data 模块；
 5. 旧实验数据不进入新主表。
 

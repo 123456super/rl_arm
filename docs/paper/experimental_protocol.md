@@ -41,7 +41,9 @@ M1 只删除 Objective 中的 bottleneck 子项，M2 只删除 Data 中的 Bound
 
 ## 3. 公共训练合同
 
-所有方法使用相同的 UR5、PyBullet、动作空间、目标分布、SAC 超参数、课程、transition 预算和评估协议。训练种子为 `11001`、`11002`，每个方法、每个种子的训练预算统一为 `8,000,000 transition`，从随机初始化开始，不继承旧 Actor、Replay、optimizer 或 curriculum state。
+所有方法使用相同的 UR5、PyBullet、动作空间、目标分布、SAC 超参数、课程、transition 预算和评估协议。Full 与 Hybrid KP-SAC-Base 使用训练种子 `11001`、`11002`；M1、M2、M3 使用预先指定的单一训练种子 `11001`。所有运行的训练预算均为 `6,000,000 transition`，从随机初始化开始，不继承旧 Actor、Replay、optimizer 或 curriculum state。
+
+本轮执行冻结为 6M：已经超过该预算的基础基线运行在最近完整 checkpoint 后暂停，超过 6M 的部分仅保留作训练诊断，不纳入固定预算主比较；Full 从最新完整 checkpoint 继续训练至 6M。
 
 Hybrid KP-SAC-Base、Full、M1、M2、M3 的显式位姿误差输入、基础关键点输入、目标采样和 ordinary current-level replay 完全相同。这里的 “Hybrid” 专指观测同时包含显式六维误差与三关键点误差；它不表示额外加入一套显式六维奖励。Hybrid KP-SAC-Base 不包含上述三个复合增强模块；Full 与 M1–M3 按各自定义启用相应组成。因此 Full 对 Hybrid KP-SAC-Base 的主比较衡量完整 Direction–Objective–Data 框架的整体收益，三个关键新增机制的单项归因使用 Full–M3（Jacobian）、Full–M1（Bottleneck）和 Full–M2（Boundary Replay）的成对比较。
 
@@ -198,15 +200,15 @@ CPU 配置使用 `train.cpu_affinity: false`，由操作系统自由调度。
 4. 使用验证种子 `31001、31002、31003`，每个种子 300 episodes；
 5. 三种子平均成功率至少 85%，最低单种子至少 80% 后，执行确认评估；
 6. 确认阶段使用相同三个验证种子，每个种子 1000 episodes；
-7. 确认通过后才升到下一档；达到 L14 后保持 L14 训练直到 8M 预算结束。
+7. 确认通过后才升到下一档；达到 L14 后保持 L14 训练直到 6M 预算结束。
 
 在线成功率只用于训练诊断，不能触发升档。
 
 ## 5. 最终评估
 
-统一入口：`scripts/core/evaluate_thesis_homotopy.py`。训练期间的 `31001、31002、31003` 只用于验证和升档；最终测试固定使用从未参与训练决策的 `41001、41002、41003`，每个种子运行 1000 episodes。
+统一入口：`scripts/core/evaluate_thesis_homotopy.py`。训练期间的 `31001、31002、31003` 只用于验证和升档；最终冻结测试固定使用从未参与训练决策的 `41001、41002、41003`，每个种子运行 1000 episodes。为控制总墙钟时间，正式论文冻结评估只选择 L6、L11、L14 三个代表档位；升档 probe 和 confirmation 合同保持不变。
 
-每个训练种子在 8M 结束时各保存一个最终冻结 Actor，不挑选表现最好的种子。每个最终 Actor 都在 L6、L9、L11、L12、L13、L14 统一评估，形成精度退化曲线；跨 `11001`、`11002` 汇总均值和离散程度。训练过程中达到各档位时的 checkpoint 仅作为课程进展诊断，不作为跨方法主比较。另记录首次通过每个档位所需的累计 transition `T_Lk`。若某方法未通过升档条件，则一直在当前档位训练至 8M；若提前达到 L14，则一直保持 L14。主指标包括联合成功率、position-only / orientation-only / joint failure 比例、位置和姿态误差 P95、远距离和大姿态差桶成功率，以及 task-cell P10 和最差 10 个 cell 平均成功率。
+Full 与 Hybrid KP-SAC-Base 在 6M 结束时分别保存两个训练种子的最终冻结 Actor，不挑选表现最好的种子；M1、M2、M3 保存预先指定的 `11001` 单种子最终 Actor。每个最终 Actor 都在 L6、L9、L11、L12、L13、L14 统一评估。Full/Base 跨 `11001`、`11002` 汇总均值和离散程度；单种子消融只用于机制归因、升档行为和失败模式分析，不用于估计跨随机种子的方差。训练过程中达到各档位时的 checkpoint 仅作为课程进展诊断，不作为跨方法主比较。另记录首次通过每个档位所需的累计 transition `T_Lk`。若某方法未通过升档条件，则一直在当前档位训练至 6M；若提前达到 L14，则一直保持 L14。主指标包括联合成功率、position-only / orientation-only / joint failure 比例、位置和姿态误差 P95、远距离和大姿态差桶成功率，以及 task-cell P10 和最差 10 个 cell 平均成功率。
 
 所有局部机制分析共用同一个归一化坐标：
 \[

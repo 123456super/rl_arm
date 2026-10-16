@@ -28,7 +28,14 @@ import torch
 # pool (PyTorch defaults to the host core count).  Keep learner threading
 # bounded so the environment workers and the other seeds are not starved.
 torch.set_num_threads(6)
-torch.set_num_interop_threads(1)
+try:
+    # Evaluation imports this module after torch may already have started
+    # parallel work.  In that case PyTorch rejects changing the inter-op
+    # pool; retaining the existing setting is safe.
+    torch.set_num_interop_threads(1)
+except RuntimeError as exc:
+    if "after parallel work has started" not in str(exc):
+        raise
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
@@ -1123,18 +1130,40 @@ def deterministic_contract_passed(
 def _aggregate_deterministic_probe(results: list[dict[str, object]]) -> dict[str, object]:
     if not results:
         raise ValueError("deterministic probe requires at least one seed")
+
+    def finite_values(key: str) -> list[float]:
+        """Return finite numeric values while tolerating optional probe fields."""
+        values: list[float] = []
+        for result in results:
+            value = result.get(key)
+            if value is None or value == "":
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(numeric):
+                values.append(numeric)
+        return values
+
     out = dict(results[0])
     for key in ("mean_position_error_m", "mean_orientation_error_rad", "p95_position_error_m", "p95_orientation_error_rad", "mean_episode_steps", "mean_success_steps", "minimum_bin_success_rate", "cell_success_p10", "worst_10_cells_mean_success_rate", "terminal_position_only_rate", "terminal_orientation_only_rate", "terminal_joint_failure_rate", "terminal_joint_pose_rate"):
-        vals = [float(r[key]) for r in results if key in r and np.isfinite(float(r[key]))]
+        vals = finite_values(key)
         if vals: out[key] = float(np.mean(vals))
-    successes = [float(r["success_rate"]) for r in results]
+    successes = finite_values("success_rate")
+    if len(successes) != len(results):
+        raise ValueError("deterministic probe missing numeric success_rate")
     out["seed_results"] = results
     out["seed_success_rates"] = successes
     out["mean_success_rate"] = float(np.mean(successes))
     out["min_seed_success_rate"] = float(np.min(successes))
-    out["max_collision_rate"] = float(max(float(r["collision_rate"]) for r in results))
-    out["max_joint_limit_rate"] = float(max(float(r["joint_limit_rate"]) for r in results))
-    out["max_timeout_rate"] = float(max(float(r["timeout_rate"]) for r in results))
+    for source_key, output_key in (
+        ("collision_rate", "max_collision_rate"),
+        ("joint_limit_rate", "max_joint_limit_rate"),
+        ("timeout_rate", "max_timeout_rate"),
+    ):
+        values = finite_values(source_key)
+        out[output_key] = float(max(values)) if values else 0.0
     out["success_rate"] = out["mean_success_rate"]
     out["collision_rate"] = out["max_collision_rate"]
     out["joint_limit_rate"] = out["max_joint_limit_rate"]

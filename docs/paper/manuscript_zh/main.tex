@@ -29,7 +29,7 @@ email@example.com}
 \maketitle
 
 \begin{abstract}
-深度强化学习已经能够解决随机末端位姿到达任务，但当成功容差从厘米级逐步收紧到毫米级时，策略常在目标邻域出现联合约束不对齐、修正方向不稳定以及确定性保持失败。本文研究在不缩小目标分布和不引入解析控制器的条件下，如何改善软演员评论家（Soft Actor-Critic，SAC）在高精度联合位姿控制中的局部收敛能力。我们首先构建 Hybrid KP-SAC-weak 表征基线，其观测同时包含显式六维位姿误差与已有三关键点联合几何误差，并保留稠密关键点 tracking/progress 奖励和精度课程；完整方法进一步从 Direction、Objective 和 Data 三个层面增强局部收敛：分别引入关键点局部 Jacobian，组合 precision quality、hold/leave 与终止门控瓶颈塑形，并组合成功轨迹回放与精度边界回放。训练难度按照位置与姿态容差从 L0 逐步收紧至 L14，使用固定的多种子确定性探针和确认评估控制升档。本文给出弱化表征基线、完整方法和三项关键子项消融的实验协议，在 L6、L9、L11、L12、L13 和 L14 分别检验从厘米级到严格姿态约束的联合位姿到达。主比较衡量三模块框架相对弱化基线的整体收益，关键子项的归因则来自 Full 与 M1--M3 的成对比较。
+深度强化学习已经能够解决随机末端位姿到达任务，但当成功容差从厘米级逐步收紧到毫米级时，策略常在目标邻域出现联合约束不对齐、修正方向不稳定以及确定性保持失败。本文研究在不缩小目标分布和不引入解析控制器的条件下，如何改善软演员评论家（Soft Actor-Critic，SAC）在高精度联合位姿控制中的局部收敛能力。我们首先构建 Hybrid KP-SAC-Base 表征基线，其观测同时包含显式六维位姿误差与已有三关键点联合几何误差，并保留稠密关键点 tracking/progress 奖励和精度课程；完整方法进一步从 Direction、Objective 和 Data 三个层面增强局部收敛：分别引入关键点局部 Jacobian，组合 precision quality、hold/leave 与终止门控瓶颈塑形，并组合成功轨迹回放与精度边界回放。训练难度按照位置与姿态容差从 L0 逐步收紧至 L14，使用固定的多种子确定性探针和确认评估控制升档。本文在 L6、L11 和 L14 三个代表档位检验从厘米级到严格姿态约束的联合位姿到达。主比较衡量三模块框架相对基础基线的整体收益，关键子项的归因则来自 Full 与 M1--M3 的成对比较。
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -46,9 +46,9 @@ email@example.com}
 本文的主要贡献如下：
 \begin{itemize}
   \item 提出一个从 L0 到 L14 的联合位姿精度课程，将研究重点从“是否能够到达”推进到“在毫米级容差下是否仍能局部收敛”；
-  \item 在 Hybrid KP-SAC-weak 基线之上，从 Direction、Objective 和 Data 三个层面构建完整高精度方案，分别解决局部方向辨识、联合目标对齐与关键局部经验不足；
+  \item 在 Hybrid KP-SAC-Base 基线之上，从 Direction、Objective 和 Data 三个层面构建完整高精度方案，分别解决局部方向辨识、联合目标对齐与关键局部经验不足；
   \item 设计统一的三种子确定性探针、确认评估和冻结策略评估协议，使升档和论文结果不依赖训练日志中的在线随机成功率；
-  \item 通过 Hybrid KP-SAC-weak 与 Full 检验三模块框架的整体收益，并通过 Full 与 M1--M3 成对比较 Jacobian、Bottleneck 和 Boundary Replay 三个关键子项的增量作用。
+  \item 通过 Hybrid KP-SAC-Base 与 Full 检验三模块框架的整体收益，并通过 Full 与 M1--M3 成对比较 Jacobian、Bottleneck 和 Boundary Replay 三个关键子项的增量作用。
 \end{itemize}
 
 \section{相关工作}
@@ -76,8 +76,8 @@ e_R=\|\log(R_g^{\mathsf T}R(q_t))\|_2 .
 训练目标是在完整随机目标分布上最大化 $\Pr(\mathcal{S}_l=1)$，而不是通过缩小目标距离或姿态差来获得表面上的高成功率。
 
 \section{方法}
-\subsection{整体框架与弱化表征基线}
-图示中的方法增量统一归纳为三个复合模块：Direction 使用 Keypoint Jacobian；Objective 组合 precision quality、hold/leave 与 terminal-gated bottleneck shaping；Data 组合 Success Replay 与 Precision Boundary Replay。Hybrid KP-SAC-weak 同时保留显式位置—姿态误差与 Portela 式三关键点误差输入，并使用关键点距离/进度奖励、100\% ordinary current-level replay 和均衡目标采样；“Hybrid” 指两类观测并存，并不表示额外加入一套显式六维奖励。该基线不包含三个复合增强模块。Full 在同一环境、目标分布、网络规模、课程和预算下启用完整 Direction--Objective--Data 框架。因此二者的主比较衡量整体框架收益；M1、M2 分别删除 Objective/Data 中的 Bottleneck 和 Boundary Replay 子项，M3 删除完整 Direction 模块。
+\subsection{整体框架与基础表征基线}
+图示中的方法增量统一归纳为三个复合模块：Direction 使用 Keypoint Jacobian；Objective 组合 precision quality、hold/leave 与 terminal-gated bottleneck shaping；Data 组合 Success Replay 与 Precision Boundary Replay。Hybrid KP-SAC-Base 同时保留显式位置—姿态误差与 Portela 式三关键点误差输入，并使用关键点距离/进度奖励、100\% ordinary current-level replay 和均衡目标采样；“Hybrid” 指两类观测并存，并不表示额外加入一套显式六维奖励。该基线不包含三个复合增强模块。Full 在同一环境、目标分布、网络规模、课程和预算下启用完整 Direction--Objective--Data 框架。因此二者的主比较衡量整体框架收益；M1、M2 分别删除 Objective/Data 中的 Bottleneck 和 Boundary Replay 子项，M3 删除完整 Direction 模块。
 
 \subsection{关键点与局部运动学输入}
 本文的关键点构造直接参考 Portela 等人的关键点位姿表示\cite{portela2025wholebody}：在末端坐标系中构造以末端位置为中心、方向随末端姿态旋转的立方体，并选取三个具有直接对应关系的顶点。三个非共线三维点足以同时确定平移和旋转；与直接拼接欧拉角或四元数相比，这种几何表示把联合位姿误差转换为同一坐标空间中的点误差。针对本文的固定基座 UR5，立方体边长和关键点位置按照工具坐标系定义，并随目标位姿同步生成。设末端及工具上选取的关键点坐标为 $x_i(q)$，目标关键点为 $x_i^g$。关键点距离为
@@ -94,7 +94,7 @@ r_t=r_{\mathrm{task}}+\lambda_p\Delta e_p+\lambda_R\Delta e_R
  +\lambda_k\Delta d_k-r_{\mathrm{cost}} .
 \label{eq:reward}
 \end{equation}
-其中 $r_{\mathrm{task}}$ 表示联合成功奖励，$r_{\mathrm{cost}}$ 包含动作和碰撞代价。Hybrid KP-SAC-weak 只保留关键点跟踪、关键点进度、连续成功奖励及必要代价；Full 与 M1--M3 额外共享按当前档位归一化的 precision quality 和 hold/leave。Full 的 joint bottleneck shaping 在这些阈值型信号之上，为最差归一化约束增加连续非终止势函数：
+其中 $r_{\mathrm{task}}$ 表示联合成功奖励，$r_{\mathrm{cost}}$ 包含动作和碰撞代价。Hybrid KP-SAC-Base 只保留关键点跟踪、关键点进度、连续成功奖励及必要代价；Full 与 M1--M3 额外共享按当前档位归一化的 precision quality 和 hold/leave。Full 的 joint bottleneck shaping 在这些阈值型信号之上，为最差归一化约束增加连续非终止势函数：
 \begin{equation}
 \Phi_b(s)=5\exp[-\rho_b(s)/2],\quad
 r_{b,t}=(1-d_t)[\gamma\Phi_b(s_{t+1})-\Phi_b(s_t)].
@@ -125,7 +125,7 @@ $\epsilon_R$ / rad&.30&.24&.192&.1536&.10&.10&.10&.10&.10&.10&.10&.10\\
 
 \section{实验设置}
 \subsection{环境与训练}
-实验在 PyBullet UR5 无障碍环境中进行。目标为随机六维末端位姿，动作是关节速度，所有方法使用相同的 episode 长度、SAC 网络、目标分布和 3,000,000 transition 预算。训练种子为 11001 和 11002；评估种子为 31001、31002 和 31003。每个 checkpoint 在冻结 Actor 后进行 deterministic 评估，主表报告 L6、L9、L11、L12、L13 和 L14。
+实验在 PyBullet UR5 无障碍环境中进行。目标为随机六维末端位姿，动作是关节速度，所有方法使用相同的 episode 长度、SAC 网络、目标分布和 6,000,000 transition 预算。Full 与 Hybrid KP-SAC-Base 使用训练种子 11001 和 11002；M1、M2、M3 使用预先指定的单一训练种子 11001；最终冻结评估使用独立的测试种子 41001、41002 和 41003。每个 checkpoint 在冻结 Actor 后进行 deterministic 评估，主表报告 L6、L11 和 L14 三个代表档位。单种子消融用于机制归因，不用于估计跨随机种子的方差。
 
 \subsection{方法矩阵}
 \begin{table}[t]
@@ -137,7 +137,7 @@ $\epsilon_R$ / rad&.30&.24&.192&.1536&.10&.10&.10&.10&.10&.10&.10&.10\\
 \toprule
 方法 & 验证内容\\
 \midrule
-Hybrid KP-SAC-weak & 显式 6D 位姿误差、Portela 式关键点误差/奖励、100\% ordinary replay 和课程；测量弱化混合表征基线的退化边界。\\
+Hybrid KP-SAC-Base & 显式 6D 位姿误差、Portela 式关键点误差/奖励、100\% ordinary replay 和课程；测量基础混合表征基线的退化边界。\\
 Full & 加入 Jacobian、bottleneck 和 precision boundary replay；检验完整设计。\\
 M1 & 去除 joint bottleneck shaping；检验联合优化信号。\\
 M2 & 去除 precision boundary replay；检验目标边界样本。\\
@@ -151,7 +151,7 @@ M3 & 去除 Jacobian 输入；检验局部运动学方向信息。\\
 
 \section{结果与分析}
 \subsection{Matched-level 辅助分析}
-固定预算自动课程是主结果，因为更早通过课程并进入更高精度档位本身就是方法能力的一部分。为区分整体方案收益与高精度训练暴露量，在 Full 和 Hybrid KP-SAC-weak 都进入过的共同档位（优先 L6、L9）选择同档位、相近局部训练暴露量的 checkpoint，使用相同三个评估种子和每种子 1000 个 episode 进行冻结评估。主表报告 fixed-budget 结果，辅助表报告 matched-level 结果。前者衡量完整方法最终能推进到何种精度，后者检验在相同精度档位时 Full 是否已经具有局部收敛优势。
+固定预算自动课程是主结果，因为更早通过课程并进入更高精度档位本身就是方法能力的一部分。为控制评估墙钟时间，论文冻结评估选取 L6、L11、L14 三个代表档位，覆盖宽松、中等和严格精度区域；每个方法、测试种子和档位运行 1000 个 episode。主表报告 fixed-budget 结果，辅助表报告 matched-level 结果。前者衡量完整方法最终能推进到何种精度，后者检验在相同精度档位时 Full 是否已经具有局部收敛优势。升档 probe 与 confirmation 仍遵循原有合同。
 
 \subsection{主结果}
 表~\ref{tab:mainresult} 是论文主结果的预留表。所有单元格在新实验完成后填入三个评估种子的均值和标准差；在此之前不使用旧 checkpoint 或旧评估 JSON。
@@ -161,21 +161,21 @@ M3 & 去除 Jacobian 输入；检验局部运动学方向信息。\\
 \label{tab:mainresult}
 \centering
 \small
-\begin{tabular}{c|cccccc|cccccc}
+\begin{tabular}{c|ccc|ccc}
 \toprule
-&\multicolumn{6}{c|}{成功率均值 / \%}&\multicolumn{6}{c}{位置误差 P95 / mm}\\
-方法 & L6 & L9 & L11 & L12 & L13 & L14 & L6 & L9 & L11 & L12 & L13 & L14\\
+&\multicolumn{3}{c|}{成功率均值 / \%}&\multicolumn{3}{c}{位置误差 P95 / mm}\\
+方法 & L6 & L11 & L14 & L6 & L11 & L14\\
 \midrule
-Hybrid KP-SAC-weak & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & --\\
-Full & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & --\\
-M1 & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & --\\
-M2 & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & --\\
-M3 & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & --\\
+Hybrid KP-SAC-Base & -- & -- & -- & -- & -- & --\\
+Full & -- & -- & -- & -- & -- & --\\
+M1 & -- & -- & -- & -- & -- & --\\
+M2 & -- & -- & -- & -- & -- & --\\
+M3 & -- & -- & -- & -- & -- & --\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-预期分析顺序是先比较 Full 与 Hybrid KP-SAC-weak 在 L6、L9、L11、L12、L13 和 L14 的整体差距，再检查差距是否随容差收紧而扩大。如果 Full 只在宽松档位提高而在 L9--L14 没有改善，则不能声称改善了高精度局部收敛。三个复合模块的整体收益来自 Full 与弱基线；关键子项的作用依据 Full 与 M1--M3 的成对消融及对应退化模式，其中 M1/M2 分别删除 Objective/Data 中的一个子项，M3 删除完整 Direction 模块。
+预期分析顺序是先比较 Full 与 Hybrid KP-SAC-Base 在 L6、L11 和 L14 的整体差距，再检查差距是否随容差收紧而扩大。如果 Full 只在宽松档位提高而在严格档位没有改善，则不能声称改善了高精度局部收敛。三个复合模块的整体收益来自 Full 与基础基线；关键子项的作用依据 Full 与 M1--M3 的成对消融及对应退化模式，其中 M1/M2 分别删除 Objective/Data 中的一个子项，M3 删除完整 Direction 模块。
 
 \subsection{消融结果}
 \begin{table}[t]
@@ -185,7 +185,7 @@ M3 & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & -- & --\\
 \small
 \begin{tabular}{c|ccc|p{0.34\columnwidth}}
 \toprule
-方法 & L6 & L9 & L11 & 主要观察\\
+方法 & L6 & L11 & L14 & 主要观察\\
 \midrule
 Full & -- & -- & -- & --\\
 M1 & -- & -- & -- & 位置—姿态竞争与失败类型待分析\\
@@ -199,7 +199,7 @@ M3 & -- & -- & -- & 局部方向信息待分析\\
 本文结论限定在无障碍 PyBullet 仿真和给定随机目标分布内。仿真没有真实编码器噪声、减速器间隙、标定误差、视觉误差和通信延迟，因此一毫米阈值应表述为仿真中的联合成功判据，而不是未经验证的真实硬件精度。后续工作需要加入动力学扰动、观测噪声和真实机器人验证。此外，M1/M2 只分别移除 Objective/Data 中的 Bottleneck 与 Boundary Replay 子项，因此它们支持这两个子项的增量归因，不等价于整模块删除；M3 才是完整 Direction 模块消融。
 
 \section{结论}
-本文提出了一个面向毫米级联合位姿到达的局部收敛增强 SAC 研究框架。Hybrid KP-SAC-weak 提供显式六维误差、三关键点联合误差、稠密关键点奖励和精度课程，用于刻画不含额外局部高精度辅助机制时的能力边界。通过弱化基线与完整方法的整体比较、Full 家族内部单模块消融和固定多种子评估，本文将检验完整方案能否把高精度退化边界推进到更严格的联合位姿约束，并分别分析局部方向、联合优化目标和精度边界数据的作用。实验结果完成后，将根据表~\ref{tab:mainresult} 和表~\ref{tab:ablation} 填入定量结论。
+本文提出了一个面向毫米级联合位姿到达的局部收敛增强 SAC 研究框架。Hybrid KP-SAC-Base 提供显式六维误差、三关键点联合误差、稠密关键点奖励和精度课程，用于刻画不含额外局部高精度辅助机制时的能力边界。通过基础基线与完整方法的整体比较、Full 家族内部单模块消融和预先指定的种子评估，本文将检验完整方案能否把高精度退化边界推进到更严格的联合位姿约束，并分别分析局部方向、联合优化目标和精度边界数据的作用。实验结果完成后，将根据表~\ref{tab:mainresult} 和表~\ref{tab:ablation} 填入定量结论。
 
 \section*{致谢}
 本节在投稿前填写基金、平台和计算资源信息。
