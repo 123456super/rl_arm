@@ -106,7 +106,7 @@ g(z)=
 0.10+0.90\min(z-1,1)^2, & z>1.
 \end{cases}
 \]
-因此 \(g(0)=0.05\)、\(g(1)=0.10\)、\(g(2)=1.0\)，并在 \(z\geq2\) 后保持 1.0；随后再执行统一的安全投影和动作裁剪。训练、升档 probe、确认评估和最终测试均使用同一函数。跨 L0–L14 评估得到的是“固定 Actor + 档位相关 precision scaling + 档位相关成功阈值”的 strictness–performance curve，而不是脱离该控制包装器的固定闭环控制律精度极限。
+因此 \(g(0)=0.05\)、\(g(1)=0.10\)、\(g(2)=1.0\)，并在 \(z\geq2\) 后保持 1.0；随后再执行统一的安全投影和动作裁剪。训练、升档 probe、确认评估和最终测试均使用同一函数。跨 L0–L13 评估得到的是“固定 Actor + 档位相关 precision scaling + 档位相关成功阈值”的 strictness–performance curve，而不是脱离该控制包装器的固定闭环控制律精度极限。
 
 上述输入、排列、归一化和 precision action scaling 在所有方法与所有评估阶段保持一致。
 
@@ -160,7 +160,7 @@ r_{\mathrm{Full}}=r_{\mathrm{Base}}+r_{\mathrm{aux}}+r_b.
 \]
 M1 去掉 \(r_b\)，M2 与 M3 保持和 Full 完全相同的奖励。Full 系列中的 \(Q_{\mathrm{prec}}\)、hold/leave 以及所有方法共享的离散成功奖励已经提供阈值型联合约束信号。Bottleneck 的增量作用定义为：在这些已有信号之上，为最差归一化约束提供连续的非终止过程优化信号；不声称它首次引入联合约束对齐。
 
-课程使用 L0–L14。完整冻结表如下：
+课程使用 L0–L13。完整冻结表如下：
 
 | 档位 | 位置阈值 | 姿态阈值 |
 |---|---:|---:|
@@ -178,9 +178,8 @@ M1 去掉 \(r_b\)，M2 与 M3 保持和 Full 完全相同的奖励。Full 系列
 | L11 | 1 mm | 0.10 rad |
 | L12 | 1 mm | 0.05 rad |
 | L13 | 1 mm | 0.025 rad |
-| L14 | 1 mm | 0.01 rad |
 
-课程分为三个阶段：L0–L4 为位置与姿态联合收紧；L5–L11 姿态固定为 0.10 rad、位置逐步收紧至 1 mm；L12–L14 位置固定为 1 mm、姿态继续收紧。远距离和大姿态差目标分布保持不变。
+课程分为三个阶段：L0–L4 为位置与姿态联合收紧；L5–L11 姿态固定为 0.10 rad、位置逐步收紧至 1 mm；L12–L13 位置固定为 1 mm、姿态继续收紧至 0.025 rad。远距离和大姿态差目标分布保持不变。
 
 成功定义为连续 `H=5` 个控制周期同时满足位置和姿态阈值，而不是单帧进入阈值区域：
 
@@ -200,15 +199,15 @@ CPU 配置使用 `train.cpu_affinity: false`，由操作系统自由调度。
 4. 使用验证种子 `31001、31002、31003`，每个种子 300 episodes；
 5. 三种子平均成功率至少 85%，最低单种子至少 80% 后，执行确认评估；
 6. 确认阶段使用相同三个验证种子，每个种子 1000 episodes；
-7. 确认通过后才升到下一档；达到 L14 后保持 L14 训练直到 6M 预算结束。
+7. 确认通过后才升到下一档；达到 L13 后保持 L13 训练直到 6M 预算结束。
 
 在线成功率只用于训练诊断，不能触发升档。
 
 ## 5. 最终评估
 
-统一入口：`scripts/core/evaluate_thesis_homotopy.py`。训练期间的 `31001、31002、31003` 只用于验证和升档；最终冻结测试固定使用从未参与训练决策的 `41001、41002、41003`，每个种子运行 1000 episodes。为控制总墙钟时间，正式论文冻结评估只选择 L6、L11、L14 三个代表档位；升档 probe 和 confirmation 合同保持不变。
+统一入口：`scripts/core/evaluate_thesis_homotopy.py`。训练期间的 `31001、31002、31003` 只用于验证和升档；最终冻结测试固定使用从未参与训练决策的 `41001、41002、41003`，每个种子运行 1000 episodes。为控制总墙钟时间，正式论文冻结评估只选择 L6、L11、L13 三个代表档位；升档 probe 和 confirmation 合同保持不变。
 
-Full 与 Hybrid KP-SAC-Base 在 6M 结束时分别保存两个训练种子的最终冻结 Actor，不挑选表现最好的种子；M1、M2、M3 保存预先指定的 `11001` 单种子最终 Actor。每个最终 Actor 都在 L6、L9、L11、L12、L13、L14 统一评估。Full/Base 跨 `11001`、`11002` 汇总均值和离散程度；单种子消融只用于机制归因、升档行为和失败模式分析，不用于估计跨随机种子的方差。训练过程中达到各档位时的 checkpoint 仅作为课程进展诊断，不作为跨方法主比较。另记录首次通过每个档位所需的累计 transition `T_Lk`。若某方法未通过升档条件，则一直在当前档位训练至 6M；若提前达到 L14，则一直保持 L14。主指标包括联合成功率、position-only / orientation-only / joint failure 比例、位置和姿态误差 P95、远距离和大姿态差桶成功率，以及 task-cell P10 和最差 10 个 cell 平均成功率。
+Full 与 Hybrid KP-SAC-Base 在 6M 结束时分别保存两个训练种子的最终冻结 Actor，不挑选表现最好的种子；M1、M2、M3 保存预先指定的 `11001` 单种子最终 Actor。每个最终 Actor 都在 L6、L9、L11、L12、L13 统一评估。Full/Base 跨 `11001`、`11002` 汇总均值和离散程度；单种子消融只用于机制归因、升档行为和失败模式分析，不用于估计跨随机种子的方差。训练过程中达到各档位时的 checkpoint 仅作为课程进展诊断，不作为跨方法主比较。另记录首次通过每个档位所需的累计 transition `T_Lk`。若某方法未通过升档条件，则一直在当前档位训练至 6M；若提前达到 L13，则一直保持 L13。主指标包括联合成功率、position-only / orientation-only / joint failure 比例、位置和姿态误差 P95、远距离和大姿态差桶成功率，以及 task-cell P10 和最差 10 个 cell 平均成功率。
 
 所有局部机制分析共用同一个归一化坐标：
 \[
@@ -263,11 +262,11 @@ Precision Boundary Replay 使用当前档位归一化误差定义边界：
 
 达到连续成功终止时，该成功 episode 的完整 transition 序列会复制到当前成功池，以供审计和 Full 家族采样。Full 与 M1–M3 的成功池按 episode-balanced 方式抽取 transition，并非只采样 terminal success 帧；属于成功 episode 的任一 transition 均不得成为 Boundary candidate，即 \(\mathcal S\cap\mathcal B=\varnothing\)。其 Success quota 使用冷启动日程：当前档成功 episode 少于 5 个时为 0%，达到 5/20/50 个后依次为 5%/15%/20%；不足部分由普通当前档数据补齐。Hybrid KP-SAC-Base 的 success quota、low fraction 和 medium fraction 均固定为 0，成功池即使保留记录也绝不参与梯度 batch。
 
-Full、M1、M3 启用 Boundary Replay，稳定阶段 batch 配额为 `20% Success + 20% Boundary + 60% Ordinary`；M2 关闭 Boundary Replay，稳定阶段为 `20% Success + 80% Ordinary`；Hybrid KP-SAC-Base 固定为 `100% Ordinary`。所有部分都只来自当前 curriculum level。对启用相应特殊池的 Full 家族配置，三类采样身份按 Success 优先、Boundary 次之、Ordinary 最后的顺序互斥分配：成功 episode 的 transition 属于 Success；非成功 episode 中满足上述归一化区间的 transition 属于 Boundary；其余 transition 属于 Ordinary。因此配额表示互斥类别的 batch 比例，而不只是避免在同一 batch 重复抽取同一 transition。Success 或 Boundary 候选不足时，未满足 quota 回退到 Ordinary。Base 不启用任何特殊池，其 `100% Ordinary` 流保留当前档的全部普通 transition，不参与 Success/Boundary 分类。边界样本不建立独立物理 buffer，而是根据当前档 transition 中保存的 episode-success 标志、当前误差和当前档容差在线分层。该相对定义适用于 L0–L14，不使用固定毫米数。
+Full、M1、M3 启用 Boundary Replay，稳定阶段 batch 配额为 `20% Success + 20% Boundary + 60% Ordinary`；M2 关闭 Boundary Replay，稳定阶段为 `20% Success + 80% Ordinary`；Hybrid KP-SAC-Base 固定为 `100% Ordinary`。所有部分都只来自当前 curriculum level。对启用相应特殊池的 Full 家族配置，三类采样身份按 Success 优先、Boundary 次之、Ordinary 最后的顺序互斥分配：成功 episode 的 transition 属于 Success；非成功 episode 中满足上述归一化区间的 transition 属于 Boundary；其余 transition 属于 Ordinary。因此配额表示互斥类别的 batch 比例，而不只是避免在同一 batch 重复抽取同一 transition。Success 或 Boundary 候选不足时，未满足 quota 回退到 Ordinary。Base 不启用任何特殊池，其 `100% Ordinary` 流保留当前档的全部普通 transition，不参与 Success/Boundary 分类。边界样本不建立独立物理 buffer，而是根据当前档 transition 中保存的 episode-success 标志、当前误差和当前档容差在线分层。该相对定义适用于 L0–L13，不使用固定毫米数。
 
 ### 6.1 课程档位与 Replay MDP 合同
 
-正式 L0–L14 训练禁止跨档 replay，配置冻结为 `joint_pose_curriculum.cross_level_replay: false`。进入新档位时，上一档当前池被归档用于审计，但不会再参与 Actor 或 Critic 的梯度更新；当前池和当前成功池清空。新档位至少积累 `max(update_after, batch_size)=1024` 个本档 transition 后才恢复 SAC 更新，避免在空当前池阶段用旧档样本补齐 batch。
+正式 L0–L13 训练禁止跨档 replay，配置冻结为 `joint_pose_curriculum.cross_level_replay: false`。进入新档位时，上一档当前池被归档用于审计，但不会再参与 Actor 或 Critic 的梯度更新；当前池和当前成功池清空。新档位至少积累 `max(update_after, batch_size)=1024` 个本档 transition 后才恢复 SAC 更新，避免在空当前池阶段用旧档样本补齐 batch。
 
 这一约束同时覆盖 transition dynamics、reward 和 terminal 三层语义。当前实现的 precision action scaling 使用
 \[

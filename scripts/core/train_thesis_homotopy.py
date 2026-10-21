@@ -89,10 +89,19 @@ def validate_training_architecture(config: dict) -> None:
     replay_curriculum = thesis.get("orientation_curriculum", {})
     semantic_replay = thesis.get("semantic_long_term_replay", {})
     sac = config["sac"]
+    ablation_variant = str(observation.get("ablation_variant", "full"))
+    is_no_jacobian_variant = ablation_variant in {
+        "kp_sac", "base", "m3_no_jacobian",
+    }
     if (
         thesis.get("protocol") not in SUPPORTED_PROTOCOLS
-        or not observation.get("keypoint_jacobian_pose", True)
-        or not observation.get("jacobian_actor_only", False)
+        or (
+            not is_no_jacobian_variant
+            and (
+                not observation.get("keypoint_jacobian_pose", True)
+                or not observation.get("jacobian_actor_only", False)
+            )
+        )
         or not observation.get("hybrid_explicit_pose_error", True)
         or observation.get("include_orientation_error_vector", False)
         or reward.get("pose_objective", "unified_keypoint") != "unified_keypoint"
@@ -2681,7 +2690,16 @@ def main() -> None:
     output = ROOT / str(config["train"]["output_dir"]) / run_name
     output.mkdir(parents=True, exist_ok=False)
     checkpoints = output / "checkpoints"; checkpoints.mkdir()
-    env = ThesisHomotopyEnv(config)
+    observation_variant = str(
+        config["thesis"].get("observation", {}).get("ablation_variant", "full")
+    )
+    if observation_variant in {"kp_sac", "m3_no_jacobian"}:
+        from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import (
+            ThesisHomotopyEnv as VariantThesisHomotopyEnv,
+        )
+        env = VariantThesisHomotopyEnv(config)
+    else:
+        env = ThesisHomotopyEnv(config)
     env.rng = np.random.default_rng(stream_seeds["environment"])
     obs_dim = int(env.observation_space.shape[0])
     action_dim = int(env.action_space.shape[0])

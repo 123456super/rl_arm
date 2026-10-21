@@ -10,6 +10,9 @@ import numpy as np
 import pybullet as p
 
 from rl_risk_sac.control import SafetyQP, SafetyQPConfig, distance_rate_constraint
+from rl_risk_sac.envs.mechanical_disturbance import MechanicalDisturbance
+from rl_risk_sac.envs.orientation_sensor_noise import OrientationSensorNoise
+from rl_risk_sac.envs.position_sensor_noise import PositionSensorNoise
 from rl_risk_sac.robots.pybullet_robot import PyBulletRobot
 from rl_risk_sac.tasks.thesis_reaching import (
     SelfCollisionGeometry,
@@ -67,6 +70,12 @@ class ThesisHomotopyEnv(gym.Env):
         self.config = config
         self.runtime = RuntimeConfig.from_mapping(config)
         thesis = config["thesis"]
+        self.position_sensor_noise = PositionSensorNoise(
+            thesis.get("evaluation_sensor_noise", {})
+        )
+        self.orientation_sensor_noise = OrientationSensorNoise(
+            thesis.get("evaluation_sensor_noise", {})
+        )
         observation = thesis.get("observation", {})
         reward = thesis.get("reward", {})
         thesis_observation_dim(
@@ -86,6 +95,9 @@ class ThesisHomotopyEnv(gym.Env):
         self.substeps = int(round(self.control_dt / self.physics_dt))
         if self.substeps != 12 or not np.isclose(self.substeps * self.physics_dt, self.control_dt):
             raise ValueError("thesis protocol requires 12 substeps at 1/240 s for a 0.05 s control period")
+        self.mechanical_disturbance = MechanicalDisturbance(
+            thesis.get("evaluation_mechanical_disturbance", {}), self.control_dt
+        )
         self.horizon = int(thesis.get("horizon", 500))
         self.action_scale = np.full(6, float(thesis.get("action_scale", 0.7)), dtype=np.float32)
         self.qdot_observation_scale = np.full(
@@ -488,6 +500,9 @@ class ThesisHomotopyEnv(gym.Env):
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         del options
+        self.mechanical_disturbance.reset(seed)
+        self.position_sensor_noise.reset(seed)
+        self.orientation_sensor_noise.reset(seed)
         if seed is not None:
             self.rng = np.random.default_rng(seed)
             self._task_space_bin_order = np.empty(0, dtype=np.int64)
@@ -607,8 +622,10 @@ class ThesisHomotopyEnv(gym.Env):
         precision_action_scale = 1.0
         if self.precision_control_enabled:
             z = max(
-                self.previous_rho_position / self.contract.position_tolerance,
-                self.previous_rho_orientation / self.contract.orientation_tolerance,
+                (self.measured_position_error_norm if self.position_sensor_noise.enabled
+                 else self.previous_rho_position) / self.contract.position_tolerance,
+                (self.measured_orientation_error_norm if self.orientation_sensor_noise.enabled
+                 else self.previous_rho_orientation) / self.contract.orientation_tolerance,
             )
             if z <= 1.0:
                 precision_action_scale = self.precision_min_action_scale + (
@@ -637,6 +654,7 @@ class ThesisHomotopyEnv(gym.Env):
         self_max_approach = 0.0
         executed_substeps = 0
 
+        external_force = self.mechanical_disturbance.force(self.step_count)
         for _ in range(self.substeps):
             self._advance_obstacle()
             p.setJointMotorControlArray(
@@ -647,6 +665,8 @@ class ThesisHomotopyEnv(gym.Env):
                 forces=[self.motor_force] * 6,
                 physicsClientId=self.client_id,
             )
+            if self.mechanical_disturbance.enabled:
+                self.mechanical_disturbance.apply(self.robot, self.client_id, external_force)
             p.stepSimulation(physicsClientId=self.client_id)
             executed_substeps += 1
             geometry = self._geometry()
@@ -778,6 +798,7 @@ class ThesisHomotopyEnv(gym.Env):
                 "safety_penalty": reward_fields["safety_penalty"],
                 "terminal_guard_penalty": reward_fields["terminal_guard_penalty"],
                 "cost": cost,
+                "external_force_world_n": external_force.copy(),
                 "policy_joint_velocity": policy_command.copy(),
                 "precision_action_scale": precision_action_scale,
                 "scaled_policy_joint_velocity": scaled_policy_command.copy(),
@@ -1394,22 +1415,35 @@ class ThesisHomotopyEnv(gym.Env):
             ))
         geometry = self._geometry()
         self_geometry = self._self_geometry()
+        # Pose measurements feed the Actor and precision interface. Rewards,
+        # termination, geometry and existing diagnostics retain ground truth.
+        measured_position = self.position_sensor_noise.measure(ee_position, self.step_count)
+        measured_quaternion = self.orientation_sensor_noise.measure(ee_quaternion, self.step_count)
+        if self.position_sensor_noise.enabled or self.orientation_sensor_noise.enabled:
+            measured_position_error, measured_orientation_error = pose_error(
+                self.goal_position, self.goal_quaternion,
+                measured_position, measured_quaternion,
+            )
+        else:
+            measured_position_error, measured_orientation_error = position_error, orientation_error
+        self.measured_position_error_norm = float(np.linalg.norm(measured_position_error))
+        self.measured_orientation_error_norm = float(np.linalg.norm(measured_orientation_error))
         observation = build_thesis_observation(
             q=q,
             qdot=qdot,
             joint_lower=self.robot.joint_lower_limits,
             joint_upper=self.robot.joint_upper_limits,
             joint_velocity_scale=self.qdot_observation_scale,
-            ee_position=ee_position,
-            ee_quaternion=ee_quaternion,
+            ee_position=measured_position,
+            ee_quaternion=measured_quaternion,
             ee_linear_velocity=ee_linear_velocity,
             ee_angular_velocity=ee_angular_velocity,
             ee_linear_velocity_scale=self.ee_linear_velocity_scale,
             ee_angular_velocity_scale=self.ee_angular_velocity_scale,
             goal_position=self.goal_position,
             goal_quaternion=self.goal_quaternion,
-            position_error=position_error,
-            orientation_error=orientation_error,
+            position_error=measured_position_error,
+            orientation_error=measured_orientation_error,
             obstacle_present=self.obstacle_id is not None,
             obstacle_position=self.obstacle_position,
             obstacle_velocity=self.obstacle_velocity,
@@ -1424,6 +1458,11 @@ class ThesisHomotopyEnv(gym.Env):
             keypoint_jacobian_scale=self.keypoint_jacobian_scale,
         )
         info = {
+            "measured_ee_quaternion": measured_quaternion.copy(),
+            "measured_orientation_error_norm": self.measured_orientation_error_norm,
+            "measured_ee_position": measured_position.copy(),
+            "measured_position_error_norm": self.measured_position_error_norm,
+            "position_sensor_noise_m": (measured_position - ee_position).copy(),
             "goal_position": self.goal_position.copy(),
             "goal_quaternion": self.goal_quaternion.copy(),
             "goal_joint_positions": self.goal_joint_positions.copy(),

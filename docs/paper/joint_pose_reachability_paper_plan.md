@@ -17,7 +17,7 @@
 
 ## 2. 方法主线
 
-公共基础是 SAC、显式六维位姿误差、已有三关键点联合位姿误差和 L0–L14 精度课程。基线称为 **Hybrid KP-SAC-Base**（简称 **Base**）：它在显式位置/姿态误差基础上进一步使用三关键点联合几何误差和稠密关键点 tracking/progress 奖励，而不是用关键点完全替代显式位姿表示，并使用公共 precision action scaling 和课程学习。Base 不额外引入针对局部高精度阶段的 threshold-aware precision quality、hold/leave、Success Replay 及本文的局部增强机制。论文正文、图表、公式、方法名和图例统一使用该正式名称。三关键点设计不作为本文独立原创模块。成功必须连续 5 个控制周期同时满足位置和姿态阈值，以区分进入目标区域和稳定局部收敛。课程阶段固定为 L0–L4 联合收紧、L5–L11 固定 0.10 rad 姿态并收紧位置、L12–L14 固定 1 mm 位置并收紧姿态。
+公共基础是 SAC、显式六维位姿误差、已有三关键点联合位姿误差和 L0–L13 精度课程。基线称为 **Hybrid KP-SAC-Base**（简称 **Base**）：它在显式位置/姿态误差基础上进一步使用三关键点联合几何误差和稠密关键点 tracking/progress 奖励，而不是用关键点完全替代显式位姿表示，并使用公共 precision action scaling 和课程学习。Base 不额外引入针对局部高精度阶段的 threshold-aware precision quality、hold/leave、Success Replay 及本文的局部增强机制。论文正文、图表、公式、方法名和图例统一使用该正式名称。三关键点设计不作为本文独立原创模块。成功必须连续 5 个控制周期同时满足位置和姿态阈值，以区分进入目标区域和稳定局部收敛。课程阶段固定为 L0–L4 联合收紧、L5–L11 固定 0.10 rad 姿态并收紧位置、L12–L13 固定 1 mm 位置并收紧姿态。
 
 \[
 \text{Full}=\text{Hybrid KP-SAC-Base}+\text{precision quality/hold/leave}
@@ -52,7 +52,7 @@ r_{b,t}=(1-d_t)[\gamma\Phi_b(s_{t+1})-\Phi_b(s_t)],
 
 ## 3. 实验结构
 
-Hybrid KP-SAC-Base 与 Full 使用训练种子 `11001` 和 `11002`；M1、M2、M3 使用预先指定的单一训练种子 `11001`。所有运行的训练预算统一为 `6,000,000 transition`，从随机初始化开始。Hybrid KP-SAC-Base、Full 和 M1–M3 共用相同的 L0–L14 课程、自动升档、probe、确认评估和最终冻结评估协议；具体奖励与 replay 差异按表和实验协议冻结。单种子消融用于机制归因和失败模式分析，不用于估计跨随机种子的方差。
+Hybrid KP-SAC-Base 与 Full 使用训练种子 `11001` 和 `11002`；M1、M2、M3 使用预先指定的单一训练种子 `11001`。所有运行的训练预算统一为 `6,000,000 transition`，从随机初始化开始。Hybrid KP-SAC-Base、Full 和 M1–M3 共用相同的 L0–L13 课程、自动升档、probe、确认评估和最终冻结评估协议；具体奖励与 replay 差异按表和实验协议冻结。单种子消融用于机制归因和失败模式分析，不用于估计跨随机种子的方差。
 
 | 方法 | 验证内容 |
 |---|---|
@@ -64,11 +64,11 @@ Hybrid KP-SAC-Base 与 Full 使用训练种子 `11001` 和 `11002`；M1、M2、M
 
 所有方法保持相同的目标分布，因此远距离和大姿态差结果用于检查 Full 是否以牺牲全局覆盖换取局部精度，而不再引入 semantic replay 或 far-distance restart 作为额外创新。最终测试种子固定为 `41001、41002、41003`，与用于升档的验证种子 `31001、31002、31003` 分离。
 
-所有方法也使用相同的同档 replay 合同：L0–L14 之间不跨档采样。升档后清空当前训练池并先收集 1024 个新档 transition，再恢复更新；旧档快照只用于审计。原因是精度阈值不仅改变 success、Bottleneck 和 precision reward，还通过公共 precision action scaling 改变实际关节速度及下一状态，所以旧档 transition 不能只靠重算 reward/done 严格转换成新档 MDP。成功 episode 的完整序列进入当前成功池；Boundary candidate 仅来自未达到连续成功终止的 episode，且当前状态满足 \(0.8\leq\rho_{\max,t}\leq1.5\)，因此 \(Success\cap Boundary=\varnothing\)。对启用特殊池的 Full 家族配置，三类身份按 Success、Boundary、Ordinary 的优先级互斥分配。Full/M1/M3 的稳定配额为 `20% Success + 20% Boundary + 60% Ordinary`，M2 为 `20% Success + 80% Ordinary`，Hybrid KP-SAC-Base 为 `100% Ordinary`；Base 不启用特殊池，其 Ordinary 流保留当前档全部普通 transition。特殊类别候选不足时，未满足的 quota 回退到 Ordinary。
+所有方法也使用相同的同档 replay 合同：L0–L13 之间不跨档采样。升档后清空当前训练池并先收集 1024 个新档 transition，再恢复更新；旧档快照只用于审计。原因是精度阈值不仅改变 success、Bottleneck 和 precision reward，还通过公共 precision action scaling 改变实际关节速度及下一状态，所以旧档 transition 不能只靠重算 reward/done 严格转换成新档 MDP。成功 episode 的完整序列进入当前成功池；Boundary candidate 仅来自未达到连续成功终止的 episode，且当前状态满足 \(0.8\leq\rho_{\max,t}\leq1.5\)，因此 \(Success\cap Boundary=\varnothing\)。对启用特殊池的 Full 家族配置，三类身份按 Success、Boundary、Ordinary 的优先级互斥分配。Full/M1/M3 的稳定配额为 `20% Success + 20% Boundary + 60% Ordinary`，M2 为 `20% Success + 80% Ordinary`，Hybrid KP-SAC-Base 为 `100% Ordinary`；Base 不启用特殊池，其 Ordinary 流保留当前档全部普通 transition。特殊类别候选不足时，未满足的 quota 回退到 Ordinary。
 
 ## 4. 结果解释顺序
 
-Full 与 Hybrid KP-SAC-Base 分别使用两个训练种子在 6M 结束时的最终冻结 Actor，在 L6、L9、L11、L12、L13、L14 上评估并汇总均值和离散程度；M1–M3 使用预先指定的 `11001` 单种子最终 Actor，采用相同冻结评估，但不估计跨种子方差，也不挑选最佳 seed。Hybrid KP-SAC-Base 与 Full 的主比较解释为完整 Direction–Objective–Data 框架的整体收益；M1–M3 只用于 Full 家族内部归因。具体而言，Jacobian、Bottleneck 与 Boundary Replay 的增量作用分别由 Full–M3、Full–M1 和 Full–M2 验证；M1/M2 不用于声称完整 Objective/Data 模块的单项效果。同步记录每个方法首次通过各档位所需的 `T_Lk`，未通过时保持当前档位，达到 L14 后保持 L14 至 6M 结束。随后用 M1–M3 的失败模式归因：方向失配、terminal position-only / orientation-only / joint failure，以及边界附近误差反弹或保持失败。
+Full 与 Hybrid KP-SAC-Base 分别使用两个训练种子在 6M 结束时的最终冻结 Actor，在 L6、L9、L11、L12、L13 上评估并汇总均值和离散程度；M1–M3 使用预先指定的 `11001` 单种子最终 Actor，采用相同冻结评估，但不估计跨种子方差，也不挑选最佳 seed。Hybrid KP-SAC-Base 与 Full 的主比较解释为完整 Direction–Objective–Data 框架的整体收益；M1–M3 只用于 Full 家族内部归因。具体而言，Jacobian、Bottleneck 与 Boundary Replay 的增量作用分别由 Full–M3、Full–M1 和 Full–M2 验证；M1/M2 不用于声称完整 Objective/Data 模块的单项效果。同步记录每个方法首次通过各档位所需的 `T_Lk`，未通过时保持当前档位，达到 L13 后保持 L13 至 6M 结束。随后用 M1–M3 的失败模式归因：方向失配、terminal position-only / orientation-only / joint failure，以及边界附近误差反弹或保持失败。
 
 所有局部分析统一使用
 
@@ -114,7 +114,7 @@ Jacobian 只作为 Actor augmentation；Critic 使用去除 Jacobian 后的公�
 
 1. 使用五个正式配置从随机初始化训练；
 2. 完成 Full/Base 的两个训练种子，以及 M1–M3 预先指定的 `11001` 单种子，并使用统一 deterministic probe / confirmation；
-3. 在 L6、L11、L14 对所有方法的最终 6M Actor 做 1000 episodes 冻结测试；通过宽松、中等和严格三个代表档位保留精度曲线逻辑，升档 probe/confirmation 仍按原协议执行；
+3. 在 L6、L11、L13 对所有方法的最终 6M Actor 做 1000 episodes 冻结测试；通过宽松、中等和严格三个代表档位保留精度曲线逻辑，升档 probe/confirmation 仍按原协议执行；
 4. 先完成 Hybrid KP-SAC-Base 与 Full 的整体主比较，再用 M1–M3 做 Full 家族内部归因；Full–M1、Full–M2、Full–M3 分别验证 Bottleneck、Boundary Replay、Jacobian，M1/M2 不代表删除完整 Objective/Data 模块；
 5. 旧实验数据不进入新主表。
 

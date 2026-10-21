@@ -1,0 +1,72 @@
+\relax 
+\citation{haarnoja2018sac}
+\citation{bengio2009curriculum}
+\citation{zhao2024mappoik}
+\citation{hu2025rtpc}
+\citation{haarnoja2018sac}
+\citation{bengio2009curriculum}
+\citation{cho2025autocurriculum}
+\@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{}\protected@file@percent }
+\citation{hu2025rtpc}
+\citation{andrychowicz2017her,schaul2016sac}
+\citation{portela2025wholebody}
+\citation{bhat2026alignment}
+\citation{freitag2025complexreward,jiang2025rfm}
+\citation{li2022clusteringreplay,garg2026distributionreplay}
+\citation{portela2025wholebody}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Learning loop of Full. Keypoint Jacobians augment the actor observation, coupled pose signals form the reward, and uniform, success, and boundary subsets feed SAC optimization. Red dotted arrows denote parameter updates.}}{2}{}\protected@file@percent }
+\newlabel{fig:framework}{{1}{2}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {II}Related Work}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-A}}Continuous Control and Curriculum Learning}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-B}}Pose Representation and Experience Replay}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {III}Problem Definition}{2}{}\protected@file@percent }
+\newlabel{eq:pose_error}{{1}{2}{}{}{}}
+\newlabel{eq:rho}{{2}{2}{}{}{}}
+\newlabel{eq:success}{{3}{2}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {IV}Method}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Overall Framework and Base Representation}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Keypoints and Local Kinematic Input}{2}{}\protected@file@percent }
+\citation{tian2025jedprl}
+\newlabel{eq:keypoint}{{4}{3}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}Joint Optimization Signals}{3}{}\protected@file@percent }
+\newlabel{eq:reward}{{5}{3}{}{}{}}
+\newlabel{eq:bottleneck}{{9}{3}{}{}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Key training components of Full.}}{3}{}\protected@file@percent }
+\newlabel{tab:fullcomponents}{{I}{3}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Precision-Boundary Experience Replay}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-E}}Automatic Precision Curriculum}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {V}Experimental Setup}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Environment and Training}{3}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Position and orientation tolerances across curriculum levels. Position tolerance reaches a 1-mm plateau at $L11$, after which orientation tolerance is tightened from $0.10$ to $0.025$ rad.}}{4}{}\protected@file@percent }
+\newlabel{fig:curriculum}{{2}{4}{}{}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Ablation matrix. A check mark denotes an enabled component.}}{4}{}\protected@file@percent }
+\newlabel{tab:methods}{{II}{4}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Evaluation Metrics}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Results and Analysis}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-A}}Precision Milestones Under a Fixed Budget}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-B}}Main Results}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-C}}Ablation Results}{4}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Task-space success profiles under deterministic evaluation. Panels (a) and (b) show the common L6; panels (c) and (d) compare the stricter levels reached by Full and M3. The dashed line marks the 0.85 promotion criterion.}}{5}{}\protected@file@percent }
+\newlabel{fig:profiles}{{3}{5}{}{}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Precision milestones within six million transitions. Circles, triangles, and diamonds denote first attainment of $10$ mm/$0.10$ rad, $1$ mm/$0.10$ rad, and $1$ mm/$0.025$ rad.}}{5}{}\protected@file@percent }
+\newlabel{fig:milestones}{{4}{5}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Discussion and Limitations}{5}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Aggregate deterministic-evaluation results. (a) Success rate at the common $10$ mm/$0.10$ rad tolerance; error bars show standard deviation. (b) Highest curriculum level reached within six million transitions; labels report success at that level. The Base range denotes the levels reached by its two training seeds.}}{5}{}\protected@file@percent }
+\newlabel{fig:result_overview}{{5}{5}{}{}{}}
+\bibcite{haarnoja2018sac}{1}
+\bibcite{bengio2009curriculum}{2}
+\bibcite{andrychowicz2017her}{3}
+\bibcite{schaul2016sac}{4}
+\bibcite{zhao2024mappoik}{5}
+\bibcite{hu2025rtpc}{6}
+\bibcite{portela2025wholebody}{7}
+\bibcite{tian2025jedprl}{8}
+\bibcite{cho2025autocurriculum}{9}
+\bibcite{bhat2026alignment}{10}
+\bibcite{freitag2025complexreward}{11}
+\bibcite{jiang2025rfm}{12}
+\bibcite{li2022clusteringreplay}{13}
+\bibcite{garg2026distributionreplay}{14}
+\@writefile{toc}{\contentsline {section}{\numberline {VIII}Conclusion}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{References}{6}{}\protected@file@percent }
+\gdef \@abspage@last{6}

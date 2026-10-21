@@ -487,6 +487,11 @@ class HomotopyCurriculum:
     ) -> bool:
         if not self.orientation.deterministic_probe_required:
             return False
+        # There is no higher curriculum level to promote to.  In particular,
+        # after retiring L14, L13 is the terminal contract and must not launch
+        # another expensive promotion probe during training.
+        if self.joint_pose_levels and self.orientation.level_index >= len(self.orientation.levels) - 1:
+            return False
         # `minimum_full_pose_steps` is retained for checkpoint compatibility,
         # but ablation promotion no longer imposes a hidden warm-up budget.
         # The first probe cannot advance a level until the online and anchor
@@ -1167,10 +1172,38 @@ class HomotopyCurriculum:
         saved_level_count = len(self.orientation.levels)
         configured_level_count = len(configured_orientation.levels)
         if configured_level_count < saved_level_count:
-            raise ValueError(
-                "configured curriculum cannot remove levels present in the checkpoint"
-            )
-        if saved_level_count < configured_level_count:
+            # A retired tail may be removed by a new experiment contract. It
+            # is safe to resume only while the checkpoint is still at a level
+            # retained by that contract and the retained prefix matches.
+            active_count = int(self.orientation.level_index) + 1
+            if active_count > configured_level_count:
+                raise ValueError(
+                    "checkpoint is already beyond the active curriculum contract"
+                )
+            if tuple(self.orientation.levels[:active_count]) != tuple(
+                configured_orientation.levels[:active_count]
+            ):
+                raise ValueError(
+                    "checkpoint active curriculum levels do not match the current contract"
+                )
+            if tuple(self.goal.levels[:active_count]) != tuple(
+                configured_goal.levels[:active_count]
+            ):
+                raise ValueError(
+                    "checkpoint active goal levels do not match the current contract"
+                )
+            if tuple(self.joint_pose_levels[:active_count]) != tuple(
+                configured_pose_levels[:active_count]
+            ):
+                raise ValueError(
+                    "checkpoint active pose levels do not match the current contract"
+                )
+            self.goal.levels = configured_goal.levels
+            self.goal.end = configured_goal.end
+            self.orientation.levels = configured_orientation.levels
+            self.orientation.end = configured_orientation.end
+            self.joint_pose_levels = tuple(configured_pose_levels)
+        elif saved_level_count < configured_level_count:
             if tuple(self.orientation.levels) != tuple(
                 configured_orientation.levels[:saved_level_count]
             ):

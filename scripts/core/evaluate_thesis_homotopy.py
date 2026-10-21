@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import multiprocessing as mp
@@ -207,6 +208,23 @@ def main(default_variant: str = "auto") -> None:
                         help="override the evaluation episode horizon (default: config horizon)")
     parser.add_argument("--seed", type=int, default=31001)
     parser.add_argument(
+        "--position-noise-std-mm", type=float, default=0.0,
+        help="IID Gaussian end-effector position measurement noise, per-axis std in mm",
+    )
+    parser.add_argument("--external-force-n", type=float, default=0.0,
+                        help="physical tool force magnitude in N, random world direction")
+    parser.add_argument("--force-interval-s", type=float, default=0.25)
+    parser.add_argument("--disturbance-seed", type=int, default=72001)
+    parser.add_argument("--sensor-noise-seed", type=int, default=71001)
+    parser.add_argument(
+        "--orientation-noise-std-rad", type=float, default=0.0,
+        help="world-frame SO(3) noise, std of each Gaussian rotation-vector component in rad",
+    )
+    parser.add_argument(
+        "--checkpoint-config", action="store_true",
+        help="use the resolved config saved in a complete checkpoint",
+    )
+    parser.add_argument(
         "--scene", choices=("auto", "none", "static", "dynamic"), default="auto",
         help="auto maps complete S0/S1/S2 checkpoints to none/static/dynamic",
     )
@@ -235,6 +253,23 @@ def main(default_variant: str = "auto") -> None:
         parser.error("--max-episode-steps must be positive")
     if args.num_envs < 0:
         parser.error("--num-envs must be non-negative")
+    if not np.isfinite(args.position_noise_std_mm) or args.position_noise_std_mm < 0:
+        parser.error("--position-noise-std-mm must be finite and nonnegative")
+    if not np.isfinite(args.orientation_noise_std_rad) or args.orientation_noise_std_rad < 0:
+        parser.error("--orientation-noise-std-rad must be finite and nonnegative")
+    if not np.isfinite(args.external_force_n) or args.external_force_n < 0:
+        parser.error("--external-force-n must be finite and nonnegative")
+    if not np.isfinite(args.force_interval_s) or args.force_interval_s <= 0:
+        parser.error("--force-interval-s must be finite and positive")
+    if args.disturbance_seed < 0:
+        parser.error("--disturbance-seed must be nonnegative")
+    if args.seed < 0 or args.sensor_noise_seed < 0:
+        parser.error("evaluation and noise seeds must be nonnegative")
+    output = Path(args.output)
+    if not output.is_absolute():
+        output = ROOT / output
+    if output.exists():
+        raise FileExistsError(f"refusing to overwrite {output}")
     num_envs = automatic_num_envs(args.episodes) if args.num_envs == 0 else min(
         args.num_envs, args.episodes
     )
@@ -247,9 +282,32 @@ def main(default_variant: str = "auto") -> None:
     config_path = Path(args.config)
     if not config_path.is_absolute():
         config_path = ROOT / config_path
-    config = load_config(config_path)
+    checkpoint_path = Path(args.checkpoint)
+    if not checkpoint_path.is_absolute():
+        checkpoint_path = ROOT / checkpoint_path
+    started = time.perf_counter()
+    state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if args.checkpoint_config:
+        if not isinstance(state, dict) or "config" not in state:
+            parser.error("--checkpoint-config requires a checkpoint containing config")
+        config = copy.deepcopy(state["config"])
+    else:
+        config = load_config(config_path)
+    source_config_sha256 = hashlib.sha256(json.dumps(
+        config, sort_keys=True, default=_json_default,
+    ).encode()).hexdigest()
     ThesisHomotopyEnv, run_deterministic_pose_probe, run_parallel_deterministic_pose_probe, variant = _evaluation_backend(config, args.variant)
     config["device"] = args.device
+    config["thesis"]["evaluation_sensor_noise"] = {
+        "position_std_m": args.position_noise_std_mm / 1000.0,
+        "orientation_std_rad": args.orientation_noise_std_rad,
+        "seed": args.sensor_noise_seed,
+    }
+    config["thesis"]["evaluation_mechanical_disturbance"] = {
+        "force_n": args.external_force_n,
+        "interval_s": args.force_interval_s,
+        "seed": args.disturbance_seed,
+    }
     config["thesis"]["blocking_obstacle_mode"] = bool(args.blocking_obstacles)
     if args.max_episode_steps is not None:
         config["thesis"]["horizon"] = args.max_episode_steps
@@ -263,11 +321,6 @@ def main(default_variant: str = "auto") -> None:
     finally:
         env.close()
 
-    checkpoint_path = Path(args.checkpoint)
-    if not checkpoint_path.is_absolute():
-        checkpoint_path = ROOT / checkpoint_path
-    started = time.perf_counter()
-    state = torch.load(checkpoint_path, map_location=agent.device, weights_only=False)
     checkpoint_stage = None
     if isinstance(state, dict) and "curriculum" in state:
         checkpoint_stage = state["curriculum"].get("stage")
@@ -350,8 +403,29 @@ def main(default_variant: str = "auto") -> None:
     }
     threshold = thresholds[scene]
     metrics.update({
-        "checkpoint": str(checkpoint_path.relative_to(ROOT)),
+        "checkpoint": os.path.relpath(checkpoint_path, ROOT),
         "checkpoint_sha256": file_sha256(checkpoint_path),
+        "config_source": "checkpoint" if args.checkpoint_config else str(config_path),
+        "source_config_sha256": source_config_sha256,
+        "training_seed": config.get("seed"),
+        "position_tolerance_m": contract["position_tolerance"],
+        "orientation_tolerance_rad": contract["orientation_tolerance"],
+        "sensor_noise": {
+            **config["thesis"]["evaluation_sensor_noise"],
+            "model": "iid_world_frame_translation_and_left_SO3_rotation_vector_gaussian",
+            "precision_scaling_uses_measured_position": True,
+            "precision_scaling_uses_measured_orientation": True,
+            "metrics_use_ground_truth": True,
+            "orientation_measurement": "left_SO3_noise" if args.orientation_noise_std_rad else "exact",
+            "joint_measurements_and_model_jacobian": "exact",
+        },
+        "mechanical_disturbance": {
+            **config["thesis"]["evaluation_mechanical_disturbance"],
+            "model": "piecewise_constant_fixed_magnitude_isotropic_world_force",
+            "application_point": "current_tool_origin",
+            "application_rate_hz": 1.0 / float(config["thesis"]["physics_dt"]),
+            "measurements": "exact" if not (args.position_noise_std_mm or args.orientation_noise_std_rad) else "noisy",
+        },
         "level_index": level_index,
         "scene": scene,
         "episodes": args.episodes,
@@ -377,9 +451,6 @@ def main(default_variant: str = "auto") -> None:
             and metrics["timeout_rate"] <= threshold["timeout"]
         ),
     })
-    output = Path(args.output)
-    if not output.is_absolute():
-        output = ROOT / output
     output.parent.mkdir(parents=True, exist_ok=True)
     if output.exists():
         raise FileExistsError(f"refusing to overwrite {output}")

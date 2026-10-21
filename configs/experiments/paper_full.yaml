@@ -113,7 +113,6 @@ thesis:
     - 1.0
     - 1.0
     - 1.0
-    - 1.0
     tolerance_start: 0.3
     tolerance_end: 0.1
     min_transitions_per_level: 300000
@@ -192,7 +191,7 @@ thesis:
         score_floor: 0.01
     far_distance_timeout_restarts:
       enabled: false
-      level_index: 14
+      level_index: 13
       minimum_position_bin: 7
       target_transition_fraction: 0.15
       capacity_per_cell: 8
@@ -295,13 +294,6 @@ thesis:
       target_orientation_max_rad: 3.141592
       position_tolerance_m: 0.001
       orientation_tolerance_rad: 0.025
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.001
-      orientation_tolerance_rad: 0.01
   semantic_long_term_replay:
     enabled: false
     fraction: 0.2

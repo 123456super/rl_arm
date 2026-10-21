@@ -1587,11 +1587,11 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
         assert current["target_orientation_max_rad"] == previous["target_orientation_max_rad"]
     assert [level["position_tolerance_m"] for level in levels] == [
         .10, .08, .064, .0512, .05, .025, .01, .005, .0025, .002,
-        .0015, .001, .001, .001, .001,
+        .0015, .001, .001, .001,
     ]
     assert [level["orientation_tolerance_rad"] for level in levels] == [
         .30, .24, .192, .1536, .10, .10, .10, .10, .10, .10,
-        .10, .10, .05, .025, .01,
+        .10, .10, .05, .025,
     ]
     assert levels[-1]["target_distance_max_m"] == .50
     assert np.isclose(levels[-1]["target_orientation_max_rad"], np.pi, atol=1e-6)
@@ -1718,10 +1718,12 @@ def test_v13_5_precision_curriculum_keeps_restricted_range_and_tightens_only_pre
     }
     assert len(bounds) == 1
     assert [level["position_tolerance_m"] for level in levels] == [
-        .10, .08, .064, .0512, .05, .025, .01,
+        .10, .08, .064, .0512, .05, .025, .01, .005, .0025, .002,
+        .0015, .001, .001, .001,
     ]
     assert [level["orientation_tolerance_rad"] for level in levels] == [
-        .30, .24, .192, .1536, .10, .10, .10,
+        .30, .24, .192, .1536, .10, .10, .10, .10, .10, .10, .10, .10,
+        .05, .025,
     ]
     assert thesis["reward"]["use_episode_tolerance_for_joint_precision"] is True
     assert thesis["reward"]["partial_precision_reward_scale"] == .10
