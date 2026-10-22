@@ -10,7 +10,7 @@ thesis:
   protocol: task_space_precision_curriculum_hybrid_keypoint_jacobian_auto_chain_pcr
   stage: s0
   physics_dt: 0.004166666666666667
-  control_dt: 0.05
+  control_dt: 0.0333333333
   horizon: 500
   action_scale: 0.7
   qdot_observation_scale: 0.8

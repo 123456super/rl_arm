@@ -91,10 +91,10 @@ class ThesisHomotopyEnv(gym.Env):
         ):
             raise ValueError("only unified keypoint pose reward is supported")
         self.physics_dt = float(thesis.get("physics_dt", 1.0 / 240.0))
-        self.control_dt = float(thesis.get("control_dt", 0.05))
+        self.control_dt = float(thesis.get("control_dt", 1.0 / 30.0))
         self.substeps = int(round(self.control_dt / self.physics_dt))
-        if self.substeps != 12 or not np.isclose(self.substeps * self.physics_dt, self.control_dt):
-            raise ValueError("thesis protocol requires 12 substeps at 1/240 s for a 0.05 s control period")
+        if self.substeps != 8 or not np.isclose(self.substeps * self.physics_dt, self.control_dt):
+            raise ValueError("thesis protocol requires 8 substeps at 1/240 s for a 1/30 s control period")
         self.mechanical_disturbance = MechanicalDisturbance(
             thesis.get("evaluation_mechanical_disturbance", {}), self.control_dt
         )
