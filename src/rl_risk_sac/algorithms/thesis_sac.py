@@ -16,6 +16,9 @@ from rl_risk_sac.algorithms.networks import (
     soft_update,
 )
 from rl_risk_sac.algorithms.replay_buffer import Batch
+from rl_risk_sac.algorithms.obstacle_encoder import SetGaussianActor, SetQNetwork
+from rl_risk_sac.tasks.obstacle_observation import stack_observations, observation_tensors
+from rl_risk_sac.tasks.obstacle_prediction import ObstaclePredictor, load_obstacle_feature_scale
 from rl_risk_sac.utils.device import resolve_device
 
 
@@ -42,7 +45,7 @@ def diagonal_gaussian_kl_old_to_current(
 
 
 class ThesisSACAgent:
-    """Reward-only SAC for the single S0 -> S1 -> S2 serial protocol."""
+    """Full SAC with independently trained actor/critic obstacle set encoders."""
 
     def __init__(self, obs_dim: int, action_dim: int, config: dict[str, Any]) -> None:
         sac = config["sac"]
@@ -118,20 +121,13 @@ class ThesisSACAgent:
         self.jacobian_actor_only = bool(
             observation_config.get("jacobian_actor_only", False)
         )
-        observation_variant = str(
-            observation_config.get("ablation_variant", "full")
-        )
         # Full observation prefix: q(6), qdot(6), keypoint error(9), then
         # flattened keypoint Jacobian(54). Critics drop exactly that slice.
         self.jacobian_slice = (21, 75)
         if self.jacobian_actor_only:
-            if (
-                not bool(observation_config.get("keypoint_jacobian_pose", False))
-                and observation_variant != "m3_no_jacobian"
-            ):
+            if not bool(observation_config.get("keypoint_jacobian_pose", False)):
                 raise ValueError(
-                    "jacobian_actor_only requires keypoint_jacobian_pose unless "
-                    "the M3 zero-Jacobian ablation is selected"
+                    "jacobian_actor_only requires keypoint_jacobian_pose"
                 )
             start, end = self.jacobian_slice
             if obs_dim < end:
@@ -143,14 +139,27 @@ class ThesisSACAgent:
         else:
             self.actor_obs_dim = int(obs_dim)
             self.critic_obs_dim = int(obs_dim)
-        self.actor = GaussianActor(self.actor_obs_dim, action_dim, hidden).to(self.device)
+        self.set_obstacles = obs_dim == 241
+        obstacles = config.get("thesis", {}).get("obstacles", {})
+        scale = np.ones(37, np.float32)
+        if self.set_obstacles and obstacles.get("enabled", False):
+            if obstacles.get("dynamic", True):
+                scale = ObstaclePredictor(obstacles["predictor_checkpoint"]).feature_scale
+            else:
+                scale = load_obstacle_feature_scale(obstacles["predictor_checkpoint"])
+        self.actor = (SetGaussianActor(self.actor_obs_dim, action_dim, hidden, scale)
+                      if self.set_obstacles else GaussianActor(self.actor_obs_dim, action_dim, hidden)).to(self.device)
+        def critic():
+            return (SetQNetwork(self.critic_obs_dim, action_dim, hidden, scale,
+                                35 if self.jacobian_actor_only else 89)
+                    if self.set_obstacles else QNetwork(self.critic_obs_dim, action_dim, hidden)).to(self.device)
         self.chain_reference_actor = (
             self.frozen_actor_copy() if self.chain_pcr_enabled else None
         )
-        self.q1 = QNetwork(self.critic_obs_dim, action_dim, hidden).to(self.device)
-        self.q2 = QNetwork(self.critic_obs_dim, action_dim, hidden).to(self.device)
-        self.target_q1 = QNetwork(self.critic_obs_dim, action_dim, hidden).to(self.device)
-        self.target_q2 = QNetwork(self.critic_obs_dim, action_dim, hidden).to(self.device)
+        self.q1 = critic()
+        self.q2 = critic()
+        self.target_q1 = critic()
+        self.target_q2 = critic()
         hard_update(self.q1, self.target_q1)
         hard_update(self.q2, self.target_q2)
         self.actor_optimizer = torch.optim.Adam(
@@ -194,23 +203,23 @@ class ThesisSACAgent:
         self, observation: np.ndarray, deterministic: bool = False,
     ) -> np.ndarray:
         return self.select_actions(
-            np.asarray(observation, dtype=np.float32)[None, :],
+            stack_observations([observation]),
             deterministic=deterministic,
         )[0]
 
     def select_actions(
         self, observations: np.ndarray, deterministic: bool = False,
     ) -> np.ndarray:
-        obs = torch.as_tensor(
-            observations, device=self.device, dtype=torch.float32
-        )
+        if isinstance(observations, (list, tuple)):
+            observations = stack_observations(observations)
+        obs, features, mask = observation_tensors(observations, self.device)
         if obs.ndim != 2:
             raise ValueError("observations must have shape (batch, observation_dim)")
         with torch.no_grad():
             action = (
-                self.actor.deterministic(obs)
+                self.actor.deterministic(obs, features, mask)
                 if deterministic
-                else self.actor.sample(obs)[0]
+                else self.actor.sample(obs, features, mask)[0]
             )
         return action.cpu().numpy()
 
@@ -228,23 +237,23 @@ class ThesisSACAgent:
         batch: Batch,
         *,
         update_actor: bool = True,
-        reference_observations: torch.Tensor | None = None,
+        reference_observations: torch.Tensor | Batch | None = None,
         collect_diagnostics: bool = True,
     ) -> dict[str, float]:
         with torch.no_grad():
-            next_action, next_log_prob = self.actor.sample(batch.next_observations)
+            next_action, next_log_prob = self.actor.sample(batch.next_observations, batch.next_obstacle_features, batch.next_obstacle_mask)
             next_critic_observations = self._critic_observation(batch.next_observations)
             next_q = torch.min(
-                self.target_q1(next_critic_observations, next_action),
-                self.target_q2(next_critic_observations, next_action),
+                self.target_q1(next_critic_observations, next_action, batch.next_obstacle_features, batch.next_obstacle_mask),
+                self.target_q2(next_critic_observations, next_action, batch.next_obstacle_features, batch.next_obstacle_mask),
             )
             target = batch.rewards + self.gamma * (1.0 - batch.dones) * (
                 next_q - self.alpha.detach() * next_log_prob
             )
 
         critic_observations = self._critic_observation(batch.observations)
-        q1_prediction = self.q1(critic_observations, batch.actions)
-        q2_prediction = self.q2(critic_observations, batch.actions)
+        q1_prediction = self.q1(critic_observations, batch.actions, batch.obstacle_features, batch.obstacle_mask)
+        q2_prediction = self.q2(critic_observations, batch.actions, batch.obstacle_features, batch.obstacle_mask)
         q_loss = F.smooth_l1_loss(
             q1_prediction, target
         ) + F.smooth_l1_loss(q2_prediction, target)
@@ -264,9 +273,11 @@ class ThesisSACAgent:
         if actor_updated:
             if self.chain_pcr_enabled and reference_observations is None:
                 raise ValueError("CHAIN-PCR actor update requires a reference batch")
-            action, log_prob = self.actor.sample(batch.observations)
-            q1 = self.q1(critic_observations, action)
-            q2 = self.q2(critic_observations, action)
+            for critic in (self.q1, self.q2):
+                critic.requires_grad_(False)
+            action, log_prob = self.actor.sample(batch.observations, batch.obstacle_features, batch.obstacle_mask)
+            q1 = self.q1(critic_observations, action, batch.obstacle_features, batch.obstacle_mask)
+            q2 = self.q2(critic_observations, action, batch.obstacle_features, batch.obstacle_mask)
             actor_sac_loss = (
                 self.alpha.detach() * log_prob - torch.min(q1, q2)
             ).mean()
@@ -274,12 +285,17 @@ class ThesisSACAgent:
             pre_update_actor: dict[str, torch.Tensor] | None = None
             if self.chain_pcr_enabled:
                 assert self.chain_reference_actor is not None
+                reference_features = reference_mask = None
+                if isinstance(reference_observations, Batch):
+                    reference_features = reference_observations.obstacle_features
+                    reference_mask = reference_observations.obstacle_mask
+                    reference_observations = reference_observations.observations
                 reference_observations = reference_observations.to(self.device)
                 with torch.no_grad():
                     old_mean, old_log_std = self.chain_reference_actor(
-                        reference_observations
+                        reference_observations, reference_features, reference_mask
                     )
-                current_mean, current_log_std = self.actor(reference_observations)
+                current_mean, current_log_std = self.actor(reference_observations, reference_features, reference_mask)
                 policy_churn_kl = diagonal_gaussian_kl_old_to_current(
                     old_mean, old_log_std, current_mean, current_log_std,
                 )
@@ -349,6 +365,8 @@ class ThesisSACAgent:
                 self.actor.parameters(), self.actor_gradient_clip
             )
             self.actor_optimizer.step()
+            for critic in (self.q1, self.q2):
+                critic.requires_grad_(True)
             if pre_update_actor is not None:
                 assert self.chain_reference_actor is not None
                 self.chain_reference_actor.load_state_dict(pre_update_actor)
@@ -404,6 +422,7 @@ class ThesisSACAgent:
 
     def state_dict(self) -> dict[str, Any]:
         return {
+            "observation_dim": self.actor_obs_dim,
             "actor": self.actor.state_dict(),
             "q1": self.q1.state_dict(),
             "q2": self.q2.state_dict(),
@@ -428,6 +447,8 @@ class ThesisSACAgent:
         }
 
     def load_state_dict(self, state: dict[str, Any], *, actor_only: bool = False) -> None:
+        if state.get("observation_dim", state["actor"]["backbone.0.weight"].shape[1]) != self.actor_obs_dim:
+            raise ValueError("Full observation schema changed; use explicit actor initialization, not resume")
         self.actor.load_state_dict(state["actor"])
         if actor_only:
             self.reset_chain_reference_actor()

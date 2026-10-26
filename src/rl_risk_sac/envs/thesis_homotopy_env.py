@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
+from time import perf_counter
 from typing import Any
 
 import gymnasium as gym
@@ -10,24 +12,25 @@ import numpy as np
 import pybullet as p
 
 from rl_risk_sac.control import SafetyQP, SafetyQPConfig, distance_rate_constraint
-from rl_risk_sac.envs.mechanical_disturbance import MechanicalDisturbance
-from rl_risk_sac.envs.orientation_sensor_noise import OrientationSensorNoise
-from rl_risk_sac.envs.position_sensor_noise import PositionSensorNoise
 from rl_risk_sac.robots.pybullet_robot import PyBulletRobot
 from rl_risk_sac.tasks.thesis_reaching import (
     SelfCollisionGeometry,
     ThesisGeometry,
     build_thesis_observation,
     compute_self_collision_geometry,
-    compute_thesis_geometry,
     homotopy_reward,
     keypoint_position_jacobian,
     pose_keypoint_errors,
     pose_error,
     thesis_observation_dim,
 )
-from rl_risk_sac.utils.risk import closest_point_on_segment
 from rl_risk_sac.utils.runtime_config import RuntimeConfig
+from rl_risk_sac.robots.ur5_capsules import CapsuleState
+from rl_risk_sac.tasks.obstacle_observation import ObstacleObservation
+from rl_risk_sac.tasks.obstacle_prediction import ObstaclePredictor
+from rl_risk_sac.tasks.convex_sweep import sweep_features, swept_risk
+from rl_risk_sac.envs.obstacle_scene import MovingObstacle, sample_obstacle, create_body, raw_record
+from rl_risk_sac.tasks.static_scene_planning import joint_segment, path_band, rrt_connect
 
 
 @dataclass
@@ -53,11 +56,26 @@ class EpisodeContract:
     terminate_on_success: bool = True
 
 
+class ResetSamplingError(RuntimeError):
+    """A bounded initial-state/goal sampler found no acceptable proposal."""
+
+
+class StaticSceneSamplingError(RuntimeError):
+    """All bounded retries for a requested obstacle band were exhausted."""
+
+    def __init__(self, band: str, diagnostics: dict[str, Any]) -> None:
+        self.diagnostics = dict(diagnostics)
+        super().__init__(
+            f"no verified static scene for band {band}; diagnostics={diagnostics}; "
+            "planning budget exhaustion does not prove infeasibility"
+        )
+
+
 class ThesisHomotopyEnv(gym.Env):
-    """Hybrid Keypoint + Jacobian environment for S0/S1/S2.
+    """Hybrid Keypoint + Jacobian environment for reaching.
 
     Observations combine keypoint errors, their joint Jacobian, explicit pose
-    errors, task-space twist, and collision geometry in 162 dimensions.
+    errors, task-space twist, and collision geometry in 241 dimensions (raw variable obstacle sets travel alongside).
     """
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 20}
@@ -70,12 +88,8 @@ class ThesisHomotopyEnv(gym.Env):
         self.config = config
         self.runtime = RuntimeConfig.from_mapping(config)
         thesis = config["thesis"]
-        self.position_sensor_noise = PositionSensorNoise(
-            thesis.get("evaluation_sensor_noise", {})
-        )
-        self.orientation_sensor_noise = OrientationSensorNoise(
-            thesis.get("evaluation_sensor_noise", {})
-        )
+        if thesis.get("stage", "s0") not in {"s0", "s1", "s2", "s3"}:
+            raise ValueError("stage must be one of s0, s1, s2, s3")
         observation = thesis.get("observation", {})
         reward = thesis.get("reward", {})
         thesis_observation_dim(
@@ -91,13 +105,13 @@ class ThesisHomotopyEnv(gym.Env):
         ):
             raise ValueError("only unified keypoint pose reward is supported")
         self.physics_dt = float(thesis.get("physics_dt", 1.0 / 240.0))
-        self.control_dt = float(thesis.get("control_dt", 1.0 / 30.0))
+        # Keep the thesis reaching protocol at 20 Hz: 12 x 1/240 s physical
+        # substeps per policy action. With the default horizon of 500 this
+        # gives each episode a maximum simulated duration of 25 seconds.
+        self.control_dt = float(thesis.get("control_dt", 0.05))
         self.substeps = int(round(self.control_dt / self.physics_dt))
-        if self.substeps != 8 or not np.isclose(self.substeps * self.physics_dt, self.control_dt):
-            raise ValueError("thesis protocol requires 8 substeps at 1/240 s for a 1/30 s control period")
-        self.mechanical_disturbance = MechanicalDisturbance(
-            thesis.get("evaluation_mechanical_disturbance", {}), self.control_dt
-        )
+        if self.substeps != 12 or not np.isclose(self.substeps * self.physics_dt, self.control_dt):
+            raise ValueError("thesis protocol requires 12 substeps at 1/240 s for a 0.05 s control period")
         self.horizon = int(thesis.get("horizon", 500))
         self.action_scale = np.full(6, float(thesis.get("action_scale", 0.7)), dtype=np.float32)
         self.qdot_observation_scale = np.full(
@@ -121,11 +135,6 @@ class ThesisHomotopyEnv(gym.Env):
         if self.ee_linear_velocity_scale <= 0.0 or self.ee_angular_velocity_scale <= 0.0:
             raise ValueError("end-effector velocity scales must be positive")
         self.motor_force = float(thesis.get("joint_motor_force", 90.0))
-        self.obstacle_radius = float(thesis.get("obstacle_radius", 0.075))
-        self.obstacle_speed = float(thesis.get("obstacle_speed", 0.1))
-        self.blocking_obstacle_mode = bool(
-            thesis.get("blocking_obstacle_mode", False)
-        )
         self.d_safe = float(thesis.get("d_safe", 0.05))
         self_collision_config = thesis.get("self_collision", {})
         self.d_self_safe = float(self_collision_config.get("safe_distance_m", 0.005))
@@ -259,6 +268,7 @@ class ThesisHomotopyEnv(gym.Env):
                 reward_config.get("joint_bottleneck_temperature", 2.0)
             ),
             "success_bonus": float(reward_config.get("success_bonus", 20.0)),
+            "reward_scheme": reward_config.get("scheme", "legacy_dense"),
             "velocity_cost_weight": float(reward_config.get("velocity_cost_weight", 0.04)),
             "smooth_cost_weight": float(reward_config.get("smooth_cost_weight", 0.01)),
             "hard_failure_penalty": float(
@@ -303,6 +313,19 @@ class ThesisHomotopyEnv(gym.Env):
         self.contract = EpisodeContract()
         self.rng = np.random.default_rng(int(config["seed"]))
 
+        self.obstacle_config = thesis.get("obstacles", {})
+        self.obstacles_enabled = bool(self.obstacle_config.get("enabled", False))
+        self.obstacles_dynamic = bool(self.obstacle_config.get("dynamic", self.obstacles_enabled))
+        self.predictor = (ObstaclePredictor(self.obstacle_config["predictor_checkpoint"])
+                          if self.obstacles_enabled and self.obstacles_dynamic else None)
+        self.obstacles = []
+        self.physics_step_count = 0
+        self._external_geometry = None
+        self._obstacle_features = np.empty((0, 37), np.float32)
+        self.obstacle_processing_ms = 0.0
+        self.reward_parameters["lambda_ext"] = float(self.obstacle_config.get("lambda_ext", 0.05))
+        from rl_risk_sac.tasks.goal_obstacle_coupling import coupling_parameters
+        self.reward_parameters.update(coupling_parameters(config))
         self.client_id = p.connect(p.GUI if render_mode == "human" else p.DIRECT)
         if self.client_id < 0:
             raise RuntimeError(
@@ -404,8 +427,8 @@ class ThesisHomotopyEnv(gym.Env):
         task_space_bin_probabilities: list[float] | np.ndarray | None = None,
         terminate_on_success: bool = True,
     ) -> None:
-        if scene not in {"none", "static", "dynamic"}:
-            raise ValueError(f"unknown thesis scene {scene!r}")
+        if scene != "none":
+            raise ValueError("only reaching scene none is supported")
         if not 0.02 <= float(xi) <= 1.0:
             raise ValueError("xi must be in [0.02, 1]")
         if not 0.0 < float(goal_scale) <= 1.0:
@@ -500,9 +523,6 @@ class ThesisHomotopyEnv(gym.Env):
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         del options
-        self.mechanical_disturbance.reset(seed)
-        self.position_sensor_noise.reset(seed)
-        self.orientation_sensor_noise.reset(seed)
         if seed is not None:
             self.rng = np.random.default_rng(seed)
             self._task_space_bin_order = np.empty(0, dtype=np.int64)
@@ -533,10 +553,11 @@ class ThesisHomotopyEnv(gym.Env):
         else:
             self._sample_valid_reset()
             self._sample_goal_pose()
-        self._create_obstacle()
         self.step_count = 0
+        self.physics_step_count = 0
         self.success_hold_count = 0
         self.obstacle_contact_seen = False
+        self._sample_obstacle_scene()
         observation, info, geometry, self_geometry, position_error, orientation_error = self._observe()
         self.previous_rho_position = float(np.linalg.norm(position_error))
         self.previous_rho_orientation = float(np.linalg.norm(orientation_error))
@@ -575,35 +596,279 @@ class ThesisHomotopyEnv(gym.Env):
             np.random.default_rng(0), enable_self_collision=True,
         )
         self._resolve_collision_links()
-        collision_shape = p.createCollisionShape(
-            p.GEOM_SPHERE,
-            radius=self.obstacle_radius,
-            physicsClientId=self.client_id,
-        )
-        self._obstacle_body_id = p.createMultiBody(
-            baseMass=0.0,
-            baseCollisionShapeIndex=collision_shape,
-            basePosition=[10.0, 10.0, 10.0],
-            physicsClientId=self.client_id,
-        )
-        self._disable_obstacle()
 
     def _disable_obstacle(self) -> None:
+        for obstacle in self.obstacles:
+            p.removeBody(obstacle.body_id, physicsClientId=self.client_id)
+        self.obstacles.clear()
+        if self.predictor is not None:
+            self.predictor.reset()
+        self._external_geometry = None
+        self._obstacle_features = np.empty((0, 37), np.float32)
         self.obstacle_id = None
         self.obstacle_position.fill(0.0)
         self.obstacle_velocity.fill(0.0)
-        p.resetBasePositionAndOrientation(
-            self._obstacle_body_id,
-            [10.0, 10.0, 10.0],
-            [0.0, 0.0, 0.0, 1.0],
-            physicsClientId=self.client_id,
+
+    def _base_frame(self):
+        position, orientation = p.getBasePositionAndOrientation(self.robot_id, physicsClientId=self.client_id)
+        dynamics = p.getDynamicsInfo(self.robot_id, -1, physicsClientId=self.client_id)
+        inverse = p.invertTransform(dynamics[3], dynamics[4])
+        position, orientation = p.multiplyTransforms(position, orientation, *inverse)
+        rotation = np.asarray(p.getMatrixFromQuaternion(orientation)).reshape(3, 3)
+        return np.asarray(position), rotation
+
+    def _sample_obstacle_scene(self):
+        self._scene_sampling = {}
+        if not self.obstacles_enabled:
+            return
+        if self.obstacle_config.get("path_sampling", {}).get("enabled", False):
+            self._sample_stratified_static_scene()
+            return
+        probabilities = np.asarray(self.obstacle_config.get("count_probabilities", [.1, .4, .3, .2]), float)
+        if probabilities.shape != (4,) or np.any(probabilities < 0) or not np.isclose(probabilities.sum(), 1):
+            raise ValueError("obstacle count probabilities must sum to one for counts 0,1,2,3")
+        count = int(self.rng.choice(4, p=probabilities))
+        q, qdot = self.robot.joint_state_exact()
+        low = self.obstacle_config.get("workspace_low", [-.85, -.85, .05])
+        high = self.obstacle_config.get("workspace_high", [.85, .85, 1.1])
+        attempts = int(self.obstacle_config.get("max_scene_attempts", 256))
+        initial_ee = self.robot.end_effector_kinematics()[0]
+        try:
+            for identity in range(count):
+                for _ in range(attempts):
+                    center = None
+                    if self.rng.random() < .5:
+                        center = (initial_ee + self.goal_position) / 2 + self.rng.normal(0, .18, 3)
+                    obstacle = sample_obstacle(
+                        self.rng, identity, low, high, center=center,
+                        motion_modes=self.obstacle_config.get("motion_modes"),
+                        speed_range=tuple(self.obstacle_config.get("speed_range", (.04, .22))),
+                    )
+                    create_body(obstacle, self.client_id)
+                    valid = not p.getClosestPoints(self.robot_id, obstacle.body_id, 0, physicsClientId=self.client_id)
+                    valid = valid and not any(p.getClosestPoints(o.body_id, obstacle.body_id, 0,
+                                                               physicsClientId=self.client_id) for o in self.obstacles)
+                    # Exclude the fixed base AABB as well as the shoulder capsule.
+                    base_low, base_high = p.getAABB(self.robot_id, -1, physicsClientId=self.client_id)
+                    base_closest = np.clip(obstacle.initial_position, base_low, base_high)
+                    valid = valid and np.linalg.norm(obstacle.initial_position - base_closest) > obstacle.bound_radius
+                    shoulder = self.robot.capsules()[0]
+                    vector = shoulder.end - shoulder.start
+                    ratio = np.clip((np.asarray(obstacle.initial_position) - shoulder.start) @ vector
+                                    / max(vector @ vector, 1e-12), 0, 1)
+                    gap = np.linalg.norm(np.asarray(obstacle.initial_position) - shoulder.start - ratio * vector)
+                    valid = valid and gap > shoulder.radius + obstacle.bound_radius
+                    if valid:
+                        self._set_joint_state(self.goal_joint_positions)
+                        valid = not p.getClosestPoints(self.robot_id, obstacle.body_id, 0, physicsClientId=self.client_id)
+                        self._set_joint_state(q, qdot)
+                    if valid:
+                        self.obstacles.append(obstacle)
+                        break
+                    p.removeBody(obstacle.body_id, physicsClientId=self.client_id)
+                else:
+                    raise RuntimeError(f"failed to sample valid obstacle {identity} after {attempts} attempts")
+        finally:
+            self._set_joint_state(q, qdot)
+        self.obstacle_id = self.obstacles[0].body_id if self.obstacles else None
+        p.performCollisionDetection(physicsClientId=self.client_id)
+
+    def _static_clearance(self, obstacle):
+        points = p.getClosestPoints(self.robot_id, obstacle.body_id, 2., physicsClientId=self.client_id)
+        return min((float(point[8]) for point in points), default=2.)
+
+    def _static_planning_valid(self, q, obstacle, clearance):
+        if np.any(q < self.robot.joint_lower_limits) or np.any(q > self.robot.joint_upper_limits):
+            return False
+        self._set_joint_state(q)
+        if self._static_clearance(obstacle) < clearance:
+            return False
+        # Use the same nonadjacent link pairs as the environment self geometry.
+        for first, second in self._self_pair_link_ids:
+            if p.getClosestPoints(self.robot_id, self.robot_id, self.d_self_safe,
+                                  linkIndexA=first, linkIndexB=second, physicsClientId=self.client_id):
+                return False
+        return True
+
+    def _sample_stratified_static_scene(self):
+        settings = self.obstacle_config["path_sampling"]
+        probabilities = np.asarray(settings["probabilities"], float)
+        if (self.obstacles_dynamic or probabilities.shape != (4,)
+                or not np.isfinite(probabilities).all() or np.any(probabilities < 0)
+                or not np.isclose(probabilities.sum(), 1.)):
+            raise ValueError("static path sampling requires four valid probabilities")
+        band = str(self.rng.choice(["none", "far", "near", "blocking"], p=probabilities))
+        self._scene_sampling = {"path_band": band, "path_verified": False}
+        if band == "none":
+            return
+        safe = float(self.obstacle_config["risk"]["d_safe"])
+        cutoff = float(self.obstacle_config["risk"]["d_cut"])
+        resolution = float(settings["joint_resolution_rad"])
+        attempts = int(self.obstacle_config.get("max_scene_attempts", 256))
+        batches = int(settings.get("max_sampling_batches", 8))
+        goals = int(settings["max_goal_attempts"])
+        if min(attempts, batches, goals) < 1:
+            raise ValueError("static scene sampling budgets must be positive")
+        started = perf_counter()
+        diagnostics = dict(
+            batches=0, goal_attempts=0, proposals=0, reset_goal_failures=0,
+            start_rejections=0, goal_rejections=0, band_rejections=0,
+            planning_rejections=0,
+            position_bin=int(self._selected_task_space_position_bin),
+            orientation_bin=int(self._selected_task_space_orientation_bin),
         )
-        p.resetBaseVelocity(
-            self._obstacle_body_id,
-            linearVelocity=[0.0, 0.0, 0.0],
-            angularVelocity=[0.0, 0.0, 0.0],
-            physicsClientId=self.client_id,
+        # Draw the band once per episode. Retries advance the existing RNG and
+        # keep the selected semantic cell; never substitute an easier category.
+        for batch in range(batches):
+            diagnostics["batches"] = batch + 1
+            if self._try_static_scene_batch(
+                band, settings, safe, cutoff, resolution, attempts, goals,
+                resample_first=bool(batch), diagnostics=diagnostics,
+            ):
+                self._scene_sampling.update(
+                    sampling_proposals=diagnostics["proposals"],
+                    sampling_ms=(perf_counter() - started) * 1000,
+                    sampling_diagnostics=dict(diagnostics),
+                )
+                return
+            print(
+                f"static scene sampling batch exhausted: band={band} "
+                f"batch={batch + 1}/{batches} diagnostics={diagnostics}",
+                flush=True,
+            )
+        self._scene_sampling.update(
+            sampling_proposals=diagnostics["proposals"],
+            sampling_ms=(perf_counter() - started) * 1000,
+            sampling_diagnostics=dict(diagnostics),
         )
+        raise StaticSceneSamplingError(band, self._scene_sampling)
+
+    def _try_static_scene_batch(
+        self, band, settings, safe, cutoff, resolution, attempts, goals,
+        *, resample_first, diagnostics,
+    ):
+        """One bounded batch; a miss is retryable, never an accepted episode."""
+        for goal_attempt in range(goals):
+            diagnostics["goal_attempts"] += 1
+            if goal_attempt or resample_first:
+                # Keep the selected semantic bin and requested obstacle band.
+                try:
+                    self._sample_valid_reset()
+                    self._sample_goal_pose()
+                except ResetSamplingError:
+                    diagnostics["reset_goal_failures"] += 1
+                    continue
+            q, qdot = self.robot.joint_state_exact()
+            route = joint_segment(q, self.goal_joint_positions, resolution)
+            # Cache link locations only for proposing obstacles, not for acceptance.
+            anchors = []
+            try:
+                for state in route[1:-1]:
+                    self._set_joint_state(state)
+                    anchors.extend((c.start + c.end) / 2 for c in self.robot.capsules())
+                if not anchors:
+                    anchors = [self.robot.end_effector_pose()[0]]
+                for _ in range(attempts):
+                    diagnostics["proposals"] += 1
+                    center = None
+                    if band != "far":
+                        anchor = anchors[int(self.rng.integers(len(anchors)))]
+                        center = anchor + self.rng.normal(0, .10 if band == "blocking" else .18, 3)
+                    obstacle = sample_obstacle(
+                        self.rng, 0, self.obstacle_config["workspace_low"],
+                        self.obstacle_config["workspace_high"], center=center,
+                        motion_modes=["constant"],
+                    )
+                    create_body(obstacle, self.client_id)
+                    accepted = False
+                    try:
+                        if not self._static_planning_valid(q, obstacle, safe):
+                            diagnostics["start_rejections"] += 1
+                            continue
+                        if not self._static_planning_valid(self.goal_joint_positions, obstacle, safe):
+                            diagnostics["goal_rejections"] += 1
+                            continue
+                        distances = []
+                        for state in route:
+                            self._set_joint_state(state)
+                            distances.append(self._static_clearance(obstacle))
+                        distance = min(distances)
+                        if path_band(distance, safe, cutoff) != band:
+                            diagnostics["band_rejections"] += 1
+                            continue
+                        witness = rrt_connect(
+                            q, self.goal_joint_positions,
+                            self.robot.joint_lower_limits, self.robot.joint_upper_limits,
+                            lambda state: self._static_planning_valid(state, obstacle, safe),
+                            self.rng, resolution=resolution,
+                            extension=float(settings["rrt_extension_rad"]),
+                            iterations=int(settings["rrt_iterations"]),
+                            max_checks=int(settings["rrt_max_checks"]),
+                        )
+                        if witness is None:
+                            diagnostics["planning_rejections"] += 1
+                            continue
+                        self.obstacles.append(obstacle)
+                        self.obstacle_id = obstacle.body_id
+                        self._scene_sampling = dict(
+                            path_band=band, direct_path_min_distance_m=distance,
+                            path_verified=True, witness_waypoints=[v.tolist() for v in witness],
+                        )
+                        accepted = True
+                        return True
+                    finally:
+                        if not accepted:
+                            p.removeBody(obstacle.body_id, physicsClientId=self.client_id)
+            finally:
+                self._set_joint_state(q, qdot)
+                p.performCollisionDetection(physicsClientId=self.client_id)
+        return False
+
+    def _advance_obstacles(self):
+        time = self.physics_step_count * self.physics_dt
+        for obstacle in self.obstacles:
+            position = obstacle.position(time) if self.obstacles_dynamic else obstacle.initial_position
+            p.resetBasePositionAndOrientation(obstacle.body_id, position,
+                                             obstacle.quaternion, physicsClientId=self.client_id)
+
+    def _update_external(self):
+        start = perf_counter()
+        if not self.obstacles:
+            if self.predictor is not None:
+                self.predictor.reset()
+            self._obstacle_features = np.empty((0, 37), np.float32)
+            self._external_geometry = None
+            self.obstacle_processing_ms = 0.0
+            return
+        position, rotation = self._base_frame()
+        time = self.physics_step_count * self.physics_dt
+        records = [raw_record(o, time, self.client_id, position, rotation) for o in self.obstacles]
+        if self.obstacles_dynamic:
+            if self.predictor is None:
+                raise ValueError("dynamic obstacle stages require a frozen predictor checkpoint")
+            predictions = self.predictor.predict(records)
+        else:
+            predictions = {record["id"]: np.repeat(record["position"][None], 3, axis=0)
+                           for record in records}
+        capsules = [CapsuleState(rotation.T @ (c.start - position), rotation.T @ (c.end - position),
+                                 c.radius, c.name) for c in self.robot.capsules()]
+        epsilon_line = self.predictor.epsilon_line if self.predictor is not None else 1e-6
+        epsilon_pos = self.predictor.epsilon_pos if self.predictor is not None else 1e-8
+        features, self._external_queries = sweep_features(
+            records, predictions, capsules, epsilon_line, epsilon_pos,
+        )
+        self._obstacle_features = features
+        calibration = self.obstacle_config.get("risk", {})
+        risk_parameters = dict(d_safe=float(calibration.get("d_safe", .05)),
+                               d_cut=float(calibration.get("d_cut", .20)),
+                               tau=float(calibration.get("tau", .02)),
+                               phi_max=float(calibration.get("phi_max", 5.0)))
+        nearest = features[:, :4].min(axis=0) if len(features) else np.full(4, .8)
+        per_group = [swept_risk(np.asarray([[d] * 4]), **risk_parameters) for d in nearest]
+        self._external_geometry = SimpleNamespace(
+            distance_min=float(nearest.min()), risk_max=swept_risk(features, **risk_parameters),
+            distances=nearest, risk_per_link=np.asarray(per_group), ttc=np.zeros(4))
+        self.obstacle_processing_ms = (perf_counter() - start) * 1000
 
     def _advance_success_hold(self, strict_pose_reached: bool) -> bool:
         """Advance the consecutive strict-pose counter and report success."""
@@ -614,7 +879,15 @@ class ThesisHomotopyEnv(gym.Env):
             strict_pose_reached and self.success_hold_count >= self.success_hold_steps
         )
 
-    def step(self, action: np.ndarray):
+    def step(self, action: np.ndarray, *, substep_observer=None):
+        """Execute one action; optional read-only observer is for offline audits.
+
+        Training/evaluation do not supply an observer. It must not move bodies
+        or alter state, forces, rewards, or the number of physics substeps.
+        """
+        action_obstacle_processing_ms = self.obstacle_processing_ms
+        previous_external_distance = (self._external_geometry.distance_min
+                                      if self._external_geometry is not None else .8)
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
         # SAC directly controls all six joint velocities.  The action is the
         # policy command, not a residual around an analytic controller.
@@ -622,10 +895,8 @@ class ThesisHomotopyEnv(gym.Env):
         precision_action_scale = 1.0
         if self.precision_control_enabled:
             z = max(
-                (self.measured_position_error_norm if self.position_sensor_noise.enabled
-                 else self.previous_rho_position) / self.contract.position_tolerance,
-                (self.measured_orientation_error_norm if self.orientation_sensor_noise.enabled
-                 else self.previous_rho_orientation) / self.contract.orientation_tolerance,
+                self.previous_rho_position / self.contract.position_tolerance,
+                self.previous_rho_orientation / self.contract.orientation_tolerance,
             )
             if z <= 1.0:
                 precision_action_scale = self.precision_min_action_scale + (
@@ -654,9 +925,7 @@ class ThesisHomotopyEnv(gym.Env):
         self_max_approach = 0.0
         executed_substeps = 0
 
-        external_force = self.mechanical_disturbance.force(self.step_count)
         for _ in range(self.substeps):
-            self._advance_obstacle()
             p.setJointMotorControlArray(
                 self.robot_id,
                 self.robot.joint_ids,
@@ -665,14 +934,14 @@ class ThesisHomotopyEnv(gym.Env):
                 forces=[self.motor_force] * 6,
                 physicsClientId=self.client_id,
             )
-            if self.mechanical_disturbance.enabled:
-                self.mechanical_disturbance.apply(self.robot, self.client_id, external_force)
+            if executed_substeps == 0:
+                observation_to_action_ms = (perf_counter() - self._observation_read_wall_time) * 1000
+            self.physics_step_count += 1
+            self._advance_obstacles()
             p.stepSimulation(physicsClientId=self.client_id)
             executed_substeps += 1
-            geometry = self._geometry()
-            if geometry is not None:
-                max_risk = max(max_risk, geometry.risk_max)
-                min_distance = min(min_distance, geometry.distance_min)
+            if substep_observer is not None:
+                substep_observer()
             self_geometry = self._self_geometry()
             self_max_risk = max(self_max_risk, self_geometry.risk_max)
             self_min_distance = min(self_min_distance, self_geometry.distance_min)
@@ -735,8 +1004,9 @@ class ThesisHomotopyEnv(gym.Env):
             min_distance = 0.80
             max_risk = 0.0
         else:
-            min_distance = min(min_distance, endpoint_geometry.distance_min)
-            max_risk = max(max_risk, endpoint_geometry.risk_max)
+            # Reward and encoded features use this same endpoint sweep query.
+            min_distance = endpoint_geometry.distance_min
+            max_risk = endpoint_geometry.risk_max
         self_min_distance = min(self_min_distance, endpoint_self_geometry.distance_min)
         self_max_risk = max(self_max_risk, endpoint_self_geometry.risk_max)
         self_min_ttc = min(self_min_ttc, endpoint_self_geometry.ttc_min)
@@ -767,6 +1037,8 @@ class ThesisHomotopyEnv(gym.Env):
             terminal_obstacle_collision=obstacle_failure,
             risk_max=max_risk,
             distance_min=min_distance,
+            previous_external_distance=previous_external_distance,
+            obstacle_present=bool(self.obstacles),
             xi=self.contract.xi if self.contract.scene != "none" else 1.0,
             self_risk_max=self_max_risk,
             self_distance_min=self_min_distance,
@@ -794,11 +1066,13 @@ class ThesisHomotopyEnv(gym.Env):
                 **self._self_geometry_info(endpoint_self_geometry),
                 **reward_fields,
                 "reward": reward,
+                "observation_to_action_ms": observation_to_action_ms,
+                "action_obstacle_processing_ms": action_obstacle_processing_ms,
+                "action_execution_s": executed_substeps * self.physics_dt,
                 "hard_penalty": reward_fields["hard_penalty"],
                 "safety_penalty": reward_fields["safety_penalty"],
                 "terminal_guard_penalty": reward_fields["terminal_guard_penalty"],
                 "cost": cost,
-                "external_force_world_n": external_force.copy(),
                 "policy_joint_velocity": policy_command.copy(),
                 "precision_action_scale": precision_action_scale,
                 "scaled_policy_joint_velocity": scaled_policy_command.copy(),
@@ -870,7 +1144,7 @@ class ThesisHomotopyEnv(gym.Env):
                 and np.all(q <= self.robot.joint_upper_limits)
             ):
                 return
-        raise RuntimeError("failed to sample a valid initial joint configuration in 100 attempts")
+        raise ResetSamplingError("failed to sample a valid initial joint configuration in 100 attempts")
 
     def _sample_goal_pose(self) -> None:
         if self.contract.target_distance_min_m is not None:
@@ -933,7 +1207,7 @@ class ThesisHomotopyEnv(gym.Env):
                 self.goal_sample_attempts_last = attempt
                 return
         self._set_joint_state(initial_q, initial_qdot)
-        raise RuntimeError(
+        raise ResetSamplingError(
             "failed to sample a valid pose goal in "
             f"{self.goal_sample_max_attempts} attempts"
         )
@@ -1073,126 +1347,9 @@ class ThesisHomotopyEnv(gym.Env):
                 self.goal_resample_counts[flat_bin] += attempt - 1
             return
         self._set_joint_state(initial_q, initial_qdot)
-        raise RuntimeError(
+        raise ResetSamplingError(
             "failed to sample a valid task-space goal pose in "
             f"{self.goal_sample_max_attempts} attempts"
-        )
-
-    def _create_obstacle(self) -> None:
-        self._disable_obstacle()
-        if self.contract.scene == "none":
-            return
-        blocking_candidates: list[np.ndarray] = []
-        if self.contract.scene == "static" and self.blocking_obstacle_mode:
-            # Build witnesses on the straight joint-space path from reset to
-            # the sampled goal.  A sphere centered on an intermediate capsule
-            # blocks that nominal path while remaining clear of both endpoints.
-            initial_q, initial_qdot = self.robot.joint_state_exact()
-            path_states: list[list[Any]] = []
-            for fraction in np.linspace(0.20, 0.80, 13):
-                self._set_joint_state(
-                    initial_q + float(fraction) * (self.goal_joint_positions - initial_q)
-                )
-                path_states.append(self.robot.capsules())
-            self._set_joint_state(initial_q, initial_qdot)
-            for capsules in path_states:
-                for capsule in capsules:
-                    for candidate in (capsule.start, capsule.end,
-                                      0.5 * (capsule.start + capsule.end)):
-                        candidate = np.asarray(candidate, dtype=np.float32)
-                        if compute_thesis_geometry(
-                                capsules, candidate, np.zeros(3, dtype=np.float32),
-                                self._closest_point_velocities(candidate),
-                                obstacle_radius=self.obstacle_radius,
-                                d_safe=self.d_safe,
-                            ).distance_min <= 0.0:
-                            blocking_candidates.append(candidate)
-            # Keep only witnesses clear of both reset endpoints; otherwise a
-            # deliberately blocking sphere would invalidate the reset itself.
-            self._set_joint_state(self.goal_joint_positions)
-            goal_capsules = self.robot.capsules()
-            self._set_joint_state(initial_q, initial_qdot)
-            initial_capsules = self.robot.capsules()
-            endpoint_candidates: list[np.ndarray] = []
-            for candidate in blocking_candidates:
-                if np.linalg.norm(candidate - self.goal_position) < 0.15:
-                    continue
-                initial_geometry = compute_thesis_geometry(
-                    initial_capsules, candidate, np.zeros(3, dtype=np.float32),
-                    self._closest_point_velocities(candidate),
-                    obstacle_radius=self.obstacle_radius, d_safe=self.d_safe,
-                )
-                goal_geometry = compute_thesis_geometry(
-                    goal_capsules, candidate, np.zeros(3, dtype=np.float32),
-                    self._closest_point_velocities(candidate),
-                    obstacle_radius=self.obstacle_radius, d_safe=self.d_safe,
-                )
-                if (
-                    initial_geometry.distance_min >= self.d_safe
-                    and goal_geometry.distance_min >= self.d_safe
-                ):
-                    endpoint_candidates.append(candidate)
-            blocking_candidates = endpoint_candidates
-            self._set_joint_state(initial_q, initial_qdot)
-            if blocking_candidates:
-                order = self.rng.permutation(len(blocking_candidates))
-                blocking_candidates = [blocking_candidates[int(i)] for i in order]
-        for _ in range(100):
-            if self.contract.scene == "static":
-                if blocking_candidates:
-                    position = blocking_candidates.pop()
-                else:
-                    position = np.asarray(
-                        [
-                            self.rng.uniform(0.22, 0.72),
-                            self.rng.uniform(-0.48, 0.48),
-                            self.rng.uniform(0.18, 0.62),
-                        ],
-                        dtype=np.float32,
-                    )
-                velocity = np.zeros(3, dtype=np.float32)
-                if np.linalg.norm(position - self.goal_position) < 0.15:
-                    continue
-            else:
-                side = -1.0 if self.rng.random() < 0.5 else 1.0
-                position = np.asarray(
-                    [self.rng.uniform(0.22, 0.72), side * self.rng.uniform(0.42, 0.62), self.rng.uniform(0.18, 0.62)],
-                    dtype=np.float32,
-                )
-                waypoint = np.asarray(
-                    [self.rng.uniform(0.22, 0.72), -side * self.rng.uniform(0.24, 0.48), self.rng.uniform(0.18, 0.62)],
-                    dtype=np.float32,
-                )
-                direction = waypoint - position
-                velocity = (self.obstacle_speed * direction / np.linalg.norm(direction)).astype(np.float32)
-            geometry = compute_thesis_geometry(
-                self.robot.capsules(), position, velocity, self._closest_point_velocities(position),
-                obstacle_radius=self.obstacle_radius, d_safe=self.d_safe,
-            )
-            if geometry.distance_min >= self.d_safe:
-                self.obstacle_position = position
-                self.obstacle_velocity = velocity
-                self._create_obstacle_body()
-                p.performCollisionDetection(physicsClientId=self.client_id)
-                if not self._collision_events()["obstacle_collision"]:
-                    return
-                self._disable_obstacle()
-        else:
-            raise RuntimeError("failed to sample a valid obstacle in 100 attempts")
-
-    def _create_obstacle_body(self) -> None:
-        self.obstacle_id = self._obstacle_body_id
-        p.resetBasePositionAndOrientation(
-            self.obstacle_id,
-            self.obstacle_position.tolist(),
-            [0.0, 0.0, 0.0, 1.0],
-            physicsClientId=self.client_id,
-        )
-        p.resetBaseVelocity(
-            self.obstacle_id,
-            linearVelocity=self.obstacle_velocity.tolist(),
-            angularVelocity=[0.0, 0.0, 0.0],
-            physicsClientId=self.client_id,
         )
 
     def episode_state_dict(self) -> dict[str, Any]:
@@ -1219,7 +1376,10 @@ class ThesisHomotopyEnv(gym.Env):
                 None if self.task_space_bin_probabilities is None
                 else self.task_space_bin_probabilities.copy()
             ),
-            "obstacle_position": self.obstacle_position.copy(), "obstacle_velocity": self.obstacle_velocity.copy(),
+            "obstacles": [o.metadata() for o in self.obstacles],
+            "obstacle_sampling": getattr(self, "_scene_sampling", {}).copy(),
+            "physics_step_count": self.physics_step_count,
+            "predictor_history": {} if self.predictor is None else self.predictor.state_dict(),
             "step_count": self.step_count, "obstacle_contact_seen": self.obstacle_contact_seen,
             "success_hold_count": self.success_hold_count,
             "previous_rho_position": self.previous_rho_position,
@@ -1230,6 +1390,9 @@ class ThesisHomotopyEnv(gym.Env):
 
     def restore_episode_state(self, state: dict[str, Any]) -> np.ndarray:
         """Rebuild a boundary state saved after a complete control transition."""
+        self._scene_sampling = state.get("obstacle_sampling", {}).copy()
+        if state["contract"].scene != "none":
+            raise ValueError("only reaching scene none can be restored")
         self.contract = state["contract"]
         self._disable_obstacle()
         self._set_joint_state(state["q"], state["qdot"])
@@ -1274,12 +1437,20 @@ class ThesisHomotopyEnv(gym.Env):
             None if probabilities is None
             else np.asarray(probabilities, dtype=np.float64).copy()
         )
-        self.obstacle_position = np.asarray(state["obstacle_position"], dtype=np.float32)
-        self.obstacle_velocity = np.asarray(state["obstacle_velocity"], dtype=np.float32)
-        if self.contract.scene != "none": self._create_obstacle_body()
         self.step_count = int(state["step_count"])
         self.success_hold_count = int(state.get("success_hold_count", 0))
-        self.obstacle_contact_seen = bool(state["obstacle_contact_seen"])
+        self.obstacle_contact_seen = bool(state.get("obstacle_contact_seen", False))
+        self.physics_step_count = int(state.get("physics_step_count", self.step_count * self.substeps))
+        if state.get("obstacles") and self.obstacles_dynamic and self.predictor is None:
+            raise ValueError("restoring dynamic obstacle scenes requires the matching frozen predictor")
+        for metadata in state.get("obstacles", []):
+            obstacle = MovingObstacle(**metadata)
+            create_body(obstacle, self.client_id)
+            self.obstacles.append(obstacle)
+        self.obstacle_id = self.obstacles[0].body_id if self.obstacles else None
+        if self.predictor is not None:
+            self.predictor.load_state_dict(state.get("predictor_history", {}))
+        self._advance_obstacles()
         self.previous_rho_position = float(state["previous_rho_position"])
         self.previous_rho_orientation = float(state["previous_rho_orientation"])
         saved_keypoint_distance = state.get("previous_keypoint_distance")
@@ -1295,6 +1466,8 @@ class ThesisHomotopyEnv(gym.Env):
 
     def reset_bad_state(self, center: dict[str, Any], contract: dict[str, Any]):
         """Restart a perturbed local state, optionally with a fresh clock."""
+        if self.obstacles_enabled:
+            raise ValueError("bad-state starts are not supported by Full obstacle avoidance")
         self.configure_episode(**contract)
         if self.contract.scene != "none":
             raise ValueError("bad-state starts support obstacle-free S0 only")
@@ -1360,34 +1533,9 @@ class ThesisHomotopyEnv(gym.Env):
             return observation, info
         raise RuntimeError("could not sample a valid perturbed bad-state neighborhood")
 
-    def _advance_obstacle(self) -> None:
-        if self.obstacle_id is None or self.contract.scene != "dynamic":
-            return
-        position = (self.obstacle_position + self.obstacle_velocity * self.physics_dt).astype(np.float32)
-        velocity = self.obstacle_velocity.copy()
-        lows = np.asarray([0.22, -0.62, 0.18], dtype=np.float32)
-        highs = np.asarray([0.72, 0.62, 0.62], dtype=np.float32)
-        for axis in range(3):
-            if position[axis] < lows[axis]:
-                position[axis] = 2.0 * lows[axis] - position[axis]
-                velocity[axis] = abs(velocity[axis])
-            elif position[axis] > highs[axis]:
-                position[axis] = 2.0 * highs[axis] - position[axis]
-                velocity[axis] = -abs(velocity[axis])
-        self.obstacle_position, self.obstacle_velocity = position, velocity
-        p.resetBasePositionAndOrientation(
-            self.obstacle_id,
-            position.tolist(),
-            [0.0, 0.0, 0.0, 1.0],
-            physicsClientId=self.client_id,
-        )
-        p.resetBaseVelocity(
-            self.obstacle_id,
-            linearVelocity=velocity.tolist(),
-            physicsClientId=self.client_id,
-        )
-
     def _observe(self):
+        self._observation_read_wall_time = perf_counter()
+        self._update_external()
         q, qdot = self.robot.joint_state()
         ee_position, ee_quaternion, ee_linear_velocity, ee_angular_velocity = (
             self.robot.end_effector_kinematics()
@@ -1415,35 +1563,22 @@ class ThesisHomotopyEnv(gym.Env):
             ))
         geometry = self._geometry()
         self_geometry = self._self_geometry()
-        # Pose measurements feed the Actor and precision interface. Rewards,
-        # termination, geometry and existing diagnostics retain ground truth.
-        measured_position = self.position_sensor_noise.measure(ee_position, self.step_count)
-        measured_quaternion = self.orientation_sensor_noise.measure(ee_quaternion, self.step_count)
-        if self.position_sensor_noise.enabled or self.orientation_sensor_noise.enabled:
-            measured_position_error, measured_orientation_error = pose_error(
-                self.goal_position, self.goal_quaternion,
-                measured_position, measured_quaternion,
-            )
-        else:
-            measured_position_error, measured_orientation_error = position_error, orientation_error
-        self.measured_position_error_norm = float(np.linalg.norm(measured_position_error))
-        self.measured_orientation_error_norm = float(np.linalg.norm(measured_orientation_error))
         observation = build_thesis_observation(
             q=q,
             qdot=qdot,
             joint_lower=self.robot.joint_lower_limits,
             joint_upper=self.robot.joint_upper_limits,
             joint_velocity_scale=self.qdot_observation_scale,
-            ee_position=measured_position,
-            ee_quaternion=measured_quaternion,
+            ee_position=ee_position,
+            ee_quaternion=ee_quaternion,
             ee_linear_velocity=ee_linear_velocity,
             ee_angular_velocity=ee_angular_velocity,
             ee_linear_velocity_scale=self.ee_linear_velocity_scale,
             ee_angular_velocity_scale=self.ee_angular_velocity_scale,
             goal_position=self.goal_position,
             goal_quaternion=self.goal_quaternion,
-            position_error=measured_position_error,
-            orientation_error=measured_orientation_error,
+            position_error=position_error,
+            orientation_error=orientation_error,
             obstacle_present=self.obstacle_id is not None,
             obstacle_position=self.obstacle_position,
             obstacle_velocity=self.obstacle_velocity,
@@ -1457,12 +1592,15 @@ class ThesisHomotopyEnv(gym.Env):
             keypoint_jacobian=keypoint_jacobian,
             keypoint_jacobian_scale=self.keypoint_jacobian_scale,
         )
+        observation = ObstacleObservation(observation, self._obstacle_features)
         info = {
-            "measured_ee_quaternion": measured_quaternion.copy(),
-            "measured_orientation_error_norm": self.measured_orientation_error_norm,
-            "measured_ee_position": measured_position.copy(),
-            "measured_position_error_norm": self.measured_position_error_norm,
-            "position_sensor_noise_m": (measured_position - ee_position).copy(),
+            "obstacle_count": len(self.obstacles),
+            "obstacle_metadata": [o.metadata() for o in self.obstacles],
+            "obstacle_sampling": getattr(self, "_scene_sampling", {}).copy(),
+            "obstacle_processing_ms": self.obstacle_processing_ms,
+            "simulation_time_s": self.physics_step_count * self.physics_dt,
+            "simulation_advances_during_inference": False,
+            "sweep_risk": 0.0 if geometry is None else geometry.risk_max,
             "goal_position": self.goal_position.copy(),
             "goal_quaternion": self.goal_quaternion.copy(),
             "goal_joint_positions": self.goal_joint_positions.copy(),
@@ -1572,16 +1710,7 @@ class ThesisHomotopyEnv(gym.Env):
         }
 
     def _geometry(self) -> ThesisGeometry | None:
-        if self.obstacle_id is None:
-            return None
-        return compute_thesis_geometry(
-            self.robot.capsules(),
-            self.obstacle_position,
-            self.obstacle_velocity,
-            self._closest_point_velocities(self.obstacle_position),
-            obstacle_radius=self.obstacle_radius,
-            d_safe=self.d_safe,
-        )
+        return self._external_geometry
 
     def _self_geometry(self) -> SelfCollisionGeometry:
         pair_distances, pair_approaches = self._self_pair_geometry()
@@ -1717,16 +1846,6 @@ class ThesisHomotopyEnv(gym.Env):
         angular = np.asarray(state[7], dtype=np.float32)
         return linear + np.cross(angular, np.asarray(world_point) - center_of_mass)
 
-    def _closest_point_velocities(self, obstacle_position: np.ndarray) -> np.ndarray:
-        capsules = self.robot.capsules()
-        velocities = []
-        for capsule, spec in zip(capsules, self.robot.capsule_model.specs):
-            _, fraction = closest_point_on_segment(obstacle_position, capsule.start, capsule.end)
-            start_velocity = self._link_point_velocity(spec.parent_link_name, spec.parent_offset)
-            end_velocity = self._link_point_velocity(spec.child_link_name, spec.child_offset)
-            velocities.append((1.0 - fraction) * start_velocity + fraction * end_velocity)
-        return np.asarray(velocities, dtype=np.float32)
-
     def _link_point_velocity(self, link_name: str, local_offset: np.ndarray) -> np.ndarray:
         link_id = self.robot.capsule_model.link_name_to_id[link_name]
         if link_id < 0:
@@ -1775,16 +1894,6 @@ class ThesisHomotopyEnv(gym.Env):
                 )
 
     def _collision_events(self) -> dict[str, bool]:
-        obstacle_collision = False
-        if self.obstacle_id is not None:
-            obstacle_collision = any(
-                point[8] <= 0.0 and point[3] in self._collision_link_ids
-                for point in p.getContactPoints(
-                    bodyA=self.robot_id,
-                    bodyB=self.obstacle_id,
-                    physicsClientId=self.client_id,
-                )
-            )
         self_collision = False
         order = {link_id: index for index, link_id in enumerate(self._self_link_order)}
         for point in p.getContactPoints(bodyA=self.robot_id, bodyB=self.robot_id, physicsClientId=self.client_id):
@@ -1795,7 +1904,10 @@ class ThesisHomotopyEnv(gym.Env):
                 self_collision = True
                 break
         return {
-            "obstacle_collision": bool(obstacle_collision),
+            "obstacle_collision": any(
+                any(contact[8] <= 0 for contact in p.getContactPoints(
+                    bodyA=self.robot_id, bodyB=o.body_id, physicsClientId=self.client_id))
+                for o in self.obstacles),
             "self_collision": bool(self_collision),
             "environment_collision": False,
         }
@@ -1844,7 +1956,9 @@ class ThesisHomotopyEnv(gym.Env):
             "orientation_tolerance": self.contract.orientation_tolerance,
             "lambda_self": self.contract.lambda_self,
             "terminate_on_success": self.contract.terminate_on_success,
-            "obstacle_enabled": self.obstacle_id is not None,
+            "obstacle_enabled": bool(self.obstacles),
+            "obstacle_count": len(self.obstacles),
+            "obstacle_metadata": [o.metadata() for o in self.obstacles],
             "goal_proposal_counts": self.goal_proposal_counts.copy(),
             "goal_accept_counts": self.goal_accept_counts.copy(),
             "goal_resample_counts": self.goal_resample_counts.copy(),
@@ -1863,7 +1977,7 @@ class ThesisHomotopyEnv(gym.Env):
     @staticmethod
     def _geometry_info(geometry: ThesisGeometry | None) -> dict[str, Any]:
         if geometry is None:
-            return {"risk_body": np.zeros(6, dtype=np.float32), "d_min": 0.80, "risk_global": 0.0}
+            return {"risk_body": np.zeros(4, dtype=np.float32), "d_min": 0.80, "risk_global": 0.0}
         return {
             "risk_body": geometry.risk_per_link.copy(),
             "distance_body": geometry.distances.copy(),

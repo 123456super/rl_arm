@@ -3,6 +3,7 @@ from __future__ import annotations
 import multiprocessing as mp
 import os
 import time
+import traceback
 from multiprocessing.connection import Connection
 from typing import Any, Collection
 
@@ -11,25 +12,59 @@ import numpy as np
 from rl_risk_sac.envs.thesis_homotopy_env import ThesisHomotopyEnv
 
 
-def _environment_class(config: dict[str, Any]):
-    """Select the reduced-observation environment when it is requested.
+_ERROR_MARKER = "__thesis_worker_error__"
 
-    The regular parallel pool is also used by the full and reward/replay
-    ablation trainers. Reduced-observation variants
-    have a separate environment/task implementation because their observation
-    the Base variant is 108D while M3 keeps the full 162D Actor layout with a
-    zero Jacobian slot. Keeping the selection here makes every spawned worker
-    use the same variant as the learner-side environment template.
-    """
-    variant = str(config.get("thesis", {}).get("observation", {}).get(
-        "ablation_variant", "full"
-    ))
-    if variant in {"m3_no_jacobian", "kp_sac"}:
-        from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import (
-            ThesisHomotopyEnv as AblationThesisHomotopyEnv,
+
+class ParallelEnvWorkerError(RuntimeError):
+    """A worker reported its original exception instead of a bare pipe EOF."""
+
+    def __init__(self, index: int, payload: dict[str, Any]) -> None:
+        self.worker_index = index
+        self.command = payload["command"]
+        self.diagnostics = payload.get("diagnostics")
+        self.remote_traceback = payload.get("traceback", "")
+        super().__init__(
+            f"thesis-env-{index} failed during {self.command}: "
+            f"{payload['type']}: {payload['message']}\n{self.remote_traceback}"
         )
-        return AblationThesisHomotopyEnv
-    return ThesisHomotopyEnv
+
+
+def _error_payload(command: str, error: Exception) -> dict[str, Any]:
+    return {
+        _ERROR_MARKER: True, "command": command,
+        "type": type(error).__name__, "message": str(error),
+        "traceback": traceback.format_exc(),
+        "diagnostics": getattr(error, "diagnostics", None),
+    }
+
+
+def _execute(env, command, payload, step_info_keys):
+    if command == "reset":
+        contract, reset_seed = payload
+        env.configure_episode(**contract)
+        return env.reset(seed=reset_seed)
+    if command == "step":
+        profile_started = time.perf_counter() if os.environ.get("THESIS_PROFILE") == "1" else None
+        observation, reward, cost, terminated, truncated, info = env.step(payload)
+        if profile_started is not None:
+            info = dict(info)
+            info["_profile_env_step_s"] = time.perf_counter() - profile_started
+        if step_info_keys is not None:
+            info = {key: info[key] for key in step_info_keys}
+        return observation, reward, cost, terminated, truncated, info
+    if command == "state":
+        return env.episode_state_dict()
+    if command == "pose_crossing_diagnostics":
+        return env.pose_crossing_diagnostics()
+    if command == "restore":
+        return env.restore_episode_state(payload)
+    if command == "reset_bad_state":
+        center, contract = payload
+        return env.reset_bad_state(center, contract)
+    if command == "set_rng":
+        env.rng.bit_generator.state = payload
+        return None
+    raise ValueError(f"unknown parallel environment command {command!r}")
 
 
 def _worker(
@@ -41,51 +76,37 @@ def _worker(
 ) -> None:
     if cpu_id is not None and hasattr(os, "sched_setaffinity"):
         os.sched_setaffinity(0, {int(cpu_id)})
-    env = _environment_class(config)(config)
-    env.rng = np.random.default_rng(seed)
+    env = None
+    command = "initialize"
     try:
+        env = ThesisHomotopyEnv(config)
+        env.rng = np.random.default_rng(seed)
         connection.send(("ready", env.observation_space.shape[0], env.action_space.shape[0]))
+        failure = None
         while True:
             command, payload = connection.recv()
-            if command == "reset":
-                contract, reset_seed = payload
-                env.configure_episode(**contract)
-                observation, info = env.reset(seed=reset_seed)
-                connection.send((observation, info))
-            elif command == "step":
-                profile_started = time.perf_counter() if os.environ.get("THESIS_PROFILE") == "1" else None
-                result = env.step(payload)
-                if profile_started is not None:
-                    observation, reward, cost, terminated, truncated, info = result
-                    info = dict(info)
-                    info["_profile_env_step_s"] = time.perf_counter() - profile_started
-                    result = (observation, reward, cost, terminated, truncated, info)
-                if step_info_keys is not None:
-                    observation, reward, cost, terminated, truncated, info = result
-                    info = {key: info[key] for key in step_info_keys}
-                    result = (
-                        observation, reward, cost, terminated, truncated, info,
-                    )
-                connection.send(result)
-            elif command == "state":
-                connection.send(env.episode_state_dict())
-            elif command == "pose_crossing_diagnostics":
-                connection.send(env.pose_crossing_diagnostics())
-            elif command == "restore":
-                connection.send(env.restore_episode_state(payload))
-            elif command == "reset_bad_state":
-                center, contract = payload
-                connection.send(env.reset_bad_state(center, contract))
-            elif command == "set_rng":
-                env.rng.bit_generator.state = payload
-                connection.send(None)
-            elif command == "close":
+            if command == "close":
                 connection.send(None)
                 break
+            # After an unrecoverable command failure, keep the channel alive
+            # for shutdown/error reporting, but never snapshot a half-reset env.
+            if failure is not None:
+                connection.send(failure)
+                continue
+            try:
+                result = _execute(env, command, payload, step_info_keys)
+            except Exception as error:
+                failure = _error_payload(command, error)
+                connection.send(failure)
             else:
-                raise ValueError(f"unknown parallel environment command {command!r}")
+                connection.send(result)
+    except (EOFError, BrokenPipeError):
+        pass
+    except Exception as error:
+        connection.send(_error_payload(command, error))
     finally:
-        env.close()
+        if env is not None:
+            env.close()
         connection.close()
 
 
@@ -126,7 +147,11 @@ class ParallelThesisEnvPool:
             child.close()
             self.connections.append(parent)
             self.processes.append(process)
-        ready = [connection.recv() for connection in self.connections]
+        try:
+            ready = list(self._recv_many(range(len(self.connections)), "initialize").values())
+        except Exception:
+            self.close()
+            raise
         if any(message[0] != "ready" for message in ready):
             self.close()
             raise RuntimeError(f"parallel environment failed to initialize: {ready}")
@@ -139,6 +164,27 @@ class ParallelThesisEnvPool:
     def __len__(self) -> int:
         return len(self.connections)
 
+    def _recv_many(self, indices, command):
+        results, errors = {}, []
+        # Drain every requested reply before raising. Otherwise another worker's
+        # old reset/step reply could be mistaken for a checkpoint state reply.
+        for index in indices:
+            try:
+                result = self.connections[index].recv()
+            except (EOFError, OSError) as error:
+                errors.append(ParallelEnvWorkerError(index, {
+                    "command": command, "type": type(error).__name__,
+                    "message": f"worker connection lost (exitcode={self.processes[index].exitcode})",
+                }))
+                continue
+            if isinstance(result, dict) and result.get(_ERROR_MARKER) is True:
+                errors.append(ParallelEnvWorkerError(index, result))
+            else:
+                results[index] = result
+        if errors:
+            raise errors[0]
+        return results
+
     def reset_many(
         self, requests: dict[int, dict[str, Any]],
         *, seeds: dict[int, int] | None = None,
@@ -148,7 +194,7 @@ class ParallelThesisEnvPool:
         for index, contract in requests.items():
             reset_seed = None if seeds is None else int(seeds[index])
             self.connections[index].send(("reset", (contract, reset_seed)))
-        return {index: self.connections[index].recv() for index in requests}
+        return self._recv_many(requests, "reset")
 
     def step_many(
         self, actions: dict[int, np.ndarray],
@@ -167,7 +213,7 @@ class ParallelThesisEnvPool:
             )
         for index in selected:
             self.connections[index].send(("pose_crossing_diagnostics", None))
-        return {index: self.connections[index].recv() for index in selected}
+        return self._recv_many(selected, "pose_crossing_diagnostics")
 
     def send_steps(self, actions: dict[int, np.ndarray]) -> None:
         """Start one simulation step on every selected worker without waiting."""
@@ -192,7 +238,7 @@ class ParallelThesisEnvPool:
             raise RuntimeError("no parallel environment step is in flight")
         indices = self._pending_step_indices
         try:
-            return {index: self.connections[index].recv() for index in indices}
+            return self._recv_many(indices, "step")
         finally:
             self._pending_step_indices = None
 
@@ -200,41 +246,41 @@ class ParallelThesisEnvPool:
         selected = list(range(len(self))) if indices is None else list(indices)
         for index in selected:
             self.connections[index].send(("state", None))
-        return {index: self.connections[index].recv() for index in selected}
+        return self._recv_many(selected, "state")
 
     def restore_many(self, states: dict[int, dict[str, Any]]) -> dict[int, np.ndarray]:
         for index, state in states.items():
             self.connections[index].send(("restore", state))
-        return {index: self.connections[index].recv() for index in states}
+        return self._recv_many(states, "restore")
 
     def reset_bad_states_many(self, requests: dict[int, tuple[dict, dict]]):
         for index, request in requests.items():
             self.connections[index].send(("reset_bad_state", request))
-        return {index: self.connections[index].recv() for index in requests}
+        return self._recv_many(requests, "reset_bad_state")
 
     def set_rng_states(self, states: dict[int, dict[str, Any]]) -> None:
         for index, state in states.items():
             self.connections[index].send(("set_rng", state))
-        for index in states:
-            self.connections[index].recv()
+        self._recv_many(states, "set_rng")
 
     def close(self) -> None:
         if self._pending_step_indices is not None:
             try:
                 self.recv_steps()
-            except (BrokenPipeError, EOFError):
+            except (OSError, EOFError, ParallelEnvWorkerError):
                 self._pending_step_indices = None
         for connection, process in zip(self.connections, self.processes):
             if process.is_alive():
                 try:
                     connection.send(("close", None))
-                except (BrokenPipeError, EOFError):
+                except (OSError, EOFError):
                     pass
         for connection, process in zip(self.connections, self.processes):
             if process.is_alive():
                 try:
-                    connection.recv()
-                except (BrokenPipeError, EOFError):
+                    if connection.poll(5.0):
+                        connection.recv()
+                except (OSError, EOFError):
                     pass
             process.join(timeout=5.0)
             if process.is_alive():

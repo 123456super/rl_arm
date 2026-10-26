@@ -34,11 +34,13 @@ from rl_risk_sac.tasks.thesis_reaching import (
     pose_keypoint_offsets_world,
     thesis_observation_dim,
 )
-from rl_risk_sac.tasks.thesis_reaching_reduced_observation import (
-    build_thesis_observation as build_reduced_thesis_observation,
-    thesis_observation_dim as reduced_thesis_observation_dim,
-)
-from rl_risk_sac.utils.config import load_config
+from rl_risk_sac.utils.config import load_config as _load_config
+
+
+def load_config(path):
+    config = _load_config(path)
+    config["thesis"].setdefault("obstacles", {})["enabled"] = False
+    return config
 import scripts.core.train_thesis_homotopy as thesis_trainer
 
 
@@ -93,42 +95,6 @@ def test_bad_state_reset_preserves_clock_contract_and_local_neighborhood():
         env.close()
 
 
-def test_l6_far_timeout_restart_settings_and_balanced_bank():
-    config = load_config(
-        Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_full.yaml"
-    )
-    settings = thesis_trainer.far_timeout_restart_settings(config)
-    assert settings == {
-        "level_index": 6,
-        "minimum_position_bin": 7,
-        "target_transition_fraction": .15,
-        "capacity_per_cell": 8,
-    }
-
-    state = {}
-    for index in range(10):
-        thesis_trainer.add_far_timeout_center(
-            state,
-            {"position_bin": 7, "orientation_bin": 2, "index": index},
-            settings,
-        )
-    thesis_trainer.add_far_timeout_center(
-        state,
-        {"position_bin": 8, "orientation_bin": 4, "index": 10},
-        settings,
-    )
-    assert state["bank_size"] == 9
-    assert state["nonempty_cells"] == 2
-    assert [center["index"] for center in state["cells"]["7:2"]] == list(
-        range(2, 10)
-    )
-    sampled = thesis_trainer.sample_far_timeout_center(
-        state, np.random.default_rng(11001),
-    )
-    assert sampled is not None
-    assert sampled[1] in {"7:2", "8:4"}
-
 
 def test_damped_least_squares_velocity_tracks_twist_and_is_bounded():
     jacobian = np.vstack((np.eye(3), np.eye(3)))
@@ -176,16 +142,16 @@ def test_actor_can_be_frozen_while_fresh_critics_warm_up():
     config["device"] = "cpu"
     config["sac"]["hidden_dims"] = [8, 8]
     config["sac"]["actor_update_interval"] = 1
-    agent = ThesisSACAgent(4, 2, config)
+    agent = ThesisSACAgent(162, 2, config)
     actor_before = {
         key: value.detach().clone() for key, value in agent.actor.state_dict().items()
     }
     batch = Batch(
-        observations=torch.randn(16, 4),
+        observations=torch.randn(16, 162),
         actions=torch.tanh(torch.randn(16, 2)),
         rewards=torch.randn(16, 1),
         costs=torch.zeros(16, 1),
-        next_observations=torch.randn(16, 4),
+        next_observations=torch.randn(16, 162),
         dones=torch.zeros(16, 1),
     )
 
@@ -206,7 +172,7 @@ def test_update_can_skip_diagnostics_without_skipping_critic_update(monkeypatch)
     )
     config["device"] = "cpu"
     config["sac"]["hidden_dims"] = [8, 8]
-    agent = ThesisSACAgent(4, 2, config)
+    agent = ThesisSACAgent(162, 2, config)
     critic_before = {
         key: value.detach().clone() for key, value in agent.q1.state_dict().items()
     }
@@ -218,11 +184,11 @@ def test_update_can_skip_diagnostics_without_skipping_critic_update(monkeypatch)
         ),
     )
     batch = Batch(
-        observations=torch.randn(16, 4),
+        observations=torch.randn(16, 162),
         actions=torch.tanh(torch.randn(16, 2)),
         rewards=torch.randn(16, 1),
         costs=torch.zeros(16, 1),
-        next_observations=torch.randn(16, 4),
+        next_observations=torch.randn(16, 162),
         dones=torch.zeros(16, 1),
     )
 
@@ -247,14 +213,14 @@ def test_chain_pcr_uses_separate_reference_states_and_one_update_lag():
         "hidden_dims": [8, 8], "actor_update_interval": 1,
         "chain_pcr_enabled": True, "chain_pcr_coefficient": 5e-4,
     })
-    agent = ThesisSACAgent(4, 2, config)
+    agent = ThesisSACAgent(162, 2, config)
     batch = Batch(
-        observations=torch.randn(16, 4),
+        observations=torch.randn(16, 162),
         actions=torch.tanh(torch.randn(16, 2)),
         rewards=torch.randn(16, 1), costs=torch.zeros(16, 1),
-        next_observations=torch.randn(16, 4), dones=torch.zeros(16, 1),
+        next_observations=torch.randn(16, 162), dones=torch.zeros(16, 1),
     )
-    reference = torch.randn(16, 4)
+    reference = torch.randn(16, 162)
     first = agent.update(batch, reference_observations=reference)
     second = agent.update(batch, reference_observations=reference)
     assert first["policy_churn_kl"] == pytest.approx(0.0, abs=1e-7)
@@ -289,14 +255,14 @@ def test_chain_pcr_loss_ratio_cap_limits_effective_coefficient():
         "chain_pcr_coefficient": 1e6,
         "chain_pcr_max_loss_ratio": .01,
     })
-    agent = ThesisSACAgent(4, 2, config)
+    agent = ThesisSACAgent(162, 2, config)
     batch = Batch(
-        observations=torch.randn(16, 4),
+        observations=torch.randn(16, 162),
         actions=torch.tanh(torch.randn(16, 2)),
         rewards=torch.randn(16, 1), costs=torch.zeros(16, 1),
-        next_observations=torch.randn(16, 4), dones=torch.zeros(16, 1),
+        next_observations=torch.randn(16, 162), dones=torch.zeros(16, 1),
     )
-    reference = torch.randn(16, 4)
+    reference = torch.randn(16, 162)
     agent.update(batch, reference_observations=reference)
     metrics = agent.update(batch, reference_observations=reference)
     assert metrics["policy_churn_kl"] > 0.0
@@ -318,20 +284,20 @@ def test_auto_chain_pcr_tracks_relative_loss_scale_and_restores_ema():
         "chain_pcr_auto_max_coefficient": 100.0,
         "chain_pcr_max_loss_ratio": .10,
     })
-    agent = ThesisSACAgent(4, 2, config)
+    agent = ThesisSACAgent(162, 2, config)
     batch = Batch(
-        observations=torch.randn(32, 4), actions=torch.tanh(torch.randn(32, 2)),
+        observations=torch.randn(32, 162), actions=torch.tanh(torch.randn(32, 2)),
         rewards=torch.randn(32, 1), costs=torch.zeros(32, 1),
-        next_observations=torch.randn(32, 4), dones=torch.zeros(32, 1),
+        next_observations=torch.randn(32, 162), dones=torch.zeros(32, 1),
     )
-    reference = torch.randn(32, 4)
+    reference = torch.randn(32, 162)
     agent.update(batch, reference_observations=reference)
     metrics = agent.update(batch, reference_observations=reference)
     assert metrics["policy_churn_kl"] > 0.0
     assert 0.0 < metrics["policy_churn_to_sac_ratio"] <= .10
     assert metrics["chain_pcr_sac_loss_ema"] > 0.0
     assert metrics["chain_pcr_loss_ema"] > 0.0
-    restored = ThesisSACAgent(4, 2, config)
+    restored = ThesisSACAgent(162, 2, config)
     restored.load_state_dict(agent.state_dict())
     assert restored.chain_pcr_sac_loss_ema == pytest.approx(
         agent.chain_pcr_sac_loss_ema
@@ -350,7 +316,7 @@ def test_chain_reference_can_be_reset_after_actor_only_initialization():
         "chain_pcr_enabled": True,
         "chain_pcr_coefficient": 5e-4,
     })
-    agent = ThesisSACAgent(4, 2, config)
+    agent = ThesisSACAgent(162, 2, config)
     with torch.no_grad():
         next(agent.actor.parameters()).add_(1.0)
 
@@ -374,14 +340,14 @@ def test_chain_reference_is_initialized_when_resuming_pre_chain_agent():
     )
     config["device"] = "cpu"
     config["sac"]["hidden_dims"] = [8, 8]
-    baseline = ThesisSACAgent(4, 2, config)
+    baseline = ThesisSACAgent(162, 2, config)
     legacy_state = baseline.state_dict()
 
     config["sac"].update({
         "chain_pcr_enabled": True,
         "chain_pcr_coefficient": 5e-4,
     })
-    resumed = ThesisSACAgent(4, 2, config)
+    resumed = ThesisSACAgent(162, 2, config)
     resumed.load_state_dict(legacy_state)
 
     assert resumed.chain_reference_actor is not None
@@ -405,7 +371,7 @@ def test_chain_reference_is_initialized_when_resuming_pre_chain_agent():
 
 
 
-def test_hybrid_keypoint_auto_chain_contract_is_162d():
+def test_hybrid_keypoint_auto_chain_contract_is_241d():
     root = Path(__file__).resolve().parents[2]
     config = load_config(
         root / "configs/experiments/paper_full.yaml"
@@ -451,7 +417,8 @@ def test_retired_observation_and_training_modes_are_rejected():
     config = load_config(
         root / "configs/experiments/paper_full.yaml"
     )
-    assert thesis_observation_dim() == 162
+    assert thesis_observation_dim() == 241
+    thesis_trainer.validate_training_architecture(config)
     for flags in (
         {"keypoint_jacobian_pose": False},
         {"hybrid_explicit_pose_error": False},
@@ -467,6 +434,9 @@ def test_retired_observation_and_training_modes_are_rejected():
         ("reward", "pose_objective", "split_pose"),
         ("reward", "keypoint_pose_reward", False),
         ("sac", "chain_pcr_auto_enabled", False),
+        ("reward", "joint_bottleneck_shaping_scale", 0.0),
+        ("precision_boundary_replay", "enabled", False),
+        ("observation", "jacobian_actor_only", False),
     ):
         old_config = copy.deepcopy(config)
         target = old_config["sac"] if section == "sac" else old_config["thesis"][section]
@@ -747,52 +717,6 @@ def test_success_transition_returns_terminal_observation_before_reset():
         env.close()
 
 
-def test_m3_keeps_zero_jacobian_slot_and_full_actor_dimension():
-    assert reduced_thesis_observation_dim(
-        keypoint_jacobian_pose=False,
-        hybrid_explicit_pose_error=True,
-        ablation_variant="m3_no_jacobian",
-    ) == 162
-    observation = build_reduced_thesis_observation(
-        q=np.zeros(6, dtype=np.float32),
-        qdot=np.zeros(6, dtype=np.float32),
-        joint_lower=-np.ones(6, dtype=np.float32),
-        joint_upper=np.ones(6, dtype=np.float32),
-        joint_velocity_scale=np.ones(6, dtype=np.float32),
-        ee_position=np.zeros(3, dtype=np.float32),
-        ee_quaternion=np.asarray([0., 0., 0., 1.], dtype=np.float32),
-        ee_linear_velocity=np.zeros(3, dtype=np.float32),
-        ee_angular_velocity=np.zeros(3, dtype=np.float32),
-        ee_linear_velocity_scale=1.0,
-        ee_angular_velocity_scale=1.0,
-        goal_position=np.zeros(3, dtype=np.float32),
-        goal_quaternion=np.asarray([0., 0., 0., 1.], dtype=np.float32),
-        position_error=np.zeros(3, dtype=np.float32),
-        orientation_error=np.zeros(3, dtype=np.float32),
-        obstacle_present=False,
-        obstacle_position=np.zeros(3, dtype=np.float32),
-        obstacle_velocity=np.zeros(3, dtype=np.float32),
-        geometry=None,
-        self_geometry=None,
-        keypoint_jacobian_pose=False,
-        hybrid_explicit_pose_error=True,
-        ablation_variant="m3_no_jacobian",
-        keypoint_cube_side_m=0.5,
-        keypoint_error_scale_m=0.65,
-        keypoint_jacobian_scale=1.1,
-    )
-    assert observation.shape == (162,)
-    np.testing.assert_array_equal(observation[21:75], np.zeros(54, dtype=np.float32))
-    config = load_config(
-        Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_m3_no_jacobian.yaml"
-    )
-    config["device"] = "cpu"
-    agent = ThesisSACAgent(162, 6, config)
-    assert agent.actor_obs_dim == 162
-    assert agent.critic_obs_dim == 108
-
-
 def test_keypoint_replay_reward_matches_scalar_and_uses_29_fields():
     parameters = {
         "keypoint_pose_reward": True,
@@ -803,7 +727,7 @@ def test_keypoint_replay_reward_matches_scalar_and_uses_29_fields():
         "joint_bottleneck_temperature": 2.0,
     }
     replay = HomotopyReplayBuffer(
-        162, 6, "cpu", capacities={"none": 8, "static": 8, "dynamic": 8},
+        162, 6, "cpu", capacities={"none": 8},
         s0_anchor_capacity=8, s0_current_capacity=8,
         s0_history_capacity_per_level=4, s0_success_capacity=8,
         reward_parameters=parameters,
@@ -899,7 +823,7 @@ def test_keypoint_reward_statistics_report_density_and_signed_progress():
 
 
 
-def test_obstacle_observation_exposes_each_link_approach_velocity_and_risk():
+def test_obstacle_embedding_placeholder_does_not_expose_retired_features():
     geometry = ThesisGeometry(
         relative_vectors=np.arange(18, dtype=np.float32).reshape(6, 3) / 100.0,
         distances=np.linspace(.05, .10, 6, dtype=np.float32),
@@ -922,11 +846,7 @@ def test_obstacle_observation_exposes_each_link_approach_velocity_and_risk():
         obstacle_velocity=np.asarray([.1, 0., 0.]), geometry=geometry,
         ee_jacobian=np.eye(6),
     )
-    # Approach and risk are the final two
-    # six-link vectors immediately before the presence flag.
-    np.testing.assert_allclose(observation[125:131], geometry.approach_velocities)
-    np.testing.assert_allclose(observation[131:137], geometry.risk_per_link)
-    assert observation[141] == 1.0
+    np.testing.assert_array_equal(observation[89:217], 0.)
 
 
 def test_self_collision_observation_appends_six_link_continuous_features():
@@ -953,10 +873,10 @@ def test_self_collision_observation_appends_six_link_continuous_features():
     )
     assert observation.shape == (THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN,)
     expected_distance = 2.0 * (self_geometry.distances + .02) / .27 - 1.0
-    np.testing.assert_allclose(observation[138:144], expected_distance)
-    np.testing.assert_allclose(observation[144:150], self_geometry.ttc / 3.0)
-    np.testing.assert_allclose(observation[150:156], self_geometry.approach_velocities)
-    np.testing.assert_allclose(observation[156:162], self_geometry.risk_per_link)
+    np.testing.assert_allclose(observation[217:223], expected_distance)
+    np.testing.assert_allclose(observation[223:229], self_geometry.ttc / 3.0)
+    np.testing.assert_allclose(observation[229:235], self_geometry.approach_velocities)
+    np.testing.assert_allclose(observation[235:241], self_geometry.risk_per_link)
     assert np.all(np.abs(observation) <= 1.0)
 
 
@@ -1242,18 +1162,6 @@ def test_clearance_penalty_is_continuous_at_safe_distance():
     assert abs(below - above) < 1e-5
 
 
-def test_curriculum_waits_for_full_window_and_pauses_below_floor():
-    curriculum = HomotopyCurriculum("s1", seed=1, ramp_steps=50000)
-    for _ in range(99): curriculum.finish_episode("static", True, True, 10)
-    assert curriculum.states["static"].eligible_steps == 0
-    curriculum.finish_episode("static", True, True, 10)
-    assert curriculum.states["static"].eligible_steps == 10
-    for _ in range(20): curriculum.finish_episode("static", False, False, 10)
-    frozen = curriculum.states["static"].eligible_steps
-    curriculum.finish_episode("static", False, False, 10)
-    assert curriculum.states["static"].eligible_steps == frozen
-
-
 def test_goal_curriculum_is_success_gated_and_reaches_full_scale():
     curriculum = HomotopyCurriculum(
         "s0", seed=1, goal_start_scale=.03, goal_end_scale=1.0,
@@ -1463,6 +1371,7 @@ def test_v12_joint_pose_curriculum_advances_both_task_tolerances_together():
         orientation_min_transitions_per_level=1,
         orientation_success_window=1, orientation_success_floor=1.0,
         orientation_anchor_window=1, orientation_anchor_floor=1.0,
+        orientation_deterministic_probe_required=True,
         joint_pose_levels=levels,
     )
     assert curriculum.pose_contract() == {
@@ -1471,6 +1380,10 @@ def test_v12_joint_pose_curriculum_advances_both_task_tolerances_together():
     }
     curriculum.record_transition(.03, 0.0)
     curriculum.finish_episode("none", True, True, 1)
+    curriculum.record_orientation_probe(
+        success_rate=1.0, collision_rate=0.0, joint_limit_rate=0.0,
+        passed=True, confirmation_passed=True,
+    )
     assert curriculum.advance_orientation_if_ready()
     assert curriculum.pose_contract() == {
         "goal_scale": .25, "orientation_scale": .5,
@@ -1538,7 +1451,7 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
         "strict_action_scale": .10,
     }
     assert thesis["success_hold_steps"] == 5
-    assert THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN == 162
+    assert THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN == 241
     assert thesis["reward"]["joint_precision_progress_scale"] == 2.0
     assert thesis["reward"]["joint_position_tolerance_m"] == .05
     assert thesis["reward"]["joint_orientation_tolerance_rad"] == .10
@@ -1597,79 +1510,27 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
     assert np.isclose(levels[-1]["target_orientation_max_rad"], np.pi, atol=1e-6)
 
 
-def test_formal_paper_configs_share_frozen_control_reward_and_replay_contracts():
+def test_full_config_preserves_control_reward_and_replay_contracts():
     root = Path(__file__).resolve().parents[2]
-    config_names = {
-        "kp_sac": "paper_kp_sac.yaml",
-        "full": "paper_full.yaml",
-        "m1": "paper_m1_no_bottleneck.yaml",
-        "m2": "paper_m2_no_boundary_replay.yaml",
-        "m3": "paper_m3_no_jacobian.yaml",
+    config = load_config(root / "configs/experiments/paper_full.yaml")
+    thesis = config["thesis"]
+    orientation = thesis["orientation_curriculum"]
+    assert thesis["action_scale"] == .7
+    assert thesis["precision_control"] == {
+        "enabled": True,
+        "min_action_scale": .05,
+        "strict_action_scale": .10,
     }
-    configs = {
-        name: load_config(root / "configs/experiments" / filename)
-        for name, filename in config_names.items()
-    }
-    reference_reward = configs["full"]["thesis"]["reward"]
-    reward_variant_keys = {
-        "joint_bottleneck_shaping_scale",
-        "joint_bottleneck_temperature",
-        "keypoint_precision_reward_scale",
-        "hold_reward_scale",
-        "leave_joint_tolerance_penalty",
-    }
-    public_reward = {
-        key: value for key, value in reference_reward.items()
-        if key not in reward_variant_keys
-    }
-
-    for config in configs.values():
-        thesis = config["thesis"]
-        orientation = thesis["orientation_curriculum"]
-        assert thesis["action_scale"] == .7
-        assert thesis["precision_control"] == {
-            "enabled": True,
-            "min_action_scale": .05,
-            "strict_action_scale": .10,
-        }
-        assert thesis["success_hold_steps"] == 5
-        assert thesis["joint_pose_curriculum"]["cross_level_replay"] is False
-        assert thesis["semantic_long_term_replay"]["enabled"] is False
-        expected_success_fraction = .0 if config is configs["kp_sac"] else .20
-        expected_current_fraction = 1.0 if config is configs["kp_sac"] else .80
-        assert orientation["replay_success_fraction"] == expected_success_fraction
-        assert orientation["replay_current_fraction"] == expected_current_fraction
-        assert orientation["replay_current_intermediate"] == expected_current_fraction
-        assert orientation["replay_current_recovery"] == expected_current_fraction
-        assert {
-            key: value for key, value in thesis["reward"].items()
-            if key not in reward_variant_keys
-        } == public_reward
-        assert thesis["reward"]["joint_bottleneck_temperature"] == 2.0
-
-    weak_reward = configs["kp_sac"]["thesis"]["reward"]
-    assert weak_reward["keypoint_precision_reward_scale"] == 0.0
-    assert weak_reward["hold_reward_scale"] == 0.0
-    assert weak_reward["leave_joint_tolerance_penalty"] == 0.0
-
-    expected_bottleneck = {
-        "kp_sac": 0.0, "full": 5.0, "m1": 0.0, "m2": 5.0, "m3": 5.0,
-    }
-    expected_boundary = {
-        "kp_sac": False, "full": True, "m1": True,
-        "m2": False, "m3": True,
-    }
-    for name, config in configs.items():
-        thesis = config["thesis"]
-        assert thesis["reward"]["joint_bottleneck_shaping_scale"] == (
-            expected_bottleneck[name]
-        )
-        assert thesis["precision_boundary_replay"] == {
-            "enabled": expected_boundary[name],
-            "fraction": .20,
-            "position_boundary_low_ratio": .8,
-            "position_boundary_high_ratio": 1.5,
-        }
+    assert thesis["success_hold_steps"] == 5
+    assert thesis["joint_pose_curriculum"]["cross_level_replay"] is False
+    assert thesis["semantic_long_term_replay"]["enabled"] is False
+    assert orientation["replay_success_fraction"] == .20
+    assert orientation["replay_current_fraction"] == .80
+    assert orientation["replay_current_intermediate"] == .80
+    assert orientation["replay_current_recovery"] == .80
+    assert thesis["reward"]["joint_bottleneck_temperature"] == 2.0
+    assert thesis["reward"]["joint_bottleneck_shaping_scale"] == 5.0
+    assert thesis["precision_boundary_replay"]["enabled"] is True
 
 
 def test_v13_5_precision_curriculum_keeps_restricted_range_and_tightens_only_precision():
@@ -1727,7 +1588,7 @@ def test_v13_5_precision_curriculum_keeps_restricted_range_and_tightens_only_pre
     ]
     assert thesis["reward"]["use_episode_tolerance_for_joint_precision"] is True
     assert thesis["reward"]["partial_precision_reward_scale"] == .10
-    assert orientation["cross_level_probe_enabled"] is True
+    assert orientation["cross_level_probe_enabled"] is False
     adaptive = thesis["joint_pose_curriculum"]["task_space_sampling"]["adaptive"]
     assert adaptive["enabled"] is False
     assert adaptive["beta"] == .60
@@ -1774,80 +1635,6 @@ def test_fixed_orientation_mixture_keeps_full_coverage_and_weights_hard_half():
     assert np.isclose(probabilities.sum(), 1.0)
     assert np.all(probabilities > 0.0)
 
-
-def test_v13_5_cross_level_probe_enforces_previous_precision_gate(monkeypatch):
-    levels = [
-        {
-            "goal_scale": 1.0,
-            "target_distance_min_m": .03,
-            "target_distance_max_m": .70,
-            "target_orientation_min_rad": .03,
-            "target_orientation_max_rad": 3.14,
-            "position_tolerance_m": position_tolerance,
-            "orientation_tolerance_rad": orientation_tolerance,
-        }
-        for position_tolerance, orientation_tolerance in (
-            (.10, .30), (.08, .24), (.064, .192), (.0512, .1536), (.05, .10),
-        )
-    ]
-    config = {
-        "thesis": {
-            "joint_pose_curriculum": {"levels": levels},
-            "orientation_curriculum": {"levels": [0.0, .25, .50, .75, 1.0]},
-        }
-    }
-    current_level = 2
-    curriculum = SimpleNamespace(
-        orientation=SimpleNamespace(level_index=current_level),
-        pose_contract=lambda previous=False: {
-            "goal_scale": 1.0,
-            "orientation_scale": [0.0, .25, .50, .75, 1.0][
-                current_level - int(previous)
-            ],
-            "position_tolerance": levels[current_level - int(previous)][
-                "position_tolerance_m"
-            ],
-            "orientation_tolerance": levels[current_level - int(previous)][
-                "orientation_tolerance_rad"
-            ],
-            "target_distance_min_m": .03,
-            "target_distance_max_m": .70,
-            "target_orientation_min_rad": .03,
-            "target_orientation_max_rad": 3.14,
-        },
-    )
-    settings = {
-        "deterministic_probe_episodes": 100,
-        "deterministic_probe_seed": 31001,
-        "deterministic_probe_success_floor": .85,
-        "deterministic_previous_success_floor": .80,
-        "deterministic_probe_collision_ceiling": .05,
-        "deterministic_previous_collision_ceiling": .05,
-        "deterministic_confirmation_episodes": 100,
-        "deterministic_confirmation_seed": 51001,
-        "cross_level_probe_enabled": True,
-    }
-
-    def probe(*args, **kwargs):
-        tolerance = float(kwargs["position_tolerance"])
-        success = .70 if np.isclose(tolerance, .08) else .90
-        return {
-            "success_rate": success,
-            "collision_rate": 0.0,
-            "joint_limit_rate": 0.0,
-        }
-
-    monkeypatch.setattr(thesis_trainer, "run_deterministic_pose_probe", probe)
-    result = thesis_trainer.run_pose_promotion_probe(
-        object(), config, curriculum, settings,
-    )
-
-    assert set(result["cross_level"]) == {"P1", "P2", "P3", "P4", "P5"}
-    assert result["current"]["success_rate"] == pytest.approx(.90)
-    assert result["previous"] is result["cross_level"]["P2"]
-    assert result["previous"]["success_rate"] == pytest.approx(.70)
-    assert result["retention_passed"]
-    assert result["passed"]
 
 
 def test_adaptive_task_space_sampling_mixes_uniform_coverage_with_probe_scores():
@@ -1905,53 +1692,54 @@ def test_actor_migration_warmup_is_relative_to_inherited_stage_total():
     assert thesis_trainer.actor_updates_enabled(counters)
 
 
-def test_v13_5_previous_level_probe_blocks_confirmation_and_promotion(monkeypatch):
-    curriculum = SimpleNamespace(
-        orientation=SimpleNamespace(level_index=1),
-        pose_contract=lambda previous=False: {"previous": previous},
-    )
-    settings = {
-        "deterministic_probe_episodes": 50,
-        "deterministic_probe_seed": 31001,
-        "deterministic_probe_success_floor": .80,
-        "deterministic_previous_success_floor": .95,
-        "deterministic_probe_collision_ceiling": .02,
-        "deterministic_previous_collision_ceiling": .02,
-        "deterministic_confirmation_episodes": 200,
-        "deterministic_confirmation_seed": 51001,
-    }
 
-    def metrics(success):
+@pytest.mark.parametrize(
+    "screen_rates,confirmation_rates,expected",
+    [
+        ([.90, .90, .90], [.90, .90, .90], True),
+        ([1.0, 1.0, .79], None, False),
+        ([.90, .90, .90], [.84, .84, .84], False),
+    ],
+)
+def test_full_promotion_uses_three_seed_screen_and_confirmation(
+    monkeypatch, screen_rates, confirmation_rates, expected,
+):
+    config = load_config(
+        Path(__file__).resolve().parents[2]
+        / "configs/experiments/paper_full.yaml"
+    )
+    settings = config["thesis"]["orientation_curriculum"]
+    contract = {"goal_scale": 1.0, "orientation_scale": .5}
+    curriculum = SimpleNamespace(pose_contract=lambda: contract)
+    rates = iter(screen_rates + (confirmation_rates or []))
+    calls = []
+
+    def probe(agent, cfg, **kwargs):
+        assert cfg is config
+        calls.append(kwargs)
         return {
-            "success_rate": success, "collision_rate": 0.0,
-            "joint_limit_rate": 0.0,
+            "success_rate": next(rates), "collision_rate": .2,
+            "joint_limit_rate": .1, "timeout_rate": .2,
         }
 
-    calls = iter((metrics(.90), metrics(.90), metrics(.90), metrics(.90)))
-    monkeypatch.setattr(
-        thesis_trainer, "run_deterministic_pose_probe",
-        lambda *args, **kwargs: next(calls),
+    monkeypatch.setattr(thesis_trainer, "run_deterministic_pose_probe", probe)
+    result = thesis_trainer.run_pose_promotion_probe(
+        None, config, curriculum, settings,
     )
-    failed = thesis_trainer.run_pose_promotion_probe(
-        None, {}, curriculum, settings,
-    )
-    assert failed["screen_passed"]
-    assert failed["confirmation_current"] is not None
-    assert failed["passed"]
-    assert failed["retention_passed"]
-
-    calls = iter((metrics(.90), metrics(1.0), metrics(.85), metrics(.95)))
-    monkeypatch.setattr(
-        thesis_trainer, "run_deterministic_pose_probe",
-        lambda *args, **kwargs: next(calls),
-    )
-    passed = thesis_trainer.run_pose_promotion_probe(
-        None, {}, curriculum, settings,
-    )
-    assert passed["screen_passed"]
-    assert passed["confirmation_passed"]
-    assert passed["retention_passed"]
-    assert passed["passed"]
+    expected_calls = [
+        dict(contract, episodes=300, seed=seed)
+        for seed in [31001, 31002, 31003]
+    ]
+    if confirmation_rates is not None:
+        expected_calls += [
+            dict(contract, episodes=1000, seed=seed)
+            for seed in [31001, 31002, 31003]
+        ]
+    assert calls == expected_calls
+    assert result["passed"] is expected
+    assert result["previous"] is None
+    assert result["cross_level"] == {}
+    assert result["confirmation_passed"] is expected
 
 
 def test_v13_5_pose_probe_allows_residual_collision_at_configured_ceiling(monkeypatch):
@@ -1977,8 +1765,8 @@ def test_v13_5_pose_probe_allows_residual_collision_at_configured_ceiling(monkey
         }
 
     calls = iter((
-        metrics(.98, .02), metrics(1.0, .0),
-        metrics(.98, .02), metrics(.995, .005),
+        metrics(.98, .02), metrics(1.0, .0), metrics(.98, .02),
+        metrics(.98, .02), metrics(.995, .005), metrics(1.0, .0),
     ))
     monkeypatch.setattr(
         thesis_trainer, "run_deterministic_pose_probe",
@@ -2036,48 +1824,6 @@ def test_manual_checkpoint_probe_records_result_without_mutating_curriculum(monk
     assert orientation.current_level_steps == 100000
     assert result["retention_passed"]
 
-
-def test_v12_5_probe_separates_retention_warning_from_recovery(monkeypatch):
-    curriculum = SimpleNamespace(
-        orientation=SimpleNamespace(level_index=1),
-        pose_contract=lambda previous=False: {"previous": previous},
-    )
-    settings = {
-        "deterministic_probe_episodes": 50,
-        "deterministic_probe_seed": 31001,
-        "deterministic_probe_success_floor": .80,
-        "deterministic_previous_success_floor": .95,
-        "deterministic_probe_collision_ceiling": .05,
-        "deterministic_previous_collision_ceiling": .05,
-        "deterministic_confirmation_episodes": 200,
-        "deterministic_confirmation_seed": 51001,
-        "retention_recovery_success_floor": .90,
-        "retention_recovery_collision_ceiling": .05,
-    }
-
-    def metrics(success, collision=0.0):
-        return {
-            "success_rate": success, "collision_rate": collision,
-            "joint_limit_rate": 0.0,
-        }
-
-    calls = iter((metrics(.90), metrics(.94), metrics(.90), metrics(.94)))
-    monkeypatch.setattr(
-        thesis_trainer, "run_deterministic_pose_probe",
-        lambda *args, **kwargs: next(calls),
-    )
-    warning = thesis_trainer.run_pose_promotion_probe(
-        None, {}, curriculum, settings,
-    )
-    assert warning["retention_passed"]
-    assert not warning["recovery_required"]
-
-    calls = iter((metrics(.90), metrics(.88), metrics(.90), metrics(.88)))
-    severe = thesis_trainer.run_pose_promotion_probe(
-        None, {}, curriculum, settings,
-    )
-    assert severe["retention_passed"]
-    assert not severe["recovery_required"]
 
 
 def test_v13_5_best_probe_prioritizes_gate_feasibility_over_raw_success():
@@ -2214,7 +1960,7 @@ def test_legacy_probe_scores_are_not_reused_by_serial_protocol():
 
 def test_s0_replay_reserves_anchor_current_and_historical_pose_samples():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 600, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 600},
         seed=7, s0_anchor_fraction=.25, s0_current_fraction=.50,
         s0_anchor_capacity=200, s0_current_capacity=200,
         s0_history_capacity_per_level=100,
@@ -2228,13 +1974,13 @@ def test_s0_replay_reserves_anchor_current_and_historical_pose_samples():
             )
             episode += 1
     replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, 256, orientation_scale=.8,
+        "s0", {}, 256, orientation_scale=.8,
     )
     assert replay.last_orientation_sample_counts == {
         "anchor": 64, "current": 128, "historical": 64,
     }
     replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, 256, orientation_scale=.8,
+        "s0", {}, 256, orientation_scale=.8,
         s0_anchor_fraction=.50, s0_current_fraction=.35,
     )
     assert replay.last_orientation_sample_counts == {
@@ -2252,7 +1998,7 @@ def test_s0_replay_reserves_anchor_current_and_historical_pose_samples():
 def test_formal_pose_replay_never_samples_a_previous_precision_level():
     replay = HomotopyReplayBuffer(
         2, 1, "cpu",
-        capacities={"none": 32, "static": 1, "dynamic": 1},
+        capacities={"none": 32},
         seed=71,
         s0_anchor_fraction=0.0,
         s0_current_fraction=0.8,
@@ -2280,7 +2026,7 @@ def test_formal_pose_replay_never_samples_a_previous_precision_level():
 
     assert replay.has_training_batch("s0", batch_size=4, update_after=4)
     batch = replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, batch_size=4,
+        "s0", {}, batch_size=4,
         curriculum_level=1, s0_anchor_fraction=0.0,
         s0_current_fraction=0.8,
     )
@@ -2292,7 +2038,7 @@ def test_formal_pose_replay_never_samples_a_previous_precision_level():
 
 def test_s0_replay_history_survives_many_current_level_overwrites_and_restore():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 20, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 20},
         seed=17, s0_anchor_capacity=10, s0_current_capacity=20,
         s0_history_capacity_per_level=6,
     )
@@ -2313,7 +2059,7 @@ def test_s0_replay_history_survives_many_current_level_overwrites_and_restore():
         "historical_levels": {"0.2": 6, "0.5": 6},
     }
     replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, 16,
+        "s0", {}, 16,
         orientation_scale=.75, s0_anchor_fraction=.25,
         s0_current_fraction=.50,
     )
@@ -2321,7 +2067,7 @@ def test_s0_replay_history_survives_many_current_level_overwrites_and_restore():
         "anchor": 4, "current": 8, "historical": 4,
     }
     restored = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 1, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 1},
         s0_anchor_capacity=1, s0_current_capacity=1,
         s0_history_capacity_per_level=1,
     )
@@ -2332,7 +2078,7 @@ def test_s0_replay_history_survives_many_current_level_overwrites_and_restore():
 
 def test_s0_replay_level_advance_before_anchor_episode_archives_current_level():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 20, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 20},
         seed=23, s0_anchor_capacity=20, s0_current_capacity=20,
         s0_history_capacity_per_level=6,
     )
@@ -2358,7 +2104,7 @@ def test_s0_replay_level_advance_before_anchor_episode_archives_current_level():
     }
 
     replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, 16,
+        "s0", {}, 16,
         orientation_scale=.4, s0_anchor_fraction=.25,
         s0_current_fraction=.50,
     )
@@ -2369,7 +2115,7 @@ def test_s0_replay_level_advance_before_anchor_episode_archives_current_level():
 
 def test_v12_3_replay_reserves_success_recent_and_previous_samples():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 400, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 400},
         seed=29, s0_joint_pose=True, s0_success_fraction=.30,
         s0_anchor_fraction=.35, s0_current_fraction=.35,
         s0_current_capacity=300, s0_success_capacity=100,
@@ -2402,7 +2148,7 @@ def test_v12_3_replay_reserves_success_recent_and_previous_samples():
         "current_success": 40,
     }
     batch = replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, 100, orientation_scale=.2,
+        "s0", {}, 100, orientation_scale=.2,
     )
     assert replay.last_orientation_sample_counts == {
         "anchor": 30, "current": 35, "historical": 35,
@@ -2410,7 +2156,7 @@ def test_v12_3_replay_reserves_success_recent_and_previous_samples():
     }
     assert 30 < int(batch.protected_mask.sum()) <= 65
     batch = replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, 100,
+        "s0", {}, 100,
         orientation_scale=.2, s0_anchor_fraction=.50,
         s0_current_fraction=.20,
     )
@@ -2447,7 +2193,7 @@ def test_v13_2_success_replay_warms_up_by_independent_episode_count(
     successful_episodes, expected_fraction, expected_samples,
 ):
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 400, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 400},
         seed=37, s0_joint_pose=True, s0_success_fraction=.30,
         s0_success_schedule={
             "low_start_episodes": 5,
@@ -2476,7 +2222,7 @@ def test_v13_2_success_replay_warms_up_by_independent_episode_count(
     assert replay.current_success_episode_count == successful_episodes
     assert replay.effective_s0_success_fraction == expected_fraction
     replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, 100,
+        "s0", {}, 100,
         orientation_scale=.2,
     )
     assert replay.last_orientation_sample_counts["current_success"] == expected_samples
@@ -2485,7 +2231,7 @@ def test_v13_2_success_replay_warms_up_by_independent_episode_count(
 
 def test_precision_boundary_replay_balances_live_error_strata():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 400, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 400},
         seed=39, s0_joint_pose=True, s0_success_fraction=0.0,
         s0_anchor_fraction=0.0, s0_current_fraction=1.0,
         s0_current_capacity=400, s0_success_capacity=10,
@@ -2536,7 +2282,7 @@ def test_precision_boundary_replay_balances_live_error_strata():
     assert len(current_rows) == len(set(current_rows)) == 100
 
     restored = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 1, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 1},
         seed=40, s0_joint_pose=True,
     )
     restored.load_state_dict(replay.state_dict())
@@ -2548,7 +2294,7 @@ def test_precision_boundary_replay_balances_live_error_strata():
 
 def test_precision_boundary_replay_excludes_stable_success_terminal():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 8, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 8},
         seed=73, s0_joint_pose=True, s0_success_fraction=0.0,
         s0_anchor_fraction=0.0, s0_current_fraction=1.0,
         s0_current_capacity=8, s0_success_capacity=8,
@@ -2576,7 +2322,7 @@ def test_precision_boundary_replay_excludes_stable_success_terminal():
 
 def test_precision_boundary_replay_excludes_all_rows_of_successful_episode():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 8, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 8},
         seed=74, s0_joint_pose=True, s0_success_fraction=0.2,
         s0_anchor_fraction=0.0, s0_current_fraction=0.8,
         s0_current_capacity=8, s0_success_capacity=8,
@@ -2617,7 +2363,7 @@ def test_precision_boundary_replay_excludes_all_rows_of_successful_episode():
 
 def test_precision_boundary_membership_uses_current_not_next_state():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 8, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 8},
         seed=79, s0_joint_pose=True, s0_success_fraction=0.0,
         s0_anchor_fraction=0.0, s0_current_fraction=1.0,
         s0_current_capacity=8, s0_success_capacity=8,
@@ -2653,7 +2399,7 @@ def test_precision_boundary_membership_uses_current_not_next_state():
 
 def test_semantic_long_term_replay_balances_bins_and_survives_restore():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 200, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 200},
         seed=41, s0_joint_pose=True, s0_success_fraction=0.0,
         s0_anchor_fraction=0.0, s0_current_fraction=1.0,
         s0_current_capacity=200, s0_success_capacity=10,
@@ -2686,14 +2432,14 @@ def test_semantic_long_term_replay_balances_bins_and_survives_restore():
     assert storage["semantic_long_term_episodes"] == 8
     assert storage["semantic_long_term_transitions"] == 16
     replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, 16,
+        "s0", {}, 16,
         orientation_scale=.5,
     )
     assert replay.last_orientation_sample_counts["semantic_long_term"] == 8
     assert replay.last_orientation_sample_counts["current_recent"] == 8
 
     restored = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 1, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 1},
         s0_joint_pose=True, s0_success_fraction=0.0,
         s0_anchor_fraction=0.0, s0_current_fraction=1.0,
         s0_current_capacity=1, s0_success_capacity=1,
@@ -2702,13 +2448,13 @@ def test_semantic_long_term_replay_balances_bins_and_survives_restore():
     restored.configure_semantic_long_term(**settings)
     assert restored.orientation_storage_counts() == replay.orientation_storage_counts()
     restored.sample(
-        "s0", {"static": .02, "dynamic": .02}, 16,
+        "s0", {}, 16,
         orientation_scale=.5,
     )
     assert restored.last_orientation_sample_counts["semantic_long_term"] == 8
 
     promoted = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 1, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 1},
         s0_joint_pose=True, s0_success_fraction=0.0,
         s0_anchor_fraction=0.0, s0_current_fraction=1.0,
         s0_current_capacity=1, s0_success_capacity=1,
@@ -2732,7 +2478,7 @@ def test_semantic_long_term_replay_balances_bins_and_survives_restore():
 
 def test_semantic_long_term_replay_survives_precision_only_level_change():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 20, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 20},
         seed=59, s0_joint_pose=True, s0_success_fraction=0.0,
         s0_anchor_fraction=0.0, s0_current_fraction=1.0,
         s0_current_capacity=20, s0_success_capacity=4,
@@ -2774,7 +2520,7 @@ def test_semantic_long_term_replay_survives_precision_only_level_change():
 
 def test_semantic_long_term_replay_keeps_lowest_final_pose_error():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 20, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 20},
         seed=73, s0_joint_pose=True, s0_success_fraction=0.0,
         s0_anchor_fraction=0.0, s0_current_fraction=1.0,
         s0_current_capacity=20, s0_success_capacity=4,
@@ -2808,7 +2554,7 @@ def test_semantic_long_term_replay_keeps_lowest_final_pose_error():
 
 def test_replay_preserves_self_geometry_and_relabels_current_self_weight():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 1, "static": 1, "dynamic": 1}, seed=11,
+        2, 1, "cpu", capacities={"none": 1}, seed=11,
     )
     info = _transition_info()
     info.update({
@@ -2820,10 +2566,10 @@ def test_replay_preserves_self_geometry_and_relabels_current_self_weight():
     })
     replay.add("none", np.zeros(2), np.zeros(1), np.ones(2), False, info, 1, 0)
     low = replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, batch_size=1, lambda_self=.02,
+        "s0", {}, batch_size=1, lambda_self=.02,
     )
     strict = replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, batch_size=1, lambda_self=1.0,
+        "s0", {}, batch_size=1, lambda_self=1.0,
     )
     assert replay.s0_current.raw.shape[1] == 29
     np.testing.assert_allclose(replay.s0_current.raw[0, 17:22], [.6, .002, .6, .3, .01])
@@ -2894,13 +2640,13 @@ def test_vectorized_replay_reward_matches_scalar_contract(parameters):
 
 def test_replay_preserves_and_recomputes_timeout_penalty():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 1, "static": 1, "dynamic": 1}, seed=31,
+        2, 1, "cpu", capacities={"none": 1}, seed=31,
     )
     info = _transition_info(orientation_scale=0.0)
     info["timeout"] = True
     replay.add("none", np.zeros(2), np.zeros(1), np.ones(2), True, info, 1, 239)
     batch = replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, batch_size=1,
+        "s0", {}, batch_size=1,
         orientation_scale=0.0,
     )
     expected, fields = homotopy_reward(
@@ -2923,7 +2669,7 @@ def test_replay_reward_relabel_uses_each_transition_curriculum_tolerances():
         "joint_orientation_tolerance": .10,
     }
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 2, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 2},
         seed=47, s0_joint_pose=True, s0_anchor_fraction=0.0,
         s0_current_fraction=1.0, s0_success_fraction=0.0,
         reward_parameters=reward_parameters,
@@ -2943,7 +2689,7 @@ def test_replay_reward_relabel_uses_each_transition_curriculum_tolerances():
     )
 
     batch = replay.sample(
-        "s0", {"static": .02, "dynamic": .02}, batch_size=1,
+        "s0", {}, batch_size=1,
         orientation_scale=.50, curriculum_level=2,
     )
     expected, _ = homotopy_reward(
@@ -3011,7 +2757,6 @@ def test_self_safety_ramp_starts_after_pose_phase_and_restores_from_state():
         restored.record_transition(1.0, 1.0)
     restored.finish_episode("none", True, True, 5)
     assert restored.lambda_self == 1.0
-    assert HomotopyCurriculum("s1", **kwargs).lambda_self == 1.0
 
 
 def test_self_safety_completion_uses_nonzero_collision_ceiling():
@@ -3078,32 +2823,6 @@ def test_parallel_episode_uses_safety_phase_state_captured_at_reset():
     assert curriculum.self_safety.full_weight_steps == 5
 
 
-def test_stage_transition_inherits_task_and_completed_static_state_by_copy():
-    source = HomotopyCurriculum("s0")
-    source.goal.scale = source.goal.end
-    source.orientation.scale = source.orientation.end
-    source.self_safety.weight = source.self_safety.end
-    source.states["static"].strict = True
-    source.states["static"].replay_strictified = True
-    source.states["static"].strict_steps = 25000
-
-    s1 = HomotopyCurriculum("s1")
-    s1.inherit_task_state(source.state_dict())
-    assert s1.goal.scale == 1.0
-    assert s1.orientation.scale == 1.0
-    assert s1.lambda_self == 1.0
-    assert not s1.states["static"].strict
-    source.goal.scale = .03
-    assert s1.goal.scale == 1.0
-
-    s2 = HomotopyCurriculum("s2")
-    s2.inherit_task_state(s1.state_dict())
-    s2.inherit_scene_state(source.state_dict(), "static")
-    assert s2.states["static"].strict
-    assert s2.states["static"].replay_strictified
-    assert s2.states["static"].strict_steps == 25000
-
-
 def test_self_safety_ramp_freezes_when_full_pose_retention_drops():
     curriculum = HomotopyCurriculum(
         "s0", goal_levels=[.03, 1.0], goal_min_transitions_per_level=1,
@@ -3150,7 +2869,7 @@ def test_self_safety_ramp_freezes_when_full_pose_retention_drops():
 
 def test_archived_pose_levels_are_sampled_round_robin():
     replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 600, "static": 1, "dynamic": 1},
+        2, 1, "cpu", capacities={"none": 600},
         seed=19, s0_anchor_capacity=100, s0_current_capacity=120,
         s0_history_capacity_per_level=20,
     )
@@ -3239,50 +2958,6 @@ def test_filtered_self_pair_query_matches_whole_body_query():
         env.close()
 
 
-def test_strictification_keeps_first_contact_and_drops_post_contact():
-    replay = HomotopyReplayBuffer(2, 1, "cpu", capacities={"none": 10, "static": 10, "dynamic": 10})
-    for step, (before, after) in enumerate(((False, False), (False, True), (True, True))):
-        replay.add("static", np.zeros(2), np.zeros(1), np.ones(2), False,
-                   _transition_info(before, after, reached=step == 2), 7, step)
-    report = replay.strictify("static"); part = replay.parts["static"]
-    assert report["removed"] == 1 and part.size == 2
-    assert part.done[1, 0] == 1.0
-    assert part.raw[1, 5] == 0.0
-    assert report["sha256_before"] != report["sha256_after"]
-
-
-def test_strictified_replay_applies_bounded_collision_penalty_to_first_contact():
-    replay = HomotopyReplayBuffer(
-        2, 1, "cpu", capacities={"none": 1, "static": 1, "dynamic": 1}, seed=3,
-    )
-    info = _transition_info(contact_before=False, contact_after=True)
-    replay.add("static", np.zeros(2), np.zeros(1), np.ones(2), False, info, 1, 0)
-    replay.strictify("static")
-    batch = replay.sample("s1", {"static": 1.0, "dynamic": .02}, batch_size=1)
-    strict_reward, fields = homotopy_reward(
-        rho_position=.4, next_rho_position=.3, rho_orientation=.2,
-        next_rho_orientation=.1, smooth_velocity=.5, velocity_magnitude=.25,
-        orientation_scale=1.0, task_reached=False,
-        hard_failure=False, obstacle_collision=True, terminal_obstacle_collision=True,
-        risk_max=.6, distance_min=.1, xi=1.0,
-    )
-    assert fields["terminal_guard_penalty"] == 20.0
-    assert strict_reward >= -20.1
-    assert batch.dones.item() == 1.0
-    assert np.isclose(batch.rewards.item(), strict_reward)
-
-
-def test_s1_sampling_uses_64_192_partition_contract():
-    replay = HomotopyReplayBuffer(2, 1, "cpu", capacities={"none": 300, "static": 300, "dynamic": 300})
-    for scene in ("none", "static"):
-        for episode in range(220):
-            replay.add(scene, np.zeros(2), np.zeros(1), np.ones(2), False,
-                       _transition_info(), episode, 0)
-    batch = replay.sample("s1", {"static": .02, "dynamic": .02}, 256)
-    assert batch.observations.shape[0] == 256
-    assert replay.last_sample_counts == {"none": 64, "static": 192, "dynamic": 0}
-
-
 def test_sampled_goal_passes_pose_ik_fk_round_trip():
     root = Path(__file__).resolve().parents[2]
     config = load_config(root / "configs/experiments/paper_full.yaml")
@@ -3313,21 +2988,20 @@ def test_sampled_goal_passes_pose_ik_fk_round_trip():
         env.close()
 
 
-def test_repeated_reset_reuses_robot_and_obstacle_bodies():
+def test_repeated_reaching_reset_reuses_only_robot_body():
     root = Path(__file__).resolve().parents[2]
     config = load_config(root / "configs/experiments/paper_full.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         robot_id = env.robot_id
-        obstacle_body_id = env._obstacle_body_id
         body_count = p.getNumBodies(physicsClientId=env.client_id)
-        for scene, seed in (("none", 71), ("static", 72), ("dynamic", 73), ("none", 74)):
-            env.configure_episode(scene, xi=1.0, strict=True)
+        assert body_count == 1
+        for seed in (71, 72, 73, 74):
+            env.configure_episode("none", xi=1.0, strict=True)
             env.reset(seed=seed)
             assert env.robot_id == robot_id
-            assert env._obstacle_body_id == obstacle_body_id
             assert p.getNumBodies(physicsClientId=env.client_id) == body_count
-            assert (env.obstacle_id is None) == (scene == "none")
+            assert env.obstacle_id is None
     finally:
         env.close()
 
@@ -3340,7 +3014,7 @@ def test_reused_environment_reset_matches_fresh_environment_for_fixed_seed():
     try:
         for env in (reused, fresh):
             env.configure_episode(
-                "static", xi=.25, strict=False, goal_scale=.25,
+                "none", xi=1.0, strict=True, goal_scale=.25,
                 orientation_scale=.4, position_tolerance=.08,
                 orientation_tolerance=.7, lambda_self=.1,
             )
@@ -3453,6 +3127,8 @@ def test_parallel_promotion_probe_restores_training_worker_state():
         "deterministic_probe_episodes": 2,
         "deterministic_probe_seed": 31001,
         "deterministic_probe_success_floor": 0.0,
+        "deterministic_probe_min_seed_success_floor": 0.0,
+        "deterministic_success_only": True,
         "deterministic_previous_success_floor": .95,
         "deterministic_probe_collision_ceiling": .02,
         "deterministic_previous_collision_ceiling": .02,
@@ -3717,67 +3393,6 @@ def test_v13_task_space_sampling_balances_distance_orientation_cells():
             counts[position_bin, orientation_bin] += 1
         assert counts.sum() == 200
         np.testing.assert_array_equal(counts, np.full((2, 2), 50))
-    finally:
-        env.close()
-
-
-def test_real_pybullet_contacts_are_covered_by_capsule_distance_and_risk():
-    root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
-    env = ThesisHomotopyEnv(config)
-    try:
-        env.configure_episode("static", xi=1.0, strict=True)
-        env.reset(seed=20260917)
-        for capsule in env.robot.capsules():
-            center = .5 * (capsule.start + capsule.end)
-            axis = capsule.end - capsule.start
-            if np.linalg.norm(axis) <= 1e-8:
-                perpendicular = np.asarray([1.0, 0.0, 0.0])
-            else:
-                axis = axis / np.linalg.norm(axis)
-                basis = np.eye(3)[int(np.argmin(np.abs(axis)))]
-                perpendicular = np.cross(axis, basis)
-                perpendicular = perpendicular / np.linalg.norm(perpendicular)
-
-            def move_obstacle(position):
-                env.obstacle_position = np.asarray(position, dtype=np.float32)
-                env.obstacle_velocity.fill(0.0)
-                p.resetBasePositionAndOrientation(
-                    env.obstacle_id, position.tolist(), [0.0, 0.0, 0.0, 1.0],
-                    physicsClientId=env.client_id,
-                )
-                p.performCollisionDetection(physicsClientId=env.client_id)
-                return env._collision_events()["obstacle_collision"]
-
-            candidates = [
-                perpendicular, -perpendicular,
-                np.asarray([1.0, 0.0, 0.0]), np.asarray([-1.0, 0.0, 0.0]),
-                np.asarray([0.0, 1.0, 0.0]), np.asarray([0.0, -1.0, 0.0]),
-                np.asarray([0.0, 0.0, 1.0]), np.asarray([0.0, 0.0, -1.0]),
-            ]
-            directions = []
-            for direction in candidates:
-                if any(np.allclose(direction, selected) for selected in directions):
-                    continue
-                if not move_obstacle(center + .6 * direction):
-                    directions.append(direction)
-                if len(directions) == 2:
-                    break
-            assert len(directions) == 2, capsule.name
-            for direction in directions:
-                assert move_obstacle(center), capsule.name
-                low, high = 0.0, 0.6
-                for _ in range(24):
-                    middle = .5 * (low + high)
-                    if move_obstacle(center + middle * direction):
-                        low = middle
-                    else:
-                        high = middle
-                assert move_obstacle(center + low * direction), capsule.name
-                geometry = env._geometry()
-                assert geometry is not None
-                assert geometry.distance_min < env.d_safe, capsule.name
-                assert geometry.risk_max >= .79, capsule.name
     finally:
         env.close()
 

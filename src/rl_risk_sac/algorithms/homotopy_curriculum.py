@@ -10,6 +10,8 @@ import numpy as np
 
 @dataclass
 class SceneHomotopy:
+    """Legacy pickle schema retained for loading historical S0 checkpoints."""
+
     xi: float
     floor: float
     strict: bool = False
@@ -90,7 +92,7 @@ class SelfSafetyCurriculum:
 
 
 class HomotopyCurriculum:
-    """Episode-level S0/S1/S2 mixture and gated safety continuation."""
+    """Reaching precision curriculum with gated self-safety continuation."""
 
     def __init__(
         self,
@@ -137,8 +139,8 @@ class HomotopyCurriculum:
         self_full_weight_min_steps: int = 25000,
         self_probe_collision_ceiling: float = 0.01,
     ) -> None:
-        if stage not in {"s0", "s1", "s2"}:
-            raise ValueError("stage must be s0, s1 or s2")
+        if stage not in {"s0", "s1", "s2", "s3"}:
+            raise ValueError("unsupported curriculum stage")
         self.stage, self.ramp_steps = stage, int(ramp_steps)
         self.rng = np.random.default_rng(seed)
         if not 0.0 <= self_start_weight <= self_end_weight <= 1.0:
@@ -152,7 +154,7 @@ class HomotopyCurriculum:
         self.self_full_weight_min_steps = int(self_full_weight_min_steps)
         self.self_probe_collision_ceiling = float(self_probe_collision_ceiling)
         self.self_safety = SelfSafetyCurriculum(
-            weight=float(self_start_weight if stage == "s0" else self_end_weight),
+            weight=float(self_start_weight),
             start=float(self_start_weight),
             end=float(self_end_weight),
             ramp_steps=int(self_ramp_steps),
@@ -233,7 +235,7 @@ class HomotopyCurriculum:
             if not 0.0 <= anchor_fraction < 1.0 or not 0.0 <= current_fraction <= 1.0 - anchor_fraction:
                 raise ValueError("invalid adaptive replay fractions")
         self.goal_full_scale_min_steps = int(goal_full_scale_min_steps)
-        initial_goal_index = 0 if stage == "s0" else len(levels) - 1
+        initial_goal_index = 0
         initial_goal_scale = levels[initial_goal_index]
         self.goal = GoalCurriculum(
             scale=float(initial_goal_scale),
@@ -245,7 +247,7 @@ class HomotopyCurriculum:
             min_transitions_per_level=int(goal_min_transitions_per_level),
             outcomes=deque(maxlen=int(goal_success_window)),
         )
-        initial_orientation_index = 0 if stage == "s0" else len(orientation_levels_tuple) - 1
+        initial_orientation_index = 0
         initial_orientation_scale = orientation_levels_tuple[initial_orientation_index]
         self.orientation = OrientationCurriculum(
             scale=float(initial_orientation_scale),
@@ -349,14 +351,11 @@ class HomotopyCurriculum:
             self.goal.start = goal_scales[0]
             self.goal.end = goal_scales[-1]
             self.goal.scale = goal_scales[index]
-        self.probabilities = {"s0": [1, 0, 0], "s1": [.25, .75, 0], "s2": [.20, .30, .50]}[stage]
-        self.states = {
-            "static": SceneHomotopy(1.0 if stage == "s2" else .02, .90, strict=stage == "s2", replay_strictified=stage == "s2"),
-            "dynamic": SceneHomotopy(.02, .80),
-        }
+        self.probabilities = [1.0]
+        self.states = {}
 
     def choose_scene(self) -> str:
-        return str(self.rng.choice(["none", "static", "dynamic"], p=self.probabilities))
+        return "none"
 
     def choose_orientation_anchor(self) -> bool:
         """Rehearse the previous joint-pose level while learning a harder one."""
@@ -364,12 +363,12 @@ class HomotopyCurriculum:
             if "target_distance_max_m" in self.joint_pose_levels[0]:
                 return False
             return bool(
-                self.stage == "s0"
+                self.stage in {"s0", "s1", "s2", "s3"}
                 and self.orientation.level_index > 0
                 and self.rng.random() < self.orientation_anchor_probability
             )
         return bool(
-            self.stage == "s0"
+            self.stage in {"s0", "s1", "s2", "s3"}
             and self.position_phase_complete
             and self.orientation.scale > self.orientation.start
             and self.rng.random() < self.orientation_anchor_probability
@@ -493,7 +492,7 @@ class HomotopyCurriculum:
         if self.joint_pose_levels and self.orientation.level_index >= len(self.orientation.levels) - 1:
             return False
         # `minimum_full_pose_steps` is retained for checkpoint compatibility,
-        # but ablation promotion no longer imposes a hidden warm-up budget.
+        # but promotion no longer imposes a hidden warm-up budget.
         # The first probe cannot advance a level until the online and anchor
         # windows pass, so running it earlier only burns evaluation episodes.
         task_space_curriculum = bool(
@@ -585,8 +584,8 @@ class HomotopyCurriculum:
         """Activate a harder S0 pose level after an explicit human decision."""
         target_level = int(target_level)
         current_level = int(self.orientation.level_index)
-        if self.stage != "s0":
-            raise ValueError("manual pose promotion is only valid in S0")
+        if self.stage not in {"s0", "s1", "s2", "s3"}:
+            raise ValueError("manual pose promotion is not valid for this stage")
         if target_level <= current_level:
             raise ValueError(
                 f"target level L{target_level} must be above current L{current_level}"
@@ -630,7 +629,9 @@ class HomotopyCurriculum:
         self.orientation.recovery_mode = False
 
     def contract(self, scene: str) -> tuple[float, bool]:
-        return (1.0, True) if scene == "none" else (self.states[scene].xi, self.states[scene].strict)
+        if scene != "none":
+            raise ValueError("only reaching scene none is supported")
+        return 1.0, True
 
     @property
     def goal_scale(self) -> float:
@@ -817,7 +818,7 @@ class HomotopyCurriculum:
         curriculum_eligible: bool = True,
     ) -> None:
         """Count position and full-pose consolidation from their actual contracts."""
-        if self.stage != "s0" or not curriculum_eligible:
+        if self.stage not in {"s0", "s1", "s2", "s3"} or not curriculum_eligible:
             return
         if self.joint_pose_levels:
             if np.isclose(float(goal_scale), self.goal.scale, rtol=0.0, atol=1e-12):
@@ -883,7 +884,7 @@ class HomotopyCurriculum:
                 >= self.orientation.anchor_floor
             )
         return bool(
-            self.stage == "s0"
+            self.stage in {"s0", "s1", "s2", "s3"}
             and self.goal_at_full_scale
             and self.goal.full_scale_steps >= int(minimum_goal_full_scale_steps)
             and self.orientation_at_full_scale
@@ -906,28 +907,14 @@ class HomotopyCurriculum:
             )
         )
 
-    def scene_stage_complete(self, scene: str, minimum_strict_steps: int) -> bool:
-        """Return whether a formal obstacle stage may hand off its checkpoint."""
-        if scene not in {"static", "dynamic"}:
-            raise ValueError("scene must be 'static' or 'dynamic'")
-        state = self.states[scene]
-        return bool(
-            state.strict
-            and state.replay_strictified
-            and int(state.strict_steps) >= int(minimum_strict_steps)
-        )
-
     def stage_complete(
         self, minimum_goal_full_scale_steps: int,
-        minimum_pose_full_scale_steps: int, minimum_strict_steps: int,
+        minimum_pose_full_scale_steps: int,
     ) -> bool:
-        """Formal completion contract for the active serial stage."""
-        if self.stage == "s0":
-            return self.s0_goal_gate_eligible(
-                minimum_goal_full_scale_steps, minimum_pose_full_scale_steps,
-            )
-        scene = "static" if self.stage == "s1" else "dynamic"
-        return self.scene_stage_complete(scene, minimum_strict_steps)
+        """Completion contract for reaching and self-safety."""
+        return self.s0_goal_gate_eligible(
+            minimum_goal_full_scale_steps, minimum_pose_full_scale_steps,
+        )
 
     def finish_episode(
         self, scene: str, position_reached: bool, task_reached: bool, transitions: int,
@@ -936,9 +923,11 @@ class HomotopyCurriculum:
         pose_phase_complete_at_start: bool | None = None,
         self_weight_full_at_start: bool | None = None,
     ) -> dict[str, Any]:
+        if scene != "none":
+            raise ValueError("only reaching scene none is supported")
         goal_rate = None
         orientation_rate = None
-        if self.stage == "s0":
+        if self.stage in {"s0", "s1", "s2", "s3"}:
             if self.joint_pose_levels:
                 current_episode_full_steps = (
                     0 if orientation_anchor or not self.orientation_at_full_scale
@@ -1071,40 +1060,8 @@ class HomotopyCurriculum:
                 "orientation_tolerance": self.orientation_tolerance,
                 "lambda_self": self.lambda_self,
             }
-        state = self.states[scene]; was_strict = state.strict; state.outcomes.append(bool(task_reached))
-        rate = float(np.mean(state.outcomes))
-        became = False
-        if not state.strict and len(state.outcomes) == 100 and rate >= state.floor:
-            state.eligible_steps += int(transitions)
-            old = state.xi
-            state.xi = min(1.0, .02 + .98 * state.eligible_steps / self.ramp_steps)
-            if old < 1.0 and state.xi >= 1.0:
-                state.strict = True; became = True
-        if was_strict:
-            state.strict_steps += int(transitions)
-        return {
-            "became_strict": became,
-            "rolling_task_reach_rate": rate,
-            "rolling_goal_success_rate": goal_rate,
-            "rolling_orientation_success_rate": orientation_rate,
-            "goal_scale": self.goal.scale,
-            "orientation_scale": self.orientation.scale,
-            "orientation_tolerance": self.orientation_tolerance,
-            "lambda_self": self.lambda_self,
-            "xi": state.xi,
-            "strict": state.strict,
-        }
-
     def xi_map(self) -> dict[str, float]:
         return {name: state.xi for name, state in self.states.items()}
-
-    def inherit_task_state(self, previous: dict[str, Any]) -> None:
-        """Carry the completed S0 task and self-safety contract into S1/S2."""
-        self.goal = copy.deepcopy(previous["goal"])
-        self.orientation = copy.deepcopy(previous["orientation"])
-        self.joint_pose_levels = tuple(copy.deepcopy(previous.get("joint_pose_levels", ())))
-        self._refresh_precision_only_task_space()
-        self.self_safety = copy.deepcopy(previous["self_safety"])
 
     def _refresh_precision_only_task_space(self) -> None:
         self.precision_only_task_space = False
@@ -1125,12 +1082,6 @@ class HomotopyCurriculum:
             for level in self.joint_pose_levels[1:]
         )
 
-    def inherit_scene_state(self, previous: dict[str, Any], scene: str) -> None:
-        """Carry one completed scene curriculum without replacing stage policy."""
-        if scene not in self.states or scene not in previous["states"]:
-            raise ValueError(f"cannot inherit unknown scene {scene!r}")
-        self.states[scene] = copy.deepcopy(previous["states"][scene])
-
     def state_dict(self) -> dict[str, Any]:
         return {"stage": self.stage, "ramp_steps": self.ramp_steps, "probabilities": self.probabilities,
                 "goal_full_scale_min_steps": self.goal_full_scale_min_steps,
@@ -1147,7 +1098,8 @@ class HomotopyCurriculum:
         configured_goal = copy.deepcopy(self.goal)
         configured_orientation = copy.deepcopy(self.orientation)
         configured_pose_levels = copy.deepcopy(self.joint_pose_levels)
-        self.ramp_steps = state["ramp_steps"]; self.probabilities = state["probabilities"]
+        self.ramp_steps = state["ramp_steps"]
+        self.probabilities = [1.0]
         self.goal_full_scale_min_steps = int(state["goal_full_scale_min_steps"])
         self.orientation_full_scale_min_steps = int(
             state["orientation_full_scale_min_steps"]
@@ -1261,5 +1213,5 @@ class HomotopyCurriculum:
             self.joint_pose_levels = tuple(configured_pose_levels)
         self._refresh_precision_only_task_space()
         self.self_safety = copy.deepcopy(state["self_safety"])
-        self.states = copy.deepcopy(state["states"])
+        self.states = {}
         self.rng.bit_generator.state = state["rng_state"]

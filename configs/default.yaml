@@ -1,4 +1,4 @@
-# 默认配置入口。训练、评估和 smoke test 仍然只需要传这个文件。
+# Full 配置共用的基础参数；训练和评估使用 experiments/paper_full.yaml。
 # includes 按顺序加载，后面的文件会覆盖前面的同名字段；本文件自身的字段优先级最高。
 includes:
   - robot/ur5.yaml

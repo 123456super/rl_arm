@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the single, parallel frozen-policy evaluation for V13.5."""
+"""Run the single Full predictive-avoidance frozen-policy evaluation."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import argparse
 import copy
 import hashlib
 import json
-import multiprocessing as mp
 import os
 from pathlib import Path
 import sys
@@ -50,6 +49,9 @@ MOTION_METRICS = (
 )
 
 EVALUATION_INFO_KEYS = (
+    "obstacle_count", "obstacle_metadata", "obstacle_sampling", "obstacle_processing_ms",
+    "action_obstacle_processing_ms",
+    "observation_to_action_ms", "action_execution_s", "simulation_time_s",
     "rho_orientation",
     "next_rho_orientation",
     "control_self_min_distance",
@@ -66,6 +68,9 @@ EVALUATION_INFO_KEYS = (
     "keypoint_precision_quality",
     "keypoint_precision_reward",
     "joint_bottleneck_shaping_reward",
+    "goal_obstacle_coupling_reward",
+    "goal_obstacle_potential",
+    "next_goal_obstacle_potential",
     "keypoint_progress",
     "jacobian_clip_ratio",
 )
@@ -163,39 +168,11 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _evaluation_backend(config: dict, variant: str):
-    """Select the environment/probe implementation from one eval entrypoint."""
-    if variant == "auto":
-        configured = str(
-            config.get("thesis", {}).get("observation", {}).get(
-                "ablation_variant", ""
-            )
-        ).lower()
-        variant = "reduced" if (
-            configured in {"m3_no_jacobian", "kp_sac"}
-        ) else "standard"
-    if variant == "reduced":
-        from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import ThesisHomotopyEnv
-        from scripts.core.train_thesis_homotopy_reduced_observation import (
-            run_deterministic_pose_probe, run_parallel_deterministic_pose_probe,
-        )
-    else:
-        from rl_risk_sac.envs.thesis_homotopy_env import ThesisHomotopyEnv
-        from scripts.core.train_thesis_homotopy import (
-            run_deterministic_pose_probe, run_parallel_deterministic_pose_probe,
-        )
-    return ThesisHomotopyEnv, run_deterministic_pose_probe, run_parallel_deterministic_pose_probe, variant
-
-
-def main(default_variant: str = "auto") -> None:
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Parallel frozen-policy evaluation for a V13.5 checkpoint"
+        description="Parallel frozen-policy evaluation for a Full avoidance checkpoint"
     )
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument(
-        "--variant", choices=("auto", "standard", "reduced"), default=default_variant,
-        help="evaluation backend; auto infers reduced keypoint observations from the config",
-    )
     parser.add_argument(
         "--config", default="configs/experiments/paper_full.yaml"
     )
@@ -208,32 +185,12 @@ def main(default_variant: str = "auto") -> None:
                         help="override the evaluation episode horizon (default: config horizon)")
     parser.add_argument("--seed", type=int, default=31001)
     parser.add_argument(
-        "--position-noise-std-mm", type=float, default=0.0,
-        help="IID Gaussian end-effector position measurement noise, per-axis std in mm",
-    )
-    parser.add_argument("--external-force-n", type=float, default=0.0,
-                        help="physical tool force magnitude in N, random world direction")
-    parser.add_argument("--force-interval-s", type=float, default=0.25)
-    parser.add_argument("--disturbance-seed", type=int, default=72001)
-    parser.add_argument("--sensor-noise-seed", type=int, default=71001)
-    parser.add_argument(
-        "--orientation-noise-std-rad", type=float, default=0.0,
-        help="world-frame SO(3) noise, std of each Gaussian rotation-vector component in rad",
-    )
-    parser.add_argument(
         "--checkpoint-config", action="store_true",
         help="use the resolved config saved in a complete checkpoint",
     )
     parser.add_argument(
-        "--scene", choices=("auto", "none", "static", "dynamic"), default="auto",
-        help="auto maps complete S0/S1/S2 checkpoints to none/static/dynamic",
-    )
-    parser.add_argument(
-        "--blocking-obstacles", action="store_true",
-        help=(
-            "for static evaluation, place the sphere on intermediate capsules "
-            "of the straight reset-to-goal path"
-        ),
+        "--scene", choices=("auto", "avoidance", "none"), default="auto",
+        help="auto/avoidance uses the mixed obstacle distribution; none forces N=0",
     )
     parser.add_argument("--device", choices=("cpu", "cuda:auto"), default="cpu")
     parser.add_argument(
@@ -253,18 +210,8 @@ def main(default_variant: str = "auto") -> None:
         parser.error("--max-episode-steps must be positive")
     if args.num_envs < 0:
         parser.error("--num-envs must be non-negative")
-    if not np.isfinite(args.position_noise_std_mm) or args.position_noise_std_mm < 0:
-        parser.error("--position-noise-std-mm must be finite and nonnegative")
-    if not np.isfinite(args.orientation_noise_std_rad) or args.orientation_noise_std_rad < 0:
-        parser.error("--orientation-noise-std-rad must be finite and nonnegative")
-    if not np.isfinite(args.external_force_n) or args.external_force_n < 0:
-        parser.error("--external-force-n must be finite and nonnegative")
-    if not np.isfinite(args.force_interval_s) or args.force_interval_s <= 0:
-        parser.error("--force-interval-s must be finite and positive")
-    if args.disturbance_seed < 0:
-        parser.error("--disturbance-seed must be nonnegative")
-    if args.seed < 0 or args.sensor_noise_seed < 0:
-        parser.error("evaluation and noise seeds must be nonnegative")
+    if args.seed < 0:
+        parser.error("evaluation seed must be nonnegative")
     output = Path(args.output)
     if not output.is_absolute():
         output = ROOT / output
@@ -287,6 +234,11 @@ def main(default_variant: str = "auto") -> None:
         checkpoint_path = ROOT / checkpoint_path
     started = time.perf_counter()
     state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    checkpoint_stage = None
+    if isinstance(state, dict) and "curriculum" in state:
+        checkpoint_stage = state["curriculum"].get("stage")
+    if checkpoint_stage not in (None, "s0", "s1", "s2", "s3"):
+        parser.error("checkpoint stage must be one of s0, s1, s2 or s3")
     if args.checkpoint_config:
         if not isinstance(state, dict) or "config" not in state:
             parser.error("--checkpoint-config requires a checkpoint containing config")
@@ -296,21 +248,35 @@ def main(default_variant: str = "auto") -> None:
     source_config_sha256 = hashlib.sha256(json.dumps(
         config, sort_keys=True, default=_json_default,
     ).encode()).hexdigest()
-    ThesisHomotopyEnv, run_deterministic_pose_probe, run_parallel_deterministic_pose_probe, variant = _evaluation_backend(config, args.variant)
+    from rl_risk_sac.envs.thesis_homotopy_env import ThesisHomotopyEnv
+    from scripts.core.train_thesis_homotopy import (
+        apply_stage_profile,
+        run_deterministic_pose_probe, run_parallel_deterministic_pose_probe,
+    )
     config["device"] = args.device
-    config["thesis"]["evaluation_sensor_noise"] = {
-        "position_std_m": args.position_noise_std_mm / 1000.0,
-        "orientation_std_rad": args.orientation_noise_std_rad,
-        "seed": args.sensor_noise_seed,
-    }
-    config["thesis"]["evaluation_mechanical_disturbance"] = {
-        "force_n": args.external_force_n,
-        "interval_s": args.force_interval_s,
-        "seed": args.disturbance_seed,
-    }
-    config["thesis"]["blocking_obstacle_mode"] = bool(args.blocking_obstacles)
     if args.max_episode_steps is not None:
         config["thesis"]["horizon"] = args.max_episode_steps
+    if args.scene == "auto":
+        evaluation_scene = "none" if checkpoint_stage in (None, "s0") else "avoidance"
+    else:
+        evaluation_scene = args.scene
+    if evaluation_scene == "none":
+        # S0 evaluation must be genuinely obstacle-free, even when a complete
+        # checkpoint was saved with an obstacle-enabled stage configuration.
+        config["thesis"]["obstacles"]["enabled"] = False
+        config["thesis"]["obstacles"]["dynamic"] = False
+        config["thesis"]["obstacles"]["count_probabilities"] = [1., 0., 0., 0.]
+    elif not bool(config["thesis"].get("obstacles", {}).get("enabled", False)):
+        # An actor-only checkpoint has no embedded config.  When the caller
+        # supplies the base paper config, recover the matching stage profile
+        # from the complete checkpoint metadata before constructing workers.
+        if checkpoint_stage in ("s1", "s2", "s3"):
+            apply_stage_profile(config, checkpoint_stage)
+        if not bool(config["thesis"].get("obstacles", {}).get("enabled", False)):
+            parser.error(
+                "avoidance evaluation requires an obstacle-enabled stage config "
+                "or --checkpoint-config from an S1/S2/S3 checkpoint"
+            )
     env = ThesisHomotopyEnv(config)
     try:
         agent = ThesisSACAgent(
@@ -321,16 +287,10 @@ def main(default_variant: str = "auto") -> None:
     finally:
         env.close()
 
-    checkpoint_stage = None
-    if isinstance(state, dict) and "curriculum" in state:
-        checkpoint_stage = state["curriculum"].get("stage")
-    scene = args.scene
-    if scene == "auto":
-        scene = {"s0": "none", "s1": "static", "s2": "dynamic"}.get(
-            checkpoint_stage, "none"
-        )
-    if args.blocking_obstacles and scene != "static":
-        parser.error("--blocking-obstacles is only supported for static evaluation")
+    # The reaching environment deliberately keeps its episode contract scene
+    # as "none"; obstacle presence is controlled by thesis.obstacles.  Keep a
+    # separate reported scene so the evaluation metadata reflects reality.
+    scene = "none"
     level_index = args.level_index
     if level_index is None and isinstance(state, dict) and "curriculum" in state:
         orientation = state["curriculum"].get("orientation")
@@ -373,14 +333,9 @@ def main(default_variant: str = "auto") -> None:
         )
     else:
         worker_seeds = [args.seed + 1000000 + index for index in range(num_envs)]
-        # CPU-only evaluation can safely fork after the temporary construction
-        # environment has closed.  This avoids importing PyTorch and PyBullet
-        # again in every worker.  CUDA retains spawn semantics.
-        start_method = (
-            "fork"
-            if args.device == "cpu" and "fork" in mp.get_all_start_methods()
-            else "spawn"
-        )
+        # LSTM inference initializes PyTorch thread pools in the parent.
+        # Fresh interpreters avoid inheriting those locks in CPU workers.
+        start_method = "spawn"
         with ParallelThesisEnvPool(
             config, worker_seeds, cpu_ids=cpu_ids,
             step_info_keys=EVALUATION_INFO_KEYS,
@@ -398,10 +353,13 @@ def main(default_variant: str = "auto") -> None:
             "collision": float(settings["deterministic_probe_collision_ceiling"]),
             "timeout": 0.05,
         },
-        "static": {"success": 0.90, "collision": 0.03, "timeout": 0.10},
-        "dynamic": {"success": 0.80, "collision": 0.05, "timeout": 0.20},
+        "avoidance": {
+            "success": float(settings["deterministic_probe_success_floor"]),
+            "collision": float(settings["deterministic_probe_collision_ceiling"]),
+            "timeout": float(settings.get("deterministic_probe_timeout_ceiling", 0.05)),
+        },
     }
-    threshold = thresholds[scene]
+    threshold = thresholds[evaluation_scene]
     metrics.update({
         "checkpoint": os.path.relpath(checkpoint_path, ROOT),
         "checkpoint_sha256": file_sha256(checkpoint_path),
@@ -410,31 +368,19 @@ def main(default_variant: str = "auto") -> None:
         "training_seed": config.get("seed"),
         "position_tolerance_m": contract["position_tolerance"],
         "orientation_tolerance_rad": contract["orientation_tolerance"],
-        "sensor_noise": {
-            **config["thesis"]["evaluation_sensor_noise"],
-            "model": "iid_world_frame_translation_and_left_SO3_rotation_vector_gaussian",
-            "precision_scaling_uses_measured_position": True,
-            "precision_scaling_uses_measured_orientation": True,
-            "metrics_use_ground_truth": True,
-            "orientation_measurement": "left_SO3_noise" if args.orientation_noise_std_rad else "exact",
-            "joint_measurements_and_model_jacobian": "exact",
-        },
-        "mechanical_disturbance": {
-            **config["thesis"]["evaluation_mechanical_disturbance"],
-            "model": "piecewise_constant_fixed_magnitude_isotropic_world_force",
-            "application_point": "current_tool_origin",
-            "application_rate_hz": 1.0 / float(config["thesis"]["physics_dt"]),
-            "measurements": "exact" if not (args.position_noise_std_mm or args.orientation_noise_std_rad) else "noisy",
-        },
+        "measurements": "exact",
         "level_index": level_index,
-        "scene": scene,
+        "scene": evaluation_scene,
+        "checkpoint_stage": checkpoint_stage,
+        "obstacles_enabled": bool(config["thesis"].get("obstacles", {}).get("enabled", False)),
+        "obstacles_dynamic": bool(config["thesis"].get("obstacles", {}).get("dynamic", False)),
         "episodes": args.episodes,
         "max_episode_steps": int(config["thesis"]["horizon"]),
         "seed": args.seed,
         "num_envs": num_envs,
         "worker_start_method": start_method if num_envs > 1 else None,
         "worker_cpu_ids": cpu_ids,
-        "evaluation_variant": variant,
+        "evaluation_variant": "full",
         "elapsed_seconds": time.perf_counter() - started,
         "success_floor": threshold["success"],
         "bin_success_floor": float(settings["deterministic_probe_bin_success_floor"]),

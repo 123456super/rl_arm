@@ -1,4 +1,4 @@
-Full method: KP-SAC plus Jacobian, bottleneck shaping, and precision-boundary replay.
+# Full: Hybrid Keypoint + Actor-only Jacobian + Auto-PCR + bottleneck shaping + precision-boundary replay.
 includes:
 - ../default.yaml
 - paper_auto_promotion_protocol.yaml
@@ -7,10 +7,72 @@ device: cuda:auto
 robot:
   tool_link_name: wrist_3_link
 thesis:
-  protocol: task_space_precision_curriculum_hybrid_keypoint_jacobian_auto_chain_pcr
+  protocol: full_predictive_obstacle_avoidance_v1
+  obstacles:
+    enabled: false
+    dynamic: false
+    predictor_checkpoint: outputs/obstacle_predictor/predictor.pt
+    count_probabilities: [0.1, 0.4, 0.3, 0.2]
+    workspace_low: [-0.85, -0.85, 0.05]
+    workspace_high: [0.85, 0.85, 1.1]
+    max_scene_attempts: 256
+    lambda_ext: 0.05
+    # Initial engineering values; calibrate/freeze before formal experiments.
+    risk:
+      d_safe: 0.025
+      d_cut: 0.10
+      tau: 0.02
+      phi_max: 5.0
   stage: s0
+  # The precision curriculum L0-L13 is reused in every obstacle stage.
+  # Stage profiles only change the obstacle distribution and are applied by
+  # train_thesis_homotopy.py before environments and replay are created.
+  stage_profiles:
+    s0:
+      obstacles:
+        path_sampling:
+          enabled: false
+        enabled: false
+        dynamic: false
+        count_probabilities: [1.0, 0.0, 0.0, 0.0]
+    s1:
+      promotion_obstacles_only: true
+      obstacles:
+        enabled: true
+        dynamic: false
+        count_probabilities: [0.20, 0.80, 0.0, 0.0]
+        motion_modes: [constant]
+        path_sampling:
+          enabled: true
+          # Unconditional episode probabilities: none / far / near / blocking.
+          probabilities: [0.20, 0.15, 0.15, 0.50]
+          joint_resolution_rad: 0.02
+          max_goal_attempts: 16
+          # Retry exhausted batches without redrawing the band or semantic cell.
+          max_sampling_batches: 8
+          rrt_extension_rad: 0.15
+          rrt_iterations: 400
+          rrt_max_checks: 4000
+    s2:
+      obstacles:
+        path_sampling:
+          enabled: false
+        enabled: true
+        dynamic: true
+        count_probabilities: [0.20, 0.65, 0.15, 0.0]
+        motion_modes: [constant]
+        speed_range: [0.04, 0.10]
+    s3:
+      obstacles:
+        path_sampling:
+          enabled: false
+        enabled: true
+        dynamic: true
+        count_probabilities: [0.10, 0.40, 0.30, 0.20]
+        motion_modes: [constant, accelerate, decelerate, stop, reverse]
+        speed_range: [0.04, 0.22]
   physics_dt: 0.004166666666666667
-  control_dt: 0.0333333333
+  control_dt: 0.05
   horizon: 500
   action_scale: 0.7
   qdot_observation_scale: 0.8
@@ -22,36 +84,28 @@ thesis:
   ee_linear_velocity_scale: 0.55
   ee_angular_velocity_scale: 1.5
   joint_motor_force: 90.0
-  obstacle_radius: 0.075
-  obstacle_speed: 0.1
-  d_safe: 0.05
+  d_safe: 0.025
   position_tolerance: 0.05
   orientation_tolerance: 0.1
   goal_sample_max_attempts: 10000
-  ramp_steps: 50000
-  strict_min_transitions: 25000
   serial_stages:
     s0:
-      purpose: reaching
+      purpose: predictive_obstacle_avoidance
       scene_probabilities:
         none: 1.0
-        static: 0.0
-        dynamic: 0.0
-      completion: final_p5_probe_and_p4_retention_plus_self_safety
     s1:
-      purpose: static_obstacle_avoidance
+      purpose: static_obstacle_reaching
       scene_probabilities:
-        none: 0.25
-        static: 0.75
-        dynamic: 0.0
-      completion: static_strict_replay_and_25000_strict_transitions
+        none: 1.0
     s2:
-      purpose: dynamic_obstacle_avoidance
+      purpose: simple_dynamic_obstacle_reaching
       scene_probabilities:
-        none: 0.2
-        static: 0.3
-        dynamic: 0.5
-      completion: dynamic_strict_replay_and_25000_strict_transitions
+        none: 1.0
+    s3:
+      purpose: full_dynamic_obstacle_avoidance
+      scene_probabilities:
+        none: 1.0
+      completion: reaching_precision_and_self_safety
   self_collision:
     safe_distance_m: 0.005
     query_distance_m: 0.25
@@ -307,6 +361,8 @@ thesis:
     position_boundary_low_ratio: 0.8
     position_boundary_high_ratio: 1.5
   reward:
+    # Restore the dense reaching reward used before the reward-ordering experiment.
+    scheme: legacy_dense
     position_sigma_m: 0.2
     micro_power: 4.0
     fine_position_sigma_m: 0.02
@@ -329,7 +385,7 @@ thesis:
     orientation_progress_scale: 2.0
     position_state_cost_weight: 0.02
     orientation_state_cost_weight: 0.02
-    success_bonus: 20.0
+    success_bonus: 50.0
     velocity_cost_weight: 0.04
     smooth_cost_weight: 0.01
     hard_failure_penalty: 20.0
@@ -371,7 +427,7 @@ train:
   progress_interval: 1000
   log_flush_interval: 100
   update_log_interval: 10
-  output_dir: outputs/retrain_20261013/full
+  output_dir: outputs/full
   plateau:
     comparison_blocks: 2
     min_current_episodes_per_block: 100

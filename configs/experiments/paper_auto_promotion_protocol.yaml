@@ -1,5 +1,5 @@
 # Shared deterministic promotion protocol for automatic S0 curricula.
-# Included by KP-SAC, Full, and M1-M3.
+# Included by the Full training configuration.
 thesis:
   orientation_curriculum:
     deterministic_probe_required: true

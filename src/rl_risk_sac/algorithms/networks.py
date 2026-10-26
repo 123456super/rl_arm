@@ -36,14 +36,14 @@ class GaussianActor(nn.Module):
         self.mean = nn.Linear(hidden_dims[-1], action_dim)
         self.log_std = nn.Linear(hidden_dims[-1], action_dim)
 
-    def forward(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, obs: torch.Tensor, features=None, mask=None) -> tuple[torch.Tensor, torch.Tensor]:
         features = self.backbone(obs)
         mean = self.mean(features)
         log_std = torch.clamp(self.log_std(features), LOG_STD_MIN, LOG_STD_MAX)
         return mean, log_std
 
-    def sample(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        mean, log_std = self(obs)
+    def sample(self, obs: torch.Tensor, features=None, mask=None) -> tuple[torch.Tensor, torch.Tensor]:
+        mean, log_std = self(obs, features, mask)
         std = log_std.exp()
         normal = Normal(mean, std)
         raw_action = normal.rsample()
@@ -54,8 +54,8 @@ class GaussianActor(nn.Module):
         log_prob = log_prob.sum(dim=-1, keepdim=True)
         return action, log_prob
 
-    def deterministic(self, obs: torch.Tensor) -> torch.Tensor:
-        mean, _ = self(obs)
+    def deterministic(self, obs: torch.Tensor, features=None, mask=None) -> torch.Tensor:
+        mean, _ = self(obs, features, mask)
         return torch.tanh(mean)
 
 
@@ -66,7 +66,7 @@ class QNetwork(nn.Module):
         super().__init__()
         self.net = mlp(obs_dim + action_dim, hidden_dims, 1)
 
-    def forward(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+    def forward(self, obs: torch.Tensor, action: torch.Tensor, features=None, mask=None) -> torch.Tensor:
         return self.net(torch.cat([obs, action], dim=-1))
 
 

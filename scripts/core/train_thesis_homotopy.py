@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import copy
 from dataclasses import asdict, is_dataclass
 import hashlib
 import json
@@ -24,9 +25,7 @@ for thread_variable in (
 import numpy as np
 import torch
 
-# Four concurrent experiments otherwise each create a large native thread
-# pool (PyTorch defaults to the host core count).  Keep learner threading
-# bounded so the environment workers and the other seeds are not starved.
+# Bound learner threading so parallel environment workers are not starved.
 torch.set_num_threads(6)
 try:
     # Evaluation imports this module after torch may already have started
@@ -43,17 +42,153 @@ sys.path.insert(0, str(ROOT / "src"))
 from rl_risk_sac.algorithms.homotopy_curriculum import HomotopyCurriculum
 from rl_risk_sac.algorithms.homotopy_replay import HomotopyReplayBuffer
 from rl_risk_sac.algorithms.thesis_sac import ThesisSACAgent
+from rl_risk_sac.tasks.obstacle_evaluation import ObstacleEvaluation
+from rl_risk_sac.tasks.obstacle_observation import stack_observations, observation_tensors
 from rl_risk_sac.envs.parallel_thesis_env import ParallelThesisEnvPool
 from rl_risk_sac.envs.thesis_homotopy_env import ThesisHomotopyEnv
 from rl_risk_sac.utils.config import load_config
 
 
 HYBRID_KEYPOINT_AUTO_CHAIN_PROTOCOL = (
-    "task_space_precision_curriculum_hybrid_keypoint_jacobian_auto_chain_pcr"
+    "full_predictive_obstacle_avoidance_v1"
 )
 SUPPORTED_PROTOCOLS = frozenset((
     HYBRID_KEYPOINT_AUTO_CHAIN_PROTOCOL,
 ))
+SUPPORTED_STAGES = ("s0", "s1", "s2", "s3")
+
+
+# Shared by serial and parallel probe logging; preserve the legacy column prefix.
+ORIENTATION_PROBE_FIELDS = (
+    "global_step", "stage_step", "stage_total_step", "orientation_level_index",
+    "orientation_scale", "orientation_level_steps", "episodes", "seed",
+    "success_rate", "collision_rate", "joint_limit_rate", "timeout_rate",
+    "probe_seeds", "probe_mean_success_rate", "probe_min_seed_success_rate",
+    "probe_max_collision_rate", "probe_max_timeout_rate", "confirmation_seed_success_rates",
+    "mean_success_rate", "min_seed_success_rate", "max_collision_rate",
+    "max_timeout_rate", "max_joint_limit_rate", "seed_success_rates",
+    "seed_results",
+    "mean_position_error_m", "mean_orientation_error_rad",
+    "p95_orientation_error_rad",
+    "mean_minimum_self_distance_m", "self_violation_rate",
+    "strict_pose_hit_rate", "minimum_bin_success_rate",
+    "minimum_bin_strict_pose_hit_rate",
+    "p95_position_error_m", "mean_episode_steps", "mean_success_steps",
+    "terminal_position_only_rate", "terminal_orientation_only_rate",
+    "terminal_joint_failure_rate",
+    "terminal_joint_pose_rate", "bin_indices", "bin_episode_counts",
+    "mean_cell_success_rate", "cell_success_p10", "worst_10_cells_mean_success_rate", "cell_fraction_success_at_least_0_6",
+    "distance_bin_success_rates", "orientation_bin_success_rates",
+    "success_rate_d7_d9", "timeout_rate_d7_d9",
+    "keypoint_step_count", "keypoint_distance_mean_m",
+    "keypoint_next_distance_mean_m", "keypoint_tracking_quality_mean",
+    "keypoint_precision_quality_mean", "keypoint_precision_reward_mean",
+    "joint_bottleneck_shaping_reward_mean", "keypoint_progress_mean_m",
+    "keypoint_progress_positive_ratio", "jacobian_clip_ratio_mean",
+    "keypoint_episode_start_distance_mean_m",
+    "keypoint_episode_end_distance_mean_m",
+    "keypoint_episode_distance_reduction_mean_m",
+    "keypoint_episode_improvement_ratio",
+    "weak_bin_count_below_0_6", "success_rate_o0_o4",
+    "success_rate_o5_o6", "success_rate_o7_o9",
+    "timeout_rate_o0_o4", "timeout_rate_o5_o6", "timeout_rate_o7_o9",
+    "large_angle_orientation_steps",
+    "large_angle_orientation_improvement_ratio",
+    "large_angle_orientation_mean_rebound_rad",
+    "previous_success_rate", "previous_collision_rate",
+    "previous_joint_limit_rate", "screen_passed", "confirmation_ran",
+    "confirmation_episodes", "confirmation_seed", "confirmation_success_rate",
+    "confirmation_collision_rate", "confirmation_joint_limit_rate",
+    "confirmation_previous_success_rate", "confirmation_previous_collision_rate",
+    "confirmation_previous_joint_limit_rate", "confirmation_passed",
+    "retention_passed", "recovery_required",
+    "cross_level_success_rates",
+    "cross_level_minimum_bin_success_rates",
+    "s0_phase", "lambda_self", "probe_track", "passed", "is_best",
+    "bad_probe_count", "rolled_back",
+    "obstacle_groups", "obstacle_episodes", "timing_contract",
+)
+
+
+def apply_stage_profile(config: dict, stage: str) -> None:
+    """Apply the explicit obstacle curriculum profile before workers start."""
+    if stage not in SUPPORTED_STAGES:
+        raise ValueError(f"unsupported stage {stage!r}; expected {SUPPORTED_STAGES}")
+    profile = config["thesis"].get("stage_profiles", {}).get(stage)
+    if profile is None:
+        raise ValueError(f"missing thesis.stage_profiles.{stage}")
+    obstacles = config["thesis"].setdefault("obstacles", {})
+    for key, value in profile.get("obstacles", {}).items():
+        obstacles[key] = value
+    config["thesis"]["promotion_obstacles_only"] = bool(profile.get("promotion_obstacles_only", False))
+    config["thesis"]["stage"] = stage
+
+
+def promotion_episode_eligible(config: dict, info: dict) -> bool:
+    return (not config["thesis"].get("promotion_obstacles_only", False)
+            or int(info.get("obstacle_count", 0)) > 0)
+
+
+def configure_s1_expert_replay(replay, config, *, bank_path=None, fraction=None):
+    """Opt-in sampling change; leave inherited agent/online replay/RNG intact."""
+    from rl_risk_sac.algorithms.s1_expert_replay import (
+        expert_contract, file_sha256, validate_expert_bank,
+    )
+    if bank_path is None and fraction is None and not replay.s1_expert_partitions:
+        return {"enabled": False, "fraction": 0., "levels": []}
+    if config["thesis"]["stage"] != "s1":
+        raise ValueError("S1 expert replay is only valid in stage s1")
+    if fraction is not None and (not np.isfinite(fraction) or not 0 <= fraction <= .5):
+        raise ValueError("--s1-expert-fraction must be in [0, 0.5]")
+    expected = expert_contract(config)
+    if bank_path is not None:
+        bank = torch.load(bank_path, map_location="cpu", weights_only=False)
+        validate_expert_bank(bank, expected)
+        replay.configure_s1_experts(bank, fraction=.1 if fraction is None else fraction,
+                                    source=str(Path(bank_path).resolve()), sha256=file_sha256(bank_path))
+    elif replay.s1_expert_partitions:
+        validate_expert_bank({**replay.s1_expert_metadata, "partitions": replay.s1_expert_partitions}, expected)
+        if fraction is not None:
+            replay.s1_expert_fraction = float(fraction)
+    elif fraction:
+        raise ValueError("nonzero expert fraction requires --s1-expert-bank or an inherited expert bank")
+    return dict(enabled=bool(replay.s1_expert_partitions and replay.s1_expert_fraction),
+                fraction=replay.s1_expert_fraction, source=replay.s1_expert_source,
+                sha256=replay.s1_expert_sha256, levels=sorted(replay.s1_expert_partitions),
+                transitions=sum(part.size for part in replay.s1_expert_partitions.values()),
+                episodes=0 if replay.s1_expert_metadata is None else len(replay.s1_expert_metadata["episodes"]),
+                missing_level_policy="online-only with explicit warning; never reuse another level",
+                behavior_cloning=False, inference_time_planner=False)
+
+
+def s1_expert_replay_metrics(replay):
+    return dict(sample_s1_expert=replay.last_s1_expert_count,
+                stored_s1_expert=sum(part.size for part in replay.s1_expert_partitions.values()),
+                replay_s1_expert_fraction=replay.s1_expert_fraction)
+
+
+def reconcile_coupling_resume(replay, config, saved_config, *, allow_change=False):
+    """Explicitly acknowledge the Q-scale transient; never silently mix rewards."""
+    from rl_risk_sac.tasks.goal_obstacle_coupling import COUPLING_KEYS, coupling_parameters
+    before, after = coupling_parameters(saved_config), coupling_parameters(config)
+    changed = before != after
+    if changed:
+        if not allow_change:
+            raise ValueError("coupling reward differs; pass --allow-coupling-reward-change for an explicit S1 experiment")
+        if config["thesis"]["stage"] != "s1" or saved_config["thesis"]["stage"] != "s1":
+            raise ValueError("coupling reward migration requires same-stage S1")
+        old_reward = copy.deepcopy(saved_config["thesis"]["reward"])
+        new_reward = copy.deepcopy(config["thesis"]["reward"])
+        old_reward.pop("goal_obstacle_coupling", None)
+        new_reward.pop("goal_obstacle_coupling", None)
+        if old_reward != new_reward:
+            raise ValueError("coupling migration cannot also change the base reward")
+        print("Explicit coupling reward migration: replay relabeled; inherited critics/optimizers may need to adapt their Q offset", flush=True)
+    for key in COUPLING_KEYS:
+        replay.reward_parameters.pop(key, None)
+    replay.reward_parameters.update(after)
+    return dict(changed=changed, before=before, after=after,
+                critics_reinitialized=False, q_offset_transient=changed)
 
 
 def physical_cpu_ids(count: int) -> list[int] | None:
@@ -83,25 +218,20 @@ def physical_cpu_ids(count: int) -> list[int] | None:
 def validate_training_architecture(config: dict) -> None:
     """Reject retired experiment modes before creating output or workers."""
     thesis = config["thesis"]
+    if thesis.get("stage", "s0") not in SUPPORTED_STAGES:
+        raise ValueError(f"unsupported training stage: {thesis.get('stage')!r}")
+    if set(thesis.get("serial_stages", {})) != set(SUPPORTED_STAGES):
+        raise ValueError("serial_stages must define s0, s1, s2 and s3")
     observation = thesis.get("observation", {})
     reward = thesis.get("reward", {})
     pose_curriculum = thesis.get("joint_pose_curriculum", {})
     replay_curriculum = thesis.get("orientation_curriculum", {})
     semantic_replay = thesis.get("semantic_long_term_replay", {})
     sac = config["sac"]
-    ablation_variant = str(observation.get("ablation_variant", "full"))
-    is_no_jacobian_variant = ablation_variant in {
-        "kp_sac", "base", "m3_no_jacobian",
-    }
     if (
         thesis.get("protocol") not in SUPPORTED_PROTOCOLS
-        or (
-            not is_no_jacobian_variant
-            and (
-                not observation.get("keypoint_jacobian_pose", True)
-                or not observation.get("jacobian_actor_only", False)
-            )
-        )
+        or not observation.get("keypoint_jacobian_pose", True)
+        or not observation.get("jacobian_actor_only", False)
         or not observation.get("hybrid_explicit_pose_error", True)
         or observation.get("include_orientation_error_vector", False)
         or reward.get("pose_objective", "unified_keypoint") != "unified_keypoint"
@@ -120,9 +250,12 @@ def validate_training_architecture(config: dict) -> None:
             )
         )
         or bool(semantic_replay.get("enabled", False))
+        or float(reward.get("joint_bottleneck_shaping_scale", 0.0)) <= 0.0
+        or not thesis.get("precision_boundary_replay", {}).get("enabled", False)
     ):
         raise ValueError(
-            "formal Full/M1/M2 training requires Actor-only Jacobian, "
+            "Full training supports only Hybrid Keypoint + Actor-only Jacobian "
+            "+ Auto-PCR, bottleneck shaping, precision-boundary replay, "
             "same-level-only replay, and no semantic replay"
         )
     far_timeout_restart_settings(config)
@@ -383,6 +516,17 @@ def checkpoint_actor_state(checkpoint: Path, device: torch.device) -> dict[str, 
 def load_reference_actor(agent: ThesisSACAgent, checkpoint: Path):
     actor_state = checkpoint_actor_state(checkpoint, agent.device)
     reference = agent.frozen_actor_copy()
+    if actor_state["backbone.0.weight"].shape[1] == 162 and agent.actor_obs_dim == 241:
+        migrated = reference.state_dict()
+        for key, value in actor_state.items():
+            if key == "backbone.0.weight":
+                migrated[key][:, :89] = value[:, :89]
+                migrated[key][:, 217:] = value[:, 138:]
+            elif key in migrated and migrated[key].shape == value.shape:
+                migrated[key] = value
+            else:
+                raise ValueError(f"incompatible reaching actor parameter: {key}")
+        actor_state = migrated
     reference.load_state_dict(actor_state)
     reference.eval()
     return reference
@@ -392,112 +536,6 @@ def restore_torch_rng(state: dict) -> None:
     torch.set_rng_state(state["torch_rng"].cpu())
     if torch.cuda.is_available() and state["cuda_rng"] is not None:
         torch.cuda.set_rng_state_all([item.cpu() for item in state["cuda_rng"]])
-
-
-def checkpoint_curriculum(config: dict, state: dict) -> HomotopyCurriculum:
-    """Rebuild a checkpoint curriculum under the current serial contract."""
-    thesis = config["thesis"]
-    goal = thesis["goal_curriculum"]
-    orientation = thesis["orientation_curriculum"]
-    self_safety = thesis["self_collision"]["curriculum"]
-    curriculum = HomotopyCurriculum(
-        str(state["stage"]),
-        ramp_steps=int(thesis["ramp_steps"]),
-        goal_start_scale=float(goal["start_scale"]),
-        goal_end_scale=float(goal["end_scale"]),
-        goal_success_window=int(goal["success_window"]),
-        goal_success_floor=float(goal["success_floor"]),
-        goal_full_scale_min_steps=int(goal["full_scale_min_transitions"]),
-        goal_levels=goal["levels"],
-        goal_min_transitions_per_level=int(goal["min_transitions_per_level"]),
-        orientation_start_scale=float(orientation["start_scale"]),
-        orientation_end_scale=float(orientation["end_scale"]),
-        orientation_tolerance_start=float(orientation["tolerance_start"]),
-        orientation_tolerance_end=float(orientation["tolerance_end"]),
-        orientation_success_window=int(orientation["success_window"]),
-        orientation_success_floor=float(orientation["success_floor"]),
-        orientation_levels=orientation["levels"],
-        orientation_min_transitions_per_level=int(
-            orientation["min_transitions_per_level"]
-        ),
-        orientation_anchor_probability=float(orientation["anchor_probability"]),
-        orientation_anchor_floor=float(orientation["anchor_success_floor"]),
-        orientation_anchor_window=int(orientation["anchor_success_window"]),
-        orientation_deterministic_probe_required=bool(
-            orientation["deterministic_probe_required"]
-        ),
-        orientation_deterministic_previous_success_floor=float(
-            orientation["deterministic_previous_success_floor"]
-        ),
-        orientation_deterministic_previous_collision_ceiling=float(
-            orientation["deterministic_previous_collision_ceiling"]
-        ),
-        orientation_full_scale_min_steps=int(
-            orientation["full_scale_min_transitions"]
-        ),
-        joint_pose_levels=thesis["joint_pose_curriculum"]["levels"],
-        self_start_weight=float(self_safety["start_weight"]),
-        self_end_weight=float(self_safety["end_weight"]),
-        self_ramp_steps=int(self_safety["ramp_steps"]),
-        self_full_weight_min_steps=int(
-            self_safety["full_weight_min_transitions"]
-        ),
-        self_probe_collision_ceiling=float(self_safety["probe_collision_ceiling"]),
-    )
-    curriculum.load_state_dict(state)
-    curriculum.configure_orientation_retention(orientation)
-    return curriculum
-
-
-def validate_serial_stage_transition(
-    config: dict, checkpoint_state: dict, destination_stage: str,
-    s0_evaluation: Path | None = None, checkpoint_source: Path | None = None,
-) -> None:
-    """Validate a serial handoff using the stage-specific completion evidence."""
-    source_stage = str(checkpoint_state["curriculum"]["stage"])
-    expected = {"s1": "s0", "s2": "s1"}.get(destination_stage)
-    if expected is None or source_stage != expected:
-        raise ValueError(f"invalid stage transition {source_stage}->{destination_stage}")
-    # S0 completion is an evaluation gate.  Re-running S0 solely to make
-    # curriculum bookkeeping reach an internal flag is not part of the
-    # experiment protocol; require the immutable frozen-evaluation manifest
-    # instead and verify that it names this exact checkpoint.
-    if destination_stage == "s1":
-        if s0_evaluation is None:
-            raise ValueError(
-                "S0->S1 requires --s0-evaluation pointing to the passed frozen-evaluation JSON"
-            )
-        try:
-            evaluation = json.loads(s0_evaluation.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError(f"cannot read S0 evaluation manifest: {s0_evaluation}") from error
-        checkpoint = Path(str(evaluation.get("checkpoint", "")))
-        checkpoint = checkpoint if checkpoint.is_absolute() else (ROOT / checkpoint)
-        checkpoint_sha = hashlib.sha256(checkpoint.read_bytes()).hexdigest() if checkpoint.exists() else ""
-        if not bool(evaluation.get("passed")):
-            raise ValueError("S0 frozen evaluation manifest is not passed")
-        if checkpoint_source is None or checkpoint.resolve() != checkpoint_source.resolve():
-            raise ValueError("S0 evaluation manifest does not name the resumed checkpoint")
-        if evaluation.get("checkpoint_sha256") and evaluation["checkpoint_sha256"] != checkpoint_sha:
-            raise ValueError("S0 evaluation manifest checkpoint SHA-256 does not match the file")
-        return
-
-    curriculum = checkpoint_curriculum(config, checkpoint_state["curriculum"])
-    thesis = config["thesis"]
-    complete = curriculum.stage_complete(
-        int(thesis["goal_curriculum"]["full_scale_min_transitions"]),
-        int(thesis["orientation_curriculum"]["full_scale_min_transitions"]),
-        int(thesis["strict_min_transitions"]),
-    )
-    if not complete:
-        if source_stage == "s0":
-            raise ValueError(
-                "S0 checkpoint has not passed the final precision-level frozen "
-                "probe, previous-level retention, and self-safety completion gate"
-            )
-        raise ValueError(
-            "S1 checkpoint has not completed strict static-scene consolidation"
-        )
 
 
 class FrozenActorEvaluator:
@@ -511,14 +549,14 @@ class FrozenActorEvaluator:
         self, observations: np.ndarray, deterministic: bool = True,
     ) -> np.ndarray:
         del deterministic
-        tensor = torch.as_tensor(observations, device=self.device, dtype=torch.float32)
+        tensor, features, mask = observation_tensors(observations, self.device)
         with torch.no_grad():
-            return self.actor.deterministic(tensor).cpu().numpy()
+            return self.actor.deterministic(tensor, features, mask).cpu().numpy()
 
     def select_action(
         self, observation: np.ndarray, deterministic: bool = True,
     ) -> np.ndarray:
-        return self.select_actions(np.asarray(observation)[None, :], deterministic)[0]
+        return self.select_actions(stack_observations([observation]), deterministic)[0]
 
 
 def task_space_training_kwargs(
@@ -651,9 +689,12 @@ def update_adaptive_task_space_sampling(
 
 
 def scalar_probe_metrics(metrics: dict[str, object]) -> dict[str, object]:
-    """Return only columns belonging in the scalar probe CSV row."""
+    """Return probe CSV columns, encoding obstacle reports as JSON cells."""
     return {
-        key: value for key, value in metrics.items()
+        key: (
+            json.dumps(value, default=summary_json_default, allow_nan=False)
+            if key in {"obstacle_groups", "obstacle_episodes"} else value
+        ) for key, value in metrics.items()
         if key not in {"bin_success_rates", "bin_strict_pose_hit_rates"}
     }
 
@@ -719,7 +760,7 @@ def summarize_pose_probe_outcomes(
         return result
 
     bin_indices = values[:, 9].astype(int)
-    ordered_bins = sorted(set(bin_indices))
+    ordered_bins = sorted(int(index) for index in set(bin_indices))
     bin_rates = [
         float(np.mean(values[bin_indices == index, 0])) for index in ordered_bins
     ]
@@ -754,8 +795,8 @@ def summarize_pose_probe_outcomes(
             ("o0_o4", 0, 4), ("o5_o6", 5, 6), ("o7_o9", 7, 9),
         ):
             mask = (orientation_index >= lower) & (orientation_index <= upper)
-            result[f"success_rate_{label}"] = float(np.mean(values[mask, 0]))
-            result[f"timeout_rate_{label}"] = float(np.mean(values[mask, 3]))
+            result[f"success_rate_{label}"] = float(np.mean(values[mask, 0])) if mask.any() else None
+            result[f"timeout_rate_{label}"] = float(np.mean(values[mask, 3])) if mask.any() else None
     return result
 
 
@@ -855,6 +896,7 @@ def run_deterministic_pose_probe(
     orientation_improvements = 0
     orientation_rebound_sum = 0.0
     keypoint_accumulator = _empty_keypoint_probe_accumulator()
+    obstacle_evaluation = ObstacleEvaluation()
     orientation_bins = int(config["thesis"]["orientation_curriculum"].get(
         "deterministic_probe_orientation_bins", 10
     ))
@@ -897,6 +939,7 @@ def run_deterministic_pose_probe(
                 observation, _, _, terminated, truncated, info = probe_env.step(
                     agent.select_action(observation, deterministic=True)
                 )
+                obstacle_evaluation.record_step(episode, info)
                 episode_steps += 1
                 _record_keypoint_probe_step(keypoint_accumulator, info)
                 if episode_start_keypoint_distance is None:
@@ -927,6 +970,7 @@ def run_deterministic_pose_probe(
                 or info["self_collision"]
                 or info["environment_collision"]
             )
+            obstacle_evaluation.finish_episode(episode, info, info["task_reached"], collision)
             outcomes.append((
                 float(info["task_reached"]), float(collision),
                 float(info["joint_limit"]), float(truncated),
@@ -944,7 +988,7 @@ def run_deterministic_pose_probe(
     finally:
         probe_env.close()
     values = np.asarray(outcomes, dtype=np.float64)
-    return summarize_pose_probe_outcomes(
+    metrics = summarize_pose_probe_outcomes(
         values,
         has_bins=target_distance_max_m is not None,
         orientation_bins=orientation_bins,
@@ -953,6 +997,8 @@ def run_deterministic_pose_probe(
         orientation_rebound_sum=orientation_rebound_sum,
         keypoint_statistics=_keypoint_probe_statistics(keypoint_accumulator),
     )
+    metrics.update(obstacle_evaluation.report())
+    return metrics
 
 
 def run_parallel_deterministic_pose_probe(
@@ -990,6 +1036,7 @@ def run_parallel_deterministic_pose_probe(
     orientation_improvements = 0
     orientation_rebound_sum = 0.0
     keypoint_accumulator = _empty_keypoint_probe_accumulator()
+    obstacle_evaluation = ObstacleEvaluation()
     next_episode = 0
     self_safe_distance = float(
         config["thesis"]["self_collision"]["safe_distance_m"]
@@ -1034,7 +1081,7 @@ def run_parallel_deterministic_pose_probe(
             for worker_index, (observation, _) in resets.items():
                 active[worker_index]["observation"] = observation
         indices = sorted(active)
-        observations = np.stack([
+        observations = stack_observations([
             active[index]["observation"] for index in indices
         ])
         actions = agent.select_actions(observations, deterministic=True)
@@ -1051,6 +1098,7 @@ def run_parallel_deterministic_pose_probe(
                     0.0, next_orientation - previous_orientation
                 )
             state = active[index]
+            obstacle_evaluation.record_step(int(state["episode"]), info)
             state["episode_steps"] += 1
             _record_keypoint_probe_step(keypoint_accumulator, info)
             if "start_keypoint_distance" not in state:
@@ -1073,6 +1121,7 @@ def run_parallel_deterministic_pose_probe(
                 or info["self_collision"]
                 or info["environment_collision"]
             )
+            obstacle_evaluation.finish_episode(int(state["episode"]), info, info["task_reached"], collision)
             outcomes[int(state["episode"])] = (
                 float(info["task_reached"]), float(collision),
                 float(info["joint_limit"]), float(truncated),
@@ -1097,7 +1146,7 @@ def run_parallel_deterministic_pose_probe(
     values = np.asarray(
         [outcomes[index] for index in range(int(episodes))], dtype=np.float64,
     )
-    return summarize_pose_probe_outcomes(
+    metrics = summarize_pose_probe_outcomes(
         values,
         has_bins=position_edges is not None,
         orientation_bins=orientation_bins,
@@ -1106,6 +1155,8 @@ def run_parallel_deterministic_pose_probe(
         orientation_rebound_sum=orientation_rebound_sum,
         keypoint_statistics=_keypoint_probe_statistics(keypoint_accumulator),
     )
+    metrics.update(obstacle_evaluation.report())
+    return metrics
 
 
 def deterministic_contract_passed(
@@ -1185,6 +1236,28 @@ def run_pose_promotion_probe(
     settings: dict, pool: ParallelThesisEnvPool | None = None,
 ) -> dict[str, object]:
     """Run three-seed 300-episode screening, then three-seed confirmation."""
+    if config.get("thesis", {}).get("promotion_obstacles_only", False):
+        probabilities = np.asarray(config["thesis"]["obstacles"]["count_probabilities"], float)
+        if probabilities[1:].sum() <= 0:
+            raise ValueError("obstacle-only promotion requires nonempty obstacle scenes")
+        if probabilities[0] > 0:
+            probe_config = copy.deepcopy(config)
+            probabilities[0] = 0.
+            probe_config["thesis"]["obstacles"]["count_probabilities"] = (probabilities / probabilities.sum()).tolist()
+            sampling = probe_config["thesis"]["obstacles"].get("path_sampling", {})
+            if sampling.get("enabled", False):
+                bands = np.asarray(sampling["probabilities"], float)
+                bands[0] = 0.
+                if bands.sum() <= 0:
+                    raise ValueError("obstacle-only probe requires nonempty path bands")
+                sampling["probabilities"] = (bands / bands.sum()).tolist()
+            if pool is None:
+                return run_pose_promotion_probe(agent, probe_config, curriculum, settings)
+            # Training workers retain the mixed distribution. A separate pool
+            # evaluates only obstacle scenes for screening and confirmation.
+            count = int(config["train"].get("num_envs", 1))
+            with ParallelThesisEnvPool(probe_config, [91001 + i for i in range(count)]) as probe_pool:
+                return run_pose_promotion_probe(agent, probe_config, curriculum, settings, pool=probe_pool)
     screen_episodes = int(settings.get("deterministic_probe_episodes", 300))
     seeds = settings.get("deterministic_probe_seeds", [31001, 31002, 31003])
     if isinstance(seeds, str): seeds = [int(x) for x in seeds.split(",") if x.strip()]
@@ -1290,7 +1363,7 @@ def run_manual_pose_checkpoint_probe(
     )
     # In manual-promotion mode the probe is observational for intermediate
     # levels, but the final precision-level probe is the formal frozen evidence used by the
-    # S0->S1 gate.  Persist those metrics because there is no later promotion
+    # Reaching completion gate. Persist those metrics because there is no later promotion
     # command that would otherwise record them in the curriculum checkpoint.
     if (
         curriculum.precision_only_task_space
@@ -1462,7 +1535,7 @@ def s0_probe_score_is_better(
     track: str, score: tuple[float, ...], previous: dict[str, object] | None,
     settings: dict, *, self_collision_ceiling: float,
 ) -> bool:
-    """Compare checkpoints produced by the current serial protocol only."""
+    """Compare checkpoints produced by the current reaching protocol only."""
     if previous is None:
         return True
     previous_score = tuple(float(value) for value in previous.get("score", ()))
@@ -1529,7 +1602,6 @@ def run_parallel_s0(
     best_probes: dict[str, dict[str, object]] = dict(counters.get("probe_best", {}))
     counters["probe_best"] = best_probes
     # Far-timeout bad-state restarts are an obstacle-free S0 mechanism.
-    # Static/dynamic stages must always reset through their scene generator.
     far_settings = far_timeout_restart_settings(config) if stage == "s0" else None
     far_restart = None
     far_rng = np.random.default_rng(stream_seed ^ 0xFA257A11)
@@ -1658,12 +1730,6 @@ def run_parallel_s0(
             float(np.mean(curriculum.orientation.outcomes))
             if curriculum.orientation.outcomes else ""
         )
-        scene_name = {"s1": "static", "s2": "dynamic"}.get(stage)
-        scene_state = None if scene_name is None else curriculum.states[scene_name]
-        scene_rate = (
-            "" if scene_state is None or not scene_state.outcomes
-            else float(np.mean(scene_state.outcomes))
-        )
         replay_mix = curriculum.orientation_replay_mix
         storage = replay.orientation_storage_counts()
         elapsed = max(time.perf_counter() - started, 1e-9)
@@ -1720,10 +1786,6 @@ def run_parallel_s0(
             "position_tolerance": curriculum.position_tolerance,
             "orientation_tolerance": curriculum.orientation_tolerance,
             "rolling_orientation_success_rate": orientation_rate,
-            "rolling_scene_success_rate": scene_rate,
-            "scene_strict": "" if scene_state is None else int(scene_state.strict),
-            "scene_strict_steps": "" if scene_state is None else int(scene_state.strict_steps),
-            "scene_eligible_steps": "" if scene_state is None else int(scene_state.eligible_steps),
             "orientation_eligible_steps": curriculum.orientation.eligible_steps,
             "orientation_level_index": curriculum.orientation.level_index,
             "orientation_level_steps": curriculum.orientation.current_level_steps,
@@ -1735,6 +1797,7 @@ def run_parallel_s0(
                 "" if curriculum.orientation_anchor_success_rate is None
                 else curriculum.orientation_anchor_success_rate
             ),
+            **s1_expert_replay_metrics(replay),
             "sample_orientation_anchor": replay.last_orientation_sample_counts["anchor"],
             "sample_orientation_current": replay.last_orientation_sample_counts["current"],
             "sample_orientation_historical": replay.last_orientation_sample_counts["historical"],
@@ -1810,7 +1873,7 @@ def run_parallel_s0(
             f"step={counters['stage_step']}/{total_steps} envs={num_envs} "
             f"episodes={counters['episodes']} replay={len(replay)} "
             f"updates={counters['updates']} level={curriculum.orientation.level_index} "
-            f"success={scene_rate if scene_name is not None else orientation_rate} "
+            f"success={orientation_rate} "
             f"steps/s={row['steps_per_second']:.1f}",
             flush=True,
         )
@@ -1825,54 +1888,7 @@ def run_parallel_s0(
         transition_writer = csv.DictWriter(transition_handle, fieldnames=transition_fields)
         update_writer = csv.DictWriter(update_handle, fieldnames=update_fields)
         progress_writer = csv.DictWriter(progress_handle, fieldnames=progress_fields)
-        probe_fields = [
-            "global_step", "stage_step", "stage_total_step", "orientation_level_index",
-            "orientation_scale", "orientation_level_steps", "episodes", "seed",
-            "success_rate", "collision_rate", "joint_limit_rate", "timeout_rate",
-            "probe_seeds", "probe_mean_success_rate", "probe_min_seed_success_rate",
-            "probe_max_collision_rate", "probe_max_timeout_rate", "confirmation_seed_success_rates",
-            "mean_success_rate", "min_seed_success_rate", "max_collision_rate",
-            "max_timeout_rate", "max_joint_limit_rate", "seed_success_rates",
-            "seed_results",
-            "mean_position_error_m", "mean_orientation_error_rad",
-            "p95_orientation_error_rad",
-            "mean_minimum_self_distance_m", "self_violation_rate",
-            "strict_pose_hit_rate", "minimum_bin_success_rate",
-            "minimum_bin_strict_pose_hit_rate",
-            "p95_position_error_m", "mean_episode_steps", "mean_success_steps",
-            "terminal_position_only_rate", "terminal_orientation_only_rate",
-            "terminal_joint_failure_rate",
-            "terminal_joint_pose_rate", "bin_indices", "bin_episode_counts",
-            "mean_cell_success_rate", "cell_success_p10", "worst_10_cells_mean_success_rate", "cell_fraction_success_at_least_0_6",
-            "distance_bin_success_rates", "orientation_bin_success_rates",
-            "success_rate_d7_d9", "timeout_rate_d7_d9",
-            "keypoint_step_count", "keypoint_distance_mean_m",
-            "keypoint_next_distance_mean_m", "keypoint_tracking_quality_mean",
-            "keypoint_precision_quality_mean", "keypoint_precision_reward_mean",
-            "joint_bottleneck_shaping_reward_mean", "keypoint_progress_mean_m",
-            "keypoint_progress_positive_ratio", "jacobian_clip_ratio_mean",
-            "keypoint_episode_start_distance_mean_m",
-            "keypoint_episode_end_distance_mean_m",
-            "keypoint_episode_distance_reduction_mean_m",
-            "keypoint_episode_improvement_ratio",
-            "weak_bin_count_below_0_6", "success_rate_o0_o4",
-            "success_rate_o5_o6", "success_rate_o7_o9",
-            "timeout_rate_o0_o4", "timeout_rate_o5_o6", "timeout_rate_o7_o9",
-            "large_angle_orientation_steps",
-            "large_angle_orientation_improvement_ratio",
-            "large_angle_orientation_mean_rebound_rad",
-            "previous_success_rate", "previous_collision_rate",
-            "previous_joint_limit_rate", "screen_passed", "confirmation_ran",
-            "confirmation_episodes", "confirmation_seed", "confirmation_success_rate",
-            "confirmation_collision_rate", "confirmation_joint_limit_rate",
-            "confirmation_previous_success_rate", "confirmation_previous_collision_rate",
-            "confirmation_previous_joint_limit_rate", "confirmation_passed",
-            "retention_passed", "recovery_required",
-            "cross_level_success_rates",
-            "cross_level_minimum_bin_success_rates",
-            "s0_phase", "lambda_self", "probe_track", "passed", "is_best",
-            "bad_probe_count", "rolled_back",
-        ]
+        probe_fields = ORIENTATION_PROBE_FIELDS
         probe_writer = csv.DictWriter(probe_handle, fieldnames=probe_fields)
         for writer in (episode_writer, transition_writer, update_writer, progress_writer, probe_writer):
             writer.writeheader()
@@ -1908,7 +1924,7 @@ def run_parallel_s0(
                         s0_current_fraction=current_fraction,
                         lambda_self=curriculum.lambda_self,
                     )
-                    reference_observations = reference_batch.observations
+                    reference_observations = reference_batch
                 batch = replay.sample(
                     stage, curriculum.xi_map(), batch_size,
                     orientation_scale=curriculum.orientation.scale,
@@ -1944,8 +1960,7 @@ def run_parallel_s0(
                     "stage_total_step": counters["stage_total_step"],
                     "update": counters["updates"], **last_update,
                     "sample_none": replay.last_sample_counts["none"],
-                    "sample_static": replay.last_sample_counts["static"],
-                    "sample_dynamic": replay.last_sample_counts["dynamic"],
+                    **s1_expert_replay_metrics(replay),
                     "sample_orientation_anchor": replay.last_orientation_sample_counts["anchor"],
                     "sample_orientation_current": replay.last_orientation_sample_counts["current"],
                     "sample_orientation_historical": replay.last_orientation_sample_counts["historical"],
@@ -2119,7 +2134,7 @@ def run_parallel_s0(
                     else:
                         policy_indices.append(index)
                 if policy_indices:
-                    observations = np.stack([
+                    observations = stack_observations([
                         workers[index]["observation"] for index in policy_indices
                     ])
                     selected_actions = agent.select_actions(observations)
@@ -2206,7 +2221,7 @@ def run_parallel_s0(
                     curriculum.record_transition(
                         worker["goal_scale"], worker["orientation_scale"],
                         orientation_anchor=worker["orientation_anchor"],
-                        curriculum_eligible=not worker["episode_used_warmup"],
+                        curriculum_eligible=(not worker["episode_used_warmup"] and promotion_episode_eligible(config, info)),
                     )
                     replay.add(
                         worker["scene"], worker["observation"], actions[index],
@@ -2282,6 +2297,9 @@ def run_parallel_s0(
                         "keypoint_distance": info["keypoint_distance"],
                         "next_keypoint_distance": info["next_keypoint_distance"],
                         "keypoint_progress": info["keypoint_progress"],
+                        "goal_obstacle_coupling_reward": info["goal_obstacle_coupling_reward"],
+                        "goal_obstacle_potential": info["goal_obstacle_potential"],
+                        "next_goal_obstacle_potential": info["next_goal_obstacle_potential"],
                         "keypoint_tracking_reward": info["keypoint_tracking_reward"],
                         "keypoint_progress_reward": info["keypoint_progress_reward"],
                         "keypoint_precision_quality": info["keypoint_precision_quality"],
@@ -2343,7 +2361,7 @@ def run_parallel_s0(
                         "velocity_cost": info["velocity_cost"],
                         "smooth_velocity": info["smooth_velocity"],
                         "smooth_cost": info["smooth_cost"],
-                        "curriculum_eligible": int(not worker["episode_used_warmup"]),
+                        "curriculum_eligible": int(not worker["episode_used_warmup"] and promotion_episode_eligible(config, info)),
                         "position_reached": int(info["position_reached"]),
                         "task_reached": int(info["task_reached"]),
                         "obstacle_collision": int(info["obstacle_collision"]),
@@ -2351,8 +2369,6 @@ def run_parallel_s0(
                         "environment_collision": int(info["environment_collision"]),
                         "joint_limit": int(info["joint_limit"]),
                         "sample_none": replay.last_sample_counts["none"],
-                        "sample_static": replay.last_sample_counts["static"],
-                        "sample_dynamic": replay.last_sample_counts["dynamic"],
                     })
                     if terminated or truncated:
                         level_before_episode = curriculum.orientation.level_index
@@ -2360,7 +2376,7 @@ def run_parallel_s0(
                             worker["scene"], bool(info["position_reached"]),
                             bool(info["task_reached"]), worker["length"],
                             orientation_anchor=worker["orientation_anchor"],
-                            curriculum_eligible=not worker["episode_used_warmup"],
+                            curriculum_eligible=(not worker["episode_used_warmup"] and promotion_episode_eligible(config, info)),
                             # Promotion is performed only by the deterministic
                             # three-seed probe/confirmation gate below.
                             allow_orientation_promotion=False,
@@ -2387,13 +2403,18 @@ def run_parallel_s0(
                                 ],
                             )
                         episode_writer.writerow({
+                            "obstacle_count": info.get("obstacle_count", 0),
+                            "obstacle_metadata": json.dumps(info.get("obstacle_metadata", [])),
+                            "obstacle_sampling": json.dumps(info.get("obstacle_sampling", {})),
+                            "obstacle_processing_ms": info.get("obstacle_processing_ms", 0.),
+                            "observation_to_action_ms": info.get("observation_to_action_ms", 0.),
                             "episode": worker["episode_id"],
                             "global_step": counters["global_step"],
                             "stage_step": counters["stage_step"],
                             "stage_total_step": counters["stage_total_step"],
                             "scene": worker["scene"], "length": worker["length"],
                             "return": worker["return"],
-                            "curriculum_eligible": int(not worker["episode_used_warmup"]),
+                            "curriculum_eligible": int(not worker["episode_used_warmup"] and promotion_episode_eligible(config, info)),
                             "orientation_anchor": int(worker["orientation_anchor"]),
                             "position_reached": int(info["position_reached"]),
                             "strict_pose_reached": int(info["strict_pose_reached"]),
@@ -2605,17 +2626,15 @@ def run_parallel_s0(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train Hybrid Keypoint + Jacobian + Auto-PCR (S0 -> S1 -> S2)")
+    parser = argparse.ArgumentParser(description="Train Full predictive obstacle avoidance: Hybrid Keypoint + Actor-only Jacobian + Auto-PCR")
     parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
-    parser.add_argument("--stage", choices=("s0", "s1", "s2"))
-    parser.add_argument("--resume", help="complete checkpoint from the preceding block or stage")
-    parser.add_argument(
-        "--s0-evaluation",
-        help=(
-            "passed frozen-evaluation JSON for the S0->S1 handoff; the JSON "
-            "must name the resumed checkpoint and contain passed=true"
-        ),
-    )
+    parser.add_argument("--stage", choices=SUPPORTED_STAGES, help="curriculum stage")
+    parser.add_argument("--resume", help="complete Full avoidance checkpoint from the preceding block")
+    parser.add_argument("--allow-coupling-reward-change", action="store_true",
+                        help="explicit S1-only PBRS reward migration; keep critics/optimizers, relabel replay")
+    parser.add_argument("--s1-expert-bank", help="optional physically verified training-only S1 bank.pt")
+    parser.add_argument("--s1-expert-fraction", type=float,
+                        help="S1 expert minibatch fraction; defaults to 0.10 with a new bank; inherited on resume")
     parser.add_argument(
         "--initialize-actor-from",
         help=(
@@ -2631,7 +2650,7 @@ def main() -> None:
     parser.add_argument("--run-name")
     parser.add_argument(
         "--output-dir",
-        help="override train.output_dir for this run (keeps S1/S2 outputs separate from S0)",
+        help="override train.output_dir for this run",
     )
     parser.add_argument("--seed", type=int, help="override training seed")
     parser.add_argument(
@@ -2645,17 +2664,19 @@ def main() -> None:
         parser.error("--resume and --initialize-actor-from are mutually exclusive")
     if args.initialize_actor_from is None and args.start_level is not None:
         parser.error("--start-level requires --initialize-actor-from")
+    if args.allow_coupling_reward_change and args.resume is None:
+        parser.error("--allow-coupling-reward-change requires --resume")
     config = load_config(ROOT / args.config)
     if args.output_dir:
         config["train"]["output_dir"] = args.output_dir
     thesis = config["thesis"]
     stage = args.stage or str(thesis["stage"])
+    try:
+        apply_stage_profile(config, stage)
+    except ValueError as error:
+        parser.error(str(error))
     if args.initialize_actor_from is not None and stage == "s0" and args.start_level is None:
         parser.error("S0 actor initialization requires --start-level")
-    # Static obstacle episodes in S1/S2 must exercise a real detour.  The
-    # environment uses this flag only for scene == "static"; none/dynamic
-    # episodes retain their normal generators.
-    thesis["blocking_obstacle_mode"] = stage in {"s1", "s2"}
     try:
         num_envs = resolve_num_envs(
             stage, args.num_envs, int(config["train"].get("num_envs", 1)),
@@ -2665,7 +2686,7 @@ def main() -> None:
         parser.error(str(error))
     if thesis.get("protocol") not in SUPPORTED_PROTOCOLS:
         parser.error(
-            "the serial trainer only supports protocols "
+            "the Full trainer only supports protocols "
             f"{sorted(SUPPORTED_PROTOCOLS)!r}"
         )
     try:
@@ -2690,16 +2711,7 @@ def main() -> None:
     output = ROOT / str(config["train"]["output_dir"]) / run_name
     output.mkdir(parents=True, exist_ok=False)
     checkpoints = output / "checkpoints"; checkpoints.mkdir()
-    observation_variant = str(
-        config["thesis"].get("observation", {}).get("ablation_variant", "full")
-    )
-    if observation_variant in {"kp_sac", "m3_no_jacobian"}:
-        from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import (
-            ThesisHomotopyEnv as VariantThesisHomotopyEnv,
-        )
-        env = VariantThesisHomotopyEnv(config)
-    else:
-        env = ThesisHomotopyEnv(config)
+    env = ThesisHomotopyEnv(config)
     env.rng = np.random.default_rng(stream_seeds["environment"])
     obs_dim = int(env.observation_space.shape[0])
     action_dim = int(env.action_space.shape[0])
@@ -2708,7 +2720,7 @@ def main() -> None:
     replay_storage = orientation_curriculum["replay_storage"]
     precision_replay = thesis["precision_boundary_replay"]
     self_curriculum = thesis["self_collision"]["curriculum"]
-    capacities = ({"none": 512, "static": 512, "dynamic": 512} if args.validation_mode else None)
+    capacities = ({"none": 512} if args.validation_mode else None)
     storage_scale = 512 if args.validation_mode else None
     replay = HomotopyReplayBuffer(
         obs_dim, action_dim, str(agent.device), capacities=capacities, seed=seed,
@@ -2758,7 +2770,6 @@ def main() -> None:
     curriculum = HomotopyCurriculum(
         stage,
         seed=stream_seeds["curriculum"],
-        ramp_steps=int(thesis["ramp_steps"]),
         goal_start_scale=float(goal_curriculum["start_scale"]),
         goal_end_scale=float(goal_curriculum["end_scale"]),
         goal_success_window=int(goal_curriculum["success_window"]),
@@ -2839,6 +2850,15 @@ def main() -> None:
         state = torch.load(checkpoint_source, map_location=agent.device, weights_only=False)
         loaded_checkpoint_state = state
         previous_stage = state["curriculum"]["stage"]
+        saved_reward = state.get("config", {}).get("thesis", {}).get("reward", {})
+        if (saved_reward.get("scheme", "legacy_dense") != thesis["reward"].get("scheme", "legacy_dense")
+                or not np.isclose(float(state["config"]["sac"]["gamma"]), float(config["sac"]["gamma"]))):
+            raise ValueError("checkpoint reward scheme/gamma differs; initialize actor into a fresh run instead of resuming old critics/replay")
+        # Check before loading worker/replay state. This flag only permits the
+        # separately audited potential term, not a broad reward rewrite.
+        from rl_risk_sac.tasks.goal_obstacle_coupling import coupling_parameters
+        if coupling_parameters(state["config"]) != coupling_parameters(config) and not args.allow_coupling_reward_change:
+            raise ValueError("coupling reward differs; pass --allow-coupling-reward-change for an explicit S1 experiment")
         if state.get("protocol") != thesis["protocol"]:
             raise ValueError(
                 f"checkpoint protocol {state.get('protocol')!r} does not match "
@@ -2852,30 +2872,11 @@ def main() -> None:
             raise ValueError("checkpoint predates deterministic RNG stream tracking and cannot be resumed")
         if state["rng_stream_seeds"] != stream_seeds:
             raise ValueError("checkpoint RNG stream derivation does not match the current trainer")
-        if {("s0", "s1"), ("s1", "s2")}.intersection({(previous_stage, stage)}):
-            validate_serial_stage_transition(
-                config, state, stage,
-                s0_evaluation=(ROOT / args.s0_evaluation).resolve()
-                if args.s0_evaluation else None,
-                checkpoint_source=Path(checkpoint_source).resolve(),
-            )
-            agent.load_state_dict(state["agent"]); replay.load_state_dict(state["replay"])
-            curriculum.inherit_task_state(state["curriculum"])
-            if previous_stage == "s1":
-                curriculum.inherit_scene_state(state["curriculum"], "static")
-            inherited = state["counters"]; counters["global_step"] = inherited["global_step"]
-            counters["updates"] = inherited["updates"]; counters["episodes"] = inherited["episodes"]
-            counters["random_steps_used"] = inherited["random_steps_used"]
-            counters["stage_total_step"] = 0
-            random.setstate(state["python_rng"]); np.random.set_state(state["numpy_rng"])
-            restore_torch_rng(state)
-            curriculum.rng.bit_generator.state = state["curriculum"]["rng_state"]
-            resume_mode = f"stage_transition_{previous_stage}_to_{stage}"
-        elif previous_stage == stage:
+        if previous_stage == stage:
             agent.load_state_dict(state["agent"]); replay.load_state_dict(state["replay"])
             curriculum.load_state_dict(state["curriculum"]); counters.update(state["counters"])
             if "stage_total_step" not in state["counters"]:
-                if stage != "s0":
+                if stage not in SUPPORTED_STAGES:
                     raise ValueError(
                         "same-stage checkpoint lacks stage_total_step; cannot audit its stage budget"
                     )
@@ -2899,6 +2900,8 @@ def main() -> None:
                         "joint_bottleneck_shaping_scale",
                         "joint_bottleneck_temperature")
         })
+        counters["coupling_reward_migration"] = reconcile_coupling_resume(
+            replay, config, state["config"], allow_change=args.allow_coupling_reward_change)
     elif args.initialize_actor_from:
         start_level = None
         initialized_actor = load_reference_actor(
@@ -2934,8 +2937,6 @@ def main() -> None:
             "warmup_start_stage_total_step": int(counters["stage_total_step"]),
         }
         resume_mode = "actor_only_fresh_replay_and_critics"
-    elif stage != "s0":
-        raise ValueError("S1/S2 must use --resume with the preceding stage's complete checkpoint")
     if checkpoint_source and replay.s0_joint_pose:
         replay.migrate_joint_pose_level_keys(
             tuple(float(value) for value in state["curriculum"]["orientation"].levels),
@@ -2979,13 +2980,20 @@ def main() -> None:
                     f"requested {num_envs}"
                 )
 
+    expert_manifest = configure_s1_expert_replay(
+        replay, config, bank_path=args.s1_expert_bank, fraction=args.s1_expert_fraction,
+    )
     manifest = {
+        "s1_expert_replay": expert_manifest,
         "protocol": config["thesis"]["protocol"], "stage": stage, "seed": seed,
         "resume": checkpoint_source, "resume_mode": resume_mode, "config": str(args.config),
         "initialize_actor_from": args.initialize_actor_from,
         "start_level": args.start_level,
         "legacy_s0_targeted_sampling": False,
         "legacy_s0_four_pool": False,
+        "reward_contract": dict(env.reward_parameters),
+        "coupling_reward_migration": counters.get("coupling_reward_migration"),
+        "reward_gamma": float(config["sac"]["gamma"]),
         "semantic_long_term_replay": {
             "enabled": semantic_enabled,
             "fraction": float(semantic_config["fraction"]),
@@ -3008,7 +3016,9 @@ def main() -> None:
         "manual_promotion": bool(orientation_curriculum.get("manual_promotion", False)),
         "urdf_sha256": file_sha256(ROOT / config["robot"]["urdf"]),
         "joint_names": config["robot"]["joint_names"], "tool_link_name": config["robot"]["tool_link_name"],
-        "observation_dim": obs_dim, "action_dim": action_dim, "external_collision_bodies": [],
+        "observation_dim": obs_dim, "action_dim": action_dim,
+        "external_collision_bodies": ["sphere", "cylinder", "box"],
+        "obstacle_configuration": thesis.get("obstacles", {}),
         "validation_mode": args.validation_mode,
         "evaluate_during_training": bool(
             config["train"].get("evaluate_during_training", False)
@@ -3037,7 +3047,7 @@ def main() -> None:
     }
     (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     log_path = output / "episodes.csv"
-    fields = ["episode", "global_step", "stage_step", "stage_total_step", "scene", "length", "return", "curriculum_eligible",
+    fields = ["obstacle_count", "obstacle_metadata", "obstacle_sampling", "obstacle_processing_ms", "observation_to_action_ms", "episode", "global_step", "stage_step", "stage_total_step", "scene", "length", "return", "curriculum_eligible",
               "orientation_anchor",
               "position_reached", "strict_pose_reached", "success_hold_count",
               "success_hold_steps_required", "task_reached",
@@ -3072,6 +3082,8 @@ def main() -> None:
                          "keypoint_tracking_quality", "keypoint_distance",
                          "jacobian_clip_ratio",
                          "next_keypoint_distance", "keypoint_progress",
+                         "goal_obstacle_coupling_reward", "goal_obstacle_potential",
+                         "next_goal_obstacle_potential",
                          "keypoint_tracking_reward", "keypoint_progress_reward",
                          "keypoint_precision_quality", "keypoint_precision_reward",
                          "joint_bottleneck_ratio", "next_joint_bottleneck_ratio",
@@ -3101,7 +3113,7 @@ def main() -> None:
                          "smooth_velocity", "smooth_cost",
                          "curriculum_eligible", "position_reached",
                          "task_reached", "obstacle_collision", "self_collision", "environment_collision", "joint_limit",
-                         "sample_none", "sample_static", "sample_dynamic"]
+                         "sample_none"]
     update_fields = [
         "global_step", "stage_step", "stage_total_step", "update", "critic_loss",
         "actor_loss", "actor_sac_loss", "policy_churn_kl",
@@ -3109,7 +3121,7 @@ def main() -> None:
         "chain_pcr_effective_coefficient",
         "chain_pcr_sac_loss_ema", "chain_pcr_loss_ema",
         "alpha_loss", "policy_entropy", "alpha",
-        "q1_mean", "q2_mean", "target_mean", "sample_none", "sample_static", "sample_dynamic",
+        "q1_mean", "q2_mean", "target_mean", "sample_none",
         "sample_orientation_anchor", "sample_orientation_current", "sample_orientation_historical",
         "sample_current_success", "sample_current_recent", "sample_previous_level",
         "sample_semantic_long_term", "sample_precision_boundary",
@@ -3142,7 +3154,6 @@ def main() -> None:
         "rolling_goal_success_rate", "goal_eligible_steps",
         "goal_full_scale_steps", "s0_goal_gate_eligible",
         "orientation_scale", "position_tolerance", "orientation_tolerance", "rolling_orientation_success_rate",
-        "rolling_scene_success_rate", "scene_strict", "scene_strict_steps", "scene_eligible_steps",
         "orientation_eligible_steps", "orientation_level_index", "orientation_level_steps",
         "rolling_anchor_position_success_rate", "rolling_previous_pose_success_rate",
         "sample_orientation_anchor",
@@ -3173,6 +3184,9 @@ def main() -> None:
         "lambda_self", "s0_phase", "pose_phase_complete",
         "self_safety_eligible_steps", "self_safety_full_weight_steps",
     ]
+    expert_metric_fields = list(s1_expert_replay_metrics(replay))
+    update_fields.extend(expert_metric_fields)
+    progress_fields.extend(expert_metric_fields)
     requested_steps = int(args.steps or config["train"]["total_steps"])
     max_stage_steps = int(config["train"]["max_stage_steps"])
     total_steps = resolve_stage_block_steps(
@@ -3243,55 +3257,7 @@ def main() -> None:
         progress_writer = csv.DictWriter(progress_handle, fieldnames=progress_fields); progress_writer.writeheader()
         probe_path = output / "orientation_probes.csv"
         probe_handle = probe_path.open("w", newline="", encoding="utf-8")
-        probe_fields = [
-            "global_step", "stage_step", "stage_total_step",
-            "orientation_level_index", "orientation_scale",
-            "orientation_level_steps", "episodes", "seed", "success_rate",
-            "collision_rate", "joint_limit_rate", "timeout_rate",
-            "probe_seeds", "probe_mean_success_rate", "probe_min_seed_success_rate",
-            "probe_max_collision_rate", "probe_max_timeout_rate", "confirmation_seed_success_rates",
-            "mean_success_rate", "min_seed_success_rate", "max_collision_rate",
-            "max_timeout_rate", "max_joint_limit_rate", "seed_success_rates",
-            "seed_results",
-            "mean_position_error_m", "mean_orientation_error_rad",
-            "p95_orientation_error_rad",
-            "mean_minimum_self_distance_m", "self_violation_rate",
-            "strict_pose_hit_rate", "minimum_bin_success_rate",
-            "minimum_bin_strict_pose_hit_rate",
-            "p95_position_error_m", "mean_episode_steps", "mean_success_steps",
-            "terminal_position_only_rate", "terminal_orientation_only_rate",
-            "terminal_joint_failure_rate",
-            "terminal_joint_pose_rate", "bin_indices", "bin_episode_counts",
-            "mean_cell_success_rate", "cell_success_p10", "worst_10_cells_mean_success_rate", "cell_fraction_success_at_least_0_6",
-            "distance_bin_success_rates", "orientation_bin_success_rates",
-            "success_rate_d7_d9", "timeout_rate_d7_d9",
-            "keypoint_step_count", "keypoint_distance_mean_m",
-            "keypoint_next_distance_mean_m", "keypoint_tracking_quality_mean",
-            "keypoint_precision_quality_mean", "keypoint_precision_reward_mean",
-            "joint_bottleneck_shaping_reward_mean", "keypoint_progress_mean_m",
-            "keypoint_progress_positive_ratio", "jacobian_clip_ratio_mean",
-            "keypoint_episode_start_distance_mean_m",
-            "keypoint_episode_end_distance_mean_m",
-            "keypoint_episode_distance_reduction_mean_m",
-            "keypoint_episode_improvement_ratio",
-            "weak_bin_count_below_0_6", "success_rate_o0_o4",
-            "success_rate_o5_o6", "success_rate_o7_o9",
-            "timeout_rate_o0_o4", "timeout_rate_o5_o6", "timeout_rate_o7_o9",
-            "large_angle_orientation_steps",
-            "large_angle_orientation_improvement_ratio",
-            "large_angle_orientation_mean_rebound_rad",
-            "previous_success_rate", "previous_collision_rate",
-            "previous_joint_limit_rate", "screen_passed", "confirmation_ran",
-            "confirmation_episodes", "confirmation_seed", "confirmation_success_rate",
-            "confirmation_collision_rate", "confirmation_joint_limit_rate",
-            "confirmation_previous_success_rate", "confirmation_previous_collision_rate",
-            "confirmation_previous_joint_limit_rate", "confirmation_passed",
-            "retention_passed", "recovery_required",
-            "cross_level_success_rates",
-            "cross_level_minimum_bin_success_rates",
-            "s0_phase", "lambda_self", "probe_track", "passed", "is_best",
-            "bad_probe_count", "rolled_back",
-        ]
+        probe_fields = ORIENTATION_PROBE_FIELDS
         probe_writer = csv.DictWriter(probe_handle, fieldnames=probe_fields)
         probe_writer.writeheader()
 
@@ -3391,7 +3357,7 @@ def main() -> None:
                 curriculum.record_transition(
                     goal_scale, orientation_scale,
                     orientation_anchor=orientation_anchor,
-                    curriculum_eligible=not used_warmup_transition,
+                    curriculum_eligible=(not used_warmup_transition and promotion_episode_eligible(config, info)),
                 )
                 replay.add(
                     scene, obs, action, next_obs, terminated or truncated, info,
@@ -3432,7 +3398,7 @@ def main() -> None:
                             s0_current_fraction=replay_current_fraction,
                             lambda_self=curriculum.lambda_self,
                         )
-                        reference_observations = reference_batch.observations
+                        reference_observations = reference_batch
                     batch = replay.sample(
                         stage, curriculum.xi_map(), batch_size,
                         orientation_scale=curriculum.orientation.scale,
@@ -3460,8 +3426,7 @@ def main() -> None:
                             "stage_total_step": counters["stage_total_step"],
                             "update": counters["updates"], **last_update,
                             "sample_none": replay.last_sample_counts["none"],
-                            "sample_static": replay.last_sample_counts["static"],
-                            "sample_dynamic": replay.last_sample_counts["dynamic"],
+                            **s1_expert_replay_metrics(replay),
                             "sample_orientation_anchor": replay.last_orientation_sample_counts["anchor"],
                             "sample_orientation_current": replay.last_orientation_sample_counts["current"],
                             "sample_orientation_historical": replay.last_orientation_sample_counts["historical"],
@@ -3519,6 +3484,9 @@ def main() -> None:
                     "keypoint_distance": info["keypoint_distance"],
                     "next_keypoint_distance": info["next_keypoint_distance"],
                     "keypoint_progress": info["keypoint_progress"],
+                    "goal_obstacle_coupling_reward": info["goal_obstacle_coupling_reward"],
+                    "goal_obstacle_potential": info["goal_obstacle_potential"],
+                    "next_goal_obstacle_potential": info["next_goal_obstacle_potential"],
                     "keypoint_tracking_reward": info["keypoint_tracking_reward"],
                     "keypoint_progress_reward": info["keypoint_progress_reward"],
                     "keypoint_precision_quality": info["keypoint_precision_quality"],
@@ -3585,8 +3553,7 @@ def main() -> None:
                     "task_reached": int(info["task_reached"]),
                     "obstacle_collision": int(info["obstacle_collision"]), "self_collision": int(info["self_collision"]),
                     "environment_collision": int(info["environment_collision"]), "joint_limit": int(info["joint_limit"]),
-                    "sample_none": replay.last_sample_counts["none"], "sample_static": replay.last_sample_counts["static"],
-                    "sample_dynamic": replay.last_sample_counts["dynamic"],
+                    "sample_none": replay.last_sample_counts["none"],
                 })
                 if counters["stage_step"] % log_flush_interval == 0:
                     transition_handle.flush()
@@ -3659,6 +3626,7 @@ def main() -> None:
                             "" if curriculum.orientation_anchor_success_rate is None
                             else curriculum.orientation_anchor_success_rate
                         ),
+                        **s1_expert_replay_metrics(replay),
                         "sample_orientation_anchor": replay.last_orientation_sample_counts["anchor"],
                         "sample_orientation_current": replay.last_orientation_sample_counts["current"],
                         "sample_orientation_historical": replay.last_orientation_sample_counts["historical"],
@@ -3779,7 +3747,7 @@ def main() -> None:
                 scene, bool(final.get("position_reached", False)),
                 bool(final.get("task_reached", False)), episode_length,
                 orientation_anchor=orientation_anchor,
-                curriculum_eligible=not episode_used_warmup,
+                curriculum_eligible=(not episode_used_warmup and promotion_episode_eligible(config, final)),
                 # Promotion is performed only by the deterministic
                 # three-seed probe/confirmation gate below.
                 allow_orientation_promotion=False,
@@ -3936,18 +3904,17 @@ def main() -> None:
                     f"rollback={int(rolled_back)} advanced={int(advanced)}",
                     flush=True,
                 )
-            if update["became_strict"]:
-                report = replay.strictify(scene)
-                curriculum.states[scene].replay_strictified = True
-                manifest.setdefault("strictification", []).append({"scene": scene, "global_step": counters["global_step"], **report})
-                (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-            state = curriculum.states.get(scene)
             writer.writerow({
+                "obstacle_count": final.get("obstacle_count", 0),
+                "obstacle_metadata": json.dumps(final.get("obstacle_metadata", [])),
+                "obstacle_sampling": json.dumps(final.get("obstacle_sampling", {})),
+                "obstacle_processing_ms": final.get("obstacle_processing_ms", 0.),
+                "observation_to_action_ms": final.get("observation_to_action_ms", 0.),
                 "episode": counters["episodes"], "global_step": counters["global_step"],
                 "stage_step": counters["stage_step"],
                 "stage_total_step": counters["stage_total_step"],
                 "scene": scene, "length": episode_length, "return": episode_return,
-                "curriculum_eligible": int(not episode_used_warmup),
+                "curriculum_eligible": int(not episode_used_warmup and promotion_episode_eligible(config, final)),
                 "orientation_anchor": int(orientation_anchor),
                 "position_reached": int(final.get("position_reached", False)),
                 "strict_pose_reached": int(final.get("strict_pose_reached", False)),
@@ -3960,11 +3927,10 @@ def main() -> None:
                 "safe_success": int(final.get("safe_success", False)),
                 "obstacle_collision": int(final.get("obstacle_collision", False)), "self_collision": int(final.get("self_collision", False)),
                 "environment_collision": int(final.get("environment_collision", False)), "joint_limit": int(final.get("joint_limit", False)),
-                "timeout": int(truncated), "xi": 1.0 if state is None else state.xi,
+                "timeout": int(truncated), "xi": 1.0,
                 "lambda_self": lambda_self,
-                "strict": 1 if state is None else int(state.strict),
-                "rolling_task_reach_rate": "" if state is None else update["rolling_task_reach_rate"],
-                "eligible_steps": 0 if state is None else state.eligible_steps, "strict_steps": 0 if state is None else state.strict_steps,
+                "strict": 1,
+                "rolling_task_reach_rate": "",
                 "goal_scale": goal_scale,
                 "rolling_goal_success_rate": update["rolling_goal_success_rate"],
                 "goal_eligible_steps": curriculum.goal.eligible_steps,

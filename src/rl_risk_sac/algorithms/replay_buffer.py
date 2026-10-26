@@ -17,6 +17,10 @@ class Batch:
     next_observations: torch.Tensor
     dones: torch.Tensor
     protected_mask: torch.Tensor | None = None
+    obstacle_features: torch.Tensor | None = None
+    obstacle_mask: torch.Tensor | None = None
+    next_obstacle_features: torch.Tensor | None = None
+    next_obstacle_mask: torch.Tensor | None = None
 
 
 class ReplayBuffer:

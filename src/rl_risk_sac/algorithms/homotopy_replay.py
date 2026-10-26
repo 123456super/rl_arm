@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from rl_risk_sac.tasks.obstacle_observation import ObstacleObservation, obstacle_set, pad_obstacle_sets
+
 from pathlib import Path
 from typing import Any
 import hashlib
@@ -8,8 +10,7 @@ import numpy as np
 import torch
 
 from rl_risk_sac.algorithms.replay_buffer import Batch
-SCENES = ("none", "static", "dynamic")
-SCENE_ID = {name: index for index, name in enumerate(SCENES)}
+SCENES = ("none",)
 
 
 def _vectorized_replay_rewards(
@@ -18,7 +19,8 @@ def _vectorized_replay_rewards(
     xi: np.ndarray,
     lambda_self: float,
     reward_gamma: float,
-    reward_parameters: dict[str, float],
+    reward_parameters: dict[str, Any],
+    *, obstacle_sets=None, next_obstacle_sets=None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Recompute replay rewards for a whole batch without Python row loops.
 
@@ -38,6 +40,7 @@ def _vectorized_replay_rewards(
         "leave_joint_tolerance_penalty": 0.0,
         "keypoint_pose_reward": True,
         "keypoint_tracking_scale": 0.05,
+        "keypoint_tracking_sigma": 0.05,
         "keypoint_progress_scale": 20.0,
         "keypoint_precision_reward_scale": 0.05,
         "joint_bottleneck_shaping_scale": 0.0,
@@ -51,6 +54,7 @@ def _vectorized_replay_rewards(
         "safety_risk_weight": 2.0, "safety_clearance_weight": 8.0,
         "self_risk_weight": 2.0, "self_clearance_weight": 8.0,
         "external_safety_scale": 0.05, "self_safety_scale": 0.05,
+        "reward_scheme": "legacy_dense",
         **reward_parameters,
     }
     if (
@@ -123,6 +127,9 @@ def _vectorized_replay_rewards(
         - smooth_cost
         + float(p["success_bonus"]) * task_reached
     )
+    scheme = p.get("reward_scheme", "legacy_dense")
+    if scheme != "legacy_dense":
+        raise ValueError("only the restored legacy_dense reward is supported")
 
     clearance = np.clip(
         (float(p["d_safe"]) - r[:, 12]) / float(p["d_safe"]), 0.0, 1.0,
@@ -139,12 +146,15 @@ def _vectorized_replay_rewards(
         float(p["safety_risk_weight"]) * risk
         + float(p["safety_clearance_weight"]) * clearance
     ) / (float(p["safety_risk_weight"]) + float(p["safety_clearance_weight"]))
+    if p.get("lambda_ext") is not None:
+        external_cost = risk
     self_cost = (
         float(p["self_risk_weight"]) * self_risk
         + float(p["self_clearance_weight"]) * self_clearance
     ) / (float(p["self_risk_weight"]) + float(p["self_clearance_weight"]))
     safety_penalty = (
-        scene_xi * float(p["external_safety_scale"]) * external_cost
+        (scene_xi * float(p["external_safety_scale"]) if p.get("lambda_ext") is None
+         else float(p["lambda_ext"])) * external_cost
         + float(lambda_self) * float(p["self_safety_scale"]) * self_cost
     )
     hard_penalty = float(p["hard_failure_penalty"]) * hard_failure
@@ -153,6 +163,19 @@ def _vectorized_replay_rewards(
     )
     terminal_guard = float(p["hard_failure_penalty"]) * terminal_obstacle
     rewards = r_goal - hard_penalty - timeout_penalty - safety_penalty - terminal_guard
+    if float(p.get("goal_obstacle_coupling_beta", 0.)) != 0:
+        from rl_risk_sac.tasks.goal_obstacle_coupling import obstacle_distances, coupling_shaping
+        if obstacle_sets is None or next_obstacle_sets is None:
+            raise ValueError("coupling replay requires current and next raw obstacle sets")
+        distance, present = obstacle_distances(obstacle_sets)
+        next_distance, next_present = obstacle_distances(next_obstacle_sets)
+        if len(distance) != len(r) or len(next_distance) != len(r):
+            raise ValueError("coupling obstacle sets must match the replay batch")
+        shaping, _, _ = coupling_shaping(
+            r[:, 0], r[:, 1], r[:, 2], r[:, 3], distance, next_distance,
+            present, next_present, done, p, reward_gamma,
+        )
+        rewards = rewards + shaping
     return rewards, proximity
 
 
@@ -162,6 +185,8 @@ class _Partition:
     ) -> None:
         self.capacity, self.ptr, self.size = int(capacity), 0, 0
         self.obs = np.zeros((capacity, obs_dim), np.float32)
+        self.obstacle_sets = [np.empty((0, 37), np.float32) for _ in range(capacity)]
+        self.next_obstacle_sets = [np.empty((0, 37), np.float32) for _ in range(capacity)]
         self.action = np.zeros((capacity, action_dim), np.float32)
         self.next_obs = np.zeros((capacity, obs_dim), np.float32)
         self.done = np.zeros((capacity, 1), np.float32)
@@ -213,6 +238,8 @@ class _Partition:
             cached[old_episode].remove(index)
             if not cached[old_episode]:
                 del cached[old_episode]
+        self.obstacle_sets[index] = obstacle_set(obs).copy()
+        self.next_obstacle_sets[index] = obstacle_set(next_obs).copy()
         self.obs[index], self.action[index], self.next_obs[index] = obs, action, next_obs
         self.done[index], self.raw[index] = float(done), raw
         self.episode[index], self.step[index] = episode, step
@@ -220,6 +247,11 @@ class _Partition:
             cached.setdefault(int(episode), set()).add(index)
         self.ptr = (index + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
+
+    def observation(self, index, *, next_state=False):
+        values = self.next_obs if next_state else self.obs
+        sets = self.next_obstacle_sets if next_state else self.obstacle_sets
+        return ObstacleObservation(values[index], sets[index])
 
     def chronological_indices(self) -> np.ndarray:
         if self.size < self.capacity:
@@ -233,6 +265,10 @@ class _Partition:
         for field in ("obs", "action", "next_obs", "raw", "episode", "step"):
             array = getattr(self, field)
             array[:size] = array[selected].copy()
+        for field in ("obstacle_sets", "next_obstacle_sets"):
+            values = getattr(self, field)
+            kept = [values[i].copy() for i in selected]
+            setattr(self, field, kept + [np.empty((0, 37), np.float32) for _ in range(self.capacity - size)])
         values = self.done[selected].copy()
         if done_override is not None:
             values[:] = done_override.reshape(-1, 1)
@@ -257,7 +293,8 @@ class _Partition:
             order = order[selected_positions]
         for index in order:
             result.add(
-                self.obs[index], self.action[index], self.next_obs[index],
+                ObstacleObservation(self.obs[index], self.obstacle_sets[index]), self.action[index],
+                ObstacleObservation(self.next_obs[index], self.next_obstacle_sets[index]),
                 self.done[index, 0], self.raw[index], self.episode[index], self.step[index],
             )
         return result
@@ -273,7 +310,8 @@ class _Partition:
     def copy_episode_to(self, episode: int, destination: _Partition) -> None:
         for index in self.episode_indices(episode):
             destination.add(
-                self.obs[index], self.action[index], self.next_obs[index],
+                ObstacleObservation(self.obs[index], self.obstacle_sets[index]), self.action[index],
+                ObstacleObservation(self.next_obs[index], self.next_obstacle_sets[index]),
                 self.done[index, 0], self.raw[index], self.episode[index], self.step[index],
             )
 
@@ -287,7 +325,7 @@ class HomotopyReplayBuffer:
     merely because they contain more transitions.
     """
 
-    STORAGE_VERSION = 9
+    STORAGE_VERSION = 10
 
     def __init__(
         self,
@@ -312,9 +350,8 @@ class HomotopyReplayBuffer:
         precision_replay_fraction: float = 0.0,
         precision_position_boundary_low: float = 0.8,
         precision_position_boundary_high: float = 1.5,
-        reward_parameters: dict[str, float] | None = None,
+        reward_parameters: dict[str, Any] | None = None,
     ) -> None:
-        capacities = capacities or {"none": 60000, "static": 90000, "dynamic": 150000}
         if str(device).startswith("cuda") and not torch.cuda.is_available():
             device = "cpu"
         self.device = torch.device("cuda" if device in {"cuda", "cuda:auto", "auto"} else device)
@@ -326,10 +363,7 @@ class HomotopyReplayBuffer:
         ):
             raise ValueError("only unified keypoint pose reward is supported")
         self.raw_dim = 29
-        self.parts = {
-            scene: _Partition(obs_dim, action_dim, capacities[scene], self.raw_dim)
-            for scene in ("static", "dynamic")
-        }
+        self.parts = {}  # Reserved for loading older reaching checkpoints.
         self.s0_anchor = _Partition(obs_dim, action_dim, int(s0_anchor_capacity), self.raw_dim)
         self.s0_current = _Partition(obs_dim, action_dim, int(s0_current_capacity), self.raw_dim)
         self.s0_current_success = _Partition(
@@ -412,6 +446,58 @@ class HomotopyReplayBuffer:
         self.four_pool_source: str | None = None
         self.four_pool_history_mode = False
         self.four_pool_current_fraction = .5
+        # Frozen S1 demonstrations never enter online success/curriculum pools.
+        self.s1_expert_partitions: dict[int, _Partition] = {}
+        self.s1_expert_fraction = 0.0
+        self.s1_expert_source: str | None = None
+        self.s1_expert_sha256: str | None = None
+        self.s1_expert_contract: dict[str, Any] | None = None
+        self.s1_expert_metadata: dict[str, Any] | None = None
+        self.s1_expert_rng = np.random.default_rng(seed ^ 0x51E7E)
+        self.last_s1_expert_count = 0
+        self._expert_missing_levels_warned: set[int] = set()
+
+    def configure_s1_experts(self, bank, *, fraction, source, sha256):
+        from rl_risk_sac.algorithms.s1_expert_replay import validate_expert_bank
+        validate_expert_bank(bank)
+        if not np.isfinite(fraction) or not 0 <= fraction <= .5:
+            raise ValueError("S1 expert fraction must be in [0, 0.5]")
+        if self.s1_expert_sha256 != sha256:
+            self.s1_expert_partitions = bank["partitions"]
+            self.s1_expert_rng = np.random.default_rng(int(sha256[:16], 16))
+        self.s1_expert_fraction = float(fraction)
+        self.s1_expert_source = str(source)
+        self.s1_expert_sha256 = str(sha256)
+        self.s1_expert_contract = bank["contract"]
+        self.s1_expert_metadata = {k: v for k, v in bank.items()
+                                   if k not in ("partitions", "initial_states")}
+        self._expert_missing_levels_warned.clear()
+
+    def _sample_s1_experts(self, count, level):
+        part = self.s1_expert_partitions.get(level)
+        if not count or part is None:
+            return []
+        # Episode-uniform without replacement; use a separate persisted RNG.
+        pools = {ep: np.asarray(sorted(indices), dtype=np.int64)
+                 for ep, indices in part.episode_rows().items()}
+        for values in pools.values():
+            self.s1_expert_rng.shuffle(values)
+        cursors = dict.fromkeys(pools, 0)
+        active = sorted(pools)
+        selected = []
+        while active and len(selected) < count:
+            self.s1_expert_rng.shuffle(active)
+            remaining = []
+            for episode in active:
+                cursor = cursors[episode]
+                selected.append((part, int(pools[episode][cursor]), "s1_expert"))
+                cursors[episode] += 1
+                if cursors[episode] < len(pools[episode]):
+                    remaining.append(episode)
+                if len(selected) >= count:
+                    break
+            active = remaining
+        return selected
 
     def promote_four_pool_to_history(
         self, scale: float, *, current_fraction: float = .5,
@@ -447,7 +533,7 @@ class HomotopyReplayBuffer:
             for _, index, _ in self._sample_episode_balanced_rows(
                 part, anchor_quotas[tier], "previous",
             ):
-                history.add(part.obs[index], part.action[index], part.next_obs[index],
+                history.add(part.observation(index), part.action[index], part.observation(index, next_state=True),
                             part.done[index, 0], part.raw[index], part.episode[index], part.step[index])
         centers = list(self.frontier)
         self.rng.shuffle(centers)
@@ -460,7 +546,7 @@ class HomotopyReplayBuffer:
                 part, min(part.size, frontier_budget // len(centers)
                           + int(ordinal < frontier_budget % len(centers))), "previous",
             ):
-                history.add(part.obs[index], part.action[index], part.next_obs[index],
+                history.add(part.observation(index), part.action[index], part.observation(index, next_state=True),
                             part.done[index, 0], part.raw[index], part.episode[index], part.step[index])
         saved_semantic = self._loaded_semantic_state
         semantic_slots = (
@@ -470,7 +556,7 @@ class HomotopyReplayBuffer:
         for part, index, _ in self._sample_semantic_rows(
             history.capacity - history.size, slots=semantic_slots,
         ):
-            history.add(part.obs[index], part.action[index], part.next_obs[index],
+            history.add(part.observation(index), part.action[index], part.observation(index, next_state=True),
                         part.done[index, 0], part.raw[index], part.episode[index], part.step[index])
         self.four_pool_enabled = False
         self.four_pool_history_mode = True
@@ -539,8 +625,8 @@ class HomotopyReplayBuffer:
                 recovered and step - start_step >= 40 and step >= last_step - 19
             ) or (not recovered and (stalled or rebounded or misaligned)):
                 part = self.frontier[center]
-                part.add(self.s0_current.obs[index], self.s0_current.action[index],
-                         self.s0_current.next_obs[index], self.s0_current.done[index, 0],
+                part.add(self.s0_current.observation(index), self.s0_current.action[index],
+                         self.s0_current.observation(index, next_state=True), self.s0_current.done[index, 0],
                          self.s0_current.raw[index], episode, step)
 
     def _validate_success_schedule(
@@ -776,7 +862,7 @@ class HomotopyReplayBuffer:
         )
         for index in selected:
             result.add(
-                source.obs[index], source.action[index], source.next_obs[index],
+                source.observation(index), source.action[index], source.observation(index, next_state=True),
                 source.done[index, 0], source.raw[index], source.episode[index],
                 source.step[index],
             )
@@ -896,13 +982,10 @@ class HomotopyReplayBuffer:
             )
         self.s0_level_keys_are_indices = True
 
-    def add(
-        self, scene: str, observation, action, next_observation, terminal: bool,
-        info: dict[str, Any], episode_id: int, step_in_episode: int,
-        *, orientation_anchor: bool = False,
-        curriculum_level: int | None = None,
-    ) -> None:
-        raw = np.asarray([
+    @staticmethod
+    def transition_features(info, *, curriculum_level=None, reward_parameters=None):
+        parameters = reward_parameters or {}
+        return np.asarray([
             info["rho_position"], info["next_rho_position"], info["rho_orientation"],
             info["next_rho_orientation"], info["smooth_velocity"], float(info["task_reached"]),
             float(info["hard_failure"]), float(info["obstacle_collision"]), float(info["self_collision"]),
@@ -921,22 +1004,27 @@ class HomotopyReplayBuffer:
             ),
             float(info.get(
                 "position_tolerance",
-                self.reward_parameters.get("joint_position_tolerance", 0.01),
+                parameters.get("joint_position_tolerance", 0.01),
             )),
             float(info.get(
                 "orientation_tolerance",
-                self.reward_parameters.get("joint_orientation_tolerance", 0.03),
+                parameters.get("joint_orientation_tolerance", 0.03),
             )),
             float(info.get("keypoint_distance", 0.0)),
             float(info.get("next_keypoint_distance", 0.0)),
             float(info.get("keypoint_tracking_quality", 0.0)),
         ], np.float32)
+
+    def add(
+        self, scene: str, observation, action, next_observation, terminal: bool,
+        info: dict[str, Any], episode_id: int, step_in_episode: int,
+        *, orientation_anchor: bool = False,
+        curriculum_level: int | None = None,
+    ) -> None:
         if scene != "none":
-            self.parts[scene].add(
-                observation, action, next_observation, terminal, raw,
-                episode_id, step_in_episode,
-            )
-            return
+            raise ValueError("only reaching scene none is supported")
+        raw = self.transition_features(info, curriculum_level=curriculum_level,
+                                       reward_parameters=self.reward_parameters)
         # L4--L6 share orientation_scale=1.0; use the explicit curriculum
         # index when available so their position-precision replay remains
         # partitioned by level.
@@ -989,7 +1077,7 @@ class HomotopyReplayBuffer:
                 + self.s0_current.size
                 + sum(part.size for part in self.s0_history.values())
             )
-        return self.parts[scene].size
+        raise ValueError("only reaching scene none is supported")
 
     def orientation_storage_counts(self) -> dict[str, Any]:
         counts = {
@@ -1545,33 +1633,6 @@ class HomotopyReplayBuffer:
         self.rng.shuffle(selected)
         return selected
 
-    def _sample_none_rows(self, count: int) -> list[tuple[_Partition, int, str]]:
-        """Sample the retained full-task/anchor data for S1 and S2."""
-        partitions = [self.s0_anchor]
-        if self.s0_current.size:
-            partitions.append(self.s0_current)
-        retained = sum(part.size for part in partitions)
-        for _, part in sorted(self.s0_history.items(), reverse=True):
-            if retained >= count:
-                break
-            partitions.append(part)
-            retained += part.size
-        sizes = np.asarray([part.size for part in partitions], dtype=np.int64)
-        if int(sizes.sum()) < count:
-            raise ValueError(f"no-obstacle replay has only {int(sizes.sum())} rows, need {count}")
-        remaining = count
-        remaining_total = int(sizes.sum())
-        rows: list[tuple[_Partition, int, str]] = []
-        for index, (part, size) in enumerate(zip(partitions, sizes)):
-            if index == len(partitions) - 1:
-                take = remaining
-            else:
-                take = int(self.rng.hypergeometric(int(size), remaining_total - int(size), remaining))
-            rows.extend(self._sample_partition_rows(part, take, "none"))
-            remaining -= take
-            remaining_total -= int(size)
-        return rows
-
     @staticmethod
     def _gather_rows(
         rows: list[tuple[str, _Partition, int, bool]], field: str,
@@ -1600,82 +1661,65 @@ class HomotopyReplayBuffer:
         s0_current_fraction: float | None = None,
         lambda_self: float = 1.0,
     ) -> Batch:
-        ratios = {"s0": (1, 0, 0), "s1": (64, 192, 0), "s2": (51, 77, 128)}[stage]
-        desired = np.asarray(ratios, dtype=int)
-        if batch_size != 256:
-            desired = np.floor(np.asarray(ratios) * batch_size / 256).astype(int)
-            desired[0] += batch_size - int(desired.sum())
-        scene_sizes = np.asarray([self.scene_size(scene) for scene in SCENES])
-        counts = np.minimum(desired, scene_sizes)
-        missing = batch_size - int(counts.sum())
-        available = scene_sizes - counts
-        redistributed = missing > 0
-        while missing and available.sum() > 0:
-            shares = missing * available / available.sum()
-            allocation = np.minimum(available, np.floor(shares).astype(int))
-            if allocation.sum() == 0:
-                candidates = np.flatnonzero(available > 0)
-                allocation[candidates[:missing]] = 1
-            counts += allocation; available -= allocation; missing -= int(allocation.sum())
-        if missing:
-            raise ValueError(f"replay has only {batch_size - missing} transitions, need {batch_size}")
-        self.last_sample_counts = {scene: int(count) for scene, count in zip(SCENES, counts)}
-        if redistributed:
-            self.redistribution_count += 1
+        if stage not in {"s0", "s1", "s2", "s3"}:
+            raise ValueError("unsupported curriculum stage")
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
+        if self.scene_size("none") < batch_size:
+            raise ValueError(f"replay has only {self.scene_size('none')} transitions, need {batch_size}")
+        self.last_sample_counts = {"none": int(batch_size)}
         protected_previous = (
             max(self.s0_history.items())[1] if self.s0_history else None
         )
         rows: list[tuple[str, _Partition, int, bool]] = []
-        for scene, count in zip(SCENES, counts):
-            if count:
-                if stage == "s0" and scene == "none":
-                    selected = self._sample_s0_rows(
-                        int(count),
-                        curriculum_level if curriculum_level is not None else orientation_scale,
-                        s0_anchor_fraction, s0_current_fraction,
-                    )
-                    rows.extend(
-                        (
-                            scene, part, index,
-                            category in ("current_success", "stability_anchor")
-                            or (category == "previous" and (
-                                self.four_pool_history_mode or part is protected_previous
-                            )),
-                        )
-                        for part, index, category in selected
-                    )
-                elif scene == "none":
-                    self.last_orientation_sample_counts = {
-                        "anchor": 0, "current": 0, "historical": 0,
-                        "current_success": 0, "current_recent": 0,
-                        "previous": 0,
-                    }
-                    selected = self._sample_none_rows(int(count))
-                    rows.extend(
-                        (scene, part, index, False)
-                        for part, index, _ in selected
-                    )
-                else:
-                    part = self.parts[scene]
-                    index = self.rng.choice(part.size, size=int(count), replace=False)
-                    rows.extend((scene, part, int(i), False) for i in index)
+        expert_rows = []
+        if stage == "s1" and self.s1_expert_fraction:
+            if curriculum_level is None:
+                raise ValueError("S1 expert replay requires an explicit precision level")
+            level = int(curriculum_level)
+            part = self.s1_expert_partitions.get(level)
+            if part is None and level not in self._expert_missing_levels_warned:
+                print(f"S1 expert replay: no L{level} bank; using online-only replay at this level", flush=True)
+                self._expert_missing_levels_warned.add(level)
+            expert_rows = self._sample_s1_experts(round(batch_size * self.s1_expert_fraction), level)
+        selected = self._sample_s0_rows(
+            int(batch_size) - len(expert_rows),
+            curriculum_level if curriculum_level is not None else orientation_scale,
+            s0_anchor_fraction, s0_current_fraction,
+        )
+        selected.extend(expert_rows)
+        self.last_s1_expert_count = len(expert_rows)
+        if self.s1_expert_partitions:
+            self.last_orientation_sample_counts["s1_expert"] = len(expert_rows)
+        rows.extend(
+            (
+                "none", part, index,
+                category in ("current_success", "stability_anchor")
+                or (category == "previous" and (
+                    self.four_pool_history_mode or part is protected_previous
+                )),
+            )
+            for part, index, category in selected
+        )
         self.rng.shuffle(rows)
         raw = self._gather_rows(rows, "raw")
         dones = self._gather_rows(rows, "done")
-        scene_xi = np.fromiter(
-            (1.0 if scene == "none" else xi[scene] for scene, _, _, _ in rows),
-            dtype=np.float64,
-            count=len(rows),
-        )
+        scene_xi = np.ones(len(rows), dtype=np.float64)
         rewards, costs = _vectorized_replay_rewards(
             raw, dones, scene_xi, lambda_self, self.reward_gamma,
             self.reward_parameters,
+            obstacle_sets=[part.obstacle_sets[index] for _, part, index, _ in rows],
+            next_obstacle_sets=[part.next_obstacle_sets[index] for _, part, index, _ in rows],
         )
         observations = self._gather_rows(rows, "obs")
         actions = self._gather_rows(rows, "action")
         next_observations = self._gather_rows(rows, "next_obs")
         tensor = lambda value: torch.as_tensor(value, device=self.device, dtype=torch.float32)
+        obstacle_features, obstacle_mask = pad_obstacle_sets([part.obstacle_sets[index] for _, part, index, _ in rows], self.device)
+        next_features, next_mask = pad_obstacle_sets([part.next_obstacle_sets[index] for _, part, index, _ in rows], self.device)
         return Batch(
+            obstacle_features=obstacle_features, obstacle_mask=obstacle_mask,
+            next_obstacle_features=next_features, next_obstacle_mask=next_mask,
             observations=tensor(observations),
             actions=tensor(actions),
             rewards=tensor(rewards).reshape(-1, 1), costs=tensor(costs).reshape(-1, 1),
@@ -1686,25 +1730,6 @@ class HomotopyReplayBuffer:
                 device=self.device, dtype=torch.bool,
             ).reshape(-1, 1),
         )
-
-    def strictify(self, scene: str) -> dict[str, Any]:
-        """Cut each stored trajectory at its first obstacle contact."""
-        if scene == "none":
-            raise ValueError("no-obstacle replay is banked and cannot be strictified")
-        part = self.parts[scene]; before_hash = self.partition_sha256(scene)
-        order = part.chronological_indices()
-        keep = np.ones(len(order), dtype=bool); dones = part.done[order, 0].copy()
-        blocked: set[int] = set()
-        for j, index in enumerate(order):
-            episode = int(part.episode[index]); before, after = bool(part.raw[index, 13]), bool(part.raw[index, 14])
-            if episode in blocked or before:
-                keep[j] = False; continue
-            if after:
-                dones[j] = 1.0; part.raw[index, 5] = 0.0; blocked.add(episode)
-        old = part.size
-        part.compact(keep, dones[keep])
-        return {"before": old, "after": part.size, "removed": old - part.size,
-                "sha256_before": before_hash, "sha256_after": self.partition_sha256(scene)}
 
     def partition_sha256(self, scene: str) -> str:
         digest = hashlib.sha256()
@@ -1719,12 +1744,16 @@ class HomotopyReplayBuffer:
                 for scale, part in sorted(self.s0_history.items())
             )
         else:
-            partitions = [(scene, self.parts[scene])]
+            raise ValueError("only reaching scene none is supported")
         for label, part in partitions:
             digest.update(label.encode("utf-8"))
             order = part.chronological_indices()
             for field in (part.obs, part.action, part.next_obs, part.done, part.raw, part.episode, part.step):
                 digest.update(np.ascontiguousarray(field[order]).tobytes())
+            for index in order:
+                for values in (part.obstacle_sets[index], part.next_obstacle_sets[index]):
+                    digest.update(np.asarray(values.shape, dtype=np.int64).tobytes())
+                    digest.update(np.ascontiguousarray(values).tobytes())
         return digest.hexdigest()
 
     def state_dict(self) -> dict[str, Any]:
@@ -1743,6 +1772,14 @@ class HomotopyReplayBuffer:
                 "rng_state": self.semantic_rng.bit_generator.state,
             }
         return {"storage_version": self.STORAGE_VERSION,
+                "s1_experts": ({"partitions": self.s1_expert_partitions,
+                                "fraction": self.s1_expert_fraction,
+                                "source": self.s1_expert_source,
+                                "sha256": self.s1_expert_sha256,
+                                "contract": self.s1_expert_contract,
+                                "metadata": self.s1_expert_metadata,
+                                "rng_state": self.s1_expert_rng.bit_generator.state}
+                               if self.s1_expert_partitions else None),
                 "four_pool_history_mode": self.four_pool_history_mode,
                 "four_pool_current_fraction": self.four_pool_current_fraction,
                 "four_pool_history_source": self.four_pool_source,
@@ -1780,7 +1817,18 @@ class HomotopyReplayBuffer:
             raise ValueError(
                 "checkpoint replay storage is incompatible with the active reward contract"
             )
-        self.parts = state["parts"]
+        self.parts = {}
+        experts = state.get("s1_experts")
+        self.s1_expert_partitions = {} if experts is None else experts["partitions"]
+        self.s1_expert_fraction = 0.0 if experts is None else float(experts["fraction"])
+        self.s1_expert_source = None if experts is None else experts["source"]
+        self.s1_expert_sha256 = None if experts is None else experts["sha256"]
+        self.s1_expert_contract = None if experts is None else experts["contract"]
+        self.s1_expert_metadata = None if experts is None else experts["metadata"]
+        if experts is not None:
+            self.s1_expert_rng.bit_generator.state = experts["rng_state"]
+        self.last_s1_expert_count = 0
+        self._expert_missing_levels_warned.clear()
         four_pool = state.get("four_pool")
         self.four_pool_enabled = four_pool is not None
         self.four_pool_history_mode = bool(state.get("four_pool_history_mode", False))
@@ -1822,7 +1870,7 @@ class HomotopyReplayBuffer:
             state["precision_position_boundary_high"]
         )
         # Sampling policy is a property of the current protocol, not old replay data.
-        self.last_sample_counts = state.get("last_sample_counts", {s: 0 for s in SCENES})
+        self.last_sample_counts = {"none": int(state.get("last_sample_counts", {}).get("none", 0))}
         self.last_orientation_sample_counts = state.get(
             "last_orientation_sample_counts", {
                 "anchor": 0, "current": 0, "historical": 0,

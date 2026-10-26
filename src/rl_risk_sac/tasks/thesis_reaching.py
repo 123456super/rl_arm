@@ -8,7 +8,7 @@ from rl_risk_sac.robots.ur5_capsules import CapsuleState
 from rl_risk_sac.utils.risk import closest_point_on_segment
 
 
-THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN = 162
+THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN = 241
 APPROACH_VELOCITY_SCALE = 1.0
 EXPLICIT_POSITION_ERROR_SCALE_M = 0.05
 EXPLICIT_ORIENTATION_ERROR_SCALE_RAD = 0.50
@@ -39,7 +39,7 @@ def thesis_observation_dim(
     keypoint_jacobian_pose: bool = True,
     hybrid_explicit_pose_error: bool = True,
 ) -> int:
-    """Only the 162D Hybrid Keypoint + Jacobian representation is supported."""
+    """Only the 241D Hybrid Keypoint + Jacobian representation is supported."""
     if include_orientation_error_vector or not keypoint_jacobian_pose or not hybrid_explicit_pose_error:
         raise ValueError("only Hybrid Keypoint + Jacobian observations are supported")
     return THESIS_OBSERVATION_DIM_HYBRID_KEYPOINT_JACOBIAN
@@ -486,30 +486,7 @@ def build_thesis_observation(
             ),
         ], dtype=np.float32),
     ]
-    if obstacle_present:
-        if geometry is None:
-            raise ValueError("geometry is required when an obstacle is present")
-        low = np.asarray([0.22, -0.62, 0.18], dtype=np.float32)
-        high = np.asarray([0.72, 0.62, 0.62], dtype=np.float32)
-        obstacle_normalized = np.clip(2.0 * (obstacle_position - low) / (high - low) - 1.0, -1.0, 1.0)
-        relative = np.clip(geometry.relative_vectors, -1.0, 1.0).reshape(-1)
-        distance = 2.0 * (np.clip(geometry.distances, -0.20, 0.80) + 0.20) - 1.0
-        ttc = np.clip(geometry.ttc, 0.0, 3.0) / 3.0
-        approach = np.clip(
-            geometry.approach_velocities / APPROACH_VELOCITY_SCALE, 0.0, 1.0
-        )
-        risk = np.clip(geometry.risk_per_link, 0.0, 1.0)
-        obstacle_velocity_normalized = obstacle_velocity / 0.1
-        present = 1.0
-    else:
-        relative = np.zeros(18, dtype=np.float32)
-        obstacle_normalized = np.zeros(3, dtype=np.float32)
-        obstacle_velocity_normalized = np.zeros(3, dtype=np.float32)
-        distance = np.ones(6, dtype=np.float32)
-        ttc = np.ones(6, dtype=np.float32)
-        approach = np.zeros(6, dtype=np.float32)
-        risk = np.zeros(6, dtype=np.float32)
-        present = 0.0
+    # Raw obstacle sets travel separately; each network inserts its own encoding.
     if self_geometry is None:
         self_distance = np.ones(6, dtype=np.float32)
         self_ttc = np.ones(6, dtype=np.float32)
@@ -536,14 +513,7 @@ def build_thesis_observation(
             *pose_features,
             np.clip(np.asarray(ee_linear_velocity) / ee_linear_velocity_scale, -1.0, 1.0),
             np.clip(np.asarray(ee_angular_velocity) / ee_angular_velocity_scale, -1.0, 1.0),
-            relative,
-            obstacle_normalized,
-            obstacle_velocity_normalized,
-            distance,
-            ttc,
-            approach,
-            risk,
-            np.asarray([present], dtype=np.float32),
+            np.zeros(128, dtype=np.float32),
             self_distance,
             self_ttc,
             self_approach,
@@ -636,8 +606,19 @@ def homotopy_reward(
     self_risk_weight: float = 2.0,
     self_clearance_weight: float = 8.0,
     external_safety_scale: float = 0.05,
+    lambda_ext: float | None = None,
     self_safety_scale: float = 0.05,
+    reward_scheme: str = "legacy_dense",
+    previous_external_distance: float | None = None,
+    obstacle_present: bool | None = None,
+    goal_obstacle_coupling_beta: float = 0.0,
+    goal_obstacle_position_scale: float = 0.30,
+    goal_obstacle_orientation_scale: float = 1.0,
+    goal_obstacle_d_safe: float = 0.025,
+    goal_obstacle_d_cut: float = 0.10,
 ) -> tuple[float, dict[str, float]]:
+    if reward_scheme != "legacy_dense":
+        raise ValueError("only the restored legacy_dense reward is supported")
     if not keypoint_pose_reward or rtpc_orientation_reward or pose_balanced_rtpc_reward:
         raise ValueError("only unified keypoint pose reward is supported")
     if not 0.0 < gamma < 1.0:
@@ -893,15 +874,37 @@ def homotopy_reward(
         self_risk_weight * bounded_self_risk
         + self_clearance_weight * self_clearance_violation
     ) / self_weight_sum
+    if lambda_ext is not None:
+        if not np.isfinite(lambda_ext) or lambda_ext < 0:
+            raise ValueError("lambda_ext must be finite and non-negative")
+        external_safety_cost = bounded_risk
     external_safety_penalty = (
         float(xi) * external_safety_scale * external_safety_cost
+        if lambda_ext is None else lambda_ext * external_safety_cost
     )
     self_safety_penalty = (
         float(lambda_self) * self_safety_scale * self_safety_cost
     )
     safety_penalty = external_safety_penalty + self_safety_penalty
-    reward = r_goal - hard_penalty - timeout_guard - safety_penalty - terminal_guard
+    coupling_reward = coupling_before = coupling_after = 0.0
+    if goal_obstacle_coupling_beta != 0:
+        from rl_risk_sac.tasks.goal_obstacle_coupling import COUPLING_KEYS, coupling_shaping
+        if previous_external_distance is None or obstacle_present is None:
+            raise ValueError("coupling requires previous distance and obstacle presence")
+        coupling_parameters = dict(zip(COUPLING_KEYS, (
+            goal_obstacle_coupling_beta, goal_obstacle_position_scale,
+            goal_obstacle_orientation_scale, goal_obstacle_d_safe, goal_obstacle_d_cut,
+        )))
+        coupling_reward, coupling_before, coupling_after = map(float, coupling_shaping(
+            rho_position, next_rho_position, rho_orientation, next_rho_orientation,
+            previous_external_distance, distance_min, obstacle_present, obstacle_present,
+            terminal_transition, coupling_parameters, gamma,
+        ))
+    reward = r_goal - hard_penalty - timeout_guard - safety_penalty - terminal_guard + coupling_reward
     return float(reward), {
+        "goal_obstacle_coupling_reward": coupling_reward,
+        "goal_obstacle_potential": coupling_before,
+        "next_goal_obstacle_potential": coupling_after,
         "r_goal": float(r_goal),
         "c_proximity": float(proximity),
         "hard_failure": float(hard_failure),
