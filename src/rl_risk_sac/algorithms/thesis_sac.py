@@ -44,6 +44,16 @@ def diagonal_gaussian_kl_old_to_current(
     return per_dimension.sum(dim=-1).mean()
 
 
+def _scalar_metrics(values):
+    """Read scalar diagnostics in one device-to-host transfer, without rounding Python EMAs."""
+    keys = [key for key, value in values.items() if torch.is_tensor(value)]
+    tensors = [values[key].detach().reshape(()) for key in keys]
+    numbers = torch.stack(tensors).cpu().tolist() if tensors else []
+    result = {key: float(value) for key, value in values.items() if key not in keys}
+    result.update(zip(keys, numbers))
+    return {key: result[key] for key in values}
+
+
 class ThesisSACAgent:
     """Full SAC with independently trained actor/critic obstacle set encoders."""
 
@@ -139,7 +149,11 @@ class ThesisSACAgent:
         else:
             self.actor_obs_dim = int(obs_dim)
             self.critic_obs_dim = int(obs_dim)
-        self.set_obstacles = obs_dim == 241
+        from rl_risk_sac.tasks.local_avoidance import LOCAL_OBSERVATION_DIM
+        self.set_obstacles = obs_dim == 241 or (
+            config.get("local_avoidance", {}).get("enabled", False)
+            and obs_dim == LOCAL_OBSERVATION_DIM
+        )
         obstacles = config.get("thesis", {}).get("obstacles", {})
         scale = np.ones(37, np.float32)
         if self.set_obstacles and obstacles.get("enabled", False):
@@ -239,6 +253,7 @@ class ThesisSACAgent:
         update_actor: bool = True,
         reference_observations: torch.Tensor | Batch | None = None,
         collect_diagnostics: bool = True,
+        check_finite: bool = False,
     ) -> dict[str, float]:
         with torch.no_grad():
             next_action, next_log_prob = self.actor.sample(batch.next_observations, batch.next_obstacle_features, batch.next_obstacle_mask)
@@ -270,6 +285,7 @@ class ThesisSACAgent:
             update_actor and self.update_steps % self.actor_update_interval == 0
         )
         actor_gradient_norm = 0.0
+        actor_metrics = None
         if actor_updated:
             if self.chain_pcr_enabled and reference_observations is None:
                 raise ValueError("CHAIN-PCR actor update requires a reference batch")
@@ -308,8 +324,9 @@ class ThesisSACAgent:
                 dtype=actor_sac_loss.dtype,
                 device=self.device,
             )
-            sac_magnitude = float(actor_sac_loss.detach().abs().cpu())
-            pcr_magnitude = float(policy_churn_kl.detach().abs().cpu())
+            sac_magnitude, pcr_magnitude = torch.stack((
+                actor_sac_loss.detach().abs(), policy_churn_kl.detach().abs()
+            )).cpu().tolist()
             decay = self.chain_pcr_ema_decay
             if not self.chain_pcr_sac_ema_initialized:
                 self.chain_pcr_sac_loss_ema = sac_magnitude
@@ -384,41 +401,48 @@ class ThesisSACAgent:
             with torch.no_grad():
                 self.log_alpha.clamp_(min=float(np.log(self.min_alpha)))
             if collect_diagnostics:
-                self.last_actor_metrics = {
-                    "actor_loss": float(actor_loss.detach().cpu()),
-                    "actor_sac_loss": float(actor_sac_loss.detach().cpu()),
-                    "policy_churn_kl": float(policy_churn_kl.detach().cpu()),
-                    "policy_churn_penalty": float(policy_churn_penalty.detach().cpu()),
-                    "policy_churn_to_sac_ratio": float(
-                        policy_churn_to_sac_ratio.cpu()
-                    ),
-                    "chain_pcr_effective_coefficient": float(
-                        effective_pcr_coefficient.detach().cpu()
-                    ),
+                actor_metrics = {
+                    "actor_loss": actor_loss,
+                    "actor_sac_loss": actor_sac_loss,
+                    "policy_churn_kl": policy_churn_kl,
+                    "policy_churn_penalty": policy_churn_penalty,
+                    "policy_churn_to_sac_ratio": policy_churn_to_sac_ratio,
+                    "chain_pcr_effective_coefficient": effective_pcr_coefficient,
                     "chain_pcr_sac_loss_ema": self.chain_pcr_sac_loss_ema,
                     "chain_pcr_loss_ema": self.chain_pcr_loss_ema,
-                    "alpha_loss": float(alpha_loss.detach().cpu()),
-                    "policy_entropy": float((-log_prob.detach()).mean().cpu()),
+                    "alpha_loss": alpha_loss,
+                    "policy_entropy": (-log_prob.detach()).mean(),
                 }
 
         soft_update(self.q1, self.target_q1, self.tau)
         soft_update(self.q2, self.target_q2, self.tau)
         if not collect_diagnostics:
+            if check_finite:
+                # Keep per-update numerical checks while avoiding diagnostic
+                # D2H readbacks. CUDA reports failure asynchronously; CPU raises
+                # immediately. Neither path changes gradients or optimizer math.
+                values = [q_loss.detach(), critic_gradient_norm.detach(), self.log_alpha.detach()]
+                if actor_updated:
+                    values.extend((actor_loss.detach(), actor_gradient_norm.detach(), alpha_loss.detach()))
+                torch._assert_async(torch.isfinite(torch.stack(values)).all(), "nonfinite local SAC update")
             return {}
         if not actor_updated:
             q1 = q1_prediction
             q2 = q2_prediction
-        return {
-            "critic_loss": float(q_loss.detach().cpu()),
-            **self.last_actor_metrics,
-            "alpha": float(self.alpha.detach().cpu()),
-            "q1_mean": float(q1.detach().mean().cpu()),
-            "q2_mean": float(q2.detach().mean().cpu()),
-            "target_mean": float(target.detach().mean().cpu()),
-            "critic_gradient_norm": float(critic_gradient_norm),
-            "actor_gradient_norm": float(actor_gradient_norm),
+        metrics = _scalar_metrics({
+            "critic_loss": q_loss,
+            **(self.last_actor_metrics if actor_metrics is None else actor_metrics),
+            "alpha": self.alpha,
+            "q1_mean": q1.detach().mean(),
+            "q2_mean": q2.detach().mean(),
+            "target_mean": target.detach().mean(),
+            "critic_gradient_norm": critic_gradient_norm,
+            "actor_gradient_norm": actor_gradient_norm,
             "actor_updated": float(actor_updated),
-        }
+        })
+        if actor_metrics is not None:
+            self.last_actor_metrics = {key: metrics[key] for key in actor_metrics}
+        return metrics
 
     def state_dict(self) -> dict[str, Any]:
         return {
@@ -447,6 +471,8 @@ class ThesisSACAgent:
         }
 
     def load_state_dict(self, state: dict[str, Any], *, actor_only: bool = False) -> None:
+        if "dual_sac" in state:
+            raise ValueError("dual SAC checkpoint requires the matching dual_sac configuration")
         if state.get("observation_dim", state["actor"]["backbone.0.weight"].shape[1]) != self.actor_obs_dim:
             raise ValueError("Full observation schema changed; use explicit actor initialization, not resume")
         self.actor.load_state_dict(state["actor"])
@@ -494,10 +520,17 @@ class ThesisSACAgent:
             ("alpha_optimizer", self.alpha_optimizer),
         ):
             optimizer.load_state_dict(state[key])
-            for values in optimizer.state.values():
-                for name, value in values.items():
-                    if torch.is_tensor(value):
-                        values[name] = value.to(self.device)
+            for group in optimizer.param_groups:
+                # Non-capturable/non-fused Adam reads step as a Python scalar.
+                # Hosting it on CUDA forces a D2H synchronization per parameter;
+                # moments still belong beside the parameter on its own device.
+                device_steps = group.get("capturable", False) or group.get("fused", False)
+                for parameter in group["params"]:
+                    values = optimizer.state.get(parameter, {})
+                    for name, value in values.items():
+                        if torch.is_tensor(value):
+                            device = "cpu" if name == "step" and not device_steps else parameter.device
+                            values[name] = value.to(device)
 
     def save_actor(self, path: str | Path) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)

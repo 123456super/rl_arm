@@ -22,11 +22,22 @@ class ObstacleSetEncoder(nn.Module):
         result = features.new_zeros((features.shape[0], 128))
         if features.shape[1] == 0:
             return result
-        active = mask.any(dim=1)
-        if not active.any():
-            return result
-        valid = mask[active]
-        x = features[active] / self.scale
+        rows = getattr(mask, "_obstacle_active_rows", Ellipsis)
+        if rows is None:
+            # The local bank always contains obstacles. Skip both the CUDA
+            # scalar branch and repeated boolean gather/scatter in this case.
+            valid, selected = mask, features
+        elif rows is Ellipsis:
+            # Preserve compatibility for callers supplying ordinary tensors.
+            active = mask.any(dim=1)
+            if not active.any():
+                return result
+            valid, selected = mask[active], features[active]
+        else:
+            if rows.numel() == 0:
+                return result
+            valid, selected = mask.index_select(0, rows), features.index_select(0, rows)
+        x = selected / self.scale
         # Distances and displacements use clipped fixed scales. Directions
         # and support ranges retain their training-statistic normalization.
         x = torch.cat((x[..., :4].clamp(-5, 5), x[..., 4:16],
@@ -39,7 +50,20 @@ class ObstacleSetEncoder(nn.Module):
         logits = self.attention(x).squeeze(-1).masked_fill(~valid, -torch.inf)
         attention = (logits.softmax(dim=1)[..., None] * h).sum(dim=1)
         pooled = torch.cat((mean, maximum, attention, torch.log1p(count.to(h.dtype))), dim=-1)
-        result[active] = self.fusion(pooled)
+        encoded = self.fusion(pooled)
+        if rows is None:
+            if encoded.requires_grad:
+                # Preserve the old scatter's contiguous gathered gradient.
+                # Returning encoded directly changes the stride of gradients
+                # arriving from the actor/critic concatenation and can select
+                # a different GEMM accumulation path during backpropagation.
+                indices = torch.arange(features.shape[0], device=features.device)
+                return result.index_copy_(0, indices, encoded)
+            return encoded
+        if rows is Ellipsis:
+            result[active] = encoded
+        else:
+            result.index_copy_(0, rows, encoded)
         return result
 
 

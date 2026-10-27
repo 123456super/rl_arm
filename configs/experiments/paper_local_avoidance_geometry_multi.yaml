@@ -1,0 +1,4 @@
+includes:
+- paper_local_avoidance_geometry.yaml
+local_avoidance:
+  obstacle_count_probabilities: [0.0, 0.50, 0.30, 0.20]

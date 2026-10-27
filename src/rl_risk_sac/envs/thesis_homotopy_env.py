@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from time import perf_counter
@@ -80,11 +81,15 @@ class ThesisHomotopyEnv(gym.Env):
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 20}
 
-    def __init__(self, config: dict[str, Any], render_mode: str | None = None) -> None:
+    def __init__(self, config: dict[str, Any], render_mode: str | None = None, *,
+                 compute_external_features: bool = True, cache_geometry_queries: bool = False) -> None:
         super().__init__()
         if render_mode not in {None, "human", "rgb_array"}:
             raise ValueError("render_mode must be None, 'human', or 'rgb_array'")
         self.render_mode = render_mode
+        self.compute_external_features = compute_external_features
+        self.cache_geometry_queries = cache_geometry_queries
+        self._geometry_queries = None
         self.config = config
         self.runtime = RuntimeConfig.from_mapping(config)
         thesis = config["thesis"]
@@ -674,8 +679,15 @@ class ThesisHomotopyEnv(gym.Env):
         p.performCollisionDetection(physicsClientId=self.client_id)
 
     def _static_clearance(self, obstacle):
+        cache = self._geometry_queries
+        key = ("external", obstacle.body_id)
+        if cache is not None and key in cache:
+            return cache[key]
         points = p.getClosestPoints(self.robot_id, obstacle.body_id, 2., physicsClientId=self.client_id)
-        return min((float(point[8]) for point in points), default=2.)
+        distance = min((float(point[8]) for point in points), default=2.)
+        if cache is not None:
+            cache[key] = distance
+        return distance
 
     def _static_planning_valid(self, q, obstacle, clearance):
         if np.any(q < self.robot.joint_lower_limits) or np.any(q > self.robot.joint_upper_limits):
@@ -825,6 +837,7 @@ class ThesisHomotopyEnv(gym.Env):
         return False
 
     def _advance_obstacles(self):
+        self._invalidate_geometry_queries()
         time = self.physics_step_count * self.physics_dt
         for obstacle in self.obstacles:
             position = obstacle.position(time) if self.obstacles_dynamic else obstacle.initial_position
@@ -833,6 +846,15 @@ class ThesisHomotopyEnv(gym.Env):
 
     def _update_external(self):
         start = perf_counter()
+        if not self.compute_external_features:
+            # Only the frozen-S0 recovery client uses this path. Obstacle
+            # bodies and raw mesh/contact checks remain active; S0 discards
+            # external sets and the recovery caller does not consume rewards.
+            self._obstacle_features = np.empty((0, 37), np.float32)
+            self._external_queries = []
+            self._external_geometry = None
+            self.obstacle_processing_ms = 0.0
+            return
         if not self.obstacles:
             if self.predictor is not None:
                 self.predictor.reset()
@@ -880,10 +902,14 @@ class ThesisHomotopyEnv(gym.Env):
         )
 
     def step(self, action: np.ndarray, *, substep_observer=None):
-        """Execute one action; optional read-only observer is for offline audits.
+        with self._geometry_query_scope():
+            return self._step(action, substep_observer=substep_observer)
 
-        Training/evaluation do not supply an observer. It must not move bodies
-        or alter state, forces, rewards, or the number of physics substeps.
+    def _step(self, action: np.ndarray, *, substep_observer=None):
+        """Execute one action with an optional read-only mesh-safety observer.
+
+        Local passage and offline audits use the observer. It must not move
+        bodies or alter state, forces, rewards, or the physics substep count.
         """
         action_obstacle_processing_ms = self.obstacle_processing_ms
         previous_external_distance = (self._external_geometry.distance_min
@@ -939,6 +965,7 @@ class ThesisHomotopyEnv(gym.Env):
             self.physics_step_count += 1
             self._advance_obstacles()
             p.stepSimulation(physicsClientId=self.client_id)
+            self._invalidate_geometry_queries()
             executed_substeps += 1
             if substep_observer is not None:
                 substep_observer()
@@ -1712,9 +1739,41 @@ class ThesisHomotopyEnv(gym.Env):
     def _geometry(self) -> ThesisGeometry | None:
         return self._external_geometry
 
+    @contextmanager
+    def _geometry_query_scope(self):
+        # Caches never survive a control step. Direct Bullet operations outside
+        # this scope cannot leave stale geometry for the next action.
+        if not self.cache_geometry_queries or self._geometry_queries is not None:
+            yield
+            return
+        self._geometry_queries = {}
+        try:
+            yield
+        finally:
+            self._geometry_queries = None
+
+    def _invalidate_geometry_queries(self):
+        if self._geometry_queries is not None:
+            self._geometry_queries.clear()
+
+    def _self_pair_points(self, first, second):
+        cache = self._geometry_queries
+        key = ("self_points", first, second, self.self_query_distance)
+        if cache is not None and key in cache:
+            return cache[key]
+        points = p.getClosestPoints(
+            bodyA=self.robot_id, bodyB=self.robot_id, distance=self.self_query_distance,
+            linkIndexA=first, linkIndexB=second, physicsClientId=self.client_id)
+        if cache is not None:
+            cache[key] = points
+        return points
+
     def _self_geometry(self) -> SelfCollisionGeometry:
+        cache = self._geometry_queries
+        if cache is not None and "self_geometry" in cache:
+            return cache["self_geometry"]
         pair_distances, pair_approaches = self._self_pair_geometry()
-        return compute_self_collision_geometry(
+        geometry = compute_self_collision_geometry(
             pair_distances,
             pair_approaches,
             self._self_pair_slots,
@@ -1724,6 +1783,9 @@ class ThesisHomotopyEnv(gym.Env):
             approach_velocity_scale=self.self_approach_velocity_scale,
             ttc_tau=self.self_ttc_tau,
         )
+        if cache is not None:
+            cache["self_geometry"] = geometry
+        return geometry
 
     def _self_pair_geometry(self) -> tuple[np.ndarray, np.ndarray]:
         pair_distances = np.full(
@@ -1735,14 +1797,7 @@ class ThesisHomotopyEnv(gym.Env):
         # only the 15 monitored pairs preserves the exact geometry contract
         # while avoiding that broad-phase/result-conversion overhead.
         for pair_index, (first, second) in enumerate(self._self_pair_link_ids):
-            points = p.getClosestPoints(
-                bodyA=self.robot_id,
-                bodyB=self.robot_id,
-                distance=self.self_query_distance,
-                linkIndexA=first,
-                linkIndexB=second,
-                physicsClientId=self.client_id,
-            )
+            points = self._self_pair_points(first, second)
             for point in points:
                 point_first = np.asarray(point[5], dtype=np.float32)
                 point_second = np.asarray(point[6], dtype=np.float32)
@@ -1795,6 +1850,7 @@ class ThesisHomotopyEnv(gym.Env):
                     targetVelocity=float(qdot[joint_offset]),
                     physicsClientId=self.client_id,
                 )
+                self._invalidate_geometry_queries()
                 perturbed, _ = self._self_pair_geometry()
                 jacobians[:, joint_offset] = (
                     perturbed[active] - base_distances[active]
@@ -1804,6 +1860,7 @@ class ThesisHomotopyEnv(gym.Env):
                     targetVelocity=float(qdot[joint_offset]),
                     physicsClientId=self.client_id,
                 )
+                self._invalidate_geometry_queries()
         finally:
             self._set_joint_state(q, qdot)
 
@@ -1834,13 +1891,15 @@ class ThesisHomotopyEnv(gym.Env):
     def _link_world_point_velocity(
         self, link_id: int, world_point: np.ndarray
     ) -> np.ndarray:
-        state = p.getLinkState(
-            self.robot_id,
-            link_id,
-            computeLinkVelocity=True,
-            computeForwardKinematics=True,
-            physicsClientId=self.client_id,
-        )
+        cache = self._geometry_queries
+        key = ("link_state", link_id)
+        state = None if cache is None else cache.get(key)
+        if state is None:
+            state = p.getLinkState(
+                self.robot_id, link_id, computeLinkVelocity=True,
+                computeForwardKinematics=True, physicsClientId=self.client_id)
+            if cache is not None:
+                cache[key] = state
         center_of_mass = np.asarray(state[0], dtype=np.float32)
         linear = np.asarray(state[6], dtype=np.float32)
         angular = np.asarray(state[7], dtype=np.float32)
@@ -1913,6 +1972,7 @@ class ThesisHomotopyEnv(gym.Env):
         }
 
     def _set_joint_state(self, q: np.ndarray, qdot: np.ndarray | None = None) -> None:
+        self._invalidate_geometry_queries()
         velocity = np.zeros(6, dtype=np.float64) if qdot is None else np.asarray(qdot, dtype=np.float64)
         for joint_id, position, speed in zip(self.robot.joint_ids, q, velocity):
             p.resetJointState(

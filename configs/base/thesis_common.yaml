@@ -1,7 +1,7 @@
-# Full: Hybrid Keypoint + Actor-only Jacobian + Auto-PCR + bottleneck shaping + precision-boundary replay.
+# Shared robot, reaching, observation and SAC parameters. Use experiments/ for run entry points.
 includes:
 - ../default.yaml
-- paper_auto_promotion_protocol.yaml
+- promotion_protocol.yaml
 seed: 11001
 device: cuda:auto
 robot:
@@ -427,6 +427,11 @@ train:
   progress_interval: 1000
   log_flush_interval: 100
   update_log_interval: 10
+  # Detailed diagnostics are opt-in; regular runs keep episode/progress/probe summaries.
+  logging:
+    transitions: false
+    updates: false
+    probe_details: false
   output_dir: outputs/full
   plateau:
     comparison_blocks: 2

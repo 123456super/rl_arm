@@ -1,0 +1,7 @@
+# Independent S0 reaching training; avoidance stays frozen.
+includes:
+- ../base/dual_sac.yaml
+dual_sac:
+  training_policy: reaching
+thesis:
+  stage: s0

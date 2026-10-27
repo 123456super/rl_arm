@@ -174,7 +174,7 @@ def summarize(values: np.ndarray) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--config", type=Path, default=Path("configs/experiments/paper_full.yaml"))
+    parser.add_argument("--config", type=Path, default=Path("configs/base/thesis_common.yaml"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--episodes", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=31001)

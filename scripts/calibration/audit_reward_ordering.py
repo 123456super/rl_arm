@@ -138,7 +138,7 @@ def audit(config):
             for failure in ("stationary_timeout", "approach_then_stall_timeout", "position_only_timeout", "late_collision_450"):
                 compare(f"detour_success_{steps}", failure, "successful detour preferred to failure from same start")
         all_results[f"L{level_index}"] = dict(scenarios=results, comparisons=comparisons)
-    return dict(config="configs/experiments/paper_full.yaml", gamma=gamma, horizon=horizon,
+    return dict(config="configs/base/thesis_common.yaml", gamma=gamma, horizon=horizon,
                 reward_scheme=parameters["reward_scheme"], reward_parameters=parameters,
                 method="controlled reward-feature counterfactuals; not certified robot paths; no entropy bonus",
                 levels=all_results)
@@ -220,7 +220,7 @@ if __name__ == "__main__":
     parser.add_argument("--physical", action="store_true", help="also run same-start real robot controllers")
     parser.add_argument("--legacy-baseline", action="store_true", help="reproduce legacy_dense with gamma=0.99")
     args = parser.parse_args()
-    config = load_config(ROOT / "configs/experiments/paper_full.yaml")
+    config = load_config(ROOT / "configs/base/thesis_common.yaml")
     if args.legacy_baseline:
         config["thesis"]["reward"]["scheme"] = "legacy_dense"
         config["sac"]["gamma"] = .99

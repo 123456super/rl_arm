@@ -1,4 +1,4 @@
-# Full 配置共用的基础参数；训练和评估使用 experiments/paper_full.yaml。
+# 共用基础参数；实验入口在 experiments/，任务公共参数在 base/thesis_common.yaml。
 # includes 按顺序加载，后面的文件会覆盖前面的同名字段；本文件自身的字段优先级最高。
 includes:
   - robot/ur5.yaml

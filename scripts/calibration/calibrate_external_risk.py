@@ -168,7 +168,7 @@ def evaluate_candidate(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
+    parser.add_argument("--config", default="configs/base/thesis_common.yaml")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--episodes-per-stage", type=int, default=8)

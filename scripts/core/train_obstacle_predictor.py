@@ -173,7 +173,7 @@ def train_predictor(data, *, epochs, batch_size, learning_rate, seed, acceptance
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
+    parser.add_argument("--config", default="configs/base/thesis_common.yaml")
     parser.add_argument("--output", default="outputs/obstacle_predictor")
     parser.add_argument("--dataset", help="Reuse an existing generated .npz dataset")
     parser.add_argument("--episodes", type=int, default=200)

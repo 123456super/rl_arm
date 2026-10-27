@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from rl_risk_sac.tasks.static_scene_planning import joint_segment, path_band, rrt_connect
+from rl_risk_sac.tasks.static_scene_planning import joint_segment, path_band, rrt_connect, rrt_goal_region
 from rl_risk_sac.utils.config import load_config
 from rl_risk_sac.envs.thesis_homotopy_env import (
     ResetSamplingError, StaticSceneSamplingError, ThesisHomotopyEnv,
@@ -35,9 +35,27 @@ def test_path_band_boundaries():
     assert path_band(-.02, .025, .10) == "blocking"
 
 
+def test_goal_region_rrt_finds_connected_exit_and_respects_budget():
+    valid = lambda q: not (abs(q[0]) < .12 and q[1] < .4)
+    goal = lambda q: q[0] > .6
+    stats = {}
+    path = rrt_goal_region([-.8, 0.], [-1, -1], [1, 1], valid, goal,
+                           np.random.default_rng(5), iterations=1000, max_checks=10000,
+                           statistics=stats)
+    assert path is not None and goal(path[-1])
+    np.testing.assert_allclose(path[0], [-.8, 0.])
+    assert all(valid(q) for a, b in zip(path, path[1:]) for q in joint_segment(a, b, .02))
+    assert stats["checks"] <= 10000
+    stats = {}
+    assert rrt_goal_region([-.8, 0.], [-1, -1], [1, 1],
+                           lambda q: abs(q[0]) > .12, goal, np.random.default_rng(5),
+                           max_checks=50, statistics=stats) is None
+    assert stats["checks"] <= 50
+
+
 @pytest.mark.parametrize("band", ["none", "far", "near", "blocking"])
 def test_real_static_scene_band_and_witness(band):
-    c = load_config("configs/experiments/paper_full.yaml")
+    c = load_config("configs/base/thesis_common.yaml")
     apply_stage_profile(c, "s1")
     names = ["none", "far", "near", "blocking"]
     c["thesis"]["obstacles"]["path_sampling"]["probabilities"] = [float(n == band) for n in names]
@@ -76,7 +94,7 @@ def test_real_static_scene_band_and_witness(band):
 
 
 def _blocking_env():
-    config = load_config("configs/experiments/paper_full.yaml")
+    config = load_config("configs/base/thesis_common.yaml")
     apply_stage_profile(config, "s1")
     config["thesis"]["obstacles"]["path_sampling"]["probabilities"] = [0., 0., 0., 1.]
     env = ThesisHomotopyEnv(config)

@@ -36,7 +36,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--config",
-        default="configs/experiments/paper_full.yaml",
+        default="configs/base/thesis_common.yaml",
     )
     parser.add_argument("--samples", type=int, default=1_000)
     parser.add_argument("--delta-q", type=float, default=1e-3)

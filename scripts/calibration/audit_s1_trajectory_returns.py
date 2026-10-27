@@ -295,7 +295,7 @@ def fingerprint(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--config", type=Path, default=ROOT / "configs/experiments/paper_full.yaml")
+    parser.add_argument("--config", type=Path, default=ROOT / "configs/base/thesis_common.yaml")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--episodes", type=int, nargs="+")

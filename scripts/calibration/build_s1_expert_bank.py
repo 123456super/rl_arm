@@ -178,7 +178,7 @@ def combine_parts(parts):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
+    parser.add_argument("--config", default="configs/base/thesis_common.yaml")
     parser.add_argument("--reference-actor", required=True, help="frozen current 241-input S1 Actor")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--levels", type=int, nargs="+", default=[0])

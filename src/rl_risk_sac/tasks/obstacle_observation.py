@@ -50,16 +50,32 @@ def stack_observations(observations):
                          [obstacle_set(o) for o in observations])
 
 
+def cache_obstacle_rows(mask, counts):
+    """Attach CPU-known row indices to a fresh mask, avoiding CUDA nonzero.
+
+    Batch masks are immutable after construction. Tensor operations which drop
+    this optional metadata simply use the encoder's ordinary fallback path.
+    None means every row is active; an empty index tensor means no row is.
+    This is derived batch metadata, never a stored replay embedding or schema.
+    """
+    indices = np.flatnonzero(counts)
+    mask._obstacle_active_rows = (None if len(indices) == len(counts) else
+                                  torch.as_tensor(indices, dtype=torch.long, device=mask.device))
+    return mask
+
+
 def pad_obstacle_sets(sets, device):
     """Only this minibatch's largest set determines temporary padding."""
     sets = tuple(sets)
-    maximum = max((len(s) for s in sets), default=0)
+    counts = [len(s) for s in sets]
+    maximum = max(counts, default=0)
     features = np.zeros((len(sets), maximum, FEATURE_DIM), np.float32)
     mask = np.zeros((len(sets), maximum), bool)
     for i, values in enumerate(sets):
         features[i, :len(values)] = values
         mask[i, :len(values)] = True
-    return (torch.as_tensor(features, device=device), torch.as_tensor(mask, device=device))
+    return (torch.as_tensor(features, device=device),
+            cache_obstacle_rows(torch.as_tensor(mask, device=device), counts))
 
 
 def observation_tensors(observations, device):

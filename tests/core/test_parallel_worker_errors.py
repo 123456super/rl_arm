@@ -5,7 +5,7 @@ from rl_risk_sac.utils.config import load_config
 
 
 def test_remote_error_preserves_traceback_drains_other_replies_and_closes():
-    config = load_config("configs/experiments/paper_full.yaml")
+    config = load_config("configs/base/thesis_common.yaml")
     config["thesis"]["obstacles"]["enabled"] = False
     pool = ParallelThesisEnvPool(config, [101, 102])
     try:
@@ -28,7 +28,7 @@ def test_remote_error_preserves_traceback_drains_other_replies_and_closes():
 
 
 def test_sampling_exhaustion_reports_structured_diagnostics_from_worker():
-    config = load_config("configs/experiments/paper_full.yaml")
+    config = load_config("configs/base/thesis_common.yaml")
     from scripts.core.train_thesis_homotopy import apply_stage_profile
     apply_stage_profile(config, "s1")
     obstacle = config["thesis"]["obstacles"]

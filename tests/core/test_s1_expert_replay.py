@@ -17,7 +17,7 @@ from scripts.core.train_thesis_homotopy import apply_stage_profile, configure_s1
 
 @pytest.fixture(scope="module")
 def setup():
-    config = load_config("configs/experiments/paper_full.yaml")
+    config = load_config("configs/base/thesis_common.yaml")
     apply_stage_profile(config, "s1")
     env = ThesisHomotopyEnv(config)
     parameters = dict(env.reward_parameters)

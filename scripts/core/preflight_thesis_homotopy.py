@@ -547,7 +547,7 @@ def main() -> None:
         "mode",
         choices=("reward", "goal", "cells", "self-contact", "external-risk"),
     )
-    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
+    parser.add_argument("--config", default="configs/base/thesis_common.yaml")
     parser.add_argument("--output", required=True)
     parser.add_argument("--samples", type=int, default=100)
     parser.add_argument("--level", type=int, default=6)

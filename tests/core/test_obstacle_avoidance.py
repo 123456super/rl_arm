@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_s1_promotion_excludes_empty_scenes(monkeypatch):
     import scripts.core.train_thesis_homotopy as trainer
-    config = load_config(ROOT / "configs/experiments/paper_full.yaml")
+    config = load_config(ROOT / "configs/base/thesis_common.yaml")
     trainer.apply_stage_profile(config, "s1")
     assert config["thesis"]["obstacles"]["count_probabilities"] == [.2, .8, 0., 0.]
     assert not trainer.promotion_episode_eligible(config, {"obstacle_count": 0})
@@ -74,7 +74,7 @@ def checkpoint(tmp_path):
 
 @pytest.fixture
 def config(checkpoint):
-    config = load_config(ROOT / "configs/experiments/paper_full.yaml")
+    config = load_config(ROOT / "configs/base/thesis_common.yaml")
     config["thesis"]["obstacles"].update(
         enabled=True, dynamic=True, predictor_checkpoint=str(checkpoint),
         count_probabilities=[0., 1., 0., 0.], motion_modes=["constant"],

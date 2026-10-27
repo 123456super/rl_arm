@@ -94,7 +94,7 @@ def validate_coverage(config, *, samples=8, wrist_samples=33, tolerance=1e-5, se
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
+    parser.add_argument("--config", default="configs/base/thesis_common.yaml")
     parser.add_argument("--output", default="outputs/capsule_coverage.json")
     parser.add_argument("--samples", type=int, default=8)
     parser.add_argument("--wrist-samples", type=int, default=33)

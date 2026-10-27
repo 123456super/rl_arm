@@ -17,7 +17,11 @@ from scripts.core.train_thesis_homotopy import apply_stage_profile, reconcile_co
 
 @pytest.fixture
 def config():
-    c = load_config("configs/experiments/paper_full_s1_coupling.yaml")
+    c = load_config("configs/base/thesis_common.yaml")
+    # The retired experiment is no longer a runnable config. Keep explicit
+    # regression coverage for saved reward contracts.
+    c["thesis"]["reward"]["goal_obstacle_coupling"] = dict(
+        enabled=True, beta=1.0, position_scale_m=.30, orientation_scale_rad=1.0)
     apply_stage_profile(c, "s1")
     return c
 

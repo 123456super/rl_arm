@@ -47,7 +47,7 @@ import scripts.core.train_thesis_homotopy as thesis_trainer
 def test_bad_state_reset_preserves_clock_contract_and_local_neighborhood():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_full.yaml"
+        / "configs/base/thesis_common.yaml"
     )
     env = ThesisHomotopyEnv(config)
     contract = {
@@ -137,7 +137,7 @@ def _transition_info(contact_before=False, contact_after=False, reached=False, o
 def test_actor_can_be_frozen_while_fresh_critics_warm_up():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_full.yaml"
+        / "configs/base/thesis_common.yaml"
     )
     config["device"] = "cpu"
     config["sac"]["hidden_dims"] = [8, 8]
@@ -168,7 +168,7 @@ def test_actor_can_be_frozen_while_fresh_critics_warm_up():
 def test_update_can_skip_diagnostics_without_skipping_critic_update(monkeypatch):
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_full.yaml"
+        / "configs/base/thesis_common.yaml"
     )
     config["device"] = "cpu"
     config["sac"]["hidden_dims"] = [8, 8]
@@ -206,7 +206,7 @@ def test_update_can_skip_diagnostics_without_skipping_critic_update(monkeypatch)
 def test_chain_pcr_uses_separate_reference_states_and_one_update_lag():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_full.yaml"
+        / "configs/base/thesis_common.yaml"
     )
     config["device"] = "cpu"
     config["sac"].update({
@@ -245,7 +245,7 @@ def test_chain_pcr_gaussian_kl_direction_and_identity():
 def test_chain_pcr_loss_ratio_cap_limits_effective_coefficient():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_full.yaml"
+        / "configs/base/thesis_common.yaml"
     )
     config["device"] = "cpu"
     config["sac"].update({
@@ -273,7 +273,7 @@ def test_chain_pcr_loss_ratio_cap_limits_effective_coefficient():
 def test_auto_chain_pcr_tracks_relative_loss_scale_and_restores_ema():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_full.yaml"
+        / "configs/base/thesis_common.yaml"
     )
     config["device"] = "cpu"
     config["sac"].update({
@@ -308,7 +308,7 @@ def test_auto_chain_pcr_tracks_relative_loss_scale_and_restores_ema():
 def test_chain_reference_can_be_reset_after_actor_only_initialization():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_full.yaml"
+        / "configs/base/thesis_common.yaml"
     )
     config["device"] = "cpu"
     config["sac"].update({
@@ -336,7 +336,7 @@ def test_chain_reference_can_be_reset_after_actor_only_initialization():
 def test_chain_reference_is_initialized_when_resuming_pre_chain_agent():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_full.yaml"
+        / "configs/base/thesis_common.yaml"
     )
     config["device"] = "cpu"
     config["sac"]["hidden_dims"] = [8, 8]
@@ -374,7 +374,7 @@ def test_chain_reference_is_initialized_when_resuming_pre_chain_agent():
 def test_hybrid_keypoint_auto_chain_contract_is_241d():
     root = Path(__file__).resolve().parents[2]
     config = load_config(
-        root / "configs/experiments/paper_full.yaml"
+        root / "configs/base/thesis_common.yaml"
     )
     assert config["thesis"]["observation"]["hybrid_explicit_pose_error"] is True
     assert config["thesis"]["reward"]["keypoint_tracking_scale"] == .05
@@ -415,7 +415,7 @@ def test_hybrid_keypoint_auto_chain_contract_is_241d():
 def test_retired_observation_and_training_modes_are_rejected():
     root = Path(__file__).resolve().parents[2]
     config = load_config(
-        root / "configs/experiments/paper_full.yaml"
+        root / "configs/base/thesis_common.yaml"
     )
     assert thesis_observation_dim() == 241
     thesis_trainer.validate_training_architecture(config)
@@ -483,7 +483,7 @@ def test_keypoint_jacobian_maps_joint_velocity_to_each_point_velocity():
 def test_pybullet_keypoint_jacobian_matches_central_finite_difference():
     root = Path(__file__).resolve().parents[2]
     config = load_config(
-        root / "configs/experiments/paper_full.yaml"
+        root / "configs/base/thesis_common.yaml"
     )
     env = ThesisHomotopyEnv(config)
     try:
@@ -668,7 +668,7 @@ def test_joint_bottleneck_shaping_is_zero_for_every_terminal_cause(
 def test_actor_only_jacobian_is_removed_from_critic_state():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_full.yaml"
+        / "configs/base/thesis_common.yaml"
     )
     config["device"] = "cpu"
     agent = ThesisSACAgent(162, 6, config)
@@ -688,7 +688,7 @@ def test_actor_only_jacobian_is_removed_from_critic_state():
 def test_success_transition_returns_terminal_observation_before_reset():
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_full.yaml"
+        / "configs/base/thesis_common.yaml"
     )
     env = ThesisHomotopyEnv(config)
     try:
@@ -1439,7 +1439,7 @@ def test_manual_pose_promotion_requires_explicit_early_override():
 
 def test_v13_5_serial_config_is_self_contained_and_precision_only():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     thesis = config["thesis"]
     levels = thesis["joint_pose_curriculum"]["levels"]
     assert thesis["protocol"] == thesis_trainer.HYBRID_KEYPOINT_AUTO_CHAIN_PROTOCOL
@@ -1512,7 +1512,7 @@ def test_v13_5_serial_config_is_self_contained_and_precision_only():
 
 def test_full_config_preserves_control_reward_and_replay_contracts():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     thesis = config["thesis"]
     orientation = thesis["orientation_curriculum"]
     assert thesis["action_scale"] == .7
@@ -1536,7 +1536,7 @@ def test_full_config_preserves_control_reward_and_replay_contracts():
 def test_v13_5_precision_curriculum_keeps_restricted_range_and_tightens_only_precision():
     root = Path(__file__).resolve().parents[2]
     config = load_config(
-        root / "configs/experiments/paper_full.yaml"
+        root / "configs/base/thesis_common.yaml"
     )
     thesis = config["thesis"]
     goal = thesis["goal_curriculum"]
@@ -1706,7 +1706,7 @@ def test_full_promotion_uses_three_seed_screen_and_confirmation(
 ):
     config = load_config(
         Path(__file__).resolve().parents[2]
-        / "configs/experiments/paper_full.yaml"
+        / "configs/base/thesis_common.yaml"
     )
     settings = config["thesis"]["orientation_curriculum"]
     contract = {"goal_scale": 1.0, "orientation_scale": .5}
@@ -2890,7 +2890,7 @@ def test_archived_pose_levels_are_sampled_round_robin():
 
 def test_filtered_self_pair_query_matches_whole_body_query():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         env.configure_episode(
@@ -2960,7 +2960,7 @@ def test_filtered_self_pair_query_matches_whole_body_query():
 
 def test_sampled_goal_passes_pose_ik_fk_round_trip():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         l6 = config["thesis"]["joint_pose_curriculum"]["levels"][-1]
@@ -2990,7 +2990,7 @@ def test_sampled_goal_passes_pose_ik_fk_round_trip():
 
 def test_repeated_reaching_reset_reuses_only_robot_body():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         robot_id = env.robot_id
@@ -3008,7 +3008,7 @@ def test_repeated_reaching_reset_reuses_only_robot_body():
 
 def test_reused_environment_reset_matches_fresh_environment_for_fixed_seed():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     reused = ThesisHomotopyEnv(config)
     fresh = ThesisHomotopyEnv(config)
     try:
@@ -3036,7 +3036,7 @@ def test_reused_environment_reset_matches_fresh_environment_for_fixed_seed():
 
 def test_parallel_environment_pool_resets_and_steps_independent_clients():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     contract = {
         "scene": "none", "xi": 1.0, "strict": True,
         "goal_scale": .03, "orientation_scale": 0.0,
@@ -3086,7 +3086,7 @@ def test_parallel_environment_pool_resets_and_steps_independent_clients():
 
 def test_parallel_environment_pool_can_filter_step_info_for_evaluation():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     contract = {
         "scene": "none", "xi": 1.0, "strict": True,
         "goal_scale": .03, "orientation_scale": 0.0,
@@ -3102,7 +3102,7 @@ def test_parallel_environment_pool_can_filter_step_info_for_evaluation():
 
 def test_parallel_promotion_probe_restores_training_worker_state():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     contract = {
         "scene": "none", "xi": 1.0, "strict": True,
         "goal_scale": .03, "orientation_scale": 0.0,
@@ -3158,7 +3158,7 @@ def test_parallel_promotion_probe_restores_training_worker_state():
 
 def test_pybullet_self_contact_has_nonpositive_mesh_clearance_and_unit_risk():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     env = ThesisHomotopyEnv(config)
     rng = np.random.default_rng(20260918)
     try:
@@ -3189,7 +3189,7 @@ def test_pybullet_self_contact_has_nonpositive_mesh_clearance_and_unit_risk():
 
 def test_environment_smoothness_uses_per_joint_mean_not_six_joint_sum():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         env.configure_episode("none", xi=1.0, strict=True)
@@ -3210,7 +3210,7 @@ def test_environment_smoothness_uses_per_joint_mean_not_six_joint_sum():
 
 def test_direct_sac_action_is_scaled_only_by_precision_envelope():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     assert config["thesis"]["self_safety_projection"]["enabled"] is False
     env = ThesisHomotopyEnv(config)
     try:
@@ -3232,7 +3232,7 @@ def test_direct_sac_action_is_scaled_only_by_precision_envelope():
 
 def test_precision_control_reduces_velocity_near_goal():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         env.configure_episode("none", xi=1.0, strict=True)
@@ -3254,7 +3254,7 @@ def test_precision_control_reduces_velocity_near_goal():
 @pytest.mark.parametrize("z, expected", [(0.0, .05), (.5, .075), (1., .10), (1.5, .325), (2., 1.), (3., 1.)])
 def test_precision_control_uses_episode_tolerances(level, z, expected):
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         thresholds = config["thesis"]["joint_pose_curriculum"]["levels"][level]
@@ -3319,7 +3319,7 @@ def test_joint_precision_quality_uses_sum_and_temperature():
 
 def test_initial_goal_curriculum_samples_locally():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         scale = float(config["thesis"]["goal_curriculum"]["start_scale"])
@@ -3337,7 +3337,7 @@ def test_initial_goal_curriculum_samples_locally():
 
 def test_goal_scale_sampling_is_split_between_history_and_frontier():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     env = ThesisHomotopyEnv(config)
     try:
         sampled = []
@@ -3360,7 +3360,7 @@ def test_goal_scale_sampling_is_split_between_history_and_frontier():
 
 def test_v13_task_space_sampling_balances_distance_orientation_cells():
     root = Path(__file__).resolve().parents[2]
-    config = load_config(root / "configs/experiments/paper_full.yaml")
+    config = load_config(root / "configs/base/thesis_common.yaml")
     sampling = config["thesis"]["joint_pose_curriculum"]["task_space_sampling"]
     sampling["balanced_bins"] = True
     sampling["position_bins"] = 2

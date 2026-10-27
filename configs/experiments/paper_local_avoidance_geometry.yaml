@@ -1,0 +1,55 @@
+# Static geometric passage: frozen S0 starts, offline feasibility filtering, independent avoidance SAC.
+includes:
+- ../base/dual_sac.yaml
+train:
+  num_envs: 8
+  update_log_interval: 10
+sac:
+  batch_size: 1024
+  updates_per_transition: 0.25
+  actor_update_interval: 2
+# Offline selection budgets; these do not change the policy/replay task digest.
+local_path_verification:
+  joint_resolution_rad: 0.02
+  verification_resolution_rad: 0.005
+  rrt_extension_rad: 0.15
+  rrt_iterations: 400
+  rrt_max_checks: 4000
+  max_verification_checks: 20000
+  max_exit_checks: 32
+local_avoidance:
+  enabled: true
+  reference_mode: instantaneous_geometry
+  geometry:
+    kinematic_dt: 0.01
+    prediction_dt: 0.05
+    minimum_point_speed: 0.0001
+    minimum_closing_cosine: 0.05
+  horizon: 160
+  trigger_distance_m: 0.10
+  release_distance_m: 0.06
+  minimum_reference_motion_m: 0.03
+  # Compatibility fields retained in existing bank/checkpoint task digests.
+  # Geometric handoff uses geometry.prediction_dt, not recovery rollout.
+  recovery_steps: 10
+  recovery_progress: 0.02
+  nominal_level: 13
+  nominal_max_steps: 500
+  minimum_approach_steps: 3
+  obstacle_proposals_per_trace: 24
+  obstacle_offset_std_m: 0.045
+  reward:
+    progress_scale: 5.0
+    external_risk_scale: 1.0
+    self_risk_scale: 0.2
+    time_cost: 0.02
+    smooth_cost: 0.01
+    success_bonus: 20.0
+    failure_penalty: 20.0
+    timeout_penalty: 2.0
+  replay_capacity: 50000
+  # Signature compatibility only; learning reads sac.batch_size and UTD above.
+  batch_size: 256
+  warmup_steps: 1000
+  update_after: 1000
+  updates_per_step: 1

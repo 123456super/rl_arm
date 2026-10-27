@@ -33,7 +33,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--config",
-        default="configs/experiments/paper_full.yaml",
+        default="configs/base/thesis_common.yaml",
     )
     parser.add_argument("--samples", type=int, default=10_000)
     parser.add_argument("--seed", type=int, default=81003)

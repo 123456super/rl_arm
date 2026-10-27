@@ -26,7 +26,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, nargs="+", required=True)
     parser.add_argument("--states", type=Path, required=True)
-    parser.add_argument("--config", default="configs/experiments/paper_full_s1_coupling.yaml")
+    parser.add_argument("--config", required=True, help="explicit config containing the S1 coupling reward to audit")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():

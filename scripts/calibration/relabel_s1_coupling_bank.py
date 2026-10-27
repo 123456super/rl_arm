@@ -20,7 +20,7 @@ from scripts.core.train_thesis_homotopy import apply_stage_profile
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--config", default="configs/experiments/paper_full_s1_coupling.yaml")
+    parser.add_argument("--config", required=True, help="explicit config containing the target S1 coupling reward")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     report_path = args.output.with_suffix(".relabel.json")

@@ -11,7 +11,7 @@ from scripts.calibration.audit_reward_ordering import audit, physical_audit
 
 @pytest.fixture
 def parameters():
-    env = ThesisHomotopyEnv(load_config("configs/experiments/paper_full.yaml"))
+    env = ThesisHomotopyEnv(load_config("configs/base/thesis_common.yaml"))
     try:
         return dict(env.reward_parameters)
     finally:
@@ -86,7 +86,7 @@ def test_restored_reward_scalar_vector_parity(parameters):
 
 
 def test_original_reward_audit_baseline_is_restored():
-    result = audit(load_config("configs/experiments/paper_full.yaml"))
+    result = audit(load_config("configs/base/thesis_common.yaml"))
     assert result["gamma"] == .99
     assert result["reward_scheme"] == "legacy_dense"
     for level, values in result["levels"].items():
@@ -95,7 +95,7 @@ def test_original_reward_audit_baseline_is_restored():
 
 
 def test_real_same_state_original_returns_are_restored():
-    config = load_config("configs/experiments/paper_full.yaml")
+    config = load_config("configs/base/thesis_common.yaml")
     # Isolate the restored formula from the later success_bonus=50 experiment.
     config["thesis"]["reward"]["success_bonus"] = 20.
     rows = physical_audit(config)["results"]

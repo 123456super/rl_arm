@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
 from rl_risk_sac.algorithms.thesis_sac import ThesisSACAgent
+from rl_risk_sac.algorithms.dual_sac import POLICIES, checkpoint_policy_state
 from rl_risk_sac.envs.parallel_thesis_env import ParallelThesisEnvPool
 from rl_risk_sac.utils.config import load_config
 
@@ -173,8 +174,10 @@ def main() -> None:
         description="Parallel frozen-policy evaluation for a Full avoidance checkpoint"
     )
     parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--sac-policy", choices=POLICIES,
+                        help="named policy in a complete dual SAC checkpoint; default: its training policy")
     parser.add_argument(
-        "--config", default="configs/experiments/paper_full.yaml"
+        "--config", default="configs/base/thesis_common.yaml"
     )
     parser.add_argument(
         "--level-index", type=int,
@@ -234,6 +237,13 @@ def main() -> None:
         checkpoint_path = ROOT / checkpoint_path
     started = time.perf_counter()
     state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    dual_state = state.get("agent", state).get("dual_sac")
+    if args.sac_policy is not None and dual_state is None:
+        parser.error("--sac-policy requires a complete dual SAC checkpoint; actor exports already identify one policy")
+    selected_policy = args.sac_policy or (dual_state["training_policy"] if dual_state else None)
+    policy_state = checkpoint_policy_state(state, selected_policy)
+    if dual_state and selected_policy != dual_state["training_policy"] and args.level_index is None:
+        parser.error("--level-index is required when evaluating the inactive SAC; its precision level differs from the active curriculum")
     checkpoint_stage = None
     if isinstance(state, dict) and "curriculum" in state:
         checkpoint_stage = state["curriculum"].get("stage")
@@ -245,6 +255,8 @@ def main() -> None:
         config = copy.deepcopy(state["config"])
     else:
         config = load_config(config_path)
+    if config.get("local_avoidance", {}).get("enabled", False) or state.get("protocol") == "s0_generated_local_passage_v1":
+        parser.error("local passage uses scripts/core/evaluate_local_avoidance.py and an independent local validation bank")
     source_config_sha256 = hashlib.sha256(json.dumps(
         config, sort_keys=True, default=_json_default,
     ).encode()).hexdigest()
@@ -257,9 +269,11 @@ def main() -> None:
     if args.max_episode_steps is not None:
         config["thesis"]["horizon"] = args.max_episode_steps
     if args.scene == "auto":
-        evaluation_scene = "none" if checkpoint_stage in (None, "s0") else "avoidance"
+        evaluation_scene = "none" if selected_policy == "reaching" or checkpoint_stage in (None, "s0") else "avoidance"
     else:
         evaluation_scene = args.scene
+    if selected_policy == "reaching" and evaluation_scene != "none":
+        parser.error("reaching SAC evaluation uses --scene none; automatic obstacle switching is not implemented")
     if evaluation_scene == "none":
         # S0 evaluation must be genuinely obstacle-free, even when a complete
         # checkpoint was saved with an obstacle-enabled stage configuration.
@@ -300,12 +314,7 @@ def main() -> None:
     levels = config["thesis"]["joint_pose_curriculum"]["levels"]
     if not 0 <= level_index < len(levels):
         parser.error(f"--level-index must be in [0, {len(levels) - 1}]")
-    if isinstance(state, dict) and "agent" in state:
-        actor_state = state["agent"]["actor"]
-    elif isinstance(state, dict) and "actor" in state:
-        actor_state = state["actor"]
-    else:
-        actor_state = state
+    actor_state = policy_state.get("actor", policy_state)
     agent.actor.load_state_dict(actor_state)
     agent.actor.eval()
 
@@ -372,6 +381,7 @@ def main() -> None:
         "level_index": level_index,
         "scene": evaluation_scene,
         "checkpoint_stage": checkpoint_stage,
+        "sac_policy": selected_policy,
         "obstacles_enabled": bool(config["thesis"].get("obstacles", {}).get("enabled", False)),
         "obstacles_dynamic": bool(config["thesis"].get("obstacles", {}).get("dynamic", False)),
         "episodes": args.episodes,

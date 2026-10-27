@@ -37,7 +37,7 @@ def test_removed_scenes_cannot_enter_training_or_restore(scene):
                                   s0_current_capacity=1, s0_success_capacity=1)
     with pytest.raises(ValueError, match="only reaching scene none"):
         replay.add(scene, None, None, None, False, {}, 0, 0)
-    env = ThesisHomotopyEnv(load_config(ROOT / "configs/experiments/paper_full.yaml"))
+    env = ThesisHomotopyEnv(load_config(ROOT / "configs/base/thesis_common.yaml"))
     try:
         with pytest.raises(ValueError, match="only reaching scene none"):
             env.configure_episode(scene, xi=1.0, strict=True)
@@ -111,7 +111,7 @@ def test_reaching_completion_gate():
 
 
 def test_full_config_contains_only_full_avoidance():
-    config = load_config(ROOT / "configs/experiments/paper_full.yaml")
+    config = load_config(ROOT / "configs/base/thesis_common.yaml")
     assert set(config["thesis"]["serial_stages"]) == {"s0", "s1", "s2", "s3"}
     assert [config["thesis"]["serial_stages"][stage]["purpose"] for stage in ("s0", "s1", "s2", "s3")] == [
         "predictive_obstacle_avoidance", "static_obstacle_reaching",
@@ -120,7 +120,7 @@ def test_full_config_contains_only_full_avoidance():
 
 
 def test_task_space_goal_acceptance_stats_are_recorded_per_cell():
-    config = load_config(ROOT / "configs/experiments/paper_full.yaml")
+    config = load_config(ROOT / "configs/base/thesis_common.yaml")
     config["thesis"]["joint_pose_curriculum"]["task_space_sampling"].update({
         "position_bins": 2, "orientation_bins": 2,
     })

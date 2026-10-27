@@ -121,6 +121,8 @@ class ParallelThesisEnvPool:
         cpu_ids: list[int] | None = None,
         step_info_keys: Collection[str] | None = None,
         start_method: str = "spawn",
+        _worker_target=None,
+        _worker_extra_args: tuple = (),
     ) -> None:
         if not seeds:
             raise ValueError("parallel environment pool requires at least one seed")
@@ -139,8 +141,8 @@ class ParallelThesisEnvPool:
             parent, child = context.Pipe()
             cpu_id = None if cpu_ids is None else int(cpu_ids[index])
             process = context.Process(
-                target=_worker,
-                args=(child, config, int(seed), cpu_id, selected_info_keys),
+                target=_worker if _worker_target is None else _worker_target,
+                args=(child, config, int(seed), cpu_id, selected_info_keys, *_worker_extra_args),
                 name=f"thesis-env-{index}",
             )
             process.start()

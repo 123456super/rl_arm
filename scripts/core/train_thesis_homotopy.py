@@ -42,11 +42,19 @@ sys.path.insert(0, str(ROOT / "src"))
 from rl_risk_sac.algorithms.homotopy_curriculum import HomotopyCurriculum
 from rl_risk_sac.algorithms.homotopy_replay import HomotopyReplayBuffer
 from rl_risk_sac.algorithms.thesis_sac import ThesisSACAgent
+from rl_risk_sac.algorithms.dual_sac import (
+    POLICIES, DualSACAgent, build_thesis_sac, checkpoint_policy_state,
+    validate_dual_sac_config,
+)
 from rl_risk_sac.tasks.obstacle_evaluation import ObstacleEvaluation
 from rl_risk_sac.tasks.obstacle_observation import stack_observations, observation_tensors
 from rl_risk_sac.envs.parallel_thesis_env import ParallelThesisEnvPool
 from rl_risk_sac.envs.thesis_homotopy_env import ThesisHomotopyEnv
 from rl_risk_sac.utils.config import load_config
+from rl_risk_sac.utils.training_logs import (
+    CsvLog, PROBE_DETAIL_FIELDS, LEARNING_DIAGNOSTIC_FIELDS,
+    detailed_log_enabled, learning_diagnostics, record_online_success, format_training_progress,
+)
 
 
 HYBRID_KEYPOINT_AUTO_CHAIN_PROTOCOL = (
@@ -217,6 +225,7 @@ def physical_cpu_ids(count: int) -> list[int] | None:
 
 def validate_training_architecture(config: dict) -> None:
     """Reject retired experiment modes before creating output or workers."""
+    validate_dual_sac_config(config)
     thesis = config["thesis"]
     if thesis.get("stage", "s0") not in SUPPORTED_STAGES:
         raise ValueError(f"unsupported training stage: {thesis.get('stage')!r}")
@@ -502,20 +511,26 @@ def save_parallel_checkpoint(
     }, path)
 
 
-def checkpoint_actor_state(checkpoint: Path, device: torch.device) -> dict[str, torch.Tensor]:
+def checkpoint_actor_state(checkpoint: Path, device: torch.device, policy=None) -> dict[str, torch.Tensor]:
     state = torch.load(checkpoint, map_location=device, weights_only=False)
-    if isinstance(state, dict) and "agent" in state:
-        actor_state = state["agent"]["actor"]
-    elif isinstance(state, dict) and "actor" in state:
-        actor_state = state["actor"]
-    else:
-        actor_state = state
-    return actor_state
+    selected = checkpoint_policy_state(state, policy)
+    return selected.get("actor", selected)
 
 
-def load_reference_actor(agent: ThesisSACAgent, checkpoint: Path):
-    actor_state = checkpoint_actor_state(checkpoint, agent.device)
+def load_reference_actor(agent: ThesisSACAgent, checkpoint: Path, *, policy=None):
+    actor_state = checkpoint_actor_state(checkpoint, agent.device, policy)
     reference = agent.frozen_actor_copy()
+    if actor_state["backbone.0.weight"].shape[1] == 241 and agent.actor_obs_dim > 241:
+        migrated = reference.state_dict()
+        for key, value in actor_state.items():
+            if key == "backbone.0.weight":
+                migrated[key].zero_()
+                migrated[key][:, :241] = value
+            elif key in migrated and migrated[key].shape == value.shape:
+                migrated[key] = value
+            else:
+                raise ValueError(f"incompatible local avoidance actor parameter: {key}")
+        actor_state = migrated
     if actor_state["backbone.0.weight"].shape[1] == 162 and agent.actor_obs_dim == 241:
         migrated = reference.state_dict()
         for key, value in actor_state.items():
@@ -530,6 +545,26 @@ def load_reference_actor(agent: ThesisSACAgent, checkpoint: Path):
     reference.load_state_dict(actor_state)
     reference.eval()
     return reference
+
+
+def initialize_frozen_reaching(agent: DualSACAgent, checkpoint: Path) -> dict:
+    """Import S0 without transferring its replay/curriculum to avoidance."""
+    state = torch.load(checkpoint, map_location=agent.device, weights_only=False)
+    source = checkpoint_policy_state(state, "reaching")
+    is_dual = "dual_sac" in state.get("agent", state)
+    source_stage = state.get("curriculum", {}).get("stage")
+    if not is_dual and source_stage not in (None, "s0"):
+        raise ValueError("initialize-reaching-from requires an S0 or named reaching policy, not a combined obstacle policy")
+    complete = "q1" in source
+    if complete:
+        agent.reaching.load_state_dict(source)
+    else:
+        reference = load_reference_actor(agent.reaching, checkpoint, policy="reaching")
+        agent.reaching.actor.load_state_dict(reference.state_dict())
+        agent.reaching.reset_chain_reference_actor()
+    return {"checkpoint": str(checkpoint), "sha256": file_sha256(checkpoint),
+            "complete_sac": complete, "replay_reused": False,
+            "frozen": True}
 
 
 def restore_torch_rng(state: dict) -> None:
@@ -688,7 +723,7 @@ def update_adaptive_task_space_sampling(
     return probabilities.tolist()
 
 
-def scalar_probe_metrics(metrics: dict[str, object]) -> dict[str, object]:
+def scalar_probe_metrics(metrics: dict[str, object], *, include_details: bool = True) -> dict[str, object]:
     """Return probe CSV columns, encoding obstacle reports as JSON cells."""
     return {
         key: (
@@ -696,6 +731,7 @@ def scalar_probe_metrics(metrics: dict[str, object]) -> dict[str, object]:
             if key in {"obstacle_groups", "obstacle_episodes"} else value
         ) for key, value in metrics.items()
         if key not in {"bin_success_rates", "bin_strict_pose_hit_rates"}
+        and (include_details or key not in PROBE_DETAIL_FIELDS)
     }
 
 
@@ -1424,7 +1460,7 @@ def run_manual_pose_checkpoint_probe(
         "orientation_level_steps": level_steps,
         "episodes": settings["deterministic_probe_episodes"],
         "seed": settings["deterministic_probe_seed"],
-        **scalar_probe_metrics(metrics),
+        **scalar_probe_metrics(metrics, include_details=detailed_log_enabled(config, "probe_details")),
         **pose_probe_audit_fields(result, settings),
         "s0_phase": phase,
         "lambda_self": lambda_self,
@@ -1769,6 +1805,7 @@ def run_parallel_s0(
             ),
             "chain_pcr_loss_ema": last_update.get("chain_pcr_loss_ema", ""),
             **keypoint_reward_statistics(counters),
+            **learning_diagnostics(last_update),
             "q1_mean": last_update.get("q1_mean", ""),
             "q2_mean": last_update.get("q2_mean", ""),
             "target_mean": last_update.get("target_mean", ""),
@@ -1869,27 +1906,25 @@ def run_parallel_s0(
             "self_safety_full_weight_steps": curriculum.self_safety.full_weight_steps,
         }
         writer.writerow(row)
-        print(
-            f"step={counters['stage_step']}/{total_steps} envs={num_envs} "
-            f"episodes={counters['episodes']} replay={len(replay)} "
-            f"updates={counters['updates']} level={curriculum.orientation.level_index} "
-            f"success={orientation_rate} "
-            f"steps/s={row['steps_per_second']:.1f}",
-            flush=True,
-        )
+        print(format_training_progress(counters["stage_step"], total_steps, elapsed,
+                                       counters.get("recent_online_successes", []))
+              + f" | 回合={counters['episodes']} 更新={counters['updates']} "
+                f"等级={curriculum.orientation.level_index} 环境={num_envs}", flush=True)
 
     log_path = output / "episodes.csv"
     with log_path.open("w", newline="", encoding="utf-8") as episode_handle, \
-            (output / "transitions.csv").open("w", newline="", encoding="utf-8") as transition_handle, \
-            (output / "updates.csv").open("w", newline="", encoding="utf-8") as update_handle, \
+            CsvLog(output / "transitions.csv", transition_fields,
+                   enabled=detailed_log_enabled(config, "transitions")) as transition_handle, \
+            CsvLog(output / "updates.csv", update_fields,
+                   enabled=detailed_log_enabled(config, "updates")) as update_handle, \
             (output / "progress.csv").open("w", newline="", encoding="utf-8") as progress_handle, \
-            (output / "orientation_probes.csv").open("w", newline="", encoding="utf-8") as probe_handle:
+            CsvLog(output / "orientation_probes.csv", ORIENTATION_PROBE_FIELDS,
+                   exclude=() if detailed_log_enabled(config, "probe_details") else PROBE_DETAIL_FIELDS) as probe_handle:
         episode_writer = csv.DictWriter(episode_handle, fieldnames=fields)
-        transition_writer = csv.DictWriter(transition_handle, fieldnames=transition_fields)
-        update_writer = csv.DictWriter(update_handle, fieldnames=update_fields)
+        transition_writer = transition_handle
+        update_writer = update_handle
         progress_writer = csv.DictWriter(progress_handle, fieldnames=progress_fields)
-        probe_fields = ORIENTATION_PROBE_FIELDS
-        probe_writer = csv.DictWriter(probe_handle, fieldnames=probe_fields)
+        probe_writer = probe_handle
         for writer in (episode_writer, transition_writer, update_writer, progress_writer, probe_writer):
             writer.writeheader()
 
@@ -1979,6 +2014,8 @@ def run_parallel_s0(
                 })
 
         started = time.perf_counter()
+        print(format_training_progress(counters["stage_step"], total_steps, 0.,
+                                       counters.get("recent_online_successes", []), completed_steps=0), flush=True)
         training_completed = False
         try:
             while counters["stage_step"] < total_steps:
@@ -2097,7 +2134,7 @@ def run_parallel_s0(
                         "orientation_level_steps": steps_at_probe,
                         "episodes": orientation_curriculum["deterministic_probe_episodes"],
                         "seed": orientation_curriculum["deterministic_probe_seed"],
-                        **scalar_probe_metrics(metrics),
+                        **scalar_probe_metrics(metrics, include_details=detailed_log_enabled(config, "probe_details")),
                         **pose_probe_audit_fields(
                             probe_result, orientation_curriculum,
                         ),
@@ -2250,127 +2287,129 @@ def run_parallel_s0(
                     counters["parallel_updates_due"] = (
                         int(counters.get("parallel_updates_due", 0)) + updates_due
                     )
-                    transition_writer.writerow({
-                        "global_step": counters["global_step"],
-                        "stage_step": counters["stage_step"],
-                        "stage_total_step": counters["stage_total_step"],
-                        "episode": worker["episode_id"], "episode_step": worker["length"],
-                        "far_timeout_restart": int(
-                            worker.get("far_timeout_restart", False)
-                        ),
-                        "scene": worker["scene"], "xi": worker["xi"],
-                        "lambda_self": worker["lambda_self"], "strict": int(worker["strict"]),
-                        "reward": reward, "r_goal": info["r_goal"],
-                        "c_proximity": info["c_proximity"], "hard_penalty": info["hard_penalty"],
-                        "timeout_penalty": info["timeout_penalty"],
-                        "safety_penalty": info["safety_penalty"],
-                        "external_safety_penalty": info["external_safety_penalty"],
-                        "self_safety_penalty": info["self_safety_penalty"],
-                        "terminal_guard_penalty": info["terminal_guard_penalty"],
-                        "clearance_violation": info["clearance_violation"],
-                        "risk_max": info["control_max_risk"],
-                        "d_min": info["control_min_distance"],
-                        "goal_scale": worker["goal_scale"],
-                        "self_clearance_violation": info["self_clearance_violation"],
-                        "self_risk_max": info["control_self_max_risk"],
-                        "self_d_min": info["control_self_min_distance"],
-                        "self_ttc_min": info["control_self_min_ttc"],
-                        "self_approach_max": info["control_self_max_approach"],
-                        "self_projection_intervened": int(info["self_projection_intervened"]),
-                        "self_projection_infeasible": int(info["self_projection_infeasible"]),
-                        "self_projection_correction_norm": info["self_projection_correction_norm"],
-                        "self_projection_max_slack": info["self_projection_max_slack"],
-                        "goal_full_scale_steps": curriculum.goal.full_scale_steps,
-                        "orientation_scale": worker["orientation_scale"],
-                        "position_tolerance": worker["position_tolerance"],
-                        "orientation_tolerance": worker["orientation_tolerance"],
-                        "orientation_reward_scale": info["orientation_reward_scale"],
-                        "orientation_reward_gate": info["orientation_reward_gate"],
-                        "rho_position": info["rho_position"],
-                        "next_rho_position": info["next_rho_position"],
-                        "rho_orientation": info["rho_orientation"],
-                        "next_rho_orientation": info["next_rho_orientation"],
-                        "position_quality": info["position_quality"],
-                        "orientation_quality": info["orientation_quality"],
-                        "keypoint_tracking_quality": info["keypoint_tracking_quality"],
-                        "jacobian_clip_ratio": info["jacobian_clip_ratio"],
-                        "keypoint_distance": info["keypoint_distance"],
-                        "next_keypoint_distance": info["next_keypoint_distance"],
-                        "keypoint_progress": info["keypoint_progress"],
-                        "goal_obstacle_coupling_reward": info["goal_obstacle_coupling_reward"],
-                        "goal_obstacle_potential": info["goal_obstacle_potential"],
-                        "next_goal_obstacle_potential": info["next_goal_obstacle_potential"],
-                        "keypoint_tracking_reward": info["keypoint_tracking_reward"],
-                        "keypoint_progress_reward": info["keypoint_progress_reward"],
-                        "keypoint_precision_quality": info["keypoint_precision_quality"],
-                        "keypoint_precision_reward": info["keypoint_precision_reward"],
-                        "joint_bottleneck_ratio": info["joint_bottleneck_ratio"],
-                        "next_joint_bottleneck_ratio": info["next_joint_bottleneck_ratio"],
-                        "joint_bottleneck_potential": info["joint_bottleneck_potential"],
-                        "next_joint_bottleneck_potential": info["next_joint_bottleneck_potential"],
-                        "joint_bottleneck_shaping_reward": info["joint_bottleneck_shaping_reward"],
-                        "pose_potential": info["pose_potential"],
-                        "next_pose_potential": info["next_pose_potential"],
-                        "pose_potential_progress": info["pose_potential_progress"],
-                        "position_progress": info["position_progress"],
-                        "orientation_progress": info["orientation_progress"],
-                        "orientation_error_progress": info["orientation_error_progress"],
-                        "orientation_absolute_penalty": info["orientation_absolute_penalty"],
-                        "orientation_absolute_position_gate": info[
-                            "orientation_absolute_position_gate"
-                        ],
-                        "orientation_error_progress_reward": info["orientation_error_progress_reward"],
-                        "orientation_completion_reward": info["orientation_completion_reward"],
-                        "orientation_completion_position_gate": info[
-                            "orientation_completion_position_gate"
-                        ],
-                        "orientation_shaping_reward": info["orientation_shaping_reward"],
-                        "fine_position_quality": info["fine_position_quality"],
-                        "fine_orientation_quality": info["fine_orientation_quality"],
-                        "fine_position_progress": info["fine_position_progress"],
-                        "fine_orientation_progress": info["fine_orientation_progress"],
-                        "precision_proximity": info["precision_proximity"],
-                        "precision_stop_cost": info["precision_stop_cost"],
-                        "joint_tolerance_ratio": info["joint_tolerance_ratio"],
-                        "next_joint_tolerance_ratio": info["next_joint_tolerance_ratio"],
-                        "joint_precision_quality": info["joint_precision_quality"],
-                        "next_joint_precision_quality": info["next_joint_precision_quality"],
-                        "joint_precision_progress": info["joint_precision_progress"],
-                        "joint_precision_reward": info["joint_precision_reward"],
-                        "position_completion": info["position_completion"],
-                        "orientation_completion": info["orientation_completion"],
-                        "partial_precision_reward": info[
-                            "partial_precision_reward"
-                        ],
-                        "left_joint_tolerance_region": int(
-                            info["left_joint_tolerance_region"]
-                        ),
-                        "leave_joint_tolerance_penalty": info[
-                            "leave_joint_tolerance_penalty"
-                        ],
-                        "strict_pose_reached": int(info["strict_pose_reached"]),
-                        "success_hold_count": info["success_hold_count"],
-                        "success_hold_steps_required": info[
-                            "success_hold_steps_required"
-                        ],
-                        "orientation_anchor": int(worker["orientation_anchor"]),
-                        "position_error_m": info["next_rho_position"],
-                        "orientation_error_rad": info["next_rho_orientation"],
-                        "precision_action_scale": info["precision_action_scale"],
-                        "velocity_magnitude": info["velocity_magnitude"],
-                        "velocity_cost": info["velocity_cost"],
-                        "smooth_velocity": info["smooth_velocity"],
-                        "smooth_cost": info["smooth_cost"],
-                        "curriculum_eligible": int(not worker["episode_used_warmup"] and promotion_episode_eligible(config, info)),
-                        "position_reached": int(info["position_reached"]),
-                        "task_reached": int(info["task_reached"]),
-                        "obstacle_collision": int(info["obstacle_collision"]),
-                        "self_collision": int(info["self_collision"]),
-                        "environment_collision": int(info["environment_collision"]),
-                        "joint_limit": int(info["joint_limit"]),
-                        "sample_none": replay.last_sample_counts["none"],
-                    })
+                    if transition_handle.enabled:
+                        transition_writer.writerow({
+                            "global_step": counters["global_step"],
+                            "stage_step": counters["stage_step"],
+                            "stage_total_step": counters["stage_total_step"],
+                            "episode": worker["episode_id"], "episode_step": worker["length"],
+                            "far_timeout_restart": int(
+                                worker.get("far_timeout_restart", False)
+                            ),
+                            "scene": worker["scene"], "xi": worker["xi"],
+                            "lambda_self": worker["lambda_self"], "strict": int(worker["strict"]),
+                            "reward": reward, "r_goal": info["r_goal"],
+                            "c_proximity": info["c_proximity"], "hard_penalty": info["hard_penalty"],
+                            "timeout_penalty": info["timeout_penalty"],
+                            "safety_penalty": info["safety_penalty"],
+                            "external_safety_penalty": info["external_safety_penalty"],
+                            "self_safety_penalty": info["self_safety_penalty"],
+                            "terminal_guard_penalty": info["terminal_guard_penalty"],
+                            "clearance_violation": info["clearance_violation"],
+                            "risk_max": info["control_max_risk"],
+                            "d_min": info["control_min_distance"],
+                            "goal_scale": worker["goal_scale"],
+                            "self_clearance_violation": info["self_clearance_violation"],
+                            "self_risk_max": info["control_self_max_risk"],
+                            "self_d_min": info["control_self_min_distance"],
+                            "self_ttc_min": info["control_self_min_ttc"],
+                            "self_approach_max": info["control_self_max_approach"],
+                            "self_projection_intervened": int(info["self_projection_intervened"]),
+                            "self_projection_infeasible": int(info["self_projection_infeasible"]),
+                            "self_projection_correction_norm": info["self_projection_correction_norm"],
+                            "self_projection_max_slack": info["self_projection_max_slack"],
+                            "goal_full_scale_steps": curriculum.goal.full_scale_steps,
+                            "orientation_scale": worker["orientation_scale"],
+                            "position_tolerance": worker["position_tolerance"],
+                            "orientation_tolerance": worker["orientation_tolerance"],
+                            "orientation_reward_scale": info["orientation_reward_scale"],
+                            "orientation_reward_gate": info["orientation_reward_gate"],
+                            "rho_position": info["rho_position"],
+                            "next_rho_position": info["next_rho_position"],
+                            "rho_orientation": info["rho_orientation"],
+                            "next_rho_orientation": info["next_rho_orientation"],
+                            "position_quality": info["position_quality"],
+                            "orientation_quality": info["orientation_quality"],
+                            "keypoint_tracking_quality": info["keypoint_tracking_quality"],
+                            "jacobian_clip_ratio": info["jacobian_clip_ratio"],
+                            "keypoint_distance": info["keypoint_distance"],
+                            "next_keypoint_distance": info["next_keypoint_distance"],
+                            "keypoint_progress": info["keypoint_progress"],
+                            "goal_obstacle_coupling_reward": info["goal_obstacle_coupling_reward"],
+                            "goal_obstacle_potential": info["goal_obstacle_potential"],
+                            "next_goal_obstacle_potential": info["next_goal_obstacle_potential"],
+                            "keypoint_tracking_reward": info["keypoint_tracking_reward"],
+                            "keypoint_progress_reward": info["keypoint_progress_reward"],
+                            "keypoint_precision_quality": info["keypoint_precision_quality"],
+                            "keypoint_precision_reward": info["keypoint_precision_reward"],
+                            "joint_bottleneck_ratio": info["joint_bottleneck_ratio"],
+                            "next_joint_bottleneck_ratio": info["next_joint_bottleneck_ratio"],
+                            "joint_bottleneck_potential": info["joint_bottleneck_potential"],
+                            "next_joint_bottleneck_potential": info["next_joint_bottleneck_potential"],
+                            "joint_bottleneck_shaping_reward": info["joint_bottleneck_shaping_reward"],
+                            "pose_potential": info["pose_potential"],
+                            "next_pose_potential": info["next_pose_potential"],
+                            "pose_potential_progress": info["pose_potential_progress"],
+                            "position_progress": info["position_progress"],
+                            "orientation_progress": info["orientation_progress"],
+                            "orientation_error_progress": info["orientation_error_progress"],
+                            "orientation_absolute_penalty": info["orientation_absolute_penalty"],
+                            "orientation_absolute_position_gate": info[
+                                "orientation_absolute_position_gate"
+                            ],
+                            "orientation_error_progress_reward": info["orientation_error_progress_reward"],
+                            "orientation_completion_reward": info["orientation_completion_reward"],
+                            "orientation_completion_position_gate": info[
+                                "orientation_completion_position_gate"
+                            ],
+                            "orientation_shaping_reward": info["orientation_shaping_reward"],
+                            "fine_position_quality": info["fine_position_quality"],
+                            "fine_orientation_quality": info["fine_orientation_quality"],
+                            "fine_position_progress": info["fine_position_progress"],
+                            "fine_orientation_progress": info["fine_orientation_progress"],
+                            "precision_proximity": info["precision_proximity"],
+                            "precision_stop_cost": info["precision_stop_cost"],
+                            "joint_tolerance_ratio": info["joint_tolerance_ratio"],
+                            "next_joint_tolerance_ratio": info["next_joint_tolerance_ratio"],
+                            "joint_precision_quality": info["joint_precision_quality"],
+                            "next_joint_precision_quality": info["next_joint_precision_quality"],
+                            "joint_precision_progress": info["joint_precision_progress"],
+                            "joint_precision_reward": info["joint_precision_reward"],
+                            "position_completion": info["position_completion"],
+                            "orientation_completion": info["orientation_completion"],
+                            "partial_precision_reward": info[
+                                "partial_precision_reward"
+                            ],
+                            "left_joint_tolerance_region": int(
+                                info["left_joint_tolerance_region"]
+                            ),
+                            "leave_joint_tolerance_penalty": info[
+                                "leave_joint_tolerance_penalty"
+                            ],
+                            "strict_pose_reached": int(info["strict_pose_reached"]),
+                            "success_hold_count": info["success_hold_count"],
+                            "success_hold_steps_required": info[
+                                "success_hold_steps_required"
+                            ],
+                            "orientation_anchor": int(worker["orientation_anchor"]),
+                            "position_error_m": info["next_rho_position"],
+                            "orientation_error_rad": info["next_rho_orientation"],
+                            "precision_action_scale": info["precision_action_scale"],
+                            "velocity_magnitude": info["velocity_magnitude"],
+                            "velocity_cost": info["velocity_cost"],
+                            "smooth_velocity": info["smooth_velocity"],
+                            "smooth_cost": info["smooth_cost"],
+                            "curriculum_eligible": int(not worker["episode_used_warmup"] and promotion_episode_eligible(config, info)),
+                            "position_reached": int(info["position_reached"]),
+                            "task_reached": int(info["task_reached"]),
+                            "obstacle_collision": int(info["obstacle_collision"]),
+                            "self_collision": int(info["self_collision"]),
+                            "environment_collision": int(info["environment_collision"]),
+                            "joint_limit": int(info["joint_limit"]),
+                            "sample_none": replay.last_sample_counts["none"],
+                        })
                     if terminated or truncated:
+                        record_online_success(counters, info.get("safe_success", False))
                         level_before_episode = curriculum.orientation.level_index
                         update = curriculum.finish_episode(
                             worker["scene"], bool(info["position_reached"]),
@@ -2627,8 +2666,12 @@ def run_parallel_s0(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train Full predictive obstacle avoidance: Hybrid Keypoint + Actor-only Jacobian + Auto-PCR")
-    parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
+    parser.add_argument("--config", default="configs/base/thesis_common.yaml")
     parser.add_argument("--stage", choices=SUPPORTED_STAGES, help="curriculum stage")
+    parser.add_argument("--sac-policy", choices=POLICIES,
+                        help="explicit training policy in a dual_sac configuration; no automatic switching")
+    parser.add_argument("--initialize-reaching-from",
+                        help="S0 checkpoint retained as the frozen reaching SAC in a fresh dual avoidance run")
     parser.add_argument("--resume", help="complete Full avoidance checkpoint from the preceding block")
     parser.add_argument("--allow-coupling-reward-change", action="store_true",
                         help="explicit S1-only PBRS reward migration; keep critics/optimizers, relabel replay")
@@ -2667,6 +2710,21 @@ def main() -> None:
     if args.allow_coupling_reward_change and args.resume is None:
         parser.error("--allow-coupling-reward-change requires --resume")
     config = load_config(ROOT / args.config)
+    if config.get("local_avoidance", {}).get("enabled", False):
+        parser.error("local passage uses scripts/core/train_local_avoidance.py; the global-reaching trainer has different rewards and success labels")
+    dual_settings = config.get("dual_sac", {})
+    if args.sac_policy:
+        if not dual_settings.get("enabled", False):
+            parser.error("--sac-policy requires a dual_sac configuration")
+        dual_settings["training_policy"] = args.sac_policy
+    if args.initialize_reaching_from and (not dual_settings.get("enabled", False)
+                                         or dual_settings.get("training_policy") != "avoidance"):
+        parser.error("--initialize-reaching-from requires a dual avoidance run")
+    if args.initialize_reaching_from and args.resume:
+        parser.error("--resume restores both SACs; do not also initialize reaching")
+    if (dual_settings.get("enabled", False) and dual_settings.get("training_policy") == "avoidance"
+            and not args.resume and not args.initialize_reaching_from):
+        parser.error("a fresh dual avoidance run requires --initialize-reaching-from to preserve the trained reaching policy")
     if args.output_dir:
         config["train"]["output_dir"] = args.output_dir
     thesis = config["thesis"]
@@ -2715,7 +2773,11 @@ def main() -> None:
     env.rng = np.random.default_rng(stream_seeds["environment"])
     obs_dim = int(env.observation_space.shape[0])
     action_dim = int(env.action_space.shape[0])
-    agent = ThesisSACAgent(obs_dim, action_dim, config)
+    agent = build_thesis_sac(obs_dim, action_dim, config)
+    if args.initialize_reaching_from:
+        config["dual_sac"]["reaching_initialization"] = initialize_frozen_reaching(
+            agent, ROOT / args.initialize_reaching_from,
+        )
     orientation_curriculum = thesis["orientation_curriculum"]
     replay_storage = orientation_curriculum["replay_storage"]
     precision_replay = thesis["precision_boundary_replay"]
@@ -2849,6 +2911,14 @@ def main() -> None:
     if checkpoint_source:
         state = torch.load(checkpoint_source, map_location=agent.device, weights_only=False)
         loaded_checkpoint_state = state
+        if bool(state.get("config", {}).get("dual_sac", {}).get("enabled", False)) != bool(dual_settings.get("enabled", False)):
+            raise ValueError("single and dual SAC checkpoints cannot share a complete resume; initialize policies explicitly")
+        if dual_settings.get("enabled", False):
+            if state["agent"]["dual_sac"]["training_policy"] != agent.training_policy:
+                raise ValueError("cannot resume replay/curriculum across SAC policies")
+            if "reaching_initialization" in state["config"].get("dual_sac", {}):
+                config["dual_sac"]["reaching_initialization"] = copy.deepcopy(
+                    state["config"]["dual_sac"]["reaching_initialization"])
         previous_stage = state["curriculum"]["stage"]
         saved_reward = state.get("config", {}).get("thesis", {}).get("reward", {})
         if (saved_reward.get("scheme", "legacy_dense") != thesis["reward"].get("scheme", "legacy_dense")
@@ -2988,6 +3058,7 @@ def main() -> None:
         "protocol": config["thesis"]["protocol"], "stage": stage, "seed": seed,
         "resume": checkpoint_source, "resume_mode": resume_mode, "config": str(args.config),
         "initialize_actor_from": args.initialize_actor_from,
+        "dual_sac": copy.deepcopy(config.get("dual_sac", {"enabled": False})),
         "start_level": args.start_level,
         "legacy_s0_targeted_sampling": False,
         "legacy_s0_four_pool": False,
@@ -3024,6 +3095,8 @@ def main() -> None:
             config["train"].get("evaluate_during_training", False)
         ),
         "num_envs": num_envs,
+        "logging": {name: detailed_log_enabled(config, name)
+                    for name in ("transitions", "updates", "probe_details")},
         "blocking_obstacle_mode": bool(thesis.get("blocking_obstacle_mode", False)),
         "parallel_execution": {
             "mode": (
@@ -3187,6 +3260,7 @@ def main() -> None:
     expert_metric_fields = list(s1_expert_replay_metrics(replay))
     update_fields.extend(expert_metric_fields)
     progress_fields.extend(expert_metric_fields)
+    progress_fields.extend(LEARNING_DIAGNOSTIC_FIELDS)
     requested_steps = int(args.steps or config["train"]["total_steps"])
     max_stage_steps = int(config["train"]["max_stage_steps"])
     total_steps = resolve_stage_block_steps(
@@ -3248,17 +3322,19 @@ def main() -> None:
         )
         return
     with log_path.open("w", newline="", encoding="utf-8") as handle, \
-            (output / "transitions.csv").open("w", newline="", encoding="utf-8") as transition_handle, \
-            (output / "updates.csv").open("w", newline="", encoding="utf-8") as update_handle, \
+            CsvLog(output / "transitions.csv", transition_fields,
+                   enabled=detailed_log_enabled(config, "transitions")) as transition_handle, \
+            CsvLog(output / "updates.csv", update_fields,
+                   enabled=detailed_log_enabled(config, "updates")) as update_handle, \
             (output / "progress.csv").open("w", newline="", encoding="utf-8") as progress_handle:
         writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
-        transition_writer = csv.DictWriter(transition_handle, fieldnames=transition_fields); transition_writer.writeheader()
-        update_writer = csv.DictWriter(update_handle, fieldnames=update_fields); update_writer.writeheader()
+        transition_writer = transition_handle; transition_writer.writeheader()
+        update_writer = update_handle; update_writer.writeheader()
         progress_writer = csv.DictWriter(progress_handle, fieldnames=progress_fields); progress_writer.writeheader()
         probe_path = output / "orientation_probes.csv"
-        probe_handle = probe_path.open("w", newline="", encoding="utf-8")
-        probe_fields = ORIENTATION_PROBE_FIELDS
-        probe_writer = csv.DictWriter(probe_handle, fieldnames=probe_fields)
+        probe_handle = CsvLog(probe_path, ORIENTATION_PROBE_FIELDS,
+                              exclude=() if detailed_log_enabled(config, "probe_details") else PROBE_DETAIL_FIELDS)
+        probe_writer = probe_handle
         probe_writer.writeheader()
 
         def run_and_log_manual_probe() -> None:
@@ -3284,6 +3360,8 @@ def main() -> None:
         counters["probe_best"] = best_probes
         last_update: dict[str, float] = {}
         start_time = time.perf_counter()
+        print(format_training_progress(counters["stage_step"], total_steps, 0.,
+                                       counters.get("recent_online_successes", []), completed_steps=0), flush=True)
         while counters["stage_step"] < total_steps:
             if active_episode is None:
                 scene = curriculum.choose_scene(); xi, strict = curriculum.contract(scene)
@@ -3375,6 +3453,8 @@ def main() -> None:
                 counters["global_step"] += 1
                 counters["stage_step"] += 1
                 counters["stage_total_step"] += 1
+                if terminated or truncated:
+                    record_online_success(counters, info.get("safe_success", False))
                 updates_due = (
                     accrue_update_credit(counters, updates_per_transition)
                     if replay.has_training_batch(stage, batch_size, update_after) else 0
@@ -3444,117 +3524,118 @@ def main() -> None:
                             "actor_gradient_norm": last_update["actor_gradient_norm"],
                             "actor_updated": last_update["actor_updated"],
                         })
-                transition_writer.writerow({
-                    "global_step": counters["global_step"], "stage_step": counters["stage_step"],
-                    "stage_total_step": counters["stage_total_step"],
-                    "episode": counters["episodes"], "episode_step": episode_length, "scene": scene,
-                    "xi": xi, "lambda_self": lambda_self, "strict": int(strict), "reward": reward, "r_goal": info["r_goal"],
-                    "c_proximity": info["c_proximity"], "hard_penalty": info["hard_penalty"],
-                    "timeout_penalty": info["timeout_penalty"],
-                    "safety_penalty": info["safety_penalty"],
-                    "external_safety_penalty": info["external_safety_penalty"],
-                    "self_safety_penalty": info["self_safety_penalty"],
-                    "terminal_guard_penalty": info["terminal_guard_penalty"],
-                    "clearance_violation": info["clearance_violation"],
-                    "risk_max": info["control_max_risk"],
-                    "d_min": info["control_min_distance"], "goal_scale": goal_scale,
-                    "self_clearance_violation": info["self_clearance_violation"],
-                    "self_risk_max": info["control_self_max_risk"],
-                    "self_d_min": info["control_self_min_distance"],
-                    "self_ttc_min": info["control_self_min_ttc"],
-                    "self_approach_max": info["control_self_max_approach"],
-                    "self_projection_intervened": int(info["self_projection_intervened"]),
-                    "self_projection_infeasible": int(info["self_projection_infeasible"]),
-                    "self_projection_correction_norm": info["self_projection_correction_norm"],
-                    "self_projection_max_slack": info["self_projection_max_slack"],
-                    "goal_full_scale_steps": curriculum.goal.full_scale_steps,
-                    "orientation_scale": orientation_scale,
-                    "position_tolerance": position_tolerance,
-                    "orientation_tolerance": orientation_tolerance,
-                    "orientation_reward_scale": info["orientation_reward_scale"],
-                    "orientation_reward_gate": info["orientation_reward_gate"],
-                    "rho_position": info["rho_position"],
-                    "next_rho_position": info["next_rho_position"],
-                    "rho_orientation": info["rho_orientation"],
-                    "next_rho_orientation": info["next_rho_orientation"],
-                    "position_quality": info["position_quality"],
-                    "orientation_quality": info["orientation_quality"],
-                    "keypoint_tracking_quality": info["keypoint_tracking_quality"],
-                    "jacobian_clip_ratio": info["jacobian_clip_ratio"],
-                    "keypoint_distance": info["keypoint_distance"],
-                    "next_keypoint_distance": info["next_keypoint_distance"],
-                    "keypoint_progress": info["keypoint_progress"],
-                    "goal_obstacle_coupling_reward": info["goal_obstacle_coupling_reward"],
-                    "goal_obstacle_potential": info["goal_obstacle_potential"],
-                    "next_goal_obstacle_potential": info["next_goal_obstacle_potential"],
-                    "keypoint_tracking_reward": info["keypoint_tracking_reward"],
-                    "keypoint_progress_reward": info["keypoint_progress_reward"],
-                    "keypoint_precision_quality": info["keypoint_precision_quality"],
-                    "keypoint_precision_reward": info["keypoint_precision_reward"],
-                    "joint_bottleneck_ratio": info["joint_bottleneck_ratio"],
-                    "next_joint_bottleneck_ratio": info["next_joint_bottleneck_ratio"],
-                    "joint_bottleneck_potential": info["joint_bottleneck_potential"],
-                    "next_joint_bottleneck_potential": info["next_joint_bottleneck_potential"],
-                    "joint_bottleneck_shaping_reward": info["joint_bottleneck_shaping_reward"],
-                    "pose_potential": info["pose_potential"],
-                    "next_pose_potential": info["next_pose_potential"],
-                    "pose_potential_progress": info["pose_potential_progress"],
-                    "position_progress": info["position_progress"],
-                    "orientation_progress": info["orientation_progress"],
-                    "orientation_error_progress": info["orientation_error_progress"],
-                    "orientation_absolute_penalty": info["orientation_absolute_penalty"],
-                    "orientation_absolute_position_gate": info[
-                        "orientation_absolute_position_gate"
-                    ],
-                    "orientation_error_progress_reward": info["orientation_error_progress_reward"],
-                    "orientation_completion_reward": info["orientation_completion_reward"],
-                    "orientation_completion_position_gate": info[
-                        "orientation_completion_position_gate"
-                    ],
-                    "orientation_shaping_reward": info["orientation_shaping_reward"],
-                    "fine_position_quality": info["fine_position_quality"],
-                    "fine_orientation_quality": info["fine_orientation_quality"],
-                    "fine_position_progress": info["fine_position_progress"],
-                    "fine_orientation_progress": info["fine_orientation_progress"],
-                    "precision_proximity": info["precision_proximity"],
-                    "precision_stop_cost": info["precision_stop_cost"],
-                    "joint_tolerance_ratio": info["joint_tolerance_ratio"],
-                    "next_joint_tolerance_ratio": info["next_joint_tolerance_ratio"],
-                    "joint_precision_quality": info["joint_precision_quality"],
-                    "next_joint_precision_quality": info["next_joint_precision_quality"],
-                    "joint_precision_progress": info["joint_precision_progress"],
-                    "joint_precision_reward": info["joint_precision_reward"],
-                    "position_completion": info["position_completion"],
-                    "orientation_completion": info["orientation_completion"],
-                    "partial_precision_reward": info[
-                        "partial_precision_reward"
-                    ],
-                    "left_joint_tolerance_region": int(
-                        info["left_joint_tolerance_region"]
-                    ),
-                    "leave_joint_tolerance_penalty": info[
-                        "leave_joint_tolerance_penalty"
-                    ],
-                    "strict_pose_reached": int(info["strict_pose_reached"]),
-                    "success_hold_count": info["success_hold_count"],
-                    "success_hold_steps_required": info[
-                        "success_hold_steps_required"
-                    ],
-                    "orientation_anchor": int(orientation_anchor),
-                    "position_error_m": info["next_rho_position"],
-                    "orientation_error_rad": info["next_rho_orientation"],
-                    "precision_action_scale": info["precision_action_scale"],
-                    "velocity_magnitude": info["velocity_magnitude"],
-                    "velocity_cost": info["velocity_cost"],
-                    "smooth_velocity": info["smooth_velocity"],
-                    "smooth_cost": info["smooth_cost"],
-                    "curriculum_eligible": int(not used_warmup_transition),
-                    "position_reached": int(info["position_reached"]),
-                    "task_reached": int(info["task_reached"]),
-                    "obstacle_collision": int(info["obstacle_collision"]), "self_collision": int(info["self_collision"]),
-                    "environment_collision": int(info["environment_collision"]), "joint_limit": int(info["joint_limit"]),
-                    "sample_none": replay.last_sample_counts["none"],
-                })
+                if transition_handle.enabled:
+                    transition_writer.writerow({
+                        "global_step": counters["global_step"], "stage_step": counters["stage_step"],
+                        "stage_total_step": counters["stage_total_step"],
+                        "episode": counters["episodes"], "episode_step": episode_length, "scene": scene,
+                        "xi": xi, "lambda_self": lambda_self, "strict": int(strict), "reward": reward, "r_goal": info["r_goal"],
+                        "c_proximity": info["c_proximity"], "hard_penalty": info["hard_penalty"],
+                        "timeout_penalty": info["timeout_penalty"],
+                        "safety_penalty": info["safety_penalty"],
+                        "external_safety_penalty": info["external_safety_penalty"],
+                        "self_safety_penalty": info["self_safety_penalty"],
+                        "terminal_guard_penalty": info["terminal_guard_penalty"],
+                        "clearance_violation": info["clearance_violation"],
+                        "risk_max": info["control_max_risk"],
+                        "d_min": info["control_min_distance"], "goal_scale": goal_scale,
+                        "self_clearance_violation": info["self_clearance_violation"],
+                        "self_risk_max": info["control_self_max_risk"],
+                        "self_d_min": info["control_self_min_distance"],
+                        "self_ttc_min": info["control_self_min_ttc"],
+                        "self_approach_max": info["control_self_max_approach"],
+                        "self_projection_intervened": int(info["self_projection_intervened"]),
+                        "self_projection_infeasible": int(info["self_projection_infeasible"]),
+                        "self_projection_correction_norm": info["self_projection_correction_norm"],
+                        "self_projection_max_slack": info["self_projection_max_slack"],
+                        "goal_full_scale_steps": curriculum.goal.full_scale_steps,
+                        "orientation_scale": orientation_scale,
+                        "position_tolerance": position_tolerance,
+                        "orientation_tolerance": orientation_tolerance,
+                        "orientation_reward_scale": info["orientation_reward_scale"],
+                        "orientation_reward_gate": info["orientation_reward_gate"],
+                        "rho_position": info["rho_position"],
+                        "next_rho_position": info["next_rho_position"],
+                        "rho_orientation": info["rho_orientation"],
+                        "next_rho_orientation": info["next_rho_orientation"],
+                        "position_quality": info["position_quality"],
+                        "orientation_quality": info["orientation_quality"],
+                        "keypoint_tracking_quality": info["keypoint_tracking_quality"],
+                        "jacobian_clip_ratio": info["jacobian_clip_ratio"],
+                        "keypoint_distance": info["keypoint_distance"],
+                        "next_keypoint_distance": info["next_keypoint_distance"],
+                        "keypoint_progress": info["keypoint_progress"],
+                        "goal_obstacle_coupling_reward": info["goal_obstacle_coupling_reward"],
+                        "goal_obstacle_potential": info["goal_obstacle_potential"],
+                        "next_goal_obstacle_potential": info["next_goal_obstacle_potential"],
+                        "keypoint_tracking_reward": info["keypoint_tracking_reward"],
+                        "keypoint_progress_reward": info["keypoint_progress_reward"],
+                        "keypoint_precision_quality": info["keypoint_precision_quality"],
+                        "keypoint_precision_reward": info["keypoint_precision_reward"],
+                        "joint_bottleneck_ratio": info["joint_bottleneck_ratio"],
+                        "next_joint_bottleneck_ratio": info["next_joint_bottleneck_ratio"],
+                        "joint_bottleneck_potential": info["joint_bottleneck_potential"],
+                        "next_joint_bottleneck_potential": info["next_joint_bottleneck_potential"],
+                        "joint_bottleneck_shaping_reward": info["joint_bottleneck_shaping_reward"],
+                        "pose_potential": info["pose_potential"],
+                        "next_pose_potential": info["next_pose_potential"],
+                        "pose_potential_progress": info["pose_potential_progress"],
+                        "position_progress": info["position_progress"],
+                        "orientation_progress": info["orientation_progress"],
+                        "orientation_error_progress": info["orientation_error_progress"],
+                        "orientation_absolute_penalty": info["orientation_absolute_penalty"],
+                        "orientation_absolute_position_gate": info[
+                            "orientation_absolute_position_gate"
+                        ],
+                        "orientation_error_progress_reward": info["orientation_error_progress_reward"],
+                        "orientation_completion_reward": info["orientation_completion_reward"],
+                        "orientation_completion_position_gate": info[
+                            "orientation_completion_position_gate"
+                        ],
+                        "orientation_shaping_reward": info["orientation_shaping_reward"],
+                        "fine_position_quality": info["fine_position_quality"],
+                        "fine_orientation_quality": info["fine_orientation_quality"],
+                        "fine_position_progress": info["fine_position_progress"],
+                        "fine_orientation_progress": info["fine_orientation_progress"],
+                        "precision_proximity": info["precision_proximity"],
+                        "precision_stop_cost": info["precision_stop_cost"],
+                        "joint_tolerance_ratio": info["joint_tolerance_ratio"],
+                        "next_joint_tolerance_ratio": info["next_joint_tolerance_ratio"],
+                        "joint_precision_quality": info["joint_precision_quality"],
+                        "next_joint_precision_quality": info["next_joint_precision_quality"],
+                        "joint_precision_progress": info["joint_precision_progress"],
+                        "joint_precision_reward": info["joint_precision_reward"],
+                        "position_completion": info["position_completion"],
+                        "orientation_completion": info["orientation_completion"],
+                        "partial_precision_reward": info[
+                            "partial_precision_reward"
+                        ],
+                        "left_joint_tolerance_region": int(
+                            info["left_joint_tolerance_region"]
+                        ),
+                        "leave_joint_tolerance_penalty": info[
+                            "leave_joint_tolerance_penalty"
+                        ],
+                        "strict_pose_reached": int(info["strict_pose_reached"]),
+                        "success_hold_count": info["success_hold_count"],
+                        "success_hold_steps_required": info[
+                            "success_hold_steps_required"
+                        ],
+                        "orientation_anchor": int(orientation_anchor),
+                        "position_error_m": info["next_rho_position"],
+                        "orientation_error_rad": info["next_rho_orientation"],
+                        "precision_action_scale": info["precision_action_scale"],
+                        "velocity_magnitude": info["velocity_magnitude"],
+                        "velocity_cost": info["velocity_cost"],
+                        "smooth_velocity": info["smooth_velocity"],
+                        "smooth_cost": info["smooth_cost"],
+                        "curriculum_eligible": int(not used_warmup_transition),
+                        "position_reached": int(info["position_reached"]),
+                        "task_reached": int(info["task_reached"]),
+                        "obstacle_collision": int(info["obstacle_collision"]), "self_collision": int(info["self_collision"]),
+                        "environment_collision": int(info["environment_collision"]), "joint_limit": int(info["joint_limit"]),
+                        "sample_none": replay.last_sample_counts["none"],
+                    })
                 if counters["stage_step"] % log_flush_interval == 0:
                     transition_handle.flush()
                     update_handle.flush()
@@ -3597,6 +3678,7 @@ def main() -> None:
                             "chain_pcr_loss_ema", ""
                         ),
                         **keypoint_reward_statistics(counters),
+                        **learning_diagnostics(last_update),
                         "q1_mean": last_update.get("q1_mean", ""), "q2_mean": last_update.get("q2_mean", ""),
                         "target_mean": last_update.get("target_mean", ""),
                         "steps_per_second": counters["stage_step"] / elapsed,
@@ -3700,24 +3782,10 @@ def main() -> None:
                         ),
                     }
                     progress_writer.writerow(progress); progress_handle.flush()
-                    print(
-                        f"step={counters['stage_step']}/{total_steps} episodes={counters['episodes']} "
-                        f"replay={len(replay)} updates={counters['updates']} alpha={float(progress['alpha']):.5f} "
-                        f"goal_scale={curriculum.goal_scale:.4f} "
-                        f"goal_success={goal_success_rate if goal_success_rate == '' else f'{goal_success_rate:.3f}'} "
-                        f"orientation_scale={curriculum.orientation_scale:.4f} "
-                        f"orientation_tol={curriculum.orientation_tolerance:.3f} "
-                        f"orientation_level={curriculum.orientation.level_index} "
-                        f"anchor_success={curriculum.orientation_anchor_success_rate} "
-                        f"retention={curriculum.orientation_retention_mode} "
-                        f"anchor_p={curriculum.orientation_anchor_probability:.2f} "
-                        f"phase={curriculum.s0_phase if stage == 's0' else stage} "
-                        f"lambda_self={curriculum.lambda_self:.3f} "
-                        f"full_goal_steps={curriculum.goal.full_scale_steps} "
-                        f"gate_eligible={progress['s0_goal_gate_eligible']} "
-                        f"steps/s={progress['steps_per_second']:.1f}",
-                        flush=True,
-                    )
+                    print(format_training_progress(counters["stage_step"], total_steps, elapsed,
+                                                   counters.get("recent_online_successes", []))
+                          + f" | 回合={counters['episodes']} 更新={counters['updates']} "
+                            f"等级={curriculum.orientation.level_index}", flush=True)
                 if counters["stage_step"] % save_interval == 0 and not (terminated or truncated):
                     if (
                         evaluate_during_training
@@ -3880,7 +3948,7 @@ def main() -> None:
                     "orientation_level_steps": level_steps_at_probe,
                     "episodes": orientation_curriculum["deterministic_probe_episodes"],
                     "seed": orientation_curriculum["deterministic_probe_seed"],
-                    **scalar_probe_metrics(metrics),
+                    **scalar_probe_metrics(metrics, include_details=detailed_log_enabled(config, "probe_details")),
                     **pose_probe_audit_fields(
                         probe_result, orientation_curriculum,
                     ),

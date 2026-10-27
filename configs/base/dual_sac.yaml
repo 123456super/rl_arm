@@ -1,0 +1,8 @@
+# Shared independent-SAC wiring; experiment entry points choose the local task or S0.
+includes:
+- thesis_common.yaml
+dual_sac:
+  enabled: true
+  training_policy: avoidance
+thesis:
+  stage: s1
