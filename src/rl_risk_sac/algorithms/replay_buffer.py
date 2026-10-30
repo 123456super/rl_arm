@@ -21,6 +21,8 @@ class Batch:
     obstacle_mask: torch.Tensor | None = None
     next_obstacle_features: torch.Tensor | None = None
     next_obstacle_mask: torch.Tensor | None = None
+    # Optional gamma**duration for transitions spanning a fixed-policy segment.
+    bootstrap_discounts: torch.Tensor | None = None
 
 
 class ReplayBuffer:

@@ -262,7 +262,8 @@ class ThesisSACAgent:
                 self.target_q1(next_critic_observations, next_action, batch.next_obstacle_features, batch.next_obstacle_mask),
                 self.target_q2(next_critic_observations, next_action, batch.next_obstacle_features, batch.next_obstacle_mask),
             )
-            target = batch.rewards + self.gamma * (1.0 - batch.dones) * (
+            discount = self.gamma if batch.bootstrap_discounts is None else batch.bootstrap_discounts
+            target = batch.rewards + discount * (1.0 - batch.dones) * (
                 next_q - self.alpha.detach() * next_log_prob
             )
 

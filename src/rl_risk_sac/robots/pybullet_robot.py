@@ -221,6 +221,8 @@ class PyBulletRobot:
         position_tolerance: float = 0.01,
         orientation_tolerance: float = 0.05,
         rest_pose: np.ndarray | None = None,
+        max_iterations: int = 200,
+        residual_threshold: float = 1.0e-6,
     ) -> dict[str, object]:
         """Solve pose IK and verify the solution by an explicit FK round trip.
 
@@ -229,6 +231,8 @@ class PyBulletRobot:
         produce the same angular error.
         """
         robot_id = self._require_loaded()
+        if max_iterations < 1 or residual_threshold <= 0.0:
+            raise ValueError("IK iteration budget and residual threshold must be positive")
         lower = self.joint_lower_limits.astype(np.float64)
         upper = self.joint_upper_limits.astype(np.float64)
         current_q, _ = self.joint_state()
@@ -252,8 +256,8 @@ class PyBulletRobot:
             upperLimits=upper.tolist(),
             jointRanges=(upper - lower).tolist(),
             restPoses=rest.tolist(),
-            maxNumIterations=200,
-            residualThreshold=1.0e-6,
+            maxNumIterations=int(max_iterations),
+            residualThreshold=float(residual_threshold),
             physicsClientId=self.physics_client_id,
         )
         q_ik = np.asarray(solution[: self.joint_count], dtype=np.float64)

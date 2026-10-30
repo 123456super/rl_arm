@@ -1,18 +1,23 @@
-"""S0 recovery from real handoffs, with obstacles removed only for recovery training."""
+"""Real handoff states, legacy recovery and obstacle-aware task fine-tuning."""
 from __future__ import annotations
 
 import copy
 import hashlib
 import json
+from dataclasses import replace
 
 import numpy as np
 import torch
 
 from rl_risk_sac.algorithms.replay_buffer import Batch
 from rl_risk_sac.tasks.local_avoidance import actor_digest, MeshClearance
+from rl_risk_sac.tasks.obstacle_observation import ObstacleObservation, obstacle_set, pad_obstacle_sets
 
 BANK_PROTOCOL = "reaching_handoff_starts_v1"
 TRAIN_PROTOCOL = "reaching_handoff_finetune_v1"
+JOINT_TRAIN_PROTOCOL = "reaching_joint_handoff_finetune_v1"
+OBSTACLE_AWARE_TRAIN_PROTOCOL = "reaching_obstacle_aware_handoff_finetune_v1"
+HANDOFF_TRAIN_PROTOCOLS = (TRAIN_PROTOCOL, JOINT_TRAIN_PROTOCOL, OBSTACLE_AWARE_TRAIN_PROTOCOL)
 
 
 def file_digest(path):
@@ -52,6 +57,23 @@ def recovery_config(source, *, actor_lr=1e-5, critic_lr=3e-5, alpha_lr=1e-5):
     config["thesis"]["obstacles"].setdefault("path_sampling", {})["enabled"] = False
     config["sac"].update(actor_lr=actor_lr, critic_lr=critic_lr, alpha_lr=alpha_lr)
     return config
+
+
+def obstacle_aware_reaching_config(source, **learning_rates):
+    config = recovery_config(source, **learning_rates)
+    config["thesis"]["stage"] = "s1"
+    config["thesis"]["obstacles"]["enabled"] = True
+    config["thesis"]["observation"]["reaching_obstacle_aware"] = True
+    return config
+
+
+def joint_handoff_state(snapshot):
+    """Start a new task at a real handoff, retaining obstacles and physical state."""
+    state = copy.deepcopy(snapshot)
+    state["step_count"] = state["success_hold_count"] = 0
+    state["contract"].terminate_on_success = True
+    state["contract"].strict_obstacle_collision = True
+    return state
 
 
 def validate_handoff_bank(bank, *, split=None, source_sha=None):
@@ -137,13 +159,115 @@ class RecoveryReplay:
         self.rng.bit_generator.state = state["rng"]
 
 
+class JointHandoffReplay(RecoveryReplay):
+    """Only reaching decisions, with discounted fixed-avoidance continuations."""
+
+    def __init__(self, capacity, device, seed):
+        super().__init__(capacity, device, seed)
+        self.discounts = np.zeros((capacity, 1), np.float32)
+
+    def add(self, observation, action, reward, following, terminated, discount):
+        if not np.isfinite(discount) or not 0 <= discount <= 1:
+            raise ValueError("invalid macro-transition bootstrap discount")
+        index = self.ptr
+        super().add(observation, action, reward, following, terminated)
+        self.discounts[index] = discount
+
+    def sample(self, batch_size):
+        indices = self.rng.integers(self.size, size=batch_size)
+        return self._batch(indices)
+
+    def _batch(self, indices):
+        values = [torch.as_tensor(getattr(self, key)[indices], device=self.device)
+                  for key in ("observations", "actions", "rewards", "next_observations", "dones")]
+        observation, action, reward, following, done = values
+        return Batch(observation, action, reward, torch.zeros_like(reward), following, done,
+                     bootstrap_discounts=torch.as_tensor(self.discounts[indices], device=self.device))
+
+    def state_dict(self):
+        return dict(super().state_dict(), protocol=JOINT_TRAIN_PROTOCOL,
+                    discounts=self.discounts[:self.size].copy())
+
+    def load_state_dict(self, state):
+        if state.get("protocol") != JOINT_TRAIN_PROTOCOL:
+            raise ValueError("joint handoff replay cannot reuse obstacle-free replay")
+        super().load_state_dict(dict(state, protocol=TRAIN_PROTOCOL))
+        self.discounts[:self.size] = state["discounts"]
+
+
+class ObstacleAwareJointHandoffReplay(JointHandoffReplay):
+    """Raw variable-size sets at both ends of shielded reaching decisions."""
+
+    def __init__(self, capacity, device, seed):
+        super().__init__(capacity, device, seed)
+        self.obstacle_sets = [None] * capacity
+        self.next_obstacle_sets = [None] * capacity
+
+    @staticmethod
+    def _features(observation):
+        features = np.array(obstacle_set(observation), dtype=np.float32, copy=True)
+        if features.ndim != 2 or features.shape[1] != 37 or not np.isfinite(features).all():
+            raise ValueError("invalid raw reaching obstacle set")
+        return features
+
+    def add(self, observation, action, reward, following, terminated, discount):
+        features, next_features = self._features(observation), self._features(following)
+        index = self.ptr
+        super().add(observation, action, reward, following, terminated, discount)
+        self.obstacle_sets[index], self.next_obstacle_sets[index] = features, next_features
+
+    def _batch(self, indices):
+        batch = super()._batch(indices)
+        features, mask = pad_obstacle_sets([self.obstacle_sets[i] for i in indices], self.device)
+        next_features, next_mask = pad_obstacle_sets([self.next_obstacle_sets[i] for i in indices], self.device)
+        return replace(batch, obstacle_features=features, obstacle_mask=mask,
+                       next_obstacle_features=next_features, next_obstacle_mask=next_mask)
+
+    def state_dict(self):
+        return dict(super().state_dict(), protocol=OBSTACLE_AWARE_TRAIN_PROTOCOL,
+                    obstacle_sets=[s.copy() for s in self.obstacle_sets[:self.size]],
+                    next_obstacle_sets=[s.copy() for s in self.next_obstacle_sets[:self.size]])
+
+    def load_state_dict(self, state):
+        if state.get("protocol") != OBSTACLE_AWARE_TRAIN_PROTOCOL:
+            raise ValueError("obstacle-aware replay requires raw obstacle sets; initialize old weights instead")
+        size = state["size"]
+        if len(state["obstacle_sets"]) != size or len(state["next_obstacle_sets"]) != size:
+            raise ValueError("obstacle set counts differ from replay size")
+        sets = [[self._features(ObstacleObservation(np.zeros(241), s)) for s in state[name]]
+                for name in ("obstacle_sets", "next_obstacle_sets")]
+        super().load_state_dict(dict(state, protocol=JOINT_TRAIN_PROTOCOL))
+        self.obstacle_sets[:size], self.next_obstacle_sets[:size] = sets
+
+
+class ReachingDecisionReturn:
+    """Credit a task proposal through execution by the fixed safety controller."""
+
+    def __init__(self, observation, action):
+        self.observation = ObstacleObservation(np.asarray(observation, np.float32).copy(), obstacle_set(observation))
+        self.action = np.asarray(action, np.float32).copy()
+        self.reward, self.duration = 0., 0
+
+    def advance(self, reward, gamma):
+        self.reward += gamma ** self.duration * float(reward)
+        self.duration += 1
+
+    def store(self, replay, following, terminal, gamma):
+        if self.duration < 1:
+            raise ValueError("cannot store a decision without an executed control step")
+        replay.add(self.observation, self.action, self.reward, following,
+                   terminal, gamma ** self.duration)
+
+
 def load_reaching_override(agent, state, source_sha, evaluation_seeds):
     """Only swap S0 after validating the original scene-generating policy."""
-    if state.get("protocol") != TRAIN_PROTOCOL or state["source_checkpoint_sha256"] != source_sha:
+    if state.get("protocol") not in HANDOFF_TRAIN_PROTOCOLS or state["source_checkpoint_sha256"] != source_sha:
         raise ValueError("reaching override must be fine-tuned from this joint checkpoint")
     if set(evaluation_seeds).intersection(state["training_trace_seeds"]):
         raise ValueError("reaching fine-tuning traces overlap with evaluation scenes")
     if actor_digest(agent.avoidance.actor) != state["frozen_avoidance_actor_sha256"]:
         raise ValueError("avoidance actor differs from the frozen fine-tuning source")
+    if state["protocol"] == OBSTACLE_AWARE_TRAIN_PROTOCOL and not state["agent"].get("reaching_obstacle_aware", False):
+        raise ValueError("obstacle-aware checkpoint is missing its reaching input contract")
     agent.reaching.load_state_dict(state["agent"], actor_only=True)
     agent.reaching.actor.eval().requires_grad_(False)

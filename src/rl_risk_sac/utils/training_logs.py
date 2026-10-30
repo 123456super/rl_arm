@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import math
 from pathlib import Path
 
 
@@ -24,6 +25,16 @@ def record_online_success(counters, success):
     outcomes = counters.setdefault("recent_online_successes", [])
     outcomes.append(bool(success))
     del outcomes[:-100]
+
+
+def collect_sac_diagnostics(agent, run_updates, interval=10):
+    """Sample on real Actor-update steps, including after an offset checkpoint.
+
+    Sampling every tenth *run* update can hit only critic-only steps when the
+    imported agent's update counter is odd. Actor metrics would then stay stale.
+    """
+    period = math.lcm(interval, agent.actor_update_interval)
+    return run_updates == 1 or (agent.update_steps + 1) % period == 0
 
 
 def format_training_progress(step, total, elapsed_s, successes, *, label="训练", completed_steps=None):

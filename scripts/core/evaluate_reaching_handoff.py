@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare original/fine-tuned S0 on held-out handoffs and identical original S0 tasks."""
+"""Compare standalone reaching after held-out handoffs, with optional real obstacles."""
 from __future__ import annotations
 import argparse
 import copy
@@ -12,17 +12,26 @@ import numpy as np
 import torch
 from rl_risk_sac.algorithms.dual_sac import ReachingSACAgent, checkpoint_policy_state
 from rl_risk_sac.envs.thesis_homotopy_env import ThesisHomotopyEnv
-from rl_risk_sac.tasks.local_samples import configure_nominal_episode
-from rl_risk_sac.tasks.reaching_handoff import TRAIN_PROTOCOL, file_digest, recovery_state, validate_handoff_bank
+from rl_risk_sac.tasks.local_samples import configure_nominal_episode, simulation_config
+from rl_risk_sac.tasks.local_avoidance import MeshClearance
+from rl_risk_sac.tasks.reaching_handoff import (
+    HANDOFF_TRAIN_PROTOCOLS, file_digest, joint_handoff_state, recovery_config, recovery_state, validate_handoff_bank,
+)
 
 
-def rollout(env, agent, observation):
+def rollout(env, agent, observation, *, check_mesh=False):
     length=0
     while True:
-        observation,_,_,terminated,truncated,info=env.step(agent.select_action(observation,deterministic=True))
+        margins=MeshClearance(env) if check_mesh else None
+        action=agent.select_action(observation,deterministic=True)
+        if margins is None:
+            observation,_,_,terminated,truncated,info=env.step(action)
+        else:
+            observation,_,_,terminated,truncated,info=env.step(action,substep_observer=margins)
         length+=1
-        if terminated or truncated:
-            return dict(success=bool(info["safe_success"]),collision=bool(info["collision"]),
+        collision=bool(info["collision"] or (margins is not None and margins.collision))
+        if terminated or truncated or collision:
+            return dict(success=bool(info["safe_success"] and not collision and not info["joint_limit"]),collision=collision,
                         joint_limit=bool(info["joint_limit"]),length=length,
                         position_error_m=info["next_rho_position"],orientation_error_rad=info["next_rho_orientation"])
 
@@ -34,13 +43,16 @@ def main():
     parser.add_argument("--output",required=True)
     parser.add_argument("--normal-episodes",type=int,default=100)
     parser.add_argument("--seed",type=int,default=27103)
+    parser.add_argument("--keep-obstacles",action="store_true",help="evaluate real handoffs with obstacles and no backup re-entry")
+    parser.add_argument("--max-episode-steps",type=int,help="live reaching control steps; default 1000 with --keep-obstacles")
     args=parser.parse_args()
     if args.normal_episodes<1 or args.seed<0: parser.error("positive episodes/nonnegative seed required")
+    if args.max_episode_steps is not None and args.max_episode_steps<1: parser.error("positive episode budget required")
     output=Path(args.output)
     if output.exists(): raise FileExistsError(output)
     torch.set_num_threads(1)
     state=torch.load(args.checkpoint,map_location="cpu",weights_only=False)
-    if state.get("protocol")!=TRAIN_PROTOCOL: parser.error("requires a handoff fine-tuning checkpoint")
+    if state.get("protocol") not in HANDOFF_TRAIN_PROTOCOLS: parser.error("requires a handoff fine-tuning checkpoint")
     bank=torch.load(args.bank,map_location="cpu",weights_only=False)
     validate_handoff_bank(bank,split=("validation","test"),source_sha=state["source_checkpoint_sha256"])
     if {s["source_seed"] for s in bank["samples"]}.intersection(state["training_trace_seeds"]):
@@ -48,7 +60,7 @@ def main():
     if file_digest(state["source_checkpoint"])!=state["source_checkpoint_sha256"]:
         raise ValueError("source checkpoint changed")
     source=torch.load(state["source_checkpoint"],map_location="cpu",weights_only=False)
-    config=copy.deepcopy(state["config"]);config["device"]="cpu"
+    config=recovery_config(state["config"]);config["device"]="cpu"
     policies={}
     for name,weights in (("baseline",checkpoint_policy_state(source,"reaching")),("finetuned",state["agent"])):
         policies[name]=ReachingSACAgent(241,6,config)
@@ -60,18 +72,23 @@ def main():
     while len(seeds)<args.normal_episodes:
         seed=int(rng.integers(2**32))
         if seed not in protected and seed not in seeds: seeds.append(seed)
-    env=ThesisHomotopyEnv(config,cache_geometry_queries=True)
+    environment_config=simulation_config(source["config"]) if args.keep_obstacles else config
+    env=ThesisHomotopyEnv(environment_config,cache_geometry_queries=True)
     rows=[]
     try:
         for kind,items in (("handoff",bank["samples"]),("original",seeds)):
             for index,item in enumerate(items):
                 row=dict(kind=kind,index=index)
                 for name,agent in policies.items():
-                    if kind=="handoff": observation=env.restore_episode_state(recovery_state(item["state"]))
+                    if kind=="handoff":
+                        restore=joint_handoff_state if args.keep_obstacles else recovery_state
+                        observation=env.restore_episode_state(restore(item["state"]))
                     else:
                         configure_nominal_episode(env,config)
                         observation,_=env.reset(seed=item)
-                    row[name]=rollout(env,agent,observation)
+                    if args.max_episode_steps is not None or args.keep_obstacles:
+                        env.horizon=args.max_episode_steps or 1000
+                    row[name]=rollout(env,agent,observation,check_mesh=args.keep_obstacles)
                 rows.append(row)
                 print(f"{kind} {index+1}/{len(items)}: baseline={row['baseline']['success']} finetuned={row['finetuned']['success']}",flush=True)
     finally:
@@ -83,7 +100,10 @@ def main():
     output.parent.mkdir(parents=True,exist_ok=True)
     with output.open("x") as stream:
         json.dump(dict(checkpoint=args.checkpoint,bank=args.bank,validation_mode=state['settings']['validation_mode'],
-                       obstacles_removed=True,summary=summary,outcomes=rows),stream,indent=2)
+                       obstacles_removed=not args.keep_obstacles,backup_interventions=False,
+                       reaching_obstacle_aware={name:agent.obstacle_aware for name,agent in policies.items()},
+                       max_episode_steps=args.max_episode_steps or (1000 if args.keep_obstacles else None),
+                       summary=summary,outcomes=rows),stream,indent=2)
     print(json.dumps(summary),flush=True)
 
 

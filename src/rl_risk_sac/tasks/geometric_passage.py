@@ -130,9 +130,10 @@ class GeometricPassageReference:
                 self.query.obstacles.append(obj)
             self._scene_key = key
 
-    def prepare(self, base, observation):
+    def prepare(self, base, observation, *, action=None):
         self._sync_scene(base)
-        action = self.reaching.select_action(observation, deterministic=True)
+        action = (self.reaching.select_action(observation, deterministic=True) if action is None else
+                  np.asarray(action, dtype=np.float32))
         command = scaled_reaching_command(base, action)
         q, qdot = base.robot.joint_state_exact()
         entry = arm_vector(base)

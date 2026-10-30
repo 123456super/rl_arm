@@ -1,0 +1,119 @@
+# Paper task/reward/sampling with the author's standard SAC control interface.
+includes:
+  - ../robot/ur5.yaml
+protocol: paper_single_sac_v2
+seed: 27104
+device: cuda:auto
+device_selection:
+  fallback_to_cpu: true
+  candidate_ids: null
+  min_free_memory_gb: 2.0
+  memory_weight: 0.7
+  compute_weight: 0.3
+  print_summary: true
+robot:
+  tool_link_name: tool0
+  reset:
+    default_joint_positions: [1.57, -1.57, 1.57, -1.57, -1.57, 0.0]
+    joint_noise_range: 0.0
+paper:
+  # Current bundled model is UR5; the paper's experimental arm was UR5e.
+  gravity: -10.0
+  physics_dt: 0.004166666666666667
+  action_repeat: 100
+  horizon: 100
+  # Author Other_RL/SAC: q_target = fixed_initial_q + action_limit * a.
+  # This is an angular offset in radians, not a joint velocity.
+  action_mode: initial_offset
+  action_limit: 3.14
+  # null selects each joint's URDF effort limit, as in the author's code.
+  joint_motor_force: null
+  position_gain: 0.05
+  velocity_gain: 1.0
+  goal:
+    workspace_radius: 0.85
+    base_exclusion_radius: 0.30
+    min_z: 0.05
+    # Front half, above the floor; fixed orientation fills an unspecified
+    # paper detail using the author's environment, not the old curriculum.
+    front_half: true
+    rpy: [0.0, 1.57, 1.57]
+    ik_position_tolerance: 0.00002
+    ik_orientation_tolerance: 0.0001
+    ik_max_iterations: 200
+    ik_refine_iterations: 12
+    max_attempts: 256
+  obstacles:
+    count: 3
+    radius: 0.025
+    shell_inner_radius: 0.15
+    shell_outer_radius: 0.60
+    # Paper does not specify the quarter-shell orientation: choose the
+    # horizontal half toward the base and the vertical lower half.
+    max_attempts: 512
+    endpoint_clearance: 0.005
+  distance_links: [upper_arm, forearm, wrist_1, wrist_2, wrist_3]
+  reward:
+    error_quadratic_weight: 0.001
+    error_log_offset: 0.0001
+    obstacle_weight: 0.1
+    obstacle_distance: 0.08
+    collision_penalty: 1.0
+    position_error_weight: 0.5
+    orientation_error_weight: 0.25
+  success:
+    # Uniform training/evaluation tolerance: the author's test sweep starts
+    # at lp=0.005. This is a weighted pose error, not 5 mm position alone.
+    combined_error_tolerance: 0.005
+    strict_combined_error_tolerance: 0.0001
+    report_position_tolerance: 0.01
+    report_orientation_tolerance: 0.05
+  # Matches reference training: collision is penalized and remembered;
+  # strict collision-free success is measured separately.
+  terminate_on_collision: false
+sac:
+  hidden_dims: [256, 256]
+  activation: relu
+  gamma: 0.99
+  tau: 0.005
+  actor_lr: 0.0003
+  critic_lr: 0.0003
+  alpha_lr: 0.0003
+  initial_alpha: 1.0
+  target_entropy: -6.0
+  actor_update_interval: 1
+  # SB3 SAC does not clip gradients by default; diagnostic norms remain logged.
+  gradient_clip: null
+  batch_size: 256
+  replay_capacity: 1000000
+  warmup_steps: 100
+  update_after: 100
+  updates_per_transition: 1.0
+  action_ensemble:
+    # The author's SAC baseline has no AE/PF. AEW is a separate ablation.
+    enabled: false
+    # Paper Algorithm 1: growth 7/20. Ten count draws/rounding follow the
+    # public AEW implementation. SAC uses the conditional averaged-Gaussian
+    # density, including the tanh Jacobian, throughout learning.
+    shape_growth: 7.0
+    scale_growth: 20.0
+    count_draws: 10
+    total_episodes: 15000
+train:
+  total_steps: 1500000
+  num_envs: 8
+  progress_interval: 1000
+  save_interval: 100000
+  diagnostics_interval: 10
+  output_dir: outputs/paper_single_sac
+planner:
+  # Optional evaluation module, no vision/ROS dependency.
+  resolution: 0.05
+  velocity_resolution: 0.15
+  primitive_dt: 0.3
+  max_speed: 0.4
+  max_acceleration: 1.0
+  max_expansions: 6000
+  end_effector_radius: 0.055
+  margin: 0.005
+  waypoint_spacing: 0.08

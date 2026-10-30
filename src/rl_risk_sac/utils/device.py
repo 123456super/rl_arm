@@ -4,7 +4,7 @@ from typing import Any
 
 import torch
 
-from rl_risk_sac.utils.runtime_config import RuntimeConfig
+from rl_risk_sac.utils.runtime_config import DeviceSelectionConfig, RuntimeConfig
 
 
 def resolve_device(config: dict[str, Any]) -> str:
@@ -14,8 +14,11 @@ def resolve_device(config: dict[str, Any]) -> str:
     如果 CUDA 不可用且允许 fallback，就返回 cpu，避免训练脚本直接崩溃。
     """
     runtime = RuntimeConfig.from_mapping(config)
-    requested = runtime.device
-    selection_cfg = runtime.device_selection
+    return select_device(runtime.device, runtime.device_selection)
+
+
+def select_device(requested: str, selection_cfg: DeviceSelectionConfig) -> str:
+    """Select a device without requiring an unrelated environment configuration."""
     auto_values = {"cuda", "cuda:auto", "auto"}
 
     if requested not in auto_values:

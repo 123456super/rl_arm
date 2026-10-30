@@ -106,7 +106,7 @@ def main():
     parser.add_argument("--episodes", type=int, help="evaluate this many bank scenes (default: all)")
     parser.add_argument("--max-episode-steps", type=int, default=1000, help="total live steps, including every passage")
     parser.add_argument("--device", choices=("cpu", "cuda:auto"), default="cpu")
-    parser.add_argument("--reaching-checkpoint", help="optional handoff-fine-tuned S0; original checkpoint still defines scene provenance")
+    parser.add_argument("--reaching-checkpoint", help="optional fine-tuned reaching policy; original checkpoint still defines scene provenance")
     args = parser.parse_args()
     if args.max_episode_steps < 1 or (args.episodes is not None and args.episodes < 1):
         parser.error("episode counts/budgets must be positive")
@@ -162,6 +162,8 @@ def main():
     unchanged = all(actor_digest(agent.policy(role).actor) == digest for role, digest in digests.items())
     attempts = sum(row["avoidance_attempts"] for row in outcomes)
     passages = sum(row["verified_passages"] for row in outcomes)
+    task_decisions = sum(row["policy_steps"]["reaching"] for row in outcomes) + attempts
+    control_steps = sum(row["length"] for row in outcomes)
     report = dict(
         protocol="joint_geometric_passage_v1" if geometric_mode(config) else "joint_reaching_local_passage_v1",
         checkpoint=str(Path(args.checkpoint).resolve()),
@@ -175,6 +177,10 @@ def main():
         reference_failure_rate=float(np.mean([row["status"].startswith("reference_unavailable:") for row in outcomes])),
         timeout_rate=float(np.mean([row["status"] in ("local_timeout", "global_timeout") for row in outcomes])),
         avoidance_attempts=attempts, verified_passages=passages,
+        task_decisions=task_decisions,
+        task_decision_adjustment_rate=attempts / task_decisions if task_decisions else None,
+        avoidance_control_fraction=(sum(row["policy_steps"]["avoidance"] for row in outcomes) / control_steps
+                                    if control_steps else None),
         passage_success_rate=passages / attempts if attempts else None,
         max_episode_steps=args.max_episode_steps, local_horizon=config["local_avoidance"]["horizon"],
         trigger_distance_m=config["local_avoidance"]["trigger_distance_m"],
@@ -182,6 +188,7 @@ def main():
         actor_sha256=digests, wall_seconds=time.perf_counter() - started, outcomes=outcomes)
     report.update(source_scene_reaching_actor_sha256=source_reaching_digest,
                   reaching_override=args.reaching_checkpoint,
+                  reaching_obstacle_aware=bool(getattr(agent.reaching, "obstacle_aware", False)),
                   reaching_override_validation_mode=override["settings"]["validation_mode"] if override else None)
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("x") as stream:

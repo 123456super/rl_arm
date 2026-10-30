@@ -1,5 +1,6 @@
 from __future__ import annotations
 import copy
+import csv
 from types import SimpleNamespace
 import numpy as np
 import pytest
@@ -11,6 +12,10 @@ from rl_risk_sac.tasks.reaching_handoff import (
     recovery_state, sample_digest, validate_handoff_bank, recovery_config,
 )
 from rl_risk_sac.utils.config import load_config
+from rl_risk_sac.utils.training_logs import CsvLog
+from rl_risk_sac.algorithms.dual_sac import ReachingSACAgent
+from rl_risk_sac.algorithms.replay_buffer import Batch
+from scripts.core.train_reaching_handoff import progress_fieldnames
 
 
 def sample():
@@ -74,6 +79,35 @@ def test_recovery_replay_roundtrip_and_time_limit_bootstrap():
     assert not a.dones.any()  # Time limit resets do not become Bellman terminals.
     with pytest.raises(ValueError): restored.load_state_dict(dict(state,protocol="local_passage"))
     with pytest.raises(ValueError): replay.add(np.zeros(268),np.zeros(6),0,np.zeros(268),False)
+
+
+@pytest.mark.parametrize("start_steps", [0, 50000])
+def test_progress_accepts_learning_metrics_after_a_row_without_updates(tmp_path, start_steps):
+    # Reproduce the real startup/resume boundary: the first progress row has
+    # no collected metrics; the next contains all metrics from an SAC update.
+    cfg = recovery_config(load_config("configs/experiments/paper_local_avoidance_geometry.yaml"))
+    cfg["device"] = "cpu"
+    cfg["sac"]["hidden_dims"] = [16, 16]
+    agent = ReachingSACAgent(241, 6, cfg)
+    path = tmp_path / "progress.csv"
+    fields = progress_fieldnames(agent)
+    assert len(fields) == len(set(fields))
+    with CsvLog(path, fields) as progress:
+        progress.writerow(dict(steps=start_steps + 1000, updates=0, replay_size=1000))
+        batch = Batch(torch.randn(8, 241), torch.zeros(8, 6), torch.zeros(8, 1),
+                      torch.zeros(8, 1), torch.randn(8, 241), torch.zeros(8, 1))
+        metrics = agent.update(batch, reference_observations=batch)
+        assert metrics and all(np.isfinite(value) for value in metrics.values())
+        progress.writerow(dict(steps=start_steps + 2000, updates=1, replay_size=2000, **metrics))
+        progress.writerow(dict(steps=start_steps + 3000, updates=2, replay_size=3000))
+    with path.open() as handle:
+        reader = csv.DictReader(handle)
+        rows = list(reader)
+        assert reader.fieldnames == list(fields)
+    assert len(rows) == 3 and all(None not in row for row in rows)
+    for name, value in metrics.items():
+        assert rows[0][name] == rows[2][name] == ""
+        assert float(rows[1][name]) == value
 
 
 @pytest.mark.parametrize("bad",[None,"source","overlap","avoidance"])

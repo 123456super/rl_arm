@@ -159,12 +159,19 @@ class JointPolicyController:
                                 reason=reason, clearance_m=float(distance), **fields))
         self.role = role
 
-    def step(self, base, observation):
+    def prepare_action(self, base, observation, *, reaching_action=None):
+        """Choose the role before sampling a trainable reaching action.
+
+        Use the proposed action for training safety checks, or the deterministic
+        task action for evaluation. Live physics is not advanced here.
+        """
         if self.finished:
             raise RuntimeError("reset the controller before another episode")
         distance = min((base._static_clearance(o) for o in base.obstacles), default=float("inf"))
-        intent = (self.references.prepare(base, observation)
-                  if self.geometric and self.role == "reaching" else None)
+        intent = None
+        if self.geometric and self.role == "reaching":
+            intent = (self.references.prepare(base, observation) if reaching_action is None else
+                      self.references.prepare(base, observation, action=reaching_action))
         approaching = False
         if self.role == "reaching" and base.obstacles:
             approaching = (distance <= self.local["trigger_distance_m"]
@@ -189,14 +196,21 @@ class JointPolicyController:
                                                       obstacle_set(observation))
         else:
             policy_observation = observation
-        action = (intent.action if action_role == "reaching" and intent is not None else
+        return policy_observation, intent, action_role
+
+    def step(self, base, observation, *, prepared=None, reaching_action=None):
+        policy_observation, intent, action_role = (self.prepare_action(base, observation, reaching_action=reaching_action)
+                                                  if prepared is None else prepared)
+        action = (np.asarray(reaching_action, dtype=np.float32)
+                  if action_role == "reaching" and reaching_action is not None else
+                  intent.action if action_role == "reaching" and intent is not None else
                   self.agent.select_action(policy_observation, deterministic=True, policy=action_role))
         margins = MeshClearance(base)
         precision = base.precision_control_enabled
         if action_role == "avoidance":
             base.precision_control_enabled = False
         try:
-            observation, _, _, terminated, truncated, info = base.step(action, substep_observer=margins)
+            observation, reward, cost, terminated, truncated, info = base.step(action, substep_observer=margins)
         finally:
             base.precision_control_enabled = precision
         self.steps += 1
@@ -228,6 +242,8 @@ class JointPolicyController:
         self.finished = bool(terminated or truncated)
         return observation, terminated, truncated, dict(
             info, success=success, safe_success=success, collision=bool(info["collision"] or margins.collision),
+            environment_reward=float(reward), environment_cost=float(cost),
+            mesh_only_collision=bool(margins.collision and not (info["collision"] or info["joint_limit"])),
             action_policy=action_role, next_policy=self.role, local_progress=progress,
             local_timeout=local_timeout, timeout=truncated,
             min_external_mesh_distance_m=margins.external, min_self_mesh_distance_m=margins.self_distance)

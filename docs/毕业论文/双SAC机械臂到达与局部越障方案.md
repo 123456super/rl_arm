@@ -4,6 +4,8 @@
 
 当前方案使用实测障碍物位置和形状，不调用 LSTM 预测。越障策略的首要目标是越过当前障碍并安全交回到达策略；原目标位姿仍作为输入，使动作具有任务方向信息。
 
+实际已完成的训练、评估、样本审计及下一步任务见 [当前进度](当前进度.md)。
+
 ## 1. 系统组成与任务分工
 
 | 模块 | 职责 | 学习或执行方式 |
@@ -14,7 +16,7 @@
 | 联合控制器 | 执行到达与越障的切换 | 每次使用一个 Actor 的动作 |
 | 离线路径校验 | 确认训练起点存在整臂安全路径及可达的局部出口 | 关节直连、RRT-Connect、局部目标区域 RRT 和加密复查 |
 
-两个 SAC 不共享学习参数或 Replay。越障训练使用局部奖励；到达微调使用原 S0 到达奖励。离线路径用于筛选场景，不作为越障动作示范，也不进入在线控制。
+两个 SAC 不共享学习参数或 Replay。越障训练使用局部奖励；当前到达交接微调保留障碍，使用真实环境既有的到达与安全奖励。离线路径用于筛选场景，不作为越障动作示范，也不进入在线控制。
 
 联合运行流程为：
 
@@ -110,7 +112,7 @@ Actor、两个 Critic 及其目标网络分别持有编码器参数；编码器�
 
 ### 3.3 固定状态与维数
 
-到达 Actor 使用 241 维状态，外部障碍编码区段为零，不读取障碍集合。越障 Actor 在同一基础状态上追加 27 维局部上下文，并使用自己的障碍集合编码器替换外部编码区段。
+成熟源 S0 到达 Actor 使用 241 维状态，屏蔽外部障碍集合，保留用于旧模型复现。当前交接微调升级为障碍感知到达策略：仍使用 241 维基础状态，另传原始 `N×37` 障碍集合，由到达 Actor、双 Critic 和目标 Critic 各自的编码器替换外部区段；不增加局部出口上下文。越障 Actor 在基础状态上追加 27 维局部上下文，编码器与到达网络独立。断点显式保存到达策略是否感知障碍，联合评估加载时自动恢复该输入契约。
 
 | 特征 | 维数 | Actor 基础状态切片 |
 |---|---:|---|
@@ -256,17 +258,21 @@ $$
 
 ### 6.2 交接起点微调
 
-到达策略需要适应越障后的姿态与速度。固定当前越障策略，用真实联合运行采集每次交回到达 Actor 前的完整状态，包括首次及后续交接。训练只更新到达 SAC：
+到达策略需要适应越障后的姿态、速度和仍存在的障碍。固定当前越障策略，用真实联合运行采集每次交回到达 Actor 前的完整状态，包括首次及后续交接。当前入口为 `train_reaching_joint_handoff.py`，训练只更新到达 SAC：
 
 - 回合起点以 50% 概率取原始无障碍 L13 任务，50% 概率取真实交接状态；这是回合比例，不是 Replay transition 比例。
-- 交接训练副本删除外部障碍及其历史，保留关节位置、速度、原目标和物理时钟，仅重置回合计数。
-- 使用原 S0 到达奖励、自碰撞终止、精度控制与 CHAIN-PCR；Actor、Critic、温度学习率分别为 `1e-5`、`3e-5`、`1e-5`。
-- 从成熟到达完整 SAC 加载网络、温度和优化器，显式重设学习率，Replay 从空开始。PCR 是相邻更新约束，能力保留仍需实测。
-- 先使用 500000 个累计环境步的预算，保持越障策略及切换规则固定。
+- 交接训练保留全部障碍及其历史、关节位置、速度、原目标和物理时钟，仅重新开始回合计数与成功保持计数。
+- 沿用实际联合评估的几何出口、交接检查、整臂碰撞检查、局部 160 步及全局默认 1000 步预算；再次受阻仍由固定越障 Actor 接管。到达采样动作用于探索，训练的几何安全检查使用实际采样的候选到达动作，确定性评估则使用实际确定性动作；不会检查均值动作后执行另一个未检查的采样动作。
+- 到达 Actor 和 Critic 保持基础状态维数，启用既有的独立多障碍集合编码器，不新增局部上下文或奖励项。使用源 S1 环境既有到达与安全奖励、自碰撞终止、精度控制与 CHAIN-PCR；Actor、Critic、温度学习率分别为 `1e-5`、`3e-5`、`1e-5`。
+- Replay 保存到达策略提出的候选动作及安全控制器实际执行后的结果；候选被拦截也形成学习样本，不能把备用动作冒充到达模型提出的动作。两次任务决策间若夹有固定越障过程，则累积该段环境折扣回报，目标使用 `gamma**实际经历步数`。起点和后继状态均保存原始可变数量障碍集合，采样时才编码。任务成功、碰撞、越界及预算结束均结束该有界任务的回报。
+- 可从上一轮微调的完整到达 SAC 初始化网络、温度和优化器，显式重设学习率，Replay 从空开始。由不感知障碍的旧策略迁移时，只清零各障碍编码器的末层投影，使初始障碍嵌入仍为零，保留原到达主干及初始输出；归一化尺度取源模型的固定标定值。已感知障碍的权重迁移和断点恢复不会再次清零编码器。旧 Replay 缺少原始障碍集合，不能作为新任务续训；PCR 是相邻更新约束，能力保留仍需实测。
+- 先使用 500000 个累计真实控制步的预算（到达与越障执行都计入），保持越障策略及切换规则固定。
 
-训练交接只能从训练场景采集。验证、测试源 seed 既排除于交接训练，也排除于微调中的原始随机重置。交接采集每个源场景只遍历一次，不能通过重复相同 rollout 凑重复状态。
+训练交接只能从训练场景采集。验证、测试源 seed 既排除于交接训练，也排除于微调中的原始随机重置；权重初始化继承的训练 seed 同样保留并检查。交接采集每个源场景只遍历一次，不能通过重复相同 rollout 凑重复状态。
 
-微调后的到达 Actor 仍不读取外部障碍，目标是提高交接后的到达能力。其收益必须通过无障碍恢复对照和有障碍联合对照验证。
+在线交接成功率现在表示从保留障碍的交接状态开始，整个任务最终安全到达的比例，重复接管本身不算成功。另报告交接碰撞率、超时率、平均再次接管次数及累计任务决策介入率。原 `train_reaching_handoff.py` 保留用于复现移除障碍的姿态恢复对照；已完成的该类训练不等于真实带障碍接管训练，不能混淆两种成功率。
+
+当前选择让到达策略感知障碍并在真实安全切换下学习，保持原越障模型固定；未新增论文中的风险预测网络。除联合评估外，可用 `evaluate_reaching_handoff.py --keep-obstacles` 单独验证交接后到达能力，该对照保留障碍且不调用越障模型，能避免备用介入掩盖到达策略的问题。
 
 ## 7. 训练执行、日志与保存
 
@@ -282,7 +288,7 @@ $$
 | Actor / Critic / 温度学习率 | `1e-4 / 1e-4 / 3e-5` | `1e-5 / 3e-5 / 1e-5` |
 | gamma / tau | `0.99 / 0.005` | `0.99 / 0.005` |
 
-Replay 满足学习条件后累计更新额度，整数部分执行更新，分数部分保存在断点中。每 1000 步显示进度、近期在线成功率、速度与剩余耗时；近期窗口最多为 100 个已结束回合。到达微调另显示原始起点与交接起点的成功率。在线训练成功率不能代替独立评估。
+Replay 满足学习条件后累计更新额度，整数部分执行更新，分数部分保存在断点中；真实交接微调按新存入的任务候选决策 transition 累计额度，越障控制步不额外增加到达更新额度。每 1000 步显示进度、近期在线成功率、速度与剩余耗时；近期窗口最多为 100 个已结束回合。到达微调另显示原始起点与保留障碍的交接起点完整成功率，以及交接碰撞率、再次接管次数和累计任务决策介入率。在线训练成功率不能代替独立评估。
 
 默认保留 `manifest.json`、`episodes.csv`、`progress.csv` 和结束摘要；详细 `updates.csv` 默认关闭。完整诊断按每 10 次更新采集，避免逐步写出重复大日志。
 
@@ -290,7 +296,7 @@ Replay 满足学习条件后累计更新额度，整数部分执行更新，分�
 |---|---|
 | 越障 `step_XXXXXXX.pt` | 两套 SAC、当前局部 Replay、优化器、温度、累计计数、RNG、并行环境状态及训练场景身份；用于完整续训和联合评估 |
 | 越障 `avoidance_actor_step_XXXXXXX.pt` | 仅越障 Actor，含其集合编码器；用于权重迁移或单独部署，不能恢复完整训练 |
-| 到达微调 `step_XXXXXXX.pt` | 微调的到达 SAC、新 Replay、RNG、并行状态及源模型绑定信息；不重复保存冻结越障模型 |
+| 到达微调 `step_XXXXXXX.pt` | 微调的到达 SAC、新 Replay、RNG、并行物理与控制器状态、未完成的到达回报及源模型绑定信息；不重复保存冻结越障模型 |
 
 越障不单独重复保存 `reaching_actor_step_*.pt` 或通用 `actor_step_*.pt`。续训使用完整 `step` 文件，必须保持相同任务协议、bank、模型契约和已有并行环境数。`--steps` 始终表示额外步数。
 
@@ -373,29 +379,26 @@ TEST_BANK=outputs/local_starts/geometric_joint_test_100/bank.pt
 
 当前 `TEST_BANK` 是固定原始 100 场景基准；评估允许保留该集合以比较相同分母。若改用筛选子集或重新生成的测试集，基线和待比较模型都必须在同一集合重测，不能直接与原 100 场景成功率比较。
 
-### 8.5 采集训练交接并微调到达 SAC
+### 8.5 保留障碍物的真实交接微调
+
+现有真实交接库已经保存障碍物，可以直接复用，无需重新采集。以下从已完成的 50 万步姿态恢复模型初始化到达 SAC，新建 Replay，固定原 200 万步越障策略：
 
 ```bash
-"$PYTHON_BIN" scripts/calibration/collect_reaching_handoffs.py \
-  --checkpoint "$PAIR" --source-bank "$TRAIN_BANK" \
-  --exclude-bank "$TEST_BANK" \
-  --samples 1024 --max-scenes 2048 --split train \
-  --output-dir outputs/reaching_handoff_starts/final_train_1024
-
-"$PYTHON_BIN" scripts/core/train_reaching_handoff.py \
+"$PYTHON_BIN" scripts/core/train_reaching_joint_handoff.py \
   --source-checkpoint "$PAIR" \
-  --bank outputs/reaching_handoff_starts/final_train_1024/bank.pt \
+  --initialize-reaching-from outputs/reaching_handoff/reaching_handoff_500k_fixlog/checkpoints/step_0500000.pt \
+  --bank outputs/reaching_handoff_starts/train_1024/bank.pt \
   --steps 500000 --num-envs 8 --save-interval 50000 \
-  --handoff-fraction 0.5 \
+  --max-episode-steps 1000 --handoff-fraction 0.5 \
   --actor-lr 0.00001 --critic-lr 0.00003 --alpha-lr 0.00001 \
-  --run-name reaching_handoff_verified_500k --device cuda:auto
+  --run-name reaching_obstacle_aware_handoff_500k --device cuda:auto
 
-FT=outputs/reaching_handoff/reaching_handoff_verified_500k/checkpoints/step_0500000.pt
+FT=outputs/reaching_handoff/reaching_obstacle_aware_handoff_500k/checkpoints/step_0500000.pt
 ```
 
-交接 bank 必须达到请求数量，采集不足先查看报告，不能把重复状态当新样本。微调完整续训需同时指定相同 `--source-checkpoint`、`--bank`、学习率、比例和环境数，增加 `--resume <微调step文件>`，并更换运行名。
+当前训练协议为 `reaching_obstacle_aware_handoff_finetune_v1`；之前保留障碍但屏蔽感知的 `reaching_joint_handoff_finetune_v1` 断点只允许初始化权重，不允许完整续训。完整续训需使用本协议的 `step` 文件，保留相同源模型、bank、学习率、混合比例、预算上限和环境数；以 `--resume <新协议step文件>` 替换 `--initialize-reaching-from`，并更换运行名。`--steps` 表示新增真实控制步。旧无障碍完整断点只能通过初始化参数迁移，不能恢复旧 Replay。
 
-### 8.6 独立恢复对照与联合覆盖评估
+### 8.6 独立带障碍交接对照与联合覆盖评估
 
 ```bash
 "$PYTHON_BIN" scripts/calibration/collect_reaching_handoffs.py \
@@ -407,8 +410,8 @@ FT=outputs/reaching_handoff/reaching_handoff_verified_500k/checkpoints/step_0500
 "$PYTHON_BIN" scripts/core/evaluate_reaching_handoff.py \
   --checkpoint "$FT" \
   --bank outputs/reaching_handoff_starts/final_validation_128/bank.pt \
-  --normal-episodes 100 \
-  --output outputs/joint_evaluation/final_reaching_recovery.json
+  --normal-episodes 100 --keep-obstacles --max-episode-steps 1000 \
+  --output outputs/joint_evaluation/final_reaching_handoff_with_obstacles.json
 
 "$PYTHON_BIN" scripts/core/evaluate_joint_policy.py \
   --checkpoint "$PAIR" --reaching-checkpoint "$FT" --bank "$TEST_BANK" \
@@ -416,7 +419,7 @@ FT=outputs/reaching_handoff/reaching_handoff_verified_500k/checkpoints/step_0500
   --max-episode-steps 1000 --device cpu
 ```
 
-恢复对照在相同无外部障碍交接状态及相同原始随机任务上分别评估原到达与微调到达模型。联合覆盖评估保持越障模型和场景不变，仅替换到达 Actor；先检查原场景来源，再验证微调源完整断点摘要、冻结越障 Actor 摘要及训练/测试隔离。
+带障碍交接对照在相同真实交接状态、相同障碍及相同原始无障碍随机任务上分别评估原到达与微调到达模型，不使用备用策略。省去 `--keep-obstacles` 可另做无障碍姿态恢复对照，两种结果不得混淆。联合覆盖评估保持越障模型和场景不变，仅替换到达 Actor；先检查原场景来源，再验证微调源完整断点摘要、冻结越障 Actor 摘要及训练/测试隔离。
 
 用于调参的 validation 结果不能同时充当最终独立测试证据；正式报告应另外保留未参与模型选择的 test 场景。
 
@@ -434,7 +437,7 @@ FT=outputs/reaching_handoff/reaching_handoff_verified_500k/checkpoints/step_0500
 - [100 场景路径审计](../../outputs/diagnostics/path_verification_20261027/test100/audit_report.json)。
 - [路径校验实现验证摘要](../../outputs/diagnostics/path_verification_20261027/verification_report.json)。
 
-到达交接微调入口和覆盖评估已实现；正式改善幅度以实际完成的对照报告为准。标记 `validation_mode=true` 的短训和测试通过记录仅证明功能，不能作为学习效果或安全保证。
+移除障碍的 50 万步姿态恢复微调后，同一 100 场景联合成功率为 16%、碰撞率为 46%，332 次局部交接后有 308 次再次接管。当前已修正为保留障碍、启用到达障碍感知、固定越障策略的真实安全控制训练入口；该新任务尚未完成正式训练，不能沿用原姿态恢复训练的 90% 以上在线成功率。标记 `validation_mode=true` 的短训和测试通过记录仅证明功能，不能作为学习效果或安全保证。
 
 ## 10. 配置与代码索引
 
@@ -458,5 +461,5 @@ FT=outputs/reaching_handoff/reaching_handoff_verified_500k/checkpoints/step_0500
 | 联合控制器 | [joint_policy.py](../../src/rl_risk_sac/control/joint_policy.py) |
 | 起点生成与审计脚本 | [build_local_avoidance_bank.py](../../scripts/calibration/build_local_avoidance_bank.py)、[audit_local_avoidance_bank.py](../../scripts/calibration/audit_local_avoidance_bank.py) |
 | 越障训练与并行执行 | [train_local_avoidance.py](../../scripts/core/train_local_avoidance.py)、[train_parallel_local_avoidance.py](../../scripts/core/train_parallel_local_avoidance.py) |
-| 交接采集与微调 | [collect_reaching_handoffs.py](../../scripts/calibration/collect_reaching_handoffs.py)、[train_reaching_handoff.py](../../scripts/core/train_reaching_handoff.py) |
+| 交接采集与微调 | [collect_reaching_handoffs.py](../../scripts/calibration/collect_reaching_handoffs.py)、[train_reaching_joint_handoff.py](../../scripts/core/train_reaching_joint_handoff.py)、[parallel_joint_handoff_env.py](../../src/rl_risk_sac/envs/parallel_joint_handoff_env.py) |
 | 局部、恢复对照与联合评估 | [evaluate_local_avoidance.py](../../scripts/core/evaluate_local_avoidance.py)、[evaluate_reaching_handoff.py](../../scripts/core/evaluate_reaching_handoff.py)、[evaluate_joint_policy.py](../../scripts/core/evaluate_joint_policy.py) |

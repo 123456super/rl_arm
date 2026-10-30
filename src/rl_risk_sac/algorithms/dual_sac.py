@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
 from rl_risk_sac.algorithms.replay_buffer import Batch
 from rl_risk_sac.algorithms.thesis_sac import ThesisSACAgent
+from rl_risk_sac.tasks.obstacle_observation import ObstacleBatch, ObstacleObservation, obstacle_set
 
 
 POLICIES = ("reaching", "avoidance")
@@ -46,13 +48,59 @@ def checkpoint_policy_state(checkpoint: dict, role: str | None = None) -> dict:
 
 
 class ReachingSACAgent(ThesisSACAgent):
-    """The original S0 SAC, with external sets excluded at its public boundary."""
+    """Original S0 by default; explicit handoff fine-tuning can enable perception."""
+
+    def __init__(self, obs_dim, action_dim, config):
+        super().__init__(obs_dim, action_dim, config)
+        self.set_obstacle_awareness(config.get("thesis", {}).get("observation", {}).get(
+            "reaching_obstacle_aware", False))
+
+    def set_obstacle_awareness(self, enabled):
+        self.obstacle_aware = bool(enabled)
+        # Actor-only CPU snapshots must use the same input contract as the learner.
+        self.actor.reaching_obstacle_aware = self.obstacle_aware
+
+    def initialize_obstacle_awareness(self, feature_scale):
+        """Enable existing independent encoders without disturbing mature outputs.
+
+        Legacy S0 never trained its encoders. Zero only their final linear
+        projections, so all initial embeddings remain zero while gradients can
+        learn obstacle effects. Retain all reaching backbone/critic weights.
+        """
+        if self.obstacle_aware:
+            return False
+        scale = torch.as_tensor(feature_scale, device=self.device, dtype=self.actor.obstacle_encoder.scale.dtype)
+        if scale.shape != (37,) or not bool(torch.isfinite(scale).all() and (scale > 0).all()):
+            raise ValueError("invalid reaching obstacle feature scale")
+        for module in (self.actor, self.q1, self.q2, self.target_q1, self.target_q2):
+            encoder = module.obstacle_encoder
+            with torch.no_grad():
+                encoder.scale.copy_(scale)
+                encoder.fusion[-1].weight.zero_()
+                encoder.fusion[-1].bias.zero_()
+            for optimizer in (self.actor_optimizer, self.q_optimizer):
+                for parameter in encoder.parameters():
+                    optimizer.state.pop(parameter, None)
+        self.set_obstacle_awareness(True)
+        self.reset_chain_reference_actor()
+        return True
 
     def select_actions(self, observations, deterministic=False):
+        if self.obstacle_aware:
+            if isinstance(observations, (list, tuple)):
+                observations = [ObstacleObservation(np.asarray(o)[:self.actor_obs_dim], obstacle_set(o))
+                                for o in observations]
+            elif getattr(observations, "obstacle_sets", None) is not None:
+                observations = ObstacleBatch(np.asarray(observations)[:, :self.actor_obs_dim], observations.obstacle_sets)
+            else:
+                observations = np.asarray(observations)[:, :self.actor_obs_dim]
+            return super().select_actions(observations, deterministic)
         observations = np.stack([np.asarray(o)[:self.actor_obs_dim] for o in observations])
         return super().select_actions(observations, deterministic)
 
     def update(self, batch: Batch, **kwargs):
+        if self.obstacle_aware:
+            return super().update(batch, **kwargs)
         def without_obstacles(value):
             return replace(value, obstacle_features=None, obstacle_mask=None,
                            next_obstacle_features=None, next_obstacle_mask=None)
@@ -61,13 +109,25 @@ class ReachingSACAgent(ThesisSACAgent):
             kwargs["reference_observations"] = without_obstacles(kwargs["reference_observations"])
         return super().update(batch, **kwargs)
 
+    def state_dict(self):
+        state = super().state_dict()
+        if self.obstacle_aware:
+            state["reaching_obstacle_aware"] = True
+        return state
+
+    def load_state_dict(self, state, *, actor_only=False):
+        super().load_state_dict(state, actor_only=actor_only)
+        # Old checkpoints always retain the original obstacle-blind behavior.
+        self.set_obstacle_awareness(state.get("reaching_obstacle_aware", False))
+
 
 class DualSACAgent:
     """Keep the inactive SAC frozen while the existing trainer updates one SAC.
 
     Both policies have their own actor, twin critics, target critics, set
-    encoders, alpha and optimizers. Reaching retains 241D and ignores external
-    sets. Local avoidance adds observable passage context to the Full state;
+    encoders, alpha and optimizers. Reaching retains 241D; legacy S0 ignores
+    external sets, while an explicit fine-tuned checkpoint can enable them.
+    Local avoidance adds observable passage context to the Full state;
     its dedicated environment/replay defines a separate local reward contract.
     The active run owns its replay/curriculum; there is no cross-policy replay
     transfer, action fusion, safety gate or automatic switching.

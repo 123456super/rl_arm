@@ -1,0 +1,6 @@
+# Optional SAC-AEW ablation; not the paper's original PPO-AEW/PF algorithm.
+includes:
+  - paper_single_sac.yaml
+sac:
+  action_ensemble:
+    enabled: true

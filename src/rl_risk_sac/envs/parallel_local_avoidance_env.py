@@ -10,10 +10,13 @@ import torch
 from rl_risk_sac.envs.local_avoidance_env import LocalAvoidanceEnv
 from rl_risk_sac.envs.parallel_thesis_env import ParallelThesisEnvPool, _error_payload
 from rl_risk_sac.tasks.local_avoidance import actor_digest
+from rl_risk_sac.tasks.obstacle_observation import (
+    ObstacleObservation, obstacle_set, observation_tensors, stack_observations,
+)
 
 
 class FrozenCPUReachingPolicy:
-    """Actor-only S0 copy; workers neither build critics nor initialize CUDA."""
+    """Actor-only reaching copy with its checkpoint-defined obstacle input."""
 
     def __init__(self, actor):
         self.actor = actor.cpu().eval().requires_grad_(False)
@@ -23,6 +26,10 @@ class FrozenCPUReachingPolicy:
             raise ValueError("recovery requires deterministic frozen reaching actions")
         state = np.asarray(observation, dtype=np.float32)[:241]
         with torch.no_grad():
+            if getattr(self.actor, "reaching_obstacle_aware", False):
+                obs, features, mask = observation_tensors(
+                    stack_observations([ObstacleObservation(state, obstacle_set(observation))]), "cpu")
+                return self.actor.deterministic(obs, features, mask)[0].numpy()
             return self.actor.deterministic(torch.from_numpy(state[None]))[0].numpy()
 
 

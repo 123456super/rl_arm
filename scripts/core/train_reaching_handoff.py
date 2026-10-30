@@ -19,8 +19,17 @@ from rl_risk_sac.tasks.reaching_handoff import (
     TRAIN_PROTOCOL, RecoveryReplay, bank_fingerprint, file_digest, recovery_config, recovery_state,
     validate_handoff_bank,
 )
-from rl_risk_sac.utils.training_logs import CsvLog, format_training_progress
+from rl_risk_sac.utils.training_logs import CsvLog, collect_sac_diagnostics, format_training_progress
 from scripts.core.train_thesis_homotopy import accrue_update_credit
+
+
+def progress_fieldnames(agent):
+    """Declare learning columns before the first, possibly pre-update row."""
+    return ("steps", "episodes", "updates", "update_credit", "replay_size", "elapsed_s",
+            "all_success_rate", "original_success_rate", "handoff_success_rate",
+            "critic_loss", *agent.last_actor_metrics,
+            "alpha", "q1_mean", "q2_mean", "target_mean", "critic_gradient_norm",
+            "actor_gradient_norm", "actor_updated")
 
 
 def main():
@@ -106,13 +115,13 @@ def main():
             workers=loaded["workers"]
             observations.update(pool.restore_many(loaded["environment_states"]))
         with CsvLog(output/"episodes.csv", ("steps","worker","kind","length","success","collision","joint_limit","position_error_m","orientation_error_rad")) as episodes, \
-             CsvLog(output/"progress.csv") as progress:
+             CsvLog(output/"progress.csv", progress_fieldnames(agent)) as progress:
             def update():
                 nonlocal last_metrics
                 for _ in due:
                     batch=replay.sample(batch_size)
                     counters["updates"]+=1
-                    collect=counters["updates"]==1 or counters["updates"]%10==0
+                    collect=collect_sac_diagnostics(agent,counters["updates"])
                     metrics=agent.update(batch,reference_observations=batch,collect_diagnostics=collect,check_finite=True)
                     if not all(np.isfinite(x) for x in metrics.values()): raise RuntimeError("nonfinite recovery update")
                     if collect: last_metrics=metrics
