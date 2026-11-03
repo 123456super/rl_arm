@@ -59,47 +59,23 @@ ppo:
   gamma: 0.99
   gae_lambda: 0.95
   clip_ratio: 0.20
-  epochs: 10
+  epochs: 20
   minibatch_size: 1024
   actor_lr: 0.0003
   critic_lr: 0.0003
   entropy_coef: 0.01
   value_coef: 1.0
-  normalize_advantage: true
+  normalize_advantage: false
   # Disable gradient clipping; non-finite gradients still stop with diagnostics.
   max_grad_norm: null
   # Reject and roll back an Actor step when full-rollout KL exceeds
   # 1.5 * target_kl. Critic updates remain independent.
-  target_kl: 0.05
+  target_kl: null
   # Abort with a diagnostic BEFORE exp(log_ratio), never silently clamp it.
   max_abs_log_ratio: 20.0
   action_std_init: 1.0
-  lr_decay: false
+  lr_decay: true
+  actor_lr_final: 0.0
+  critic_lr_final: 0.0
+  adaptive_kl_lr: false
   hidden_dims: [256, 256]
-  # FTP4RM PPO main-experiment update contract. The trainer collects 512
-  # decisions from each of 8 environments, preserving 4096 transitions/update.
-  reference:
-    epochs: 20
-    minibatch_size: 1024
-    normalize_advantage: false
-    max_grad_norm: null
-    target_kl: null
-    adaptive_kl_lr: false
-    lr_decay: true
-    actor_lr_final: 0.0
-    critic_lr_final: 0.0
-  # Keypoint v2 uses bounded absolute targets and milder exploration.
-  # Both modes use the numerical protections above.
-  keypoint:
-    action_std_init: 0.20
-    normalize_advantage: true
-    max_grad_norm: 0.5
-    epochs: 10
-    lr_decay: true
-    actor_lr_final: 0.00003
-    critic_lr_final: 0.0001
-    adaptive_kl_lr: true
-    kl_lr_decrease_factor: 0.5
-    kl_lr_increase_factor: 1.05
-    kl_lr_low_threshold: 0.01
-    kl_lr_low_patience: 10

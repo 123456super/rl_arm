@@ -11,18 +11,16 @@ import pybullet as p
 
 from rl_risk_sac.control import SafetyQP, SafetyQPConfig, distance_rate_constraint
 from rl_risk_sac.robots.pybullet_robot import PyBulletRobot
-from rl_risk_sac.tasks.thesis_reaching_reduced_observation import (
+from rl_risk_sac.tasks.reference_reaching import (
+    REFERENCE_PPO_OBSERVATION_DIM,
     SelfCollisionGeometry,
     ThesisGeometry,
-    build_thesis_observation,
+    build_reference_observation,
     compute_self_collision_geometry,
     compute_thesis_geometry,
-    homotopy_reward,
-    keypoint_position_jacobian,
-    pose_keypoint_errors,
     pose_error,
-    reference_pose_keypoint_errors,
-    thesis_observation_dim,
+    reference_point_errors,
+    reference_ppo_reward,
 )
 from rl_risk_sac.utils.risk import closest_point_on_segment
 from rl_risk_sac.utils.runtime_config import RuntimeConfig
@@ -56,7 +54,7 @@ class EpisodeContract:
 
 
 class ThesisHomotopyEnv(gym.Env):
-    """Full/reduced-observation S0-S2 environment with variant-specific inputs."""
+    """Obstacle-free FTP4RM reference-PPO reaching environment."""
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 20}
 
@@ -68,34 +66,16 @@ class ThesisHomotopyEnv(gym.Env):
         self.config = config
         self.runtime = RuntimeConfig.from_mapping(config)
         thesis = config["thesis"]
-        self.simple_reaching_mode = bool(thesis.get("simple_reaching_mode", False))
+        self.simple_reaching_mode = bool(thesis.get("simple_reaching_mode", True))
+        if not self.simple_reaching_mode:
+            raise ValueError("only obstacle-free S0 reference PPO is supported")
         observation = thesis.get("observation", {})
         reward = thesis.get("reward", {})
-        self.reward_mode = str(reward.get("reward_mode", "keypoint"))
-        # S0 modes use the same dynamics and termination contract.  Reward
-        # and observation remain mode-specific by design.
-        self.reference_dynamics_contract = bool(
-            self.reward_mode == "reference_ppo" or self.simple_reaching_mode
-        )
-        self.ablation_variant = str(observation.get("ablation_variant", "kp_compact"))
-        self.observation_variant = (
-            "reference_ppo" if self.reward_mode == "reference_ppo" else self.ablation_variant
-        )
-        thesis_observation_dim(
-            observation.get("include_orientation_error_vector", False),
-            keypoint_jacobian_pose=observation.get("keypoint_jacobian_pose", True),
-            hybrid_explicit_pose_error=observation.get("hybrid_explicit_pose_error", True),
-            ablation_variant=self.observation_variant,
-        )
-        if self.reward_mode not in {"keypoint", "reference_ppo"}:
-            raise ValueError("reward.reward_mode must be 'keypoint' or 'reference_ppo'")
-        if self.reward_mode == "keypoint" and (
-            reward.get("pose_objective", "unified_keypoint") != "unified_keypoint"
-            or not reward.get("keypoint_pose_reward", True)
-            or reward.get("rtpc_orientation_reward", False)
-            or reward.get("pose_balanced_rtpc_reward", False)
-        ):
-            raise ValueError("only unified keypoint pose reward is supported")
+        configured_reward_mode = str(reward.get("reward_mode", "reference_ppo"))
+        if configured_reward_mode != "reference_ppo":
+            raise ValueError("only reward.reward_mode=reference_ppo is supported")
+        self.reward_mode = "reference_ppo"
+        self.reference_dynamics_contract = True
         self.physics_dt = float(thesis.get("physics_dt", 1.0 / 240.0))
         self.control_dt = float(thesis.get("control_dt", 1.0 / 30.0))
         self.substeps = int(round(self.control_dt / self.physics_dt))
@@ -124,8 +104,7 @@ class ThesisHomotopyEnv(gym.Env):
         self.success_hold_steps = int(thesis.get("success_hold_steps", 1))
         if self.success_hold_steps < 1:
             raise ValueError("success_hold_steps must be positive")
-        if self.reward_mode == "reference_ppo":
-            self.success_hold_steps = 1
+        self.success_hold_steps = 1
         self.velocity_limits = np.full(6, np.pi, dtype=np.float32)
         self.ee_linear_velocity_scale = float(thesis.get("ee_linear_velocity_scale", 1.0))
         self.ee_angular_velocity_scale = float(thesis.get("ee_angular_velocity_scale", 4.2))
@@ -139,25 +118,17 @@ class ThesisHomotopyEnv(gym.Env):
         if self.reference_success_threshold <= 0.0:
             raise ValueError("reference_ppo.success_threshold must be positive")
         reference_gravity = reference_settings.get("gravity", [0.0, 0.0, -10.0])
-        self.gravity = np.asarray(
-            reference_gravity if self.reward_mode == "reference_ppo" else [0.0, 0.0, 0.0],
-            dtype=np.float64,
-        )
+        self.gravity = np.asarray(reference_gravity, dtype=np.float64)
         if self.gravity.shape != (3,) or not np.isfinite(self.gravity).all():
             raise ValueError("reference_ppo.gravity must contain three finite values")
-        configured_motor_forces = (
-            reference_settings.get("motor_forces", [150.0, 150.0, 150.0, 28.0, 28.0, 28.0])
-            if self.reward_mode == "reference_ppo"
-            else [self.motor_force] * 6
+        configured_motor_forces = reference_settings.get(
+            "motor_forces", [150.0, 150.0, 150.0, 28.0, 28.0, 28.0]
         )
         self.motor_forces = np.asarray(configured_motor_forces, dtype=np.float64)
         if self.motor_forces.shape != (6,) or np.any(self.motor_forces <= 0.0):
             raise ValueError("reference_ppo.motor_forces must contain six positive values")
         plane_settings = reference_settings.get("mounting_plane", {})
-        self.mounting_plane_enabled = bool(
-            self.reward_mode == "reference_ppo"
-            and plane_settings.get("enabled", True)
-        )
+        self.mounting_plane_enabled = bool(plane_settings.get("enabled", True))
         self.mounting_plane_height = float(plane_settings.get("height_m", 0.0))
         if not np.isfinite(self.mounting_plane_height):
             raise ValueError("reference_ppo.mounting_plane.height_m must be finite")
@@ -211,195 +182,12 @@ class ThesisHomotopyEnv(gym.Env):
         self.orientation_tolerance = float(thesis.get("orientation_tolerance", 0.10))
         reward_config = thesis.get("reward", {})
         self.reward_parameters = {
-            "reward_mode": self.reward_mode,
             "reference_obstacle_threshold": float(
-                reward_config.get("reference_obstacle_threshold_m", 0.08)
+                reward.get("reference_obstacle_threshold_m", 0.08)
             ),
             "reference_collision_penalty": float(
-                reward_config.get("reference_collision_penalty", 1.0)
+                reward.get("reference_collision_penalty", 1.0)
             ),
-            "d_safe": self.d_safe,
-            "d_self_safe": self.d_self_safe,
-            "position_sigma": float(reward_config.get("position_sigma_m", 0.20)),
-            "micro_power": float(reward_config.get("micro_power", 4.0)),
-            "fine_position_sigma": float(reward_config.get("fine_position_sigma_m", 0.02)),
-            "fine_orientation_sigma": float(reward_config.get("fine_orientation_sigma_rad", 0.06)),
-            "fine_position_progress_scale": float(
-                reward_config.get("fine_position_progress_scale", 1.0)
-            ),
-            "fine_orientation_progress_scale": float(
-                reward_config.get("fine_orientation_progress_scale", 1.0)
-            ),
-            "precision_position_scale": float(
-                reward_config.get("precision_position_scale_m", 0.03)
-            ),
-            "precision_orientation_scale": float(
-                reward_config.get("precision_orientation_scale_rad", 0.09)
-            ),
-            "accuracy_position_sigma": float(
-                reward_config.get("accuracy_position_sigma_m", 0.03)
-            ),
-            "accuracy_orientation_sigma": float(
-                reward_config.get("accuracy_orientation_sigma_rad", 0.09)
-            ),
-            "accuracy_reward_scale": float(
-                reward_config.get("accuracy_reward_scale", 1.0)
-            ),
-            "accuracy_progress_scale": float(
-                reward_config.get("accuracy_progress_scale", 2.0)
-            ),
-            "pose_position_accuracy_weight": float(
-                reward_config.get("pose_position_accuracy_weight", 0.4)
-            ),
-            "pose_orientation_accuracy_weight": float(
-                reward_config.get("pose_orientation_accuracy_weight", 0.3)
-            ),
-            "keypoint_accuracy_weight": float(
-                reward_config.get("keypoint_accuracy_weight", 0.3)
-            ),
-            "keypoint_absolute_reward_alpha": float(
-                reward_config.get("keypoint_absolute_reward_alpha", 1.0e-3)
-            ),
-            "keypoint_time_cost": float(reward_config.get("keypoint_time_cost", 0.1)),
-            "keypoint_distance_cost_scale": float(reward_config.get("keypoint_distance_cost_scale", 0.9)),
-            "normalized_precision_scale": float(
-                reward_config.get("normalized_precision_scale", 200.0)
-            ),
-            "keypoint_regression_scale": float(
-                reward_config.get("keypoint_regression_scale", 300.0)
-            ),
-            "precision_stop_cost_weight": float(
-                reward_config.get("precision_stop_cost_weight", 0.10)
-            ),
-            "precision_stop_gate_start_m": float(
-                reward_config.get("precision_stop_gate_start_m", 0.05)
-            ),
-            "precision_stop_gate_full_m": float(
-                reward_config.get("precision_stop_gate_full_m", self.position_tolerance)
-            ),
-            "strict_hold_reward": float(reward_config.get("strict_hold_reward", 20.0)),
-            "strict_leave_penalty": float(reward_config.get("strict_leave_penalty", 25.0)),
-            "joint_precision_progress_scale": float(
-                reward_config.get("joint_precision_progress_scale", 0.0)
-            ),
-            "joint_precision_temperature": float(
-                reward_config.get("joint_precision_temperature", 2.0)
-            ),
-            "joint_position_tolerance": float(
-                reward_config.get("joint_position_tolerance_m", self.position_tolerance)
-            ),
-            "joint_orientation_tolerance": float(
-                reward_config.get(
-                    "joint_orientation_tolerance_rad", self.orientation_tolerance
-                )
-            ),
-            "leave_tolerance_multiplier": float(
-                reward_config.get("leave_tolerance_multiplier", 2.0)
-            ),
-            "leave_joint_tolerance_penalty": float(
-                reward_config.get("leave_joint_tolerance_penalty", 0.0)
-            ),
-            "hold_reward_scale": float(reward_config.get("hold_reward_scale", 0.02)),
-            "hold_reward_power": float(reward_config.get("hold_reward_power", 2.0)),
-            "hold_position_outer": float(reward_config.get("hold_position_outer_m", 0.10)),
-            "hold_orientation_outer": float(reward_config.get("hold_orientation_outer_rad", 0.40)),
-            "partial_precision_reward_scale": float(
-                reward_config.get("partial_precision_reward_scale", 0.0)
-            ),
-            "position_progress_scale": float(reward_config.get("position_progress_scale", 2.0)),
-            "orientation_progress_scale": float(reward_config.get("orientation_progress_scale", 2.0)),
-            "standard_pose_progress_scale": float(
-                reward_config.get("standard_pose_progress_scale", 4.0)
-            ),
-            "standard_pose_quality_scale": float(
-                reward_config.get("standard_pose_quality_scale", 0.5)
-            ),
-            "standard_pose_error_scale": float(
-                reward_config.get("standard_pose_error_scale", 0.5)
-            ),
-            "position_state_cost_weight": float(
-                reward_config.get("position_state_cost_weight", 0.02)
-            ),
-            "orientation_state_cost_weight": float(
-                reward_config.get("orientation_state_cost_weight", 0.02)
-            ),
-            "rtpc_orientation_reward": bool(
-                reward_config.get("rtpc_orientation_reward", False)
-            ),
-            "pose_balanced_rtpc_reward": bool(
-                reward_config.get("pose_balanced_rtpc_reward", False)
-            ),
-            "orientation_absolute_error_scale": float(
-                reward_config.get("orientation_absolute_error_scale", 0.125)
-            ),
-            "orientation_error_progress_scale": float(
-                reward_config.get("orientation_error_progress_scale", 0.15)
-            ),
-            "orientation_completion_reward_scale": float(
-                reward_config.get("orientation_completion_reward_scale", 0.10)
-            ),
-            "orientation_absolute_position_gate_sigma": float(
-                reward_config.get(
-                    "orientation_absolute_position_gate_sigma_m", 0.20
-                )
-            ),
-            "orientation_completion_position_gate_multiplier": float(
-                reward_config.get(
-                    "orientation_completion_position_gate_multiplier", 1.0
-                )
-            ),
-            "keypoint_pose_reward": bool(
-                reward_config.get("keypoint_pose_reward", True)
-            ),
-            "keypoint_tracking_scale": float(
-                reward_config.get("keypoint_tracking_scale", 0.05)
-            ),
-            "keypoint_tracking_sigma": float(
-                reward_config.get("keypoint_tracking_sigma_m", 0.03)
-            ),
-            "keypoint_progress_scale": float(
-                reward_config.get("keypoint_progress_scale", 20.0)
-            ),
-            "keypoint_precision_reward_scale": float(
-                reward_config.get("keypoint_precision_reward_scale", 0.05)
-            ),
-            "keypoint_best_table_start_distance": float(
-                reward_config.get("keypoint_best_table_start_distance_m", 1.5)
-            ),
-            "keypoint_best_table_step": float(
-                reward_config.get("keypoint_best_table_step_m", 0.01)
-            ),
-            "keypoint_best_table_reward_base": float(
-                reward_config.get("keypoint_best_table_reward_base", 18.3333333333)
-            ),
-            "keypoint_best_table_reward_slope": float(
-                reward_config.get("keypoint_best_table_reward_slope", 16.6666666667)
-            ),
-            "joint_bottleneck_shaping_scale": float(
-                reward_config.get("joint_bottleneck_shaping_scale", 0.0)
-            ),
-            "joint_bottleneck_temperature": float(
-                reward_config.get("joint_bottleneck_temperature", 2.0)
-            ),
-            "success_bonus": float(reward_config.get("success_bonus", 100.0)),
-            "velocity_cost_weight": float(reward_config.get("velocity_cost_weight", 0.02)),
-            "smooth_cost_weight": float(reward_config.get("smooth_cost_weight", 0.01)),
-            "hard_failure_penalty": float(
-                reward_config.get("hard_failure_penalty", 100.0)
-            ),
-            "timeout_penalty": float(reward_config.get("timeout_penalty", 2.0)),
-            "safety_risk_weight": float(reward_config.get("safety_risk_weight", 2.0)),
-            "safety_clearance_weight": float(
-                reward_config.get("safety_clearance_weight", 8.0)
-            ),
-            "self_risk_weight": float(reward_config.get("self_risk_weight", 2.0)),
-            "self_clearance_weight": float(
-                reward_config.get("self_clearance_weight", 8.0)
-            ),
-            "external_safety_scale": float(
-                reward_config.get("external_safety_scale", 0.05)
-            ),
-            "self_safety_scale": float(reward_config.get("self_safety_scale", 0.05)),
         }
         self.goal_sample_max_attempts = int(thesis.get("goal_sample_max_attempts", 10000))
         if self.goal_sample_max_attempts < 1:
@@ -486,32 +274,12 @@ class ThesisHomotopyEnv(gym.Env):
         self.obstacle_contact_seen = False
         self.previous_rho_position = 0.0
         self.previous_rho_orientation = 0.0
-        self.previous_keypoint_distance = 0.0
-        self.best_keypoint_distance = 1.5
         observation_config = thesis.get("observation", {})
-        self.include_orientation_error_vector = bool(
-            observation_config.get("include_orientation_error_vector", False)
+        self.reference_point_offset_m = float(
+            observation_config.get("reference_point_offset_m", 0.001)
         )
-        self.keypoint_jacobian_pose = bool(
-            observation_config.get("keypoint_jacobian_pose", True)
-        )
-        self.hybrid_explicit_pose_error = bool(
-            observation_config.get("hybrid_explicit_pose_error", True)
-        )
-        if self.ablation_variant != "kp_compact":
-            raise ValueError("configured observation.ablation_variant must be kp_compact")
-        self.keypoint_cube_side_m = float(
-            observation_config.get("keypoint_cube_side_m", 0.30)
-        )
-        self.reference_keypoint_offset_m = float(
-            observation_config.get("reference_keypoint_offset_m", 0.001)
-        )
-        self.keypoint_error_scale_m = float(
-            observation_config.get("keypoint_error_scale_m", 1.0)
-        )
-        self.keypoint_jacobian_scale = float(
-            observation_config.get("keypoint_jacobian_scale", 1.0)
-        )
+        if self.reference_point_offset_m <= 0.0:
+            raise ValueError("observation.reference_point_offset_m must be positive")
         self._link_name_to_id: dict[str, int] = {}
         self._collision_link_ids: set[int] = set()
         self._self_link_order: list[int] = []
@@ -522,20 +290,8 @@ class ThesisHomotopyEnv(gym.Env):
         # alive for the lifetime of the environment and reset only its state.
         self._initialize_world()
 
-        observation_dim = thesis_observation_dim(
-            self.include_orientation_error_vector,
-            keypoint_jacobian_pose=self.keypoint_jacobian_pose,
-            hybrid_explicit_pose_error=self.hybrid_explicit_pose_error,
-            ablation_variant=self.observation_variant,
-        )
-        low = np.full(observation_dim, -1.0, dtype=np.float32)
-        high = np.ones(observation_dim, dtype=np.float32)
-        if self.observation_variant == "reference_ppo":
-            low[:] = -np.inf
-            high[:] = np.inf
-        else:
-            low[12:21], high[12:21] = -np.inf, np.inf
-            low[-2:] = 0.0
+        low = np.full(REFERENCE_PPO_OBSERVATION_DIM, -np.inf, dtype=np.float32)
+        high = np.full(REFERENCE_PPO_OBSERVATION_DIM, np.inf, dtype=np.float32)
         self.observation_space = spaces.Box(
             low, high,
             dtype=np.float32,
@@ -564,8 +320,8 @@ class ThesisHomotopyEnv(gym.Env):
         task_space_bin_probabilities: list[float] | np.ndarray | None = None,
         terminate_on_success: bool = True,
     ) -> None:
-        if scene not in {"none", "static", "dynamic"}:
-            raise ValueError(f"unknown thesis scene {scene!r}")
+        if scene != "none":
+            raise ValueError("reference PPO supports only the obstacle-free 'none' scene")
         if not 0.02 <= float(xi) <= 1.0:
             raise ValueError("xi must be in [0.02, 1]")
         if not 0.0 < float(goal_scale) <= 1.0:
@@ -661,8 +417,6 @@ class ThesisHomotopyEnv(gym.Env):
             self._task_space_bin_order = np.empty(0, dtype=np.int64)
             self._task_space_bin_cursor = 0
         self._disable_obstacle()
-        # Reward/observation choices must not change the task distribution.
-        # Both modes share the same home, target validation and pose tolerances.
         if self.fixed_orientation_goal_enabled:
             self._reset_fixed_initial_state()
             self._sample_fixed_orientation_goal_pose()
@@ -699,11 +453,6 @@ class ThesisHomotopyEnv(gym.Env):
         observation, info, geometry, self_geometry, position_error, orientation_error = self._observe()
         self.previous_rho_position = float(np.linalg.norm(position_error))
         self.previous_rho_orientation = float(np.linalg.norm(orientation_error))
-        keypoint_distances = np.asarray(info["keypoint_distances"], dtype=np.float32)
-        self.previous_keypoint_distance = float(
-            0.6 * np.mean(keypoint_distances) + 0.4 * np.max(keypoint_distances)
-        )
-        self.best_keypoint_distance = min(self.previous_keypoint_distance, 1.5)
         info.update(self._contract_info())
         info.update(self._geometry_info(geometry))
         info.update(self._self_geometry_info(self_geometry))
@@ -899,20 +648,13 @@ class ThesisHomotopyEnv(gym.Env):
         action = np.clip(action, -self.action_limit, self.action_limit)
         q_before, qdot_before = self.robot.joint_state()
         lower, upper = self.robot.joint_lower_limits, self.robot.joint_upper_limits
-        if self.reference_dynamics_contract:
-            target_positions = np.clip(action, lower, upper)
-            projection_info = {
-                "projection_applied": False,
-                "projection_iterations": 0,
-                "projection_max_violation_before": 0.0,
-                "projection_max_violation_after": 0.0,
-            }
-        else:
-            # The policy predicts absolute angles. Safety-QP still operates on
-            # the implied displacement, preserving S1/S2 projection semantics.
-            requested = np.clip(action, lower + self.joint_target_margin, upper - self.joint_target_margin)
-            delta, projection_info = self._project_self_safe_command(requested - q_before)
-            target_positions = np.clip(q_before + delta, lower + self.joint_target_margin, upper - self.joint_target_margin)
+        target_positions = np.clip(action, lower, upper)
+        projection_info = {
+            "projection_applied": False,
+            "projection_iterations": 0,
+            "projection_max_violation_before": 0.0,
+            "projection_max_violation_after": 0.0,
+        }
         contact_seen_before = self.obstacle_contact_seen
         obstacle_collision = False
         self_collision = False
@@ -928,8 +670,6 @@ class ThesisHomotopyEnv(gym.Env):
         max_joint_limit_violation = 0.0
 
         for _ in range(self.substeps):
-            if not self.simple_reaching_mode:
-                self._advance_obstacle()
             p.setJointMotorControlArray(
                 self.robot_id,
                 self.robot.joint_ids,
@@ -951,8 +691,6 @@ class ThesisHomotopyEnv(gym.Env):
                     or np.any(q_now > upper + self.joint_limit_tolerance)
                 )
                 max_joint_limit_violation = max(max_joint_limit_violation, float(np.max(lower - q_now)), float(np.max(q_now - upper)))
-                if joint_limit and not self.reference_dynamics_contract:
-                    break
                 continue
             geometry = self._geometry()
             if geometry is not None:
@@ -981,70 +719,29 @@ class ThesisHomotopyEnv(gym.Env):
         observation, info, endpoint_geometry, endpoint_self_geometry, position_error, orientation_error = self._observe()
         next_rho_position = float(np.linalg.norm(position_error))
         next_rho_orientation = float(np.linalg.norm(orientation_error))
-        next_keypoint_distances = np.asarray(
-            info["keypoint_distances"], dtype=np.float32
+        next_reference_point_distances = np.asarray(
+            info["reference_point_distances"], dtype=np.float32
         )
-        next_keypoint_distance = float(
-            0.6 * np.mean(next_keypoint_distances)
-            + 0.4 * np.max(next_keypoint_distances)
-        )
-        keypoint_progress = float(
-            self.previous_keypoint_distance - next_keypoint_distance
-        )
-        keypoint_tracking_quality = float(np.mean(np.exp(
-            -next_keypoint_distances
-            / float(self.reward_parameters.get("keypoint_tracking_sigma", 0.03))
-        )))
         hard_failure = bool(self_collision or environment_collision or joint_limit)
         obstacle_failure = bool(obstacle_collision and self.contract.strict_obstacle_collision and not hard_failure)
-        if self.simple_reaching_mode:
-            # S0 is a pure reaching benchmark: safety/collision shaping and
-            # collision termination belong to S1/S2 only.
-            hard_failure = bool(joint_limit)
-            obstacle_failure = False
-            if self.reward_mode != "reference_ppo":
-                obstacle_collision = False
-                environment_collision = False
-        if self.reference_dynamics_contract:
-            # The reference main experiment penalizes contact but does not end
-            # the episode on collision; only task completion ends an episode.
-            if self.reward_mode == "reference_ppo":
-                obstacle_collision = bool(obstacle_collision or self_collision or environment_collision)
-            hard_failure = False
-            obstacle_failure = False
-        if self.reward_mode == "reference_ppo":
-            reference_error = float(
-                0.5 * np.sum(next_keypoint_distances)
-                + 0.25 * next_rho_orientation
-            )
-            strict_pose_reached = bool(
-                reference_error < self.reference_success_threshold
-            )
-            position_reached = strict_pose_reached
-            self.success_hold_count = int(strict_pose_reached)
-            task_reached = strict_pose_reached
-        else:
-            position_reached = bool(
-                not hard_failure
-                and not obstacle_failure
-                and next_rho_position <= self.contract.position_tolerance
-            )
-            strict_pose_reached = bool(
-                position_reached
-                and next_rho_orientation <= self.contract.orientation_tolerance
-            )
-            task_reached = self._advance_success_hold(strict_pose_reached)
+        # FTP4RM penalizes contact but does not terminate on collision.
+        obstacle_collision = bool(obstacle_collision or self_collision or environment_collision)
+        hard_failure = False
+        obstacle_failure = False
+        reference_error = float(
+            0.5 * np.sum(next_reference_point_distances)
+            + 0.25 * next_rho_orientation
+        )
+        strict_pose_reached = bool(reference_error < self.reference_success_threshold)
+        position_reached = strict_pose_reached
+        self.success_hold_count = int(strict_pose_reached)
+        task_reached = strict_pose_reached
         terminated = bool(
             hard_failure or obstacle_failure
             or (task_reached and self.contract.terminate_on_success)
         )
         timeout = bool(self.step_count >= self.horizon and not terminated)
-        truncated = bool(timeout and self.reference_dynamics_contract)
-        terminated = bool(terminated or (timeout and not self.reference_dynamics_contract))
-        if self.reward_mode != "reference_ppo":
-            # _observe ran before advancing the hold counter; expose the
-            # post-transition Markov state, not the previous hold count.
-            observation[-2:] = [max(0.0, (self.horizon - self.step_count) / self.horizon), min(1.0, self.success_hold_count / self.success_hold_steps)]
+        truncated = bool(timeout)
         _, qdot_after = self.robot.joint_state()
         # Average across joints before the bounded reward mapping. Summing six
         # normalized squared changes made the smoothness term saturate on
@@ -1072,60 +769,14 @@ class ThesisHomotopyEnv(gym.Env):
             self_min_distance = self.self_query_distance
             self_min_ttc = self.self_ttc_max
             self_max_approach = 0.0
-        episode_reward_parameters = dict(self.reward_parameters)
-        if bool(self.config["thesis"]["reward"].get(
-            "use_episode_tolerance_for_joint_precision", False
-        )):
-            episode_reward_parameters["joint_position_tolerance"] = (
-                self.contract.position_tolerance
-            )
-            episode_reward_parameters["joint_orientation_tolerance"] = (
-                self.contract.orientation_tolerance
-            )
-        reward, reward_fields = homotopy_reward(
-            rho_position=self.previous_rho_position,
-            next_rho_position=next_rho_position,
-            rho_orientation=self.previous_rho_orientation,
-            next_rho_orientation=next_rho_orientation,
-            orientation_tolerance=self.contract.orientation_tolerance,
-            smooth_velocity=smooth_velocity,
-            velocity_magnitude=velocity_magnitude,
-            orientation_scale=self.contract.orientation_scale,
-            task_reached=task_reached,
-            hard_failure=hard_failure,
-            timeout=timeout,
-            obstacle_collision=obstacle_collision,
-            terminal_obstacle_collision=obstacle_failure,
-            risk_max=max_risk,
-            distance_min=min_distance,
-            xi=self.contract.xi if self.contract.scene != "none" else 1.0,
-            self_risk_max=self_max_risk,
-            self_distance_min=self_min_distance,
-            lambda_self=0.0 if self.simple_reaching_mode else self.contract.lambda_self,
-            gamma=float(self.config["ppo"]["gamma"]),
-            horizon=self.horizon,
-            position_tolerance=self.contract.position_tolerance,
-            keypoint_tracking_quality=keypoint_tracking_quality,
-            keypoint_distance=self.previous_keypoint_distance,
-            next_keypoint_distance=next_keypoint_distance,
-            keypoint_best_distance=self.best_keypoint_distance,
-            reference_error=float(0.5 * np.sum(next_keypoint_distances) + 0.25 * next_rho_orientation),
-            # An empty tuple means there is no obstacle.  The three zero
-            # observation slots are presence sentinels, not zero clearances.
-            reference_obstacle_clearances=()
-            if self.reward_mode == "reference_ppo"
-            else (float(min_distance),) * 3,
-            **episode_reward_parameters,
+        reward, reward_fields = reference_ppo_reward(
+            reference_error=reference_error,
+            collision=obstacle_collision,
+            obstacle_clearances=(),
+            obstacle_threshold=self.reward_parameters["reference_obstacle_threshold"],
+            collision_penalty=self.reward_parameters["reference_collision_penalty"],
         )
-        self_collision_step_penalty = (
-            -1.0
-            if self.simple_reaching_mode
-            and self.reward_mode != "reference_ppo"
-            and self_collision
-            and not (terminated or truncated)
-            else 0.0
-        )
-        reward += self_collision_step_penalty
+        self_collision_step_penalty = 0.0
         collision_assisted_reach = bool(task_reached and self.obstacle_contact_seen)
         safe_success = bool(task_reached and not self.obstacle_contact_seen and not hard_failure)
         cost = float(
@@ -1197,10 +848,6 @@ class ThesisHomotopyEnv(gym.Env):
         )
         self.previous_rho_position = next_rho_position
         self.previous_rho_orientation = next_rho_orientation
-        self.previous_keypoint_distance = next_keypoint_distance
-        self.best_keypoint_distance = float(
-            reward_fields["keypoint_best_distance_after"]
-        )
         return observation, reward, cost, terminated, truncated, info
 
     def _sample_valid_reset(self) -> None:
@@ -1579,8 +1226,6 @@ class ThesisHomotopyEnv(gym.Env):
             "success_hold_count": self.success_hold_count,
             "previous_rho_position": self.previous_rho_position,
             "previous_rho_orientation": self.previous_rho_orientation,
-            "previous_keypoint_distance": self.previous_keypoint_distance,
-            "best_keypoint_distance": self.best_keypoint_distance,
             "rng_state": self.rng.bit_generator.state,
         }
 
@@ -1638,19 +1283,9 @@ class ThesisHomotopyEnv(gym.Env):
         self.obstacle_contact_seen = bool(state["obstacle_contact_seen"])
         self.previous_rho_position = float(state["previous_rho_position"])
         self.previous_rho_orientation = float(state["previous_rho_orientation"])
-        saved_keypoint_distance = state.get("previous_keypoint_distance")
-        self.previous_keypoint_distance = float(saved_keypoint_distance or 0.0)
-        self.best_keypoint_distance = float(state.get("best_keypoint_distance", 1.5))
         self.rng.bit_generator.state = state["rng_state"]
         p.performCollisionDetection(physicsClientId=self.client_id)
         observation, info, *_ = self._observe()
-        if saved_keypoint_distance is None:
-            keypoint_distances = np.asarray(info["keypoint_distances"], dtype=np.float32)
-            self.previous_keypoint_distance = float(
-                0.6 * np.mean(keypoint_distances) + 0.4 * np.max(keypoint_distances)
-            )
-        if "best_keypoint_distance" not in state:
-            self.best_keypoint_distance = min(self.previous_keypoint_distance, 1.5)
         return observation
 
     def reset_bad_state(self, center: dict[str, Any], contract: dict[str, Any]):
@@ -1713,10 +1348,6 @@ class ThesisHomotopyEnv(gym.Env):
             self.success_hold_count = 0
             self.previous_rho_position = float(info["goal_error_norm"])
             self.previous_rho_orientation = float(info["orientation_error_norm"])
-            keypoint_distances = np.asarray(info["keypoint_distances"], dtype=np.float32)
-            self.previous_keypoint_distance = float(
-                0.6 * np.mean(keypoint_distances) + 0.4 * np.max(keypoint_distances)
-            )
             info.update(self._contract_info())
             info.update(self._geometry_info(geometry))
             info.update(self._self_geometry_info(self_geometry))
@@ -1758,70 +1389,24 @@ class ThesisHomotopyEnv(gym.Env):
         position_error, orientation_error = pose_error(
             self.goal_position, self.goal_quaternion, ee_position, ee_quaternion
         )
-        if self.observation_variant == "reference_ppo":
-            keypoint_errors = reference_pose_keypoint_errors(
-                self.goal_position, self.goal_quaternion,
-                ee_position, ee_quaternion,
-                offset_m=self.reference_keypoint_offset_m,
-            )
-        else:
-            keypoint_errors = pose_keypoint_errors(
-                self.goal_position, self.goal_quaternion,
-                ee_position, ee_quaternion,
-                cube_side_m=self.keypoint_cube_side_m,
-            )
-        keypoint_distances = np.linalg.norm(keypoint_errors, axis=1).astype(np.float32)
-        ee_jacobian = None
-        keypoint_jacobian = None
-        jacobian_clip_ratio = 0.0
-        if (
-            self.observation_variant == "kp_compact"
-            and self.keypoint_jacobian_pose
-            and not self.simple_reaching_mode
-        ):
-            ee_jacobian = self.robot.end_effector_jacobian()
-            keypoint_jacobian = keypoint_position_jacobian(
-                ee_jacobian, ee_quaternion,
-                cube_side_m=self.keypoint_cube_side_m,
-            )
-            jacobian_clip_ratio = float(np.mean(
-                np.abs(keypoint_jacobian / self.keypoint_jacobian_scale) > 1.0
-            ))
+        point_errors = reference_point_errors(
+            self.goal_position,
+            self.goal_quaternion,
+            ee_position,
+            ee_quaternion,
+            offset_m=self.reference_point_offset_m,
+        )
+        point_distances = np.linalg.norm(point_errors, axis=1).astype(np.float32)
         geometry = self._geometry()
         self_geometry = self._self_geometry()
-        observation_self_geometry = None if self.simple_reaching_mode else self_geometry
-        observation = build_thesis_observation(
+        observation = build_reference_observation(
             q=q,
-            qdot=qdot,
-            joint_lower=self.robot.joint_lower_limits,
-            joint_upper=self.robot.joint_upper_limits,
-            joint_velocity_scale=self.qdot_observation_scale,
             ee_position=ee_position,
             ee_quaternion=ee_quaternion,
-            ee_linear_velocity=ee_linear_velocity,
-            ee_angular_velocity=ee_angular_velocity,
-            ee_linear_velocity_scale=self.ee_linear_velocity_scale,
-            ee_angular_velocity_scale=self.ee_angular_velocity_scale,
             goal_position=self.goal_position,
             goal_quaternion=self.goal_quaternion,
-            position_error=position_error,
             orientation_error=orientation_error,
-            obstacle_present=self.obstacle_id is not None,
-            obstacle_position=self.obstacle_position,
-            obstacle_velocity=self.obstacle_velocity,
-            geometry=geometry,
-            self_geometry=observation_self_geometry,
-            include_orientation_error_vector=self.include_orientation_error_vector,
-            keypoint_jacobian_pose=self.keypoint_jacobian_pose,
-            hybrid_explicit_pose_error=self.hybrid_explicit_pose_error,
-            ablation_variant=self.observation_variant,
-            keypoint_cube_side_m=self.keypoint_cube_side_m,
-            reference_keypoint_offset_m=self.reference_keypoint_offset_m,
-            keypoint_error_scale_m=self.keypoint_error_scale_m,
-            keypoint_jacobian=keypoint_jacobian,
-            keypoint_jacobian_scale=self.keypoint_jacobian_scale,
-            remaining_time_fraction=max(0.0, (self.horizon - self.step_count) / self.horizon),
-            success_hold_fraction=min(1.0, self.success_hold_count / self.success_hold_steps),
+            reference_point_offset_m=self.reference_point_offset_m,
         )
         info = {
             "goal_sampling_mode": (
@@ -1840,15 +1425,8 @@ class ThesisHomotopyEnv(gym.Env):
             "goal_error_norm": float(np.linalg.norm(position_error)),
             "orientation_error_norm": float(np.linalg.norm(orientation_error)),
             "orientation_error_vector": orientation_error.copy(),
-            "keypoint_errors": keypoint_errors.copy(),
-            "keypoint_distances": keypoint_distances.copy(),
-            "jacobian_clip_ratio": jacobian_clip_ratio,
-            # The hybrid/keypoint observation already computes this matrix.
-            # Exposing it in ``info`` lets offline evaluators inspect how the
-            # executed joint velocity is used without paying for a second
-            # PyBullet Jacobian query.  Parallel evaluators opt in explicitly
-            # through ``step_info_keys``, so normal training IPC is unchanged.
-            "ee_jacobian": None if ee_jacobian is None else ee_jacobian.copy(),
+            "reference_point_errors": point_errors.copy(),
+            "reference_point_distances": point_distances.copy(),
         }
         return observation, info, geometry, self_geometry, position_error, orientation_error
 
@@ -1869,27 +1447,11 @@ class ThesisHomotopyEnv(gym.Env):
             self.goal_position, self.goal_quaternion,
             ee_position, ee_quaternion,
         )
-        keypoint_errors = pose_keypoint_errors(
-            self.goal_position, self.goal_quaternion,
-            ee_position, ee_quaternion,
-            cube_side_m=self.keypoint_cube_side_m,
-        )
-        keypoint_distance = float(np.mean(np.linalg.norm(keypoint_errors, axis=1)))
         ee_jacobian = np.asarray(
             self.robot.end_effector_jacobian(), dtype=np.float64,
         )
-        keypoint_jacobian = np.asarray(
-            keypoint_position_jacobian(
-                ee_jacobian, ee_quaternion,
-                cube_side_m=self.keypoint_cube_side_m,
-            ),
-            dtype=np.float64,
-        )
         ee_singular_values = np.linalg.svd(
             ee_jacobian, compute_uv=False,
-        )
-        keypoint_singular_values = np.linalg.svd(
-            keypoint_jacobian, compute_uv=False,
         )
         self_distance = float(self._self_geometry().distance_min)
         return {
@@ -1900,7 +1462,6 @@ class ThesisHomotopyEnv(gym.Env):
             )),
             "rho_position": float(np.linalg.norm(position_error)),
             "rho_orientation": float(np.linalg.norm(orientation_error)),
-            "keypoint_distance": keypoint_distance,
             "joint_positions": q.tolist(),
             "joint_limit_margin_min_rad": float(np.min(margins)),
             "joint_limit_margin_mean_rad": float(np.mean(margins)),
@@ -1916,22 +1477,6 @@ class ThesisHomotopyEnv(gym.Env):
             "ee_manipulability": float(np.prod(ee_singular_values)),
             "ee_log_manipulability": float(np.sum(np.log(
                 np.maximum(ee_singular_values, 1.0e-12)
-            ))),
-            "keypoint_jacobian_sigma_min": float(
-                np.min(keypoint_singular_values)
-            ),
-            "keypoint_jacobian_sigma_max": float(
-                np.max(keypoint_singular_values)
-            ),
-            "keypoint_jacobian_condition_number": float(
-                np.max(keypoint_singular_values)
-                / max(float(np.min(keypoint_singular_values)), 1.0e-12)
-            ),
-            "keypoint_manipulability": float(
-                np.prod(keypoint_singular_values)
-            ),
-            "keypoint_log_manipulability": float(np.sum(np.log(
-                np.maximum(keypoint_singular_values, 1.0e-12)
             ))),
             "self_distance": self_distance,
         }

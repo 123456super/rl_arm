@@ -76,16 +76,12 @@ def collect(config, agent, count, env_count, seed, episode_fraction):
                 print(f"  collected {(t+1)*env_count}/{count}", flush=True)
     arrays = {key: np.asarray(value, dtype=np.float32) for key, value in rollout.items()}
     next_values = agent.predict_values(arrays["next_obs"].reshape(-1, agent.obs_dim)).reshape(-1, env_count)
-    if agent.reference_ppo:
-        mean_logp = arrays["logp"] / agent.action_dim
-        # Branch explicitly: np.where would eagerly exponentiate positive inputs.
-        gammas = np.empty_like(mean_logp)
-        positive = mean_logp > 0
-        gammas[positive] = np.tanh(.1 * mean_logp[positive])
-        gammas[~positive] = np.exp(mean_logp[~positive])
-        gammas = np.clip(gammas, .6, .99)
-    else:
-        gammas = np.full_like(arrays["rewards"], agent.gamma)
+    mean_logp = arrays["logp"] / agent.action_dim
+    gammas = np.empty_like(mean_logp)
+    positive = mean_logp > 0
+    gammas[positive] = np.tanh(.1 * mean_logp[positive])
+    gammas[~positive] = np.exp(mean_logp[~positive])
+    gammas = np.clip(gammas, .6, .99)
     adv, targets = TRAINER.compute_gae(arrays["rewards"], arrays["values"], next_values,
                                        arrays["terminated"], arrays["dones"], gammas, agent.gae_lambda)
     batch = dict(obs=arrays["obs"].reshape(-1, agent.obs_dim),
@@ -206,13 +202,12 @@ def paired_update(config, state, batch, normalize, clip, shuffle_seed, directory
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
-    parser.add_argument("--keypoint-checkpoint", default="outputs/ppo/s0_keypoint_absolute_v2_2m_seed11001/checkpoints/step_2000000.pt")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--reuse-batches-from", help="Reuse compatible frozen batches from a previous diagnostic run")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--transitions", type=int, default=4096)
     parser.add_argument("--shuffle-seeds", type=int, nargs="+", default=[21001, 21002, 21003])
-    parser.add_argument("--cases", nargs="+", default=["reference_initial", "reference_narrow_std_stress", "keypoint_initial", "keypoint_trained"])
+    parser.add_argument("--cases", nargs="+", default=["reference_initial", "reference_narrow_std_stress"])
     args = parser.parse_args()
     torch.set_num_threads(1)
     output = Path(args.output_dir)
@@ -223,22 +218,16 @@ def main():
                "device": args.device, "epochs": 10, "minibatch_size": 1024, "target_kl": .02, "cases": {}}
     variants = [(False, None), (True, None), (False, .5), (True, .5), (True, 5.), (True, 50.)]
     for case in args.cases:
-        reference = case.startswith("reference")
-        if case not in {"reference_initial", "reference_narrow_std_stress", "keypoint_initial", "keypoint_trained"}:
+        if case not in {"reference_initial", "reference_narrow_std_stress"}:
             raise ValueError(f"unknown case: {case}")
         seed_all(11001)
         config = deepcopy(base_config)
         config["device"] = args.device
         config["thesis"].update(simple_reaching_mode=True, blocking_obstacle_mode=False, stage="s0")
-        config["thesis"]["reward"]["reward_mode"] = "reference_ppo" if reference else "keypoint"
+        config["thesis"]["reward"]["reward_mode"] = "reference_ppo"
         config["ppo"].update(epochs=10, minibatch_size=1024, target_kl=.02)
-        config["ppo"]["keypoint"].update(epochs=10, minibatch_size=1024, target_kl=.02)
-        agent = ThesisPPOAgent(25 if reference else 38, 6, config)
+        agent = ThesisPPOAgent(25, 6, config)
         source = "fresh initialization"
-        if case == "keypoint_trained":
-            source = str(Path(args.keypoint_checkpoint).resolve())
-            saved = torch.load(source, map_location="cpu", weights_only=False)
-            agent.load_state_dict(saved["agent"])
         if case == "reference_narrow_std_stress":
             source = "fresh mean/value weights with std forced to .035 rad; stress test, NOT a trained reference checkpoint"
             with torch.no_grad():
@@ -261,7 +250,7 @@ def main():
             print(f"CASE {case}: reusing {reused}", flush=True)
         else:
             print(f"CASE {case}: collecting frozen real rollout", flush=True)
-            batch, collection = collect(config, agent, args.transitions, 1 if reference else 8, 31001,
+            batch, collection = collect(config, agent, args.transitions, 1, 31001,
                                         .5 if case == "reference_narrow_std_stress" else 0.)
         case_dir = output / case
         case_dir.mkdir()

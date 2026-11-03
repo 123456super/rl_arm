@@ -1,8 +1,8 @@
-"""Compact-keypoint task definitions for the serial thesis protocol."""
+"""Reference-PPO reaching task definitions."""
 
-from rl_risk_sac.tasks.thesis_reaching_reduced_observation import (
-    build_thesis_observation,
-    homotopy_reward,
+from rl_risk_sac.tasks.reference_reaching import (
+    build_reference_observation,
+    reference_ppo_reward,
 )
 
-__all__ = ["build_thesis_observation", "homotopy_reward"]
+__all__ = ["build_reference_observation", "reference_ppo_reward"]

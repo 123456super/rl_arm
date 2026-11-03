@@ -9,10 +9,7 @@ from typing import Any, Collection
 import numpy as np
 
 def _environment_class(config: dict[str, Any]):
-    """Return the sole supported compact-keypoint environment."""
-    variant = str(config.get("thesis", {}).get("observation", {}).get("ablation_variant", ""))
-    if variant != "kp_compact":
-        raise ValueError("the PPO trainer requires thesis.observation.ablation_variant=kp_compact")
+    """Return the sole supported reference-PPO environment."""
     from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import ThesisHomotopyEnv
     return ThesisHomotopyEnv
 

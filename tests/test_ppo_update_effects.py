@@ -34,7 +34,6 @@ class PPOUpdateEffectsTests(unittest.TestCase):
         self.config["device"] = "cpu"
         self.config["thesis"]["reward"]["reward_mode"] = "reference_ppo"
         self.config["ppo"].update(hidden_dims=[16, 16], epochs=1, minibatch_size=8)
-        self.config["ppo"]["reference"].update(epochs=1, minibatch_size=8)
         EFFECTS.seed_all(42)
         self.agent = ThesisPPOAgent(25, 6, self.config)
         obs = np.random.default_rng(42).normal(0, .1, (8, 25)).astype(np.float32)

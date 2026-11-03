@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import ThesisHomotopyEnv
-from rl_risk_sac.tasks.thesis_reaching_reduced_observation import pose_error
+from rl_risk_sac.tasks.reference_reaching import pose_error
 from rl_risk_sac.utils.config import load_config
 
 
@@ -124,12 +124,9 @@ def main() -> None:
     parser.add_argument("--samples", type=int, default=1000)
     parser.add_argument("--control-trials", type=int, default=20)
     parser.add_argument("--seed", type=int, default=31001)
-    parser.add_argument("--reward-mode", choices=("keypoint", "reference_ppo"), default=None)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     config = load_config(ROOT / args.config)
-    if args.reward_mode is not None:
-        config["thesis"]["reward"]["reward_mode"] = args.reward_mode
     report = audit(config, samples=args.samples,
                    control_trials=args.control_trials, seed=args.seed)
     output = json.dumps(report, ensure_ascii=False, indent=2)

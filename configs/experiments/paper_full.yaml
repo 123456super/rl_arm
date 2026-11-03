@@ -1,14 +1,17 @@
-Full method: compact keypoint observation with PPO and S0/S1/S2 curriculum.
+# Reference PPO obstacle-free reaching experiment.
 includes:
-- ../default.yaml
-- paper_auto_promotion_protocol.yaml
+  - ../default.yaml
+
 seed: 11001
 device: cuda:auto
+
 robot:
   tool_link_name: wrist_3_link
+
 thesis:
-  protocol: task_space_precision_curriculum_hybrid_keypoint_jacobian_auto_chain_pcr
-  simple_reaching_mode: false
+  protocol: reference_ppo_reaching
+  simple_reaching_mode: true
+  blocking_obstacle_mode: false
   stage: s0
   physics_dt: 0.004166666666666667
   control_dt: 0.4166666666666667
@@ -17,7 +20,7 @@ thesis:
   joint_target_margin_rad: 0.02
   joint_limit_tolerance_rad: 0.001
   qdot_observation_scale: 0.8
-  success_hold_steps: 5
+  success_hold_steps: 1
   ee_linear_velocity_scale: 0.55
   ee_angular_velocity_scale: 1.5
   joint_motor_force: 90.0
@@ -27,446 +30,81 @@ thesis:
   position_tolerance: 0.01
   orientation_tolerance: 0.1
   goal_sample_max_attempts: 10000
-  # Reuse reference_ppo's fixed target orientation and xyztorus proposals.
-  # Both reward modes share the bent home, IK-validated goals and success criteria.
-  # Joint order: shoulder_pan, shoulder_lift, elbow, wrist_1, wrist_2, wrist_3.
+
   fixed_orientation_goal:
     enabled: true
     euler_rad: [0.0, 1.57, 1.57]
-    # Degrees: [45, -90, 90, 0, 45, -90].
-    initial_joint_positions_rad: [0.7853981633974483, -1.5707963267948966, 1.5707963267948966, 0.0, 0.7853981633974483, -1.5707963267948966]
-  # Settings used only by the obstacle-free reference_ppo baseline.  The
-  # initial joint pose and goal sampler above intentionally remain ours.
+    initial_joint_positions_rad:
+      [0.7853981633974483, -1.5707963267948966, 1.5707963267948966, 0.0, 0.7853981633974483, -1.5707963267948966]
+
   reference_ppo:
     success_threshold: 1.0e-4
     gravity: [0.0, 0.0, -10.0]
     motor_forces: [150.0, 150.0, 150.0, 28.0, 28.0, 28.0]
-    # Infinite mounting plane. Normal base/mount contact is ignored, while a
-    # moving arm link touching the plane receives the reference -1 penalty.
     mounting_plane:
       enabled: true
       height_m: 0.0
       ignored_link_names: [base_link, base_link_inertia]
-  ramp_steps: 50000
-  strict_min_transitions: 25000
-  serial_stages:
-    s0:
-      purpose: reaching
-      scene_probabilities:
-        none: 1.0
-        static: 0.0
-        dynamic: 0.0
-      completion: final_p5_probe_and_p4_retention_plus_self_safety
-    s1:
-      purpose: static_obstacle_avoidance
-      scene_probabilities:
-        none: 0.25
-        static: 0.75
-        dynamic: 0.0
-      completion: static_strict_replay_and_25000_strict_transitions
-    s2:
-      purpose: dynamic_obstacle_avoidance
-      scene_probabilities:
-        none: 0.2
-        static: 0.3
-        dynamic: 0.5
-      completion: dynamic_strict_replay_and_25000_strict_transitions
+
   self_collision:
     safe_distance_m: 0.005
     query_distance_m: 0.25
     ttc_max_s: 3.0
     approach_velocity_scale: 0.7
     ttc_tau_s: 1.0
-    curriculum:
-      start_weight: 0.2
-      end_weight: 1.0
-      ramp_steps: 50000
-      full_weight_min_transitions: 25000
-      probe_collision_ceiling: 0.01
+
   self_safety_projection:
-    enabled: true
+    enabled: false
     activation_distance_m: 0.05
     gain: 5.0
     fd_epsilon: 0.001
     max_iterations: 16
     eps: 1.0e-08
     violation_tolerance: 1.0e-06
-  goal_curriculum:
-    start_scale: 1.0
-    end_scale: 1.0
-    legacy_levels:
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    min_transitions_per_level: 0
-    success_window: 100
-    success_floor: 0.85
-    full_scale_min_transitions: 0
-  orientation_curriculum:
-    start_scale: 1.0
-    end_scale: 1.0
-    legacy_levels:
-    - 0.0
-    - 0.25
-    - 0.5
-    - 0.75
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    - 1.0
-    tolerance_start: 0.1
-    tolerance_end: 0.1
-    min_transitions_per_level: 0
-    success_window: 100
-    success_floor: 0.85
-    anchor_probability: 0.0
-    anchor_probability_intermediate: 0.0
-    anchor_probability_recovery: 0.0
-    anchor_success_window: 100
-    anchor_success_floor: 0.9
-    retention_target: 0.95
-    retention_min_observations: 20
-    deterministic_probe_success_floor: 0.85
-    deterministic_probe_min_seed_success_floor: 0.8
-    deterministic_probe_seed: 31001
-    deterministic_probe_bin_success_floor: 0.6
-    deterministic_probe_position_bins: 10
-    deterministic_probe_orientation_bins: 10
-    deterministic_previous_success_floor: 0.8
-    deterministic_previous_collision_ceiling: 0.1
-    retention_recovery_success_floor: 0.9
-    retention_recovery_collision_ceiling: 0.05
-    deterministic_confirmation_seed: 31001
-    manual_probe_interval_transitions: 25000
-    rollback_patience: 3
-    rollback_success_drop: 0.1
-    rollback_actor_lr_factor: 1.0
-    full_scale_min_transitions: 0
+
   joint_pose_curriculum:
     task_space_sampling:
-      balanced_bins: true
+      balanced_bins: false
       position_bins: 10
       orientation_bins: 10
       reset_max_attempts: 32
-      history_probability: 0.5
-      fixed_orientation_mixture:
-        enabled: true
-        # Start with easy, near-reference orientations and widen the random
-        # orientation distribution only after stable S0 successes appear.
-        uniform_fraction: 0.10
-        uniform_fraction_final: 0.50
-        success_rate_start: 0.60
-        success_rate_full: 0.85
-        minimum_outcomes: 20
-        orientation_groups:
-        - fraction: 0.50
-          bins:
-          - 0
-          - 1
-          - 2
-        - fraction: 0.50
-          bins:
-          - 3
-          - 4
-      adaptive:
-        enabled: false
-        beta: 0.6
-        improvement_weight: 0.5
-        score_floor: 0.01
-    far_distance_timeout_restarts:
-      enabled: false
-    legacy_levels:
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.1
-      orientation_tolerance_rad: 0.3
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.08
-      orientation_tolerance_rad: 0.24
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.064
-      orientation_tolerance_rad: 0.192
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.0512
-      orientation_tolerance_rad: 0.1536
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.05
-      orientation_tolerance_rad: 0.1
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.025
-      orientation_tolerance_rad: 0.1
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.01
-      orientation_tolerance_rad: 0.1
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.005
-      orientation_tolerance_rad: 0.1
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.0025
-      orientation_tolerance_rad: 0.1
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.002
-      orientation_tolerance_rad: 0.1
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.0015
-      orientation_tolerance_rad: 0.1
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.001
-      orientation_tolerance_rad: 0.1
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.001
-      orientation_tolerance_rad: 0.05
-    - goal_scale: 1.0
-      target_distance_min_m: 0.03
-      target_distance_max_m: 0.5
-      target_orientation_min_rad: 0.03
-      target_orientation_max_rad: 3.141592
-      position_tolerance_m: 0.001
-      orientation_tolerance_rad: 0.025
+
   reward:
-    # Select "keypoint" for the current method or "reference_ppo" for the
-    # dense reward used by the reference PPO main experiment.
-    reward_mode: keypoint
+    reward_mode: reference_ppo
     reference_obstacle_threshold_m: 0.08
     reference_collision_penalty: 1.0
-    position_sigma_m: 0.2
-    micro_power: 4.0
-    fine_position_sigma_m: 0.02
-    fine_orientation_sigma_rad: 0.06
-    fine_position_progress_scale: 1.0
-    fine_orientation_progress_scale: 1.0
-    precision_position_scale_m: 0.03
-    precision_orientation_scale_rad: 0.09
-    accuracy_position_sigma_m: 0.03
-    accuracy_orientation_sigma_rad: 0.09
-    accuracy_reward_scale: 1.0
-    accuracy_progress_scale: 2.0
-    # Reaching reward is driven only by the virtual end-effector keypoints.
-    pose_position_accuracy_weight: 0.0
-    pose_orientation_accuracy_weight: 0.0
-    keypoint_accuracy_weight: 1.0
-    keypoint_absolute_reward_alpha: 1.0e-3
-    keypoint_time_cost: 0.1
-    keypoint_distance_cost_scale: 0.9
-    # Legacy delta/table parameters are disabled; kept for old checkpoint
-    # schemas only.
-    normalized_precision_scale: 0.0
-    keypoint_regression_scale: 0.0
-    precision_stop_cost_weight: 0.0
-    precision_stop_gate_start_m: 0.05
-    precision_stop_gate_full_m: 0.01
-    joint_precision_progress_scale: 0.0
-    joint_precision_temperature: 2.0
-    joint_position_tolerance_m: 0.05
-    joint_orientation_tolerance_rad: 0.1
-    use_episode_tolerance_for_joint_precision: false
-    partial_precision_reward_scale: 0.0
-    leave_tolerance_multiplier: 1.0
-    leave_joint_tolerance_penalty: 0.0
-    hold_reward_scale: 0.0
-    hold_reward_power: 2.0
-    hold_position_outer_m: 0.10
-    hold_orientation_outer_rad: 0.40
-    # Standalone position/orientation progress rewards are disabled.  The
-    # bounded negative keypoint cost is the sole dense reaching signal.
-    position_progress_scale: 0.0
-    orientation_progress_scale: 0.0
-    position_state_cost_weight: 0.02
-    orientation_state_cost_weight: 0.02
-    success_bonus: 100.0
-    strict_hold_reward: 0.0
-    strict_leave_penalty: 0.0
-    velocity_cost_weight: 0.0
-    smooth_cost_weight: 0.0
-    hard_failure_penalty: 250.0
-    timeout_penalty: 50.0
-    safety_risk_weight: 2.0
-    safety_clearance_weight: 8.0
-    self_risk_weight: 2.0
-    self_clearance_weight: 8.0
-    external_safety_scale: 0.0
-    self_safety_scale: 0.0
-    pose_objective: unified_keypoint
-    keypoint_pose_reward: true
-    keypoint_tracking_sigma_m: 0.03
-    keypoint_tracking_scale: 0.05
-    keypoint_progress_scale: 0.0
-    keypoint_precision_reward_scale: 0.0
-    # Retained only for backward-compatible checkpoint/config loading; the
-    # historical-best table is no longer part of the active reward.
-    keypoint_best_table_start_distance_m: 1.5
-    keypoint_best_table_step_m: 0.01
-    keypoint_best_table_reward_base: 0.0
-    keypoint_best_table_reward_slope: 0.0
-    joint_bottleneck_shaping_scale: 0.0
-    joint_bottleneck_temperature: 2.0
-  stable_success:
-    joint_velocity_rms_rad_s: 0.1
-    ee_linear_speed_m_s: 0.02
-    ee_angular_speed_rad_s: 0.1
+
   observation:
-    include_orientation_error_vector: false
-    # Use the compact keypoint observation; remove the 54-D Jacobian.
-    ablation_variant: kp_compact
-    jacobian_actor_only: false
-    keypoint_jacobian_pose: true
-    keypoint_cube_side_m: 0.5
-    # FTP4RM reference mode uses three points offset by 1 mm along the axes.
-    # The 0.5 m pose cube above remains exclusive to the keypoint mode.
-    reference_keypoint_offset_m: 0.001
-    keypoint_error_scale_m: 1.0
-    keypoint_jacobian_scale: 1.1
-    hybrid_explicit_pose_error: true
+    reference_point_offset_m: 0.001
+
 train:
   cpu_affinity: false
-  # Fresh controlled S0 experiments use 3M total transitions. With eight
-  # environments and 512 decisions per environment, every PPO update still
-  # consumes 4096 transitions.
-  total_steps: 3000000
-  max_stage_steps: 3000000
+  total_steps: 1500000
+  max_stage_steps: 1500000
   num_envs: 8
-  actor_initialization_critic_warmup_transitions: 5000
   save_interval: 25000
   progress_interval: 1000
   log_flush_interval: 100
   update_log_interval: 10
-  output_dir: outputs/retrain_20261013/full
-  plateau:
-    comparison_blocks: 2
-    min_current_episodes_per_block: 100
-    min_anchor_episodes_per_block: 50
-    safe_success_delta: 0.02
-    self_collision_delta: 0.01
-    timeout_delta: 0.02
-    anchor_success_delta: 0.01
-    probe_success_delta: 0.02
-    probe_collision_delta: 0.01
-    probe_timeout_delta: 0.02
-    position_error_delta_m: 0.005
-    orientation_error_delta_rad: 0.03
-    probe_position_error_delta_m: 0.005
-    probe_orientation_error_delta_rad: 0.03
-    q_abs_limit: 1000.0
-    critic_loss_limit: 1000.0
-    divergence_ratio: 5.0
-# PPO is the active training algorithm for scripts/core/train_thesis_ppo.py.
+  output_dir: outputs/ppo
+
 ppo:
   gamma: 0.99
   gae_lambda: 0.95
   clip_ratio: 0.20
-  epochs: 10
+  epochs: 20
   minibatch_size: 1024
   actor_lr: 3.0e-4
   critic_lr: 3.0e-4
   entropy_coef: 0.01
   value_coef: 1.0
-  normalize_advantage: true
-  # null disables Actor/Critic gradient clipping while retaining finite checks
-  # and raw gradient-norm logging.
+  normalize_advantage: false
   max_grad_norm: null
-  target_kl: 0.05
+  target_kl: null
   max_abs_log_ratio: 20.0
   action_std_init: 1.0
-  # Linear decay across the complete 3M-transition run. Both controlled S0
-  # modes use this same schedule and reach zero at the final update.
   lr_decay: true
   actor_lr_final: 0.0
   critic_lr_final: 0.0
   adaptive_kl_lr: false
   hidden_dims: [256, 256]
-  # Main-experiment settings from reference code/FTP4RM.  Numerical finite
-  # checks remain enabled, but do not alter a finite update.
-  reference:
-    epochs: 20
-    minibatch_size: 1024
-    normalize_advantage: false
-    max_grad_norm: null
-    target_kl: null
-    adaptive_kl_lr: false
-    lr_decay: true
-    actor_lr_final: 0.0
-    critic_lr_final: 0.0
-  # S0 uses the base PPO block above for a controlled comparison with
-  # reference_ppo. These overrides apply only to keypoint S1/S2 training.
-  keypoint:
-    action_std_init: 0.20
-    normalize_advantage: true
-    max_grad_norm: 0.5
-    epochs: 10
-    lr_decay: true
-    actor_lr_final: 3.0e-5
-    critic_lr_final: 1.0e-4
-    adaptive_kl_lr: true
-    kl_lr_decrease_factor: 0.5
-    kl_lr_increase_factor: 1.05
-    kl_lr_low_threshold: 0.01
-    kl_lr_low_patience: 10

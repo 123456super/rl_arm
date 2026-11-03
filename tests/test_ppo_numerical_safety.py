@@ -36,14 +36,13 @@ class PPONumericalSafetyTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         torch.manual_seed(10)
 
-    def agent(self, reference=True, device="cpu"):
+    def agent(self, device="cpu"):
         config = load_config(ROOT / "configs/experiments/paper_full.yaml")
         config["device"] = device
-        config["thesis"]["reward"]["reward_mode"] = "reference_ppo" if reference else "keypoint"
-        config["ppo"].update(hidden_dims=[16, 16], epochs=3, minibatch_size=8)
-        config["ppo"]["reference"].update(epochs=3, minibatch_size=8, target_kl=.02)
-        config["ppo"]["keypoint"].update(epochs=3, minibatch_size=8)
-        return ThesisPPOAgent(25 if reference else 38, 6, config)
+        config["ppo"].update(
+            hidden_dims=[16, 16], epochs=3, minibatch_size=8, target_kl=.02
+        )
+        return ThesisPPOAgent(25, 6, config)
 
     def batch(self, agent):
         obs = np.random.default_rng(10).normal(0, .1, (8, agent.obs_dim)).astype(np.float32)
@@ -79,27 +78,19 @@ class PPONumericalSafetyTests(unittest.TestCase):
         self.assertIn("rng_state", data)
         return data
 
-    def test_reference_and_keypoint_optimizer_defaults(self):
-        for reference in (True, False):
-            config = load_config(ROOT / "configs/experiments/paper_full.yaml")
-            config["device"] = "cpu"
-            config["ppo"]["hidden_dims"] = [16, 16]
-            config["thesis"]["reward"]["reward_mode"] = "reference_ppo" if reference else "keypoint"
-            agent = ThesisPPOAgent(25 if reference else 38, 6, config)
-            if reference:
-                self.assertFalse(agent.normalize_advantage)
-                self.assertIsNone(agent.max_grad_norm)
-                self.assertEqual(agent.epochs, 20)
-                self.assertIsNone(agent.target_kl)
-            else:
-                self.assertTrue(agent.normalize_advantage)
-                self.assertEqual(agent.max_grad_norm, .5)
-                self.assertEqual(agent.epochs, 10)
-                self.assertEqual(agent.target_kl, .05)
-            self.assertEqual(agent.max_abs_log_ratio, 20)
+    def test_reference_optimizer_defaults(self):
+        config = load_config(ROOT / "configs/experiments/paper_full.yaml")
+        config["device"] = "cpu"
+        config["ppo"]["hidden_dims"] = [16, 16]
+        agent = ThesisPPOAgent(25, 6, config)
+        self.assertFalse(agent.normalize_advantage)
+        self.assertIsNone(agent.max_grad_norm)
+        self.assertEqual(agent.epochs, 20)
+        self.assertIsNone(agent.target_kl)
+        self.assertEqual(agent.max_abs_log_ratio, 20)
 
     def test_disabled_gradient_clipping_still_reports_finite_raw_norms(self):
-        agent = self.agent(reference=True)
+        agent = self.agent()
         batch = self.batch(agent)
         with patch(
             "rl_risk_sac.algorithms.thesis_ppo.nn.utils.clip_grad_norm_",
@@ -166,7 +157,7 @@ class PPONumericalSafetyTests(unittest.TestCase):
         self.assertEqual(list(Path(self.directory.name).glob("*.pt")), [])
 
     def test_post_step_kl_rejects_actor_but_critic_finishes_all_epochs(self):
-        agent = self.agent(reference=False); batch = self.batch(agent)
+        agent = self.agent(); batch = self.batch(agent)
         original = agent._log_prob
         calls = 0
 
@@ -190,16 +181,13 @@ class PPONumericalSafetyTests(unittest.TestCase):
         self.assertEqual(metrics["critic_epochs_completed"], 3)
         self.assertEqual(metrics["stop_epoch"], 1)
         self.same_state(agent.actor.state_dict(), actor_before)
-        # Adam moments from the rejected Actor proposal are rolled back. The
-        # configured adaptive LR is the only intentional optimizer difference.
-        restored_optimizer = deepcopy(agent.actor_optimizer.state_dict())
-        restored_optimizer["param_groups"][0]["lr"] = actor_optimizer_before["param_groups"][0]["lr"]
-        self.same_state(restored_optimizer, actor_optimizer_before)
+        # Adam moments from the rejected Actor proposal are rolled back.
+        self.same_state(agent.actor_optimizer.state_dict(), actor_optimizer_before)
         self.assertTrue(any(
             not torch.equal(value, value_before[key])
             for key, value in agent.value.state_dict().items()
         ))
-        self.assertAlmostEqual(agent.actor_optimizer.param_groups[0]["lr"], 1.5e-4)
+        self.assertAlmostEqual(agent.actor_optimizer.param_groups[0]["lr"], 3.0e-4)
         agent.validate_training_state()
 
     def test_nonfinite_initial_parameter_and_optimizer_state_are_rejected(self):
@@ -297,9 +285,10 @@ class PPONumericalSafetyTests(unittest.TestCase):
     def test_trainer_failure_preserves_diagnostic_and_never_overwrites_checkpoint(self):
         output = Path(self.directory.name) / "trainer-failure"
         checkpoint = output / "checkpoints/step_0000008.pt"
-        info = dict(keypoint_distances=[.1, .1, .1], goal_error_norm=.1,
+        info = dict(reference_point_distances=[.1, .1, .1], goal_error_norm=.1,
                     orientation_error_norm=.2, next_rho_position=.1,
-                    next_rho_orientation=.2, success_hold_count=0)
+                    next_rho_orientation=.2, success_hold_count=0,
+                    reference_error=.2)
 
         class FakeTemplate:
             def __init__(self, config):
@@ -327,7 +316,7 @@ class PPONumericalSafetyTests(unittest.TestCase):
         def bad_logp(agent, obs, actions, std_scale):
             return torch.full((len(obs),), 1000., device=agent.device)
 
-        argv = ["train_thesis_ppo.py", "--reward-mode", "reference_ppo", "--steps", "8",
+        argv = ["train_thesis_ppo.py", "--steps", "8",
                 "--num-envs", "8", "--device", "cpu", "--output-dir", self.directory.name,
                 "--run-name", "trainer-failure"]
         with patch("sys.argv", argv), patch.object(TRAINER, "ParallelThesisEnvPool", FakePool), \

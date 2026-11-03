@@ -95,20 +95,16 @@ class ThesisPPOAgent:
     """
 
     def __init__(self, obs_dim: int, action_dim: int, config: dict[str, Any]) -> None:
-        self.reference_ppo = str(config.get("thesis", {}).get("reward", {}).get("reward_mode", "keypoint")) == "reference_ppo"
-        # S0 is a controlled comparison: keypoint and reference_ppo keep their
-        # own reward/observation, but share every PPO sampling/update setting.
-        self.controlled_s0_contract = bool(
-            config.get("thesis", {}).get("simple_reaching_mode", False)
+        reward_mode = str(
+            config.get("thesis", {}).get("reward", {}).get(
+                "reward_mode", "reference_ppo"
+            )
         )
-        self.reference_training_contract = bool(
-            self.reference_ppo or self.controlled_s0_contract
-        )
+        if reward_mode != "reference_ppo":
+            raise ValueError("ThesisPPOAgent supports only reference_ppo")
+        self.reference_ppo = True
+        self.reference_training_contract = True
         ppo = dict(config.get("ppo", {}))
-        if self.reference_ppo:
-            ppo.update(ppo.get("reference", {}))
-        elif not self.controlled_s0_contract:
-            ppo.update(ppo.get("keypoint", {}))
         self.policy_contract = "ppo_absolute_raw_gaussian_v2"
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -167,7 +163,7 @@ class ThesisPPOAgent:
         ):
             raise ValueError("max_grad_norm must be null or finite and positive")
         self.action_std_init = float(ppo.get("action_std_init", 1.0))
-        self.lr_decay_enabled = self.reference_training_contract or bool(ppo.get("lr_decay", False))
+        self.lr_decay_enabled = bool(ppo.get("lr_decay", True))
         action_limit = float(
             config.get("thesis", {}).get("action_limit_rad", np.pi)
         )
@@ -179,15 +175,15 @@ class ThesisPPOAgent:
         if len(hidden) != 2:
             raise ValueError("reference PPO requires exactly two hidden layers")
         self.actor = mlp(obs_dim, hidden, action_dim, activation="tanh", orthogonal_init=True, output_gain=0.01).to(self.device)
-        if not self.reference_ppo or config.get("thesis", {}).get("fixed_orientation_goal", {}).get("enabled", False):
-            # Absolute control should initially explore around the configured
-            # home, rather than command a jump back to the singular zero pose.
-            home = config.get("thesis", {}).get("fixed_orientation_goal", {}).get("initial_joint_positions_rad", [0.0] * action_dim)
-            ratio = torch.as_tensor(home, dtype=torch.float32, device=self.device) / self.action_limit
-            if ratio.shape != (action_dim,) or bool((ratio.abs() >= 1.0).any()):
-                raise ValueError("fixed home must be strictly inside absolute action bounds")
-            with torch.no_grad():
-                self.actor[-1].bias.copy_(torch.atanh(ratio))
+        # Explore around the configured bent home rather than the singular zero pose.
+        home = config.get("thesis", {}).get("fixed_orientation_goal", {}).get(
+            "initial_joint_positions_rad", [0.0] * action_dim
+        )
+        ratio = torch.as_tensor(home, dtype=torch.float32, device=self.device) / self.action_limit
+        if ratio.shape != (action_dim,) or bool((ratio.abs() >= 1.0).any()):
+            raise ValueError("fixed home must be strictly inside absolute action bounds")
+        with torch.no_grad():
+            self.actor[-1].bias.copy_(torch.atanh(ratio))
         self.actor_log_std = nn.Parameter(torch.full((action_dim,), np.log(self.action_std_init), device=self.device))
         self.value = mlp(obs_dim, hidden, 1, activation="tanh", orthogonal_init=True).to(self.device)
         self.actor_optimizer = torch.optim.Adam(
@@ -224,7 +220,7 @@ class ThesisPPOAgent:
         sample_count = 1
         if deterministic:
             action = dist.mean
-        elif self.reference_training_contract:
+        else:
             # Match the reference main experiment's Gaussian action ensemble:
             # the number of samples grows from 1 to 13 while the averaging
             # probability decreases from 0.5 to 0.
@@ -233,8 +229,6 @@ class ThesisPPOAgent:
             p = float(np.clip(0.5 - 0.5 * fraction, 0.0, 1.0))
             sample_count = int(np.clip(np.random.binomial(n, p), 1, n))
             action = dist.sample((sample_count,)).mean(dim=0)
-        else:
-            action = dist.sample()
         # An average of k independent Normal samples has std / sqrt(k).
         # Store this conditional scale with each transition for correct PPO
         # ratios in the reference ensemble branch as well.
@@ -583,7 +577,7 @@ class ThesisPPOAgent:
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         if state.get("policy_contract") != self.policy_contract or state.get("obs_dim") != self.obs_dim or state.get("reference_ppo") != self.reference_ppo:
-            raise ValueError("incompatible checkpoint: start a new v2 run (absolute actions, corrected sampling, keypoint obs=38)")
+            raise ValueError("incompatible checkpoint: expected the 25-D reference PPO contract")
         _require_finite(state, "checkpoint")
         self.actor.load_state_dict(state["actor"])
         self.actor_log_std.data.copy_(state["actor_log_std"].to(self.device)); self.value.load_state_dict(state["value"])

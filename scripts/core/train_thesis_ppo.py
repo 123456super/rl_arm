@@ -23,7 +23,6 @@ from rl_risk_sac.envs.parallel_thesis_env import ParallelThesisEnvPool
 from rl_risk_sac.utils.config import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
-CONTROLLED_NUM_ENVS = 8
 REFERENCE_NUM_ENVS = 8
 PPO_ROLLOUT_TRANSITIONS = 4096
 REFERENCE_ROLLOUT_LENGTH = PPO_ROLLOUT_TRANSITIONS // REFERENCE_NUM_ENVS
@@ -41,24 +40,23 @@ def compute_gae(rewards, values, next_values, terminated, dones, gammas, gae_lam
 
 
 def episode_stats(info):
-    distances = np.asarray(info["keypoint_distances"])
+    distances = np.asarray(info["reference_point_distances"])
+    reference_error = float(
+        0.5 * distances.sum() + 0.25 * info["orientation_error_norm"]
+    )
     return {
         "return": 0.0, "length": 0, "collision": False, "joint_limit": False,
         "best_position_m": float(info["goal_error_norm"]),
         "best_orientation_rad": float(info["orientation_error_norm"]),
-        "best_keypoint_m": float(0.6 * distances.mean() + 0.4 * distances.max()),
+        "best_reference_error": reference_error,
         "max_hold": 0, "action_clip_fraction": 0.0,
         "dense_reward_sum": 0.0, "terminal_reward_sum": 0.0,
         "self_collision_penalty_sum": 0.0, "joint_limit_violation_max_rad": 0.0,
     }
 
 
-def stage_scene(stage: str, rng: np.random.Generator) -> str:
-    if stage == "s0":
-        return "none"
-    if stage == "s1":
-        return "none" if rng.random() < 0.35 else "static"
-    return rng.choice(["none", "static", "dynamic"], p=[0.20, 0.40, 0.40]).item()
+def stage_scene() -> str:
+    return "none"
 
 
 def make_contract(stage: str, scene: str) -> dict:
@@ -78,13 +76,7 @@ def make_contract(stage: str, scene: str) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train thesis reaching with PPO")
     parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
-    parser.add_argument("--stage", choices=("s0", "s1", "s2"), default="s0")
-    parser.add_argument(
-        "--reward-mode",
-        choices=("keypoint", "reference_ppo"),
-        default=None,
-        help="Reward implementation; default uses the value in the YAML config.",
-    )
+    parser.add_argument("--stage", choices=("s0",), default="s0")
     parser.add_argument("--steps", type=int, default=3_000_000)
     parser.add_argument("--num-envs", type=int, default=None)
     # Controlled PPO collects 4096 transitions per update. With the default
@@ -112,52 +104,20 @@ def main() -> None:
     config["seed"] = args.seed
     if args.device:
         config["device"] = args.device
-    if args.reward_mode is not None:
-        config["thesis"]["reward"]["reward_mode"] = args.reward_mode
-    reference_ppo = config["thesis"]["reward"].get("reward_mode", "keypoint") == "reference_ppo"
-    controlled_s0 = args.stage == "s0"
-    if reference_ppo:
-        if args.stage != "s0":
-            raise ValueError("reference_ppo is an obstacle-free S0 reaching baseline")
-        if args.num_envs not in (None, REFERENCE_NUM_ENVS):
-            raise ValueError(
-                f"reference_ppo requires exactly {REFERENCE_NUM_ENVS} parallel environments"
-            )
-        if args.rollout_length not in (None, REFERENCE_ROLLOUT_LENGTH):
-            raise ValueError(
-                "reference_ppo requires 512 decisions per environment so each "
-                "PPO rollout still contains 4096 transitions"
-            )
-        args.num_envs = REFERENCE_NUM_ENVS
-        args.rollout_length = REFERENCE_ROLLOUT_LENGTH
-    elif controlled_s0:
-        if args.num_envs is None:
-            args.num_envs = CONTROLLED_NUM_ENVS
-        if args.num_envs != CONTROLLED_NUM_ENVS:
-            raise ValueError(
-                f"controlled keypoint S0 training requires exactly {CONTROLLED_NUM_ENVS} environments"
-            )
-        if PPO_ROLLOUT_TRANSITIONS % args.num_envs:
-            raise ValueError("PPO rollout transitions must be divisible by num_envs")
-        # rollout_length is per environment. Eight workers each collect 512
-        # decisions, preserving the reference batch of 4096 transitions.
-        args.rollout_length = PPO_ROLLOUT_TRANSITIONS // args.num_envs
-    else:
-        args.num_envs = args.num_envs or CONTROLLED_NUM_ENVS
-        args.rollout_length = args.rollout_length or (
-            PPO_ROLLOUT_TRANSITIONS // args.num_envs
-        )
-    config["thesis"]["simple_reaching_mode"] = args.stage == "s0"
-    config["thesis"]["blocking_obstacle_mode"] = args.stage in {"s1", "s2"}
+    config["thesis"].setdefault("reward", {})["reward_mode"] = "reference_ppo"
+    if args.num_envs not in (None, REFERENCE_NUM_ENVS):
+        raise ValueError(f"reference PPO requires exactly {REFERENCE_NUM_ENVS} environments")
+    if args.rollout_length not in (None, REFERENCE_ROLLOUT_LENGTH):
+        raise ValueError("reference PPO requires 512 decisions per environment")
+    args.num_envs = REFERENCE_NUM_ENVS
+    args.rollout_length = REFERENCE_ROLLOUT_LENGTH
+    config["thesis"]["simple_reaching_mode"] = True
+    config["thesis"]["blocking_obstacle_mode"] = False
     config["thesis"]["stage"] = args.stage
     random.seed(args.seed); np.random.seed(args.seed); torch.manual_seed(args.seed)
-    rng = np.random.default_rng(args.seed)
     run_name = args.run_name or f"{datetime.now():%Y%m%d_%H%M%S}_{args.stage}_ppo_seed{args.seed}"
     output = ROOT / args.output_dir / run_name
 
-    variant = str(config.get("thesis", {}).get("observation", {}).get("ablation_variant", ""))
-    if variant != "kp_compact":
-        raise ValueError("PPO training requires thesis.observation.ablation_variant=kp_compact")
     from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import ThesisHomotopyEnv
     template = ThesisHomotopyEnv(config)
     obs_dim = int(template.observation_space.shape[0]); action_dim = int(template.action_space.shape[0])
@@ -190,19 +150,19 @@ def main() -> None:
 
     seeds = [args.seed + i * 9973 for i in range(args.num_envs)]
     pool = ParallelThesisEnvPool(config, seeds)
-    scenes = [stage_scene(args.stage, rng) for _ in range(args.num_envs)]
+    scenes = [stage_scene() for _ in range(args.num_envs)]
     obs = np.zeros((args.num_envs, obs_dim), dtype=np.float32)
     episodes = 0; completed_steps = 0; update = 0
     recent = deque(maxlen=100)
     episodes_csv = (output / "episodes.csv").open("w", newline="", encoding="utf-8")
-    fields = ["episode", "step", "run_step", "scene", "return", "length", "success", "collision", "terminal_collision", "timeout", "joint_limit", "termination_reason", "best_position_m", "best_orientation_rad", "best_keypoint_m", "final_position_m", "final_orientation_rad", "final_keypoint_m", "max_hold", "action_clip_fraction", "dense_reward_sum", "terminal_reward_sum", "self_collision_penalty_sum", "joint_limit_violation_max_rad"]
+    fields = ["episode", "step", "run_step", "scene", "return", "length", "success", "collision", "terminal_collision", "timeout", "joint_limit", "termination_reason", "best_position_m", "best_orientation_rad", "best_reference_error", "final_position_m", "final_orientation_rad", "final_reference_error", "max_hold", "action_clip_fraction", "dense_reward_sum", "terminal_reward_sum", "self_collision_penalty_sum", "joint_limit_violation_max_rad"]
     writer = csv.DictWriter(episodes_csv, fieldnames=fields)
     writer.writeheader()
     updates_file = (output / "updates.jsonl").open("w", encoding="utf-8")
     failed = False
     rollout = {}
     kl_stop = None if agent.target_kl is None else 1.5 * agent.target_kl
-    print(f"PPO mode={'reference_ppo' if reference_ppo else 'keypoint'} epochs={agent.epochs} "
+    print(f"PPO mode=reference_ppo epochs={agent.epochs} "
           f"normalize_advantage={agent.normalize_advantage} max_grad_norm={agent.max_grad_norm} "
           f"target_kl={agent.target_kl} kl_stop={kl_stop} "
           f"max_abs_log_ratio={agent.max_abs_log_ratio} "
@@ -243,11 +203,12 @@ def main() -> None:
                     stat["return"] += reward; stat["length"] += 1
                     stat["collision"] |= bool(info.get("collision", False))
                     stat["joint_limit"] |= bool(info.get("joint_limit", False))
-                    ds = np.asarray(info["keypoint_distances"])
-                    distance = float(0.6 * ds.mean() + 0.4 * ds.max())
+                    reference_error = float(info["reference_error"])
                     stat["best_position_m"] = min(stat["best_position_m"], info["next_rho_position"])
                     stat["best_orientation_rad"] = min(stat["best_orientation_rad"], info["next_rho_orientation"])
-                    stat["best_keypoint_m"] = min(stat["best_keypoint_m"], distance)
+                    stat["best_reference_error"] = min(
+                        stat["best_reference_error"], reference_error
+                    )
                     stat["max_hold"] = max(stat["max_hold"], info["success_hold_count"])
                     stat["action_clip_fraction"] += float(np.mean(np.abs(policy_info["raw_actions"][i] - actions[i]) > 1e-6))
                     self_penalty = float(info.get("self_collision_step_penalty", 0.0))
@@ -261,10 +222,10 @@ def main() -> None:
                         row = {**stat, "episode": episodes,
                                "step": initial_global_step + run_step,
                                "run_step": run_step, "scene": scenes[i],
-                               "success": int(info.get("success", False)), "terminal_collision": int(info.get("collision", False)), "timeout": int(info.get("timeout", False)), "termination_reason": info.get("termination_reason", "unknown"), "final_position_m": info["next_rho_position"], "final_orientation_rad": info["next_rho_orientation"], "final_keypoint_m": distance}
+                               "success": int(info.get("success", False)), "terminal_collision": int(info.get("collision", False)), "timeout": int(info.get("timeout", False)), "termination_reason": info.get("termination_reason", "unknown"), "final_position_m": info["next_rho_position"], "final_orientation_rad": info["next_rho_orientation"], "final_reference_error": reference_error}
                         row["collision"] = int(row["collision"]); row["joint_limit"] = int(row["joint_limit"])
                         writer.writerow(row); recent.append(row)
-                        scenes[i] = stage_scene(args.stage, rng)
+                        scenes[i] = stage_scene()
                         reset_one = pool.reset_many({i: make_contract(args.stage, scenes[i])})[i]
                         next_obs[i] = reset_one[0]
                         stats[i] = episode_stats(reset_one[1])
@@ -275,11 +236,12 @@ def main() -> None:
             next_values_rollout = agent.predict_values(next_obs_rollout.reshape(-1, obs_dim))
             next_values_rollout = next_values_rollout.reshape(len(next_obs_rollout), args.num_envs)
             rewards = np.asarray(rollout["rewards"], dtype=np.float32); values = np.asarray(rollout["values"], dtype=np.float32); dones = np.asarray(rollout["dones"], dtype=np.float32); terminated = np.asarray(rollout["terminated"], dtype=np.float32); logp_rollout = np.asarray(rollout["logp"], dtype=np.float32)
-            if agent.reference_training_contract:
-                logp_mean = logp_rollout / float(action_dim)
-                gammas = np.clip(np.where(logp_mean > 0.0, np.tanh(0.1 * logp_mean), np.exp(logp_mean)), 0.6, 0.99)
-            else:
-                gammas = np.full_like(rewards, agent.gamma)
+            logp_mean = logp_rollout / float(action_dim)
+            gammas = np.clip(
+                np.where(logp_mean > 0.0, np.tanh(0.1 * logp_mean), np.exp(logp_mean)),
+                0.6,
+                0.99,
+            )
             adv, value_targets = compute_gae(rewards, values, next_values_rollout, terminated, dones, gammas, agent.gae_lambda)
             batch = {"obs": np.asarray(rollout["obs"], dtype=np.float32).reshape(-1, obs_dim), "actions": np.asarray(rollout["actions"], dtype=np.float32).reshape(-1, action_dim), "std_scale": np.asarray(rollout["std_scale"], dtype=np.float32).reshape(-1, 1), "logp": np.asarray(rollout["logp"], dtype=np.float32).reshape(-1), "advantages": adv.reshape(-1), "returns": value_targets.reshape(-1)}
             # The reference implementation applies its linear schedule after
