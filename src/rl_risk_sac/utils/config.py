@@ -68,7 +68,6 @@ def validate_config(config: dict[str, Any]) -> None:
         ("robot", "joint_names"),
         ("robot", "tool_link_name"),
         ("robot", "reset", "default_joint_positions"),
-        ("robot", "reset", "joint_noise_range"),
         ("robot", "capsules"),
         ("env", "time_step"),
         ("env", "gravity"),
@@ -122,7 +121,7 @@ def validate_config(config: dict[str, Any]) -> None:
         ("risk", "geometry_margin"),
         ("smoothing",),
         ("reward",),
-        ("sac",),
+        ("ppo",),
         ("train",),
         ("eval",),
         ("smoke",),
@@ -222,12 +221,9 @@ def validate_config(config: dict[str, Any]) -> None:
     if not 0.0 <= episode_enable_probability <= 1.0:
         raise ValueError("env.obstacle.episode_enable_probability must be in [0, 1]")
 
-    predictive_risk_penalty = float(config["sac"]["predictive_risk_penalty"])
+    predictive_risk_penalty = float(config.get("ppo", {}).get("predictive_risk_penalty", 0.0))
     if predictive_risk_penalty < 0.0:
-        raise ValueError("sac.predictive_risk_penalty must be non-negative")
-    predictive_penalty_mode = str(config["sac"]["predictive_risk_penalty_mode"])
-    if predictive_penalty_mode not in {"raw", "excess"}:
-        raise ValueError("sac.predictive_risk_penalty_mode must be 'raw' or 'excess'")
+        raise ValueError("ppo.predictive_risk_penalty must be non-negative")
     if float(config["risk"]["geometry_margin"]) < 0.0:
         raise ValueError("risk.geometry_margin must be non-negative")
 

@@ -1,0 +1,407 @@
+                                                                                                                                                                                Application and Evaluation of Soft-Actor Critic
+                                                                                                                                                                               Reinforcement Learning in Constrained Trajectory
+                                                                                                                                                                                   Planning for 6DOF Robotic Manipulators
+2023 29th International Conference on Mechatronics and Machine Vision in Practice (M2VIP) | 979-8-3503-2562-1/23/$31.00 ©2023 IEEE | DOI: 10.1109/M2VIP58386.2023.10413400
+
+
+
+
+                                                                                                                                                                                                         Wanqing Xia                                                                    Yuqian Lu
+                                                                                                                                                                                       Mechanical and Mechatronics Engineering                                       Mechanical and Mechatronics Engineering
+                                                                                                                                                                                              The University of Auckland                                                    The University of Auckland
+                                                                                                                                                                                               Auckland, New Zealand                                                         Auckland, New Zealand
+                                                                                                                                                                                             wxia612@aucklanduni.ac.nz                                                       yuqian.lu@auckland.ac.nz
+
+                                                                                                                                                                                                             Xun Xu
+                                                                                                                                                                                        Mechanical and Mechatronics Engineering
+                                                                                                                                                                                               The University of Auckland
+                                                                                                                                                                                                Auckland, New Zealand
+                                                                                                                                                                                                  x.xu@auckland.ac.nz
+
+
+                                                                                                                                                                                Abstract—In the field of robotic manipulator operations,                 vision sensing and deep neural networks to enable the model
+                                                                                                                                                                             precise trajectory planning for the end-effector’s position and             to learn high-level, multi-step tasks through a trial-and-error
+                                                                                                                                                                             orientation is crucial, especially in tasks such as grasping a              approach. Nonetheless, this approach may precipitate a lack
+                                                                                                                                                                             bottle by its neck. This paper presents a novel approach uti-
+                                                                                                                                                                             lizing Reinforcement Learning to address this issue. Specifically,          of flexibility as the task parameters are embedded within the
+                                                                                                                                                                             we employed the Soft Actor-Critic and Hindsight Experience                  neural network, and the model is limited to solving a specific
+                                                                                                                                                                             Replay algorithm to train a UR5e manipulator in a simulated                 problem. Moreover, the necessity of repeatedly learning the
+                                                                                                                                                                             environment, incorporating a unique design for state, action,               same basic actions can be time-consuming and inefficient.
+                                                                                                                                                                             and reward. Through comparative analysis with other reward                  An alternative solution may involve decomposing tasks into
+                                                                                                                                                                             function designs, we found that our trained Reinforcement Learn-
+                                                                                                                                                                             ing model generated a more efficient trajectory and achieved                smaller, more modular units to enhance the efficiency and
+                                                                                                                                                                             a significantly higher success rate. This study underscores the             flexibility of learning in robotics. For instance, a grasping
+                                                                                                                                                                             potential of our approach for enhancing the trajectory planning             task can be segmented into an action sequence involving 1
+                                                                                                                                                                             of robotic manipulator operations.                                          recognizing the object, 2 analyzing the most stable grasping
+                                                                                                                                                                                Index Terms—Reinforcement Learning, Robot Control, Tra-                  point and pose, 3 moving the Tool Centre Point (TCP) of the
+                                                                                                                                                                             jectory Planning
+                                                                                                                                                                                                                                                         robot to the desired pose, and finally, 4 closing the gripper.
+                                                                                                                                                                                                                                                         Employing rapid and reliable trajectory planning algorithms
+                                                                                                                                                                                                   I. INTRODUCTION
+                                                                                                                                                                                                                                                         for action 3 allows the DRL model to more expeditiously
+                                                                                                                                                                                Robotic manipulators are presently utilized extensively                  learn actions 1 and 2 . This lets us to decompose complex
+                                                                                                                                                                             across the globe within the manufacturing industry, bolstering              policies into a sequence of primitive actions that can be
+                                                                                                                                                                             high production efficiency. In comparison to traditional man-               independently learned and reused, thus potentially increasing
+                                                                                                                                                                             ufacturing settings, the future-oriented smart manufacturing                the efficiency and flexibility of the learning process for robotic
+                                                                                                                                                                             system necessitates increased responsiveness, flexibility, adapt-           tasks.
+                                                                                                                                                                             ability, and cost-competitiveness [1]. However, the execution                  The primary focus of this paper is the application of rein-
+                                                                                                                                                                             of intricate robotic tasks in smart manufacturing introduces                forcement learning to solve the trajectory planning problem
+                                                                                                                                                                             challenges pertaining to reliable 3D perception, high-level                 for a robotic manipulator, with particular emphasis on the
+                                                                                                                                                                             planning, and sophisticated control [2]. The implementation                 fundamental reaching action constrained by the TCP position
+                                                                                                                                                                             of a task and navigation towards the stipulated pose requires               and orientation. Although RL has been previously deployed in
+                                                                                                                                                                             planning a brief, collision-free trajectory for the robotic ma-             trajectory planning, most approaches solely consider reaching
+                                                                                                                                                                             nipulator. The advent of neural networks has spurred numerous               the desired position devoid of collisions, neglecting TCP
+                                                                                                                                                                             research initiatives aimed at resolving the trajectory planning             orientation. Nonetheless, it is imperative to constrain both
+                                                                                                                                                                             problem via reinforcement learning (RL).                                    the target location and the spatial orientation in robotic
+                                                                                                                                                                                In recent years, various deep reinforcement learning (DRL)               manipulation for a comprehensive spectrum of tasks. Our
+                                                                                                                                                                             algorithms have been proposed for solving excessive amount                  objective is to formulate an RL model capable of planning
+                                                                                                                                                                             of robotic tasks, such as bin picking [3], door opening [4],                a trajectory and controlling the manipulator to closely achieve
+                                                                                                                                                                             and object stacking [5]. These algorithms typically employ                  the strictly constrained goal TCP position and orientation for
+
+
+
+
+                                                                                                                                                                                 Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 01,2026 at 04:20:47 UTC from IEEE Xplore. Restrictions apply.
+                                                                            trajectory planning [13] [14]. This is mainly due to their
+                                                                            advantages such as user-friendliness, improved stability, and
+                                                                            robustness to sub-optimal hyperparameter settings. However,
+                                                                            in this research, we opted for the SAC algorithm owing to its
+                                                                            rapid training speed, superior performance and better support
+                                                                            on continuous actions.
+
+                                                                            B. Trajectory Planning with Constraints
+                                                                               The constraints concerning the goal position and orientation
+                                                                            of the robotic manipulator’s TCP have been addressed in
+                                                                            various studies using different methods. For instance, Li et al.
+                                                                            [15] proposed a constrained differential evolution (DE) scheme
+                                                                            for controlling the end-effector’s movements. In another study
+                                                                            [16], the authors integrated an artificial potential field (APF)
+                                                                            with the DDPG algorithm to define the state and reward. The
+   Fig. 1. The UR5e setup in our lab VS The UR5e setup in PyBullet
+                                                                            APF’s inclusion facilitates the reinforcement learning model in
+                                                                            discovering the optimal solution faster. In a different approach,
+                                                                            Lin et al. [17] combined a Long Short-Term Memory (LSTM)
+optimally grasping an object. We propose the application of                 network with DDPG to address this problem through recurrent
+the Soft Actor-Critic (SAC) [6] algorithm on a six degree-of-               reinforcement learning, attaining a 91% success rate. Finally,
+freedom manipulator and present our unique reward design to                 Cao et al. [18] utilized inverse kinematics as prior knowledge
+tackle this issue without specifically modifying the vanilla RL             to guide and accelerate the training process. Their trained
+algorithm. Fig.1 depicts the simulated manipulator in a virtual             model was capable of catching rotating objects. These various
+environment, identical to our real robot setup, used to train the           methodologies showcase the breadth of approaches available
+RL model. The performance of the trained model is contrasted                for tackling the challenges of constrained manipulator trajec-
+with other models featuring different reward designs.                       tory planning via reinforcement learning.
+   The remainder of this paper is organized as follows: Sec-
+tion II reviews relevant literature, while Section III elaborates                          III. PROBLEM FORMULATION
+on the reinforcement learning algorithm and our model design.                 In this section, we formulate the constrained trajectory
+Simulation results and discussions are presented in Section IV.             planning problem as a Markov Decision Process (MDP) and
+Finally, conclusions drawn from this work and future research               explain how all the Soft Actor-Critic algorithm is utilised to
+directions are outlined in Section V.                                       solve our problem. In addition, we also discuss the Hindsight
+                                                                            Experience Replay (HER) algorithm, which we found to
+                 II. LITERATURE REVIEW
+                                                                            be highly beneficial in our experiments for accelerating our
+A. Reinforcement Learning                                                   model’s learning.
+   Although the field of manipulator trajectory planning
+presents several challenges, numerous researchers have applied              A. Model Design
+Deep Reinforcement Learning algorithms to address this prob-                   In reinforcement learning, the term ”agent” refers to the
+lem, yielding promising outcomes. Broadly, DRL algorithms                   decision-maker who interacts with the environment. In our
+are categorized into off-policy and on-policy methods [7].                  case, the agent is the RL algorithm controlled 6-DOF (6
+   Off-policy methods include strategies like Deep Determin-                joints) UR5e manipulator. MDPs are used to model these
+istic Policy Gradient (DDPG) [8], Normalized Advantage                      sequential decision problems. An MDP can be defined by
+Functions (NAF) [9], and Soft Actor-Critic [6]. These methods               a tuple < S, A, R, P, γ >, which consists of a state set
+utilize replay buffers during algorithm training: when an action            S, an action set A, a reward function R(st , at ), a state
+is taken, and the state transitions with reward feedback, the               transition function P(st+1 | st , at ), and the discount factor
+information regarding the action is stored in the buffer for                γ for calculating the expected discounted return. An agent’s
+later replay.                                                               behavior is defined by a policy, π, which maps states to a
+   On-policy methods, which include algorithms such as Trust                probability distribution over the actions π : S → P(A). The
+Region Policy Optimization (TRPO) [10], Natural Policy                      return from a state
+                                                                                            PT is defined as the sum of discounted future
+Gradient (NPG) [11], and Proximal Policy Optimization (PPO)                 rewards Rt = i=t γ (i−t) r(si , ai ). The goal of reinforcement
+[12], operate differently. The state, action, and reward informa-           learning is to learn an optimal policy that instructs the agent on
+tion in on-policy methods are discarded after a single training             the best action to take in each state to maximize its long-term
+process, resulting in these methods generally requiring many                reward.
+more training examples than off-policy methods.                                In this study, our goal is to use RL to train the manipulator
+   Despite the data-hungry nature of on-policy methods, sev-                to plan a trajectory to reach an end-effector pose in the 3D
+eral studies have employed these algorithms for manipulator                 space. Consider the environment where we want to control
+
+
+
+
+    Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 01,2026 at 04:20:47 UTC from IEEE Xplore. Restrictions apply.
+a 6-DOF manipulator’s end-effector move towards an end                                          
+                                                     T
+pose χe in a 3D space. Where χe = [pe , ϕe ] ∈ C 7 is a                                             −1                     if Collision
+                                                                                        r4 =                                                         (4)
+pose, with pe being the three-dimensional position and ϕe                                            0                     Otherwise
+the orientation (e.g., quaternion) in the Cartesian space. The                  Finally, the total reward signal is the weighted summation of
+joint angles J = (J1 , J2 , J3 , J4 , J5 , J6 ) denotes the angle            (1),(2),(3),and (4). In Eq.(5), λ1 , λ2 , λ3 , λ4 are the coefficients
+of each joint on the manipulator in radians. Thus, we can                    or weights of each part of the reward. In our model, we chose
+calculate the pose of the end-effector χt at any given time t                λ1 to be 14, λ2 to be 6, λ3 to be 1 and λ4 to be 500. These
+using forward kinematics: χt = F orward Kinematics (J ).                     numbers are chosen based on our simulation experiments
+Similar with the end-effector
+                             T pose7 χe , the goal pose can be             shown in Fig.3, especially for λ1 and λ2 , the proportion of
+defined as χg = pg , ϕg             ∈ C . The State of our model             these two weights largely affects the training result of our
+is the tuple of manipulator’s current end-effector pose, joint               model. The selection process of weights is further introduced
+angles and the goal pose S =< χe , J , χg >. Since we can                    in Section IV.
+only control the joints of the manipulator to achieved desired
+pose, the Action
+                  is defined as theangular speed of each joint                         rt (st , at ) = λ1 r1 + λ2 r2 + λ3 r3 + λ4 r4               (5)
+       ˙
+A = J = J1 , J˙2 , J˙3 , J˙4 , J˙5 , J˙6 .
+               ˙
+                                                                             B. Soft Actor-Critic
+   Reward design is the most important part in this work. Since
+many previous research have worked on manipulator RL, our                       Soft Actor-Critic (SAC), an off-policy Deep Reinforcement
+State and Action design is very similar to previous works.                   Learning (DRL) algorithm presented in [6], has manifested
+However, our Reward design is novel and unique since not                     exemplary efficiency across a multitude of continuous control
+many papers worked on the constrained trajectory planning                    operations. Given its proven efficacy, it is an optimal choice
+before. Different from works like [17] [18], we use quaternion               for controlling our manipulator system. As inferred from its
+instead of eular angle to represent the rotation of end-effector             nomenclature, SAC operates on the principle of actor-critic,
+and goal. Our aim is to match the end-effector pose χe from                  bifurcating its primary mechanism into two essential segments.
+the starting pose χs to the goal pose χg by controlling J˙ .                 The ’actor’ segment focuses on formulating an effective policy
+We define the reward signal consists of four parts: positional               for action selection, whereas the ’critic’ section is responsible
+reward, rotational reward, action reward and collision reward.               for appraising the value of distinct state-action configurations.
+   The first part of the reward function is designed for encour-             The term ’soft’ in SAC signifies the incorporation of entropy
+aging the end-effector approach a specific target position pe .              regularization within the learning process.
+We utilize a nonlinear piecewise Eq.(1) to compute this part                    The concept of entropy is fundamentally a quantification
+of the reward. In the formula, dtar is the Euclidean distance                of stochasticity or randomness within a system, with higher
+between the end-effector and its target position, the parameter              entropy corresponding to increased randomness. This notion
+δ is the turning point of the function. When the distance dtar               holds significant relevance to the exploration-exploitation di-
+is smaller than δ, the reward function has a smaller slope for               chotomy, given that enhanced entropy directly correlates to
+the agent to learn finer actions.                                            heightened exploration. Distinguishing itself from alternative
+                                                                             deep reinforcement learning algorithms such as DDPG and
+                      − 12 d2tar                                             D4PG (Distributed Distributional Deterministic Policy Gradi-
+                  
+                                                  dtar ≤ δ
+          r1 =                                                        (1)    ents), SAC promotes extensive exploration rather than merely
+                      −δ dtar − 12 δ
+                                     
+                                                  dtar > δ
+                                                                             pursuing optimal pathways during the exploration phase. This
+   The second part is designed to encourage the end-effector                 aspect significantly minimizes the risk of convergence to
+arrive a specific target orientation ϕe . As we mentioned                    suboptimal local optima. In our research, the agent of interest
+previously, the rotation of the end-effector and the goal are                is a 6-DoF manipulator operating within a three-dimensional
+represented using quaternions ϕe and ϕg . Eq.(2) is used to                  realm, thus, an immensely vast exploration space. Conse-
+calculate the angular distance between two quaternions.                      quently, the model requires a greater level of random action
+                                                                             generation to facilitate comprehensive space exploration. In
+                    r2 = −2 · arccos(|ϕe · ϕg |)                      (2)    such conditions, SAC demonstrably surpasses the performance
+                                                                             of its counterparts, thereby solidifying our selection of this
+   The third part is relative to the norm of the current action J̇t ,        algorithm for our study.
+which means we encourage the agent to take smaller actions
+for safety. This is shown in Eq.(3).                                         C. Hindsight Experience Replay
+                                                                                HER is a technique introduced in [19] to enhance the learn-
+                             r3 = − J̇t                               (3)    ing process in reinforcement learning, particularly in tasks with
+                                                                             sparse rewards, such as manipulator control. The core idea of
+   The fourth part is designed for the purpose of avoiding col-              HER is simple and intuitive: it reuses past failed experiences
+lision, including collision with the table and the manipulator               by altering the goals, creating more successful and positive
+itself. In this part, we simply penalise the agent if any link on            experiences to accelerate the learning process. In constrained
+the manipulator collides with anything.                                      trajectory planning tasks, the reward is highest when the
+
+
+
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 01,2026 at 04:20:47 UTC from IEEE Xplore. Restrictions apply.
+distance and orientation between the end-effector and goal are
+smaller than 1 cm and 5 degrees, respectively. This makes
+learning challenging for the agent, as the exploration space is
+vast and generating successful experiences is difficult. HER
+addresses this issue by saving the agent’s past experiences in
+a replay buffer. Unlike a standard replay buffer, HER modifies
+these past experiences by changing the original failed goal to a
+successful goal and recalculating the reward based on the new
+goal. In this way, the agent can learn from generated positive
+trails and explore the environment more effectively. Algorithm
+2 provides the pseudocode for HER.
+
+                       IV. SIMULATION
+   In the following section, we outline our robot setup within
+the simulated training environment and detail the resultant
+simulation experiment findings. A comparative analysis that
+examines our proposed reward function’s effectiveness against
+alternative reward functions. Finally, we interpret and discuss             Fig. 2. The goal position and orientation are successfully achieved by the
+the salient findings derived from our simulation results.                   robot (robot tip overlaps with the coloured cube, pointing to the direction
+                                                                            of the blue face), the goal sampling areais visualised by the transparent
+                                                                            rectangular box
+A. Simulation Setup
+   In our endeavor to train the RL algorithm, we employed Py-                                             TABLE I
+Bullet, an open-source physics engine renowned for its utility                           L IST OF HYPERPARAMETERS USED IN TRAINING
+in simulation, robotics, and machine learning, to construct a
+                                                                                                   Name              Value
+virtual environment mirroring our robot setup. The utilisation                                     Epochs            2000000
+of this virtual environment not only expedites the training                                        Steps             100
+process beyond what is feasible with a real robot but also                                         Buffer Size       10000000
+                                                                                                   Learning Rate     0.0001
+safeguards the robot against potential damages stemming from                                       Gamma             0.95
+unpredictable movements during training. As depicted in Fig.                                       Batch Size        256
+1, the simulated robot is meticulously mounted on a linear
+track atop the workbench, mirroring the actual setup to foster
+a seamless algorithm transfer in the future.                                will place upon it, and a balanced fifty percent distribution
+   To enhance the visualisation of the goal position within the             does not certainly yield the most favorable outcome. Hence, a
+simulation environment, we employed a multicolored cube as                  simulation experiment was conducted to ascertain the optimal
+a representative symbol. This cube, with its six faces painted              ratio of reward weight. Our simulation design sets the total
+in distinct colors and its front face colored in blue, offers a             weight at -20 and crafted nine evenly distributed scenarios
+clear visual aid. Instances of successful goal attainment, where            ranging from -2 to -18. For each of these scenarios, the
+the end-effector perfectly aligns with the cube’s center, are               algorithm was trained for 1,000,000 epochs, maintaining all
+presented in Fig.2. This figure also delineates the 3D space                other parameters constant. The reward curves of these nine
+accommodating the goal, signified by the transparent cube.                  scenarios were subsequently illustrated in Fig.3. In the figure
+The goal area, though significantly smaller than the UR5e                   legend, each colored line signifies a specific weight setting. For
+manipulator’s operational envelope, is carefully calibrated to              instance, ”T:-2, O:-18” displays the reward curve where the
+ensure that the sampled goal can be reached from any random                 translational reward weight is -2, and the orientational reward
+orientation without any collision.                                          weight is -18. After a thorough analysis of the presented
+   As previously outlined in this paper, our model training                 data, it was concluded that -14 and -6 serve as the most
+capitalises on the vanilla SAC and HER algorithm, provided                  suitable combination for translation and orientation reward,
+by Stable-Baselines3 [20], a library known for its stable and               respectively. This result is predicated on the premise of achiev-
+robust RL algorithm implementations. Certain hyperparame-                   ing a harmonious balance between these two reward types,
+ters were finetuned to optimise the training results, as listed             subsequently optimizing the efficiency and effectiveness of the
+in Table I.                                                                 RL process.
+                                                                               Fig.4 presents the three plots that represent the mean reward,
+B. Results                                                                  success rate and epoch length, respectively. During the training
+   In the pursuit of achieving optimal results with RL, one                 phase, we test the model for 10 epochs after every 1,000
+pivotal factor to be determined is the weighting accorded to                epochs of training. The mean reward, success rate and epoch
+both translational and orientational rewards. The weight on the             length are calculated based on the 100 testing epochs, forming
+reward essentially guides the degree of emphasis the algorithm              one testing checkpoint. Thus, out of 2 million training epochs,
+
+
+
+
+    Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 01,2026 at 04:20:47 UTC from IEEE Xplore. Restrictions apply.
+                                                                             Fig. 4. The mean reward, success rate and epoch length calculated with 10
+Fig. 3. Nine reward curves for different combinations of translational and   testing epochs after every 1,000 training epochs
+orientational reward weight, the best combination will be selected as our
+reward hyperparameters
+                                                                             similar problems. The first reward function, as posited by Lin
+                                                                             et al. (2021) [17], computes the reward directly by considering
+we obtained 2,000 testing checkpoints. In Fig.4, the mean                    the translational distance and the product of the cosine of
+epoch length and success rate are presented following the left               the orientational distance in each term of the rotation vector.
+Y-axis, where the values for mean reward are presented on                    This function is represented in Eq.(6). The second reward
+the right Y-axis. As shown in the figure, the reward initiates               function, proposed by Cao et al. (2023) [18], employs the
+from a medium level. This is because the robot constantly                    hyperbolic tangent of the translational distance and the cosine
+collides with the table or itself during the very beginning of               of the maximum orientational distance in the rotation vector
+the learning. Consequently, the mean episode length remains                  to calculate the reward. This formula is detailed in Eq.(7).
+very low, and the success rate is always zero. At around                     In these formulas, er , ep , ey denote the roll, yaw, and pitch
+150 checkpoints, the reward suddenly drops and subsequently                  angles respectively, with reference to the discrepancy between
+continues to grow gradually, finally stabilizing around -50.                 the end-effector’s orientation and the goal orientation.
+This shows the robot is gradually learning how to achieve the
+goal. Consequently, the mean epoch length suddenly rises to                     rt (st , at ) = dtar + 50 ∗ cos (er ) ∗ cos (ep ) ∗ cos (ey )        (6)
+100 steps and then gradually drops, stabilising around 8 steps.
+This shows the robot is learning how to achieve the goal with
+as little time as possible. As a result of learning, the mean                    rt (st , at ) = 1 − tanh (dtar ) + cos (max[er , ep , ey ])         (7)
+success rate in testing epochs grows from zero and stabilises
+                                                                                Fig.5 illustrates the reward curve generated via our proposed
+between 90% and 100%.
+                                                                             reward function, in comparison to reward function one and
+   Even though we have testing epochs during the training, the
+                                                                             reward function two. From the graph, it becomes apparent
+size of it is limited to 10, and the goal position and orientation
+                                                                             that our reward remains consistently superior compared to the
+are totally random. It cannot represent the real performance
+                                                                             other two. However, it is critical to underscore that the original
+of our trained model. In response, we devised a test set to
+                                                                             reward curves cannot be directly compared, given that the
+evaluate the trained model. As shown in Fig.2, the target pose
+                                                                             maximum and minimum rewards are distinct. To facilitate a
+is sampled within a cubic area, possessing dimensions of 0.8m,
+                                                                             more comprehensible visual understanding, we have normal-
+0.3m, and 0.4m in length, width, and height, respectively. We
+                                                                             ized the three curves to the same scale. As previously noted,
+implemented a systematic sampling strategy wherein a target
+                                                                             the reward curve primarily depicts the learning trend and
+position is sampled every 0.05m within the goal area, and for
+                                                                             does not provide a definitive measure of the trained model’s
+each of these target positions, five random orientations are
+                                                                             performance. Consequently, we subjected models trained with
+sampled. This methodology resulted in a total of 5355 points
+                                                                             Eq.(6) and Eq.(7) to testing on our established test set. The
+(1779*5) within our test set. Upon evaluation of our trained
+                                                                             results revealed a success rate of 50% for the model trained
+model against this test set, we secured a success rate of 97%.
+                                                                             with reward function one, whereas the model trained with
+This rate exemplifies the proficiency and reliability of our RL-
+                                                                             reward function two exhibited a success rate of 20%.
+based model within the specified parameters and dimensions.
+   In order to substantiate the efficacy of our reward engi-                 C. Discussion
+neering, we juxtaposed our reward design against two other                     In the preceding section, a comparative analysis was con-
+reward functions presented in the literature, both addressing                ducted between our reward design and two other designs,
+
+
+
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 01,2026 at 04:20:47 UTC from IEEE Xplore. Restrictions apply.
+                                                                                                           R EFERENCES
+                                                                              [1] Y. Lu, X. Xu, and L. Wang, “Smart manufacturing process and system
+                                                                                  automation–a critical review of the standards and envisioned scenarios,”
+                                                                                  Journal of Manufacturing Systems, vol. 56, pp. 312–325, 2020.
+                                                                              [2] Y. Lee, E. S. Hu, and J. J. Lim, “Ikea furniture assembly environment
+                                                                                  for long-horizon complex manipulation tasks,” in 2021 ieee international
+                                                                                  conference on robotics and automation (icra). IEEE, 2021, pp. 6343–
+                                                                                  6349.
+                                                                              [3] S. Levine, P. Pastor, A. Krizhevsky, J. Ibarz, and D. Quillen, “Learning
+                                                                                  hand-eye coordination for robotic grasping with deep learning and large-
+                                                                                  scale data collection,” The International journal of robotics research,
+                                                                                  vol. 37, no. 4-5, pp. 421–436, 2018.
+                                                                              [4] S. Gu, E. Holly, T. Lillicrap, and S. Levine, “Deep reinforcement
+                                                                                  learning for robotic manipulation with asynchronous off-policy updates,”
+                                                                                  in 2017 IEEE international conference on robotics and automation
+                                                                                  (ICRA). IEEE, 2017, pp. 3389–3396.
+                                                                              [5] J. Zhang, W. Zhang, R. Song, L. Ma, and Y. Li, “Grasp for stacking via
+                                                                                  deep reinforcement learning,” in 2020 IEEE International Conference
+                                                                                  on Robotics and Automation (ICRA). IEEE, 2020, pp. 2543–2549.
+                                                                              [6] T. Haarnoja, A. Zhou, P. Abbeel, and S. Levine, “Soft actor-critic: Off-
+Fig. 5. Comparing the reward curve between our reward design with the             policy maximum entropy deep reinforcement learning with a stochastic
+other designs                                                                     actor,” in International conference on machine learning. PMLR, 2018,
+                                                                                  pp. 1861–1870.
+                                                                              [7] J. Ibarz, J. Tan, C. Finn, M. Kalakrishnan, P. Pastor, and S. Levine,
+                                                                                  “How to train your robot with deep reinforcement learning: lessons we
+with the success rate demonstrating significant disparity. The                    have learned,” The International Journal of Robotics Research, vol. 40,
+rationale behind these results can be attributed to the training                  no. 4-5, pp. 698–721, 2021.
+methodologies and problem modeling utilized in the three                      [8] T. P. Lillicrap, J. J. Hunt, A. Pritzel, N. Heess, T. Erez, Y. Tassa,
+                                                                                  D. Silver, and D. Wierstra, “Continuous control with deep reinforcement
+approaches. In the study [17] wherein Eq.(6) was proposed,                        learning,” arXiv preprint arXiv:1509.02971, 2015.
+Recurrent DDPG was deployed, and the problem was simpli-                      [9] S. Gu, T. Lillicrap, I. Sutskever, and S. Levine, “Continuous deep q-
+fied by utilising a 3-DOF manipulator instead of a 6-DOF                          learning with model-based acceleration,” in International conference on
+                                                                                  machine learning. PMLR, 2016, pp. 2829–2838.
+one. The research [18] proposing Eq.(7) employed inverse                     [10] J. Schulman, S. Levine, P. Abbeel, M. Jordan, and P. Moritz, “Trust
+kinematics as prior knowledge to support the training. Thus,                      region policy optimization,” in International conference on machine
+performance degradation was observed when a vanilla SAC                           learning. PMLR, 2015, pp. 1889–1897.
+                                                                             [11] S. M. Kakade, “A natural policy gradient,” Advances in neural informa-
+algorithm was implemented. In contrast, our reward function                       tion processing systems, vol. 14, 2001.
+employs a quaternion to represent the rotation angle instead                 [12] J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and O. Klimov, “Prox-
+of a rotation vector, thereby circumventing potential issues                      imal policy optimization algorithms,” arXiv preprint arXiv:1707.06347,
+                                                                                  2017.
+such as ”gimbal lock” that may be encountered with rotation                  [13] S. Wang, X. Zheng, Y. Cao, and T. Zhang, “A multi-target trajectory
+vectors. This allows the robot to learn trajectory planning and                   planning of a 6-dof free-floating space robot via reinforcement learning,”
+control more accurately even with the vanilla SAC algorithm.                      in 2021 IEEE/RSJ International Conference on Intelligent Robots and
+                                                                                  Systems (IROS). IEEE, 2021, pp. 3724–3730.
+                                                                             [14] J. Zhong, T. Wang, and L. Cheng, “Collision-free path planning for
+        V. CONCLUSIONS AND FUTURE WORK                                            welding manipulator via hybrid algorithm of deep reinforcement learn-
+                                                                                  ing and inverse kinematics,” Complex & Intelligent Systems, pp. 1–14,
+                                                                                  2021.
+   In conclusion, we have delved into the potential of RL                    [15] Y. Li, X. Hao, Y. She, S. Li, and M. Yu, “Constrained motion planning of
+in trajectory planning under constraints, which aiming to let                     free-float dual-arm space manipulator via deep reinforcement learning,”
+robotic manipulators learn to plan and execute a trajectory and                   Aerospace Science and Technology, vol. 109, p. 106446, 2021.
+                                                                             [16] Y. Li, D. Li, W. Zhu, J. Sun, X. Zhang, and S. Li, “Constrained motion
+achieve the designated target TCP 6D pose. The innovative                         planning of 7-dof space manipulator via deep reinforcement learning
+approach to our reward function design was also explored. Our                     combined with artificial potential field,” Aerospace, vol. 9, no. 3, p.
+design considers quaternion representation for rotation, which                    163, 2022.
+                                                                             [17] G. Lin, L. Zhu, J. Li, X. Zou, and Y. Tang, “Collision-free path
+effectively avoids ”gimbal lock” issues, thereby enabling the                     planning for a guava-harvesting robot based on recurrent deep reinforce-
+robot to learn trajectory planning and control with greater pre-                  ment learning,” Computers and Electronics in Agriculture, vol. 188, p.
+cision. Comparative analysis with other reward functions has                      106350, 2021.
+                                                                             [18] Y. Cao, S. Wang, X. Zheng, W. Ma, X. Xie, and L. Liu, “Reinforcement
+demonstrated our design’s superiority, providing a significantly                  learning with prior policy guidance for motion planning of dual-
+higher success rate.                                                              arm free-floating space robot,” Aerospace Science and Technology, p.
+   In line with our observations, future research directions                      108098, 2023.
+                                                                             [19] M. Andrychowicz, F. Wolski, A. Ray, J. Schneider, R. Fong, P. Welinder,
+should focus on the development of reinforcement learning al-                     B. McGrew, J. Tobin, O. Pieter Abbeel, and W. Zaremba, “Hindsight
+gorithms that tackles trajectory planning problem with moving                     experience replay,” Advances in neural information processing systems,
+obstacles in 3D space. Further studies could also explore how                     vol. 30, 2017.
+                                                                             [20] A. Raffin, A. Hill, A. Gleave, A. Kanervisto, M. Ernestus, and
+best to integrate RL algorithms with other AI technologies                        N. Dormann, “Stable-baselines3: Reliable reinforcement learning
+to compose a Hierarchical Reinforcement Learning system,                          implementations,” Journal of Machine Learning Research, vol. 22,
+achieving more intelligent and flexible robotic manipulators                      no. 268, pp. 1–8, 2021. [Online]. Available: http://jmlr.org/papers/v22/
+                                                                                  20-1364.html
+for the smart manufacturing industry.
+
+
+
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 01,2026 at 04:20:47 UTC from IEEE Xplore. Restrictions apply.
+

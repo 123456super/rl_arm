@@ -148,11 +148,11 @@ class PyBulletRobot:
     def capsules(self) -> list[CapsuleState]:
         return self.capsule_model.states(self._require_loaded(), self.physics_client_id)
 
-    def reset_joints(self, rng: np.random.Generator) -> None:
+    def reset_joints(self, rng: np.random.Generator | None = None) -> None:
         reset = self.config.reset
         default = np.asarray(reset.default_joint_positions, dtype=np.float32)
-        noise = rng.uniform(-reset.joint_noise_range, reset.joint_noise_range, size=self.joint_count).astype(np.float32)
-        for joint_id, joint_value in zip(self.joint_ids, default + noise):
+        del rng
+        for joint_id, joint_value in zip(self.joint_ids, default):
             p.resetJointState(
                 self._require_loaded(),
                 joint_id,

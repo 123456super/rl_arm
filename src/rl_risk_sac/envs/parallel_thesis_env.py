@@ -8,27 +8,12 @@ from typing import Any, Collection
 
 import numpy as np
 
-from rl_risk_sac.envs.thesis_homotopy_env import ThesisHomotopyEnv
-
-
 def _environment_class(config: dict[str, Any]):
-    """Select the reduced-observation environment when it is requested.
-
-    The regular parallel pool is also used by the full and reward/replay
-    ablation trainers. Reduced-observation variants
-    have a separate environment/task implementation because their observation
-    the Base variant is 108D while M3 keeps the full 162D Actor layout with a
-    zero Jacobian slot. Keeping the selection here makes every spawned worker
-    use the same variant as the learner-side environment template.
-    """
-    variant = str(config.get("thesis", {}).get("observation", {}).get(
-        "ablation_variant", "full"
-    ))
-    if variant in {"m3_no_jacobian", "kp_sac"}:
-        from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import (
-            ThesisHomotopyEnv as AblationThesisHomotopyEnv,
-        )
-        return AblationThesisHomotopyEnv
+    """Return the sole supported compact-keypoint environment."""
+    variant = str(config.get("thesis", {}).get("observation", {}).get("ablation_variant", ""))
+    if variant != "kp_compact":
+        raise ValueError("the PPO trainer requires thesis.observation.ablation_variant=kp_compact")
+    from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import ThesisHomotopyEnv
     return ThesisHomotopyEnv
 
 

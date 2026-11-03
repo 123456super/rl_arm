@@ -1,0 +1,1512 @@
+                                                        Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+                                                                        Contents lists available at ScienceDirect
+
+
+                                         Engineering Applications of Artificial Intelligence
+                                                           journal homepage: www.elsevier.com/locate/engappai
+
+
+
+
+A trend-aware reinforcement learning approach for adaptive motion
+planning of robotic manipulators in dynamic environments
+Dexian Wang a,b,c , Peng Zhang b,c                              ,∗, Pengfei Ding b,c,d , Junliang Wang b,c , Jie Zhang b,c
+a
+  College of Information Science and Technology, Donghua University, Shanghai, 201620, China
+b
+  Engineering Research Center of Artificial Intelligence for Textile Industry Ministry of Education, Institute of Artificial Intelligence, Donghua
+University, Shanghai, 201620, China
+c
+  Shanghai Engineering Research Center of Industrial Big Data and Intelligent System, Institute of Artificial Intelligence, Donghua
+University, Shanghai, 201620, China
+d College of Mechanical Engineering, Donghua University, Shanghai, 201620, China
+
+
+
+
+ARTICLE                 INFO                                  ABSTRACT
+
+Keywords:                                                     In engineering applications such as service robotics, human–robot collaboration, and industrial automation,
+Reinforcement learning                                        robotic manipulators frequently operate in highly dynamic and partially observable environments. The presence
+Dynamic environments                                          of dynamic obstacles, unpredictable human behaviors, and rapidly changing task demands intensify the
+Robotic manipulators motion planning
+                                                              inherent conflicts between positioning accuracy, obstacle avoidance, and operational safety. At the same time,
+Trend learning
+                                                              these systems must rely on incomplete and noisy sensor data to perceive and interpret their surroundings. Such
+Reward shaping
+Distillation
+                                                              dynamic scenarios significantly increase system complexity and require adaptive, real-time control strategies
+                                                              capable of making reliable decisions under uncertainty. To address these challenges, this paper proposes
+                                                              Trend Learning – Adaptive Reward Shaping – Temporal Difference Knowledge Distillation of Q-value(Action-
+                                                              Value Function), collectively referred to as TL-ARS-TDKDQ, a reinforcement learning framework designed
+                                                              to enable robotic manipulators to adaptively perform precise positioning and dynamic obstacle avoidance
+                                                              in dynamic environments. Trend Learning(TL) alleviates environmental uncertainty by extracting temporal
+                                                              dependencies from sequential data of the manipulator. Adaptive Reward Shaping(ARS) dynamically balances
+                                                              positioning accuracy and obstacle avoidance for the robotic manipulator while progressively increasing task
+                                                              difficulty via curriculum learning. To enhance stability during reward fluctuations caused by ARS,Temporal
+                                                              Difference Knowledge Distillation Q-value (TDKDQ) employs a dynamic teacher network and Temporal
+                                                              Difference(TD) error-based balancing, ensuring stable policy convergence in non-stationary scenarios involving
+                                                              robotic manipulator control. Experiments with a KUKA arm in CoppeliaSim demonstrate that TL-ARS-TDKDQ
+                                                              significantly improves convergence speed, control stability, and task success when integrated into mainstream
+                                                              continuous control reinforcement learning algorithms.
+
+
+
+1. Introduction                                                                                      orientation of their end-effectors. Therefore, developing efficient path
+                                                                                                     planning methods that can resolve conflicting requirements — such
+   Robotic manipulators are extensively employed in manufacturing,                                   as positioning accuracy, obstacle avoidance, and operational safety
+medical, and assembly applications due to their flexibility and ease of                              — in dynamic, constrained, and uncertain environments remains a
+control (Ortega-Aranda et al., 2021; Rao et al., 2017; Szczepanski et al.,                           significant and practically valuable research challenge.
+2022). Their operating workspaces often include both static and mov-                                     In recent years, path planning for robotic manipulators operating
+ing obstacles, resulting in constrained rather than open environments.                               in dynamic and constrained environments has garnered significant
+Furthermore, these environments are typically dynamic and uncertain,                                 research interest. This is largely motivated by the escalating complexity
+characterized by unpredictable changes and incomplete information.
+                                                                                                     of practical applications, which require the development of reliable
+Under such conditions, manipulators must perform real-time collision
+                                                                                                     and effective algorithms to navigate safely around both stationary and
+avoidance while maintaining precise control over the position and
+
+
+
+     Abbreviations: TL-ARS-TDKDQ, Trend Learning – Adaptive Reward Shaping – Temporal Difference Knowledge Distillation Q-value
+    ∗ Correspondence to: Donghua University, Room 2408, College Building, No. 2, 2999 Renmin North Road, Songjiang District, Shanghai, China.
+     E-mail addresses: 2232212@mail.dhu.edu.cn (D. Wang), zhangp88@dhu.edu.cn (P. Zhang), pengfeiding@mail.dhu.edu.cn (P. Ding),
+junliangwang@dhu.edu.cn (J. Wang), mezhangjie@dhu.edu.cn (J. Zhang).
+
+https://doi.org/10.1016/j.engappai.2026.114284
+Received 8 July 2025; Received in revised form 20 January 2026; Accepted 20 February 2026
+Available online 23 February 2026
+0952-1976/© 2026 Elsevier Ltd. All rights are reserved, including those for text and data mining, AI training, and similar technologies.
+D. Wang et al.                                                                                     Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+moving obstacles, while achieving accurate control of the manipula-                  Compared to traditional methods that often suffer from high com-
+tor’s end-effector path. Traditional approaches, such as the artificial          putational complexity, poor adaptability, and reliance on precise en-
+potential field (APF) method, have been extensively explored. Lin                vironment models, Deep Reinforcement Learning (DRL) offers a more
+et al. proposed a three-dimensional path planning strategy based on              adaptive approach for robotic trajectory planning tasks. DRL agents
+APF, effectively mitigating the local minima problem and enabling                can autonomously learn and adapt optimal policies through interac-
+manipulators to safely pass through narrow passages (Lin et al., 2025).          tive sampling and policy optimization in complex environments with-
+Meanwhile, graph search algorithms including A* and Dijkstra have                out explicit modeling. Despite these advantages, DRL-based robotic
+also been applied in manipulator trajectory planning. An enhanced D*             trajectory planning in dynamic environments still encounters several
+algorithm was presented by Chen et al. which optimized pre-planned               key challenges that hinder its practical application and compromise
+global paths by reducing turning points and minimizing collision risk,           performance robustness, including:
+while a real-time path adjustment mechanism ensured both reacha-                     (1) Uncertainty and belief state instability in Partially Observable
+bility and obstacle avoidance under dynamic conditions (Chen et al.,             Markov Decision Process (POMDP) environments
+2018). To address global path planning in uncertain environments, a                  (2) Multi-Objective Task Conflicts in Decision-Making
+Class-Ordered A* (COA*) algorithm was introduced in by Lim et al.                    (3) Non-stationarity-induced challenges in policy convergence and
+where an optimal search tree is heuristically constructed on a weighted          generalization
+colored graph. Compared with the conventional A* algorithm, COA*                     To address these challenges, we propose a novel reinforcement
+shows improved performance in handling path uncertainty but remains              learning framework for robotic manipulators operating in dynamic
+dependent on explicit environment modeling, limiting its suitability for         and complex environments. The framework combines an Adaptive
+real-time dynamic applications (Lim and Tsiotras, 2021). In the field of         Reward Shaping (ARS) strategy with a Trend Learning (TL) module
+robotic manipulator trajectory planning, population-based metaheuris-            and a Temporal-Difference error-based Q-value Knowledge Distillation
+tic algorithms such as Genetic Algorithm (GA) and Particle Swarm                 (TDKDQ) mechanism. It is designed to improve adaptive obstacle avoid-
+Optimization (PSO) are widely used for their strong global search                ance and precise end-effector positioning under partially observable
+capability and flexibility in handling complex, multi-objective opti-            and non-stationary conditions. The effectiveness and robustness of the
+mization problems; for example, Asma Seddaoui et al. proposed a                  framework are validated through extensive simulation experiments in
+GA-based path generator for controlled-floating space robots that lever-         CoppeliaSim.
+ages dynamic coupling between the manipulator and spacecraft base to                 The main contributions of this paper are summarized as fol-
+safely reach grasping points while avoiding collisions and singularities,        lows:
+requiring only the Cartesian target position as input (Seddaoui and
+                                                                                    • A POMDP formulation is constructed to model dynamic obstacle
+Saaj, 2021), and Özge Ekrem et al. developed a PSO-based trajectory
+                                                                                      avoidance and positioning control tasks for robotic manipulators
+planning method for a 6-DOF robotic arm using fifth-order polyno-
+                                                                                      in partially observable, dynamic environments, while simulta-
+mial interpolation to achieve obstacle-free, vibration-free, and time-
+                                                                                      neously integrating a Trend Learning (TL) mechanism to cap-
+optimized motion in joint space (Ekrem and Aksoy, 2023). However,
+                                                                                      ture temporal motion patterns and mitigate the effects of partial
+these population-based metaheuristic approaches generally suffer from
+                                                                                      observability.
+limited real-time performance, making them less suitable for dynamic
+                                                                                    • A novel Adaptive Reward Shaping (ARS) method is proposed,
+obstacle avoidance in rapidly changing environments. Sampling-based
+                                                                                      which dynamically balances the conflicting objectives of dy-
+algorithms, particularly Rapidly-exploring Random Trees (RRT), have
+                                                                                      namic obstacle avoidance and precise positioning in reinforce-
+gained widespread attention in manipulator motion planning due to
+                                                                                      ment learning for manipulators, enabling whole-body obstacle
+their efficiency in high-dimensional spaces. Reference proposed RRT-
+                                                                                      avoidance rather than limiting to end-effector safety.
+Connect, which incrementally grows two trees from both start and goal
+                                                                                    • A Temporal-Difference error-based Q-value Knowledge Distilla-
+configurations, successfully generating collision-free trajectories for a
+                                                                                      tion (TDKDQ) mechanism is introduced to alleviate the non-
+6-DOF PUMA manipulator in three-dimensional workspaces (Kuffner
+                                                                                      stationarity caused by ARS and stabilize policy updates through
+and LaValle, 2000). However, sampling-based methods often suffer
+                                                                                      a weighted soft Q-value estimation.
+from excessive path length, poor smoothness, and suboptimal initial
+                                                                                    • Comprehensive CoppeliaSim simulations confirm that the pro-
+path quality due to their inherent randomness, necessitating extensive
+                                                                                      posed framework outperforms multiple baseline DRL algorithms
+post-processing. To improve planning efficiency, Ding et al. developed
+                                                                                      in terms of effectiveness, robustness, and training stability under
+the VSA-RRR algorithm, integrating an obstacle avoidance model for
+                                                                                      dynamic environmental conditions.
+generating new sampling points and employing a workspace partition-
+ing strategy to subdivide the manipulator’s motion space into several                The remainder of this paper is organized as follows: Section 2 re-
+subregions, thereby enhancing computational efficiency (Ding et al.,             views related works. Section 3 First establishes a POMDP-based model
+2025). Furthermore, Kong et al. investigated the trajectory tracking             to describe the dynamic obstacle avoidance and positioning control
+control problem of n-link robotic manipulators with dynamic uncertain-           problem for robotic manipulators. Based on this model, presents the
+ties, time-varying output constraints, and input saturation. A finite-time       overall TL-ARS-TDKDQ framework, and details the design of its key
+control strategy was proposed to ensure end-effector collision avoid-            components, including the TL method, ARS mechanism, and TDKDQ
+ance in dynamic environments. However, this method primarily focuses             module. Section 4 describes the simulation platform setup, scene de-
+on end-effector constraints without considering obstacle avoidance for           sign, and algorithm parameter settings, followed by an analysis of the
+the entire manipulator’s state space, leaving room for further im-               proposed framework’s performance across various mainstream rein-
+provement in dynamic obstacle-rich environments (Kong et al., 2020).             forcement learning algorithms under dynamic environments. Finally,
+More recently, data-driven and skill-based planning frameworks have              Section 5 concludes the paper.
+been explored to improve generalization across tasks. Liu et al. intro-
+duced DiffSkill, which extracts skill embeddings from offline datasets           2. Related work
+and leverages diffusion-based denoising to facilitate high-level pol-
+icy learning for unseen tasks (Liu et al., 2024). While demonstrating            2.1. Deep reinforcement learning for robotic manipulator motion planning
+strong generalization capability, such approaches typically rely on
+large-scale offline data and abstract skill representations, which may              In recent years, with the rapid advancement of deep learning,
+limit adaptability and fine-grained control in complex, rapidly changing         crucial conditions have been established for reinforcement learning
+environments.                                                                    (RL) to effectively tackle high-dimensional continuous state problems.
+
+                                                                             2
+D. Wang et al.                                                                                     Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+This has provided significant advantages in robotic high-dimensional            decision-making problems (Kochenderfer, 2015). Path planning for
+continuous motion control. Numerous researchers worldwide have ex-              robotic manipulators in dynamic environments can be effectively for-
+tensively studied deep reinforcement learning (DRL)-based robotic arm           mulated as POMDP, where both the robot and obstacle states are dy-
+trajectory planning (Alegre et al., 2025).                                      namic and partially observable. While traditional planners typically as-
+    Early efforts focused on model-free DRL methods for continuous              sume full observability and static conditions, these assumptions rarely
+control. Sangiovanni et al. employed a normalized advantage function            hold in real-world scenarios, particularly in collaborative or indus-
+(NAF) algorithm to extend Q-learning to continuous action spaces for            trial tasks involving moving obstacles (Lauri et al., 2022). Frequent,
+robotic arm obstacle avoidance (Sangiovanni et al., 2018). While effec-         unpredictable changes in dynamic environments lead to belief state
+tive in controlled settings, the method assumes fixed obstacle motion           divergence and unstable policies, making it difficult to ensure safe,
+directions and relies on handcrafted reward shaping, which limits its           efficient, and reliable motion. Addressing these challenges requires
+ability to cope with dynamically changing obstacle trajectories and par-        scalable, real-time, and uncertainty-aware path planning frameworks
+tial observability commonly encountered in real-world robotic environ-          tailored for high-dimensional POMDP problems.
+ments. To enhance environmental perception in cluttered workspaces,                 Many efforts have been made to address decision biases in robot
+Zeng et al. utilized depth cameras to capture workspace information             planning under dynamic and partially observable environments. Early
+and trained robots using deep Q-networks (DQN) to perform collab-               sampling-based approximate planning methods have become a main-
+orative pushing and grasping tasks (Zeng et al., 2018). Although the            stream solution due to their flexibility and efficiency in large belief
+approach demonstrates promising performance in structured environ-              spaces. Thrun et al. employed particle filters for belief state estimation
+ments, its reliance on grid-based motion primitives and evaluation              under uncertainty, providing a foundational approach for probabilistic
+on limited object categories constrains the expressiveness and gen-             state tracking in robotics (Thrun, 2002). Building on this, POMCP (Par-
+eralization capability of the learned policies. Beyond explicit reward          tially Observable Monte Carlo Planning) integrates Monte-Carlo belief
+engineering, several studies have explored learning reward functions            updates with Monte-Carlo tree search, requiring only a black-box simu-
+directly from data. Wu et al. proposed a self-supervised framework to           lator and enabling scalable online planning in large, high-dimensional
+infer reward functions from high-dimensional robotic observations for           POMDPs (Silver and Veness, 2010). DESPOT (Determinized Sparse
+estimating task progress (Wu et al., 2021). While the method yields             Partially Observable Tree) further improves planning stability by con-
+superior manipulation policies and faster convergence compared to               structing sparse scenario-based decision trees with regularization (So-
+traditional baselines, it assumes monotonic task progression and is pri-        mani et al., 2013). Nevertheless, these methods typically depend on
+marily evaluated on structured assembly tasks, limiting its applicability       extensive sampling or simulated rollouts to approximate belief evo-
+to non-monotonic or long-horizon manipulation scenarios. Similarly,             lution, which incurs substantial computational overhead and limits
+Lim et al. introduced a data-efficient inverse reinforcement learning           robustness and scalability in high-dimensional settings, particularly
+(IRL) approach based on L1-regularized sparse Gaussian Process pre-             under rapidly changing dynamics or long-horizon tasks.
+diction to recover reward functions from a small number of expert                   To further improve scalability, hierarchical and decomposition-
+demonstrations (Lim et al., 2020). Despite its sample efficiency, the           based frameworks have been explored. Hierarchical point-based value
+method requires access to diverse trajectory–reward pairs, which con-           iteration accelerates belief updates by exploiting structured state–
+strains scalability and practical deployment in high-dimensional robotic        action dependencies (Pineau et al., 2003), while multi-level solvers
+settings. Another line of work aims to improve learning efficiency and          improve planning efficiency for nonlinear robotic systems (Hoerger
+robustness through demonstration-based strategies. Rajeswaran et al.            et al., 2023). Despite these efficiency gains, such methods rely on
+combined imitation learning with reinforcement learning by pretrain-            predefined abstractions and hierarchical decompositions, which con-
+ing policies via behavior cloning and subsequently fine-tuning them             strain adaptability in unstructured or rapidly evolving environments.
+using policy gradients (Rajeswaran et al., 2017). Although this strategy        Similarly, Saleem et al. proposed a hierarchical belief representation
+accelerates training and achieves robust performance across various             that first employs a coarse-grained policy to rapidly guide planning
+manipulation tasks, its strong dependence on expert demonstrations              toward promising belief regions, followed by fine-grained planning to
+reduces adaptability in complex and highly dynamic environments,                resolve high-dimensional uncertainties, leading to improved manipula-
+particularly when demonstrations fail to capture evolving system dy-            tor task success rates (Saleem et al., 2024). However, this coarse-to-fine
+namics. Safety-aware motion planning has also received increasing               hierarchical structure introduces additional system complexity and may
+attention. Kiemel et al. developed a collision-aware planning frame-            suffer from error propagation between hierarchical levels, particularly
+work that integrates a learned backup policy with a risk assessment             when early-stage belief guidance is inaccurate.
+module to enable safe and real-time trajectory generation under both                Another line of work focuses on explicit risk management un-
+deterministic and stochastic conditions (Kiemel et al., 2024). Never-           der uncertainty through chance-constrained motion planning (CCMP).
+theless, frequent reliance on backup-policy interventions may disrupt           Blackmore introduced an early CCMP framework that integrates prob-
+the primary task policy, potentially affecting execution consistency in         abilistic collision avoidance into trajectory optimization, enabling risk-
+highly dynamic environments. Complementary approaches have in-                  aware planning for high-dimensional robotic systems (Blackmore et al.,
+vestigated hybrid planning architectures and reward design strategies.          2010). Building on this paradigm, p-Chekov extends CCMP to high-DOF
+Chen et al. designed a comprehensive reward function that integrates            robots by integrating LQG-based estimation, waypoint-level risk evalu-
+goal reaching and dynamic obstacle avoidance to enable real-time                ation, and risk allocation, achieving high chance-constraint satisfaction
+robotic arm planning (Chen et al., 2022), while Li et al. proposed a            under motion and sensing uncertainty (Dai et al., 2019). However,
+hybrid path planning framework that combines traditional planners               such approaches often rely on simplifying assumptions in uncertainty
+with DRL to enhance planning performance (Li et al., 2021). Although            modeling, limited quadrature-based probability approximations, and
+these methods improve planning effectiveness, their reliance on man-            conservative or suboptimal risk allocation strategies, which can result
+ually designed components and heuristic planning structures reduces             in overly cautious behaviors and reduced motion efficiency, particu-
+flexibility, limits transferability across tasks and environments, and          larly in highly nonlinear or contact-rich manipulation scenarios. Com-
+increases system complexity.                                                    plementary to CCMP, online replanning and shielding-based methods
+                                                                                enhance responsiveness by repeatedly updating belief-space plans or
+2.2. Uncertainty and belief state instability in POMDP environments             enforcing safety constraints during execution (Agha-mohammadi et al.,
+                                                                                2018; Sheng et al., 2024). While effective in improving short-term
+  The partially observable Markov decision process (POMDP) is a                 safety, frequent replanning, additional statistical calibration or shield-
+mathematical model that can describe a wide variety of sequential               ing overhead, and reliance on external safety mechanisms can lead to
+
+                                                                            3
+D. Wang et al.                                                                                       Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+policy oscillations and increased computational burden, and do not fun-           AMOR, a method that employs conditional policies to generate Pareto-
+damentally resolve belief instability in long-horizon, continuous-state           optimal control strategies for dynamically weighted multi-objective
+POMDP settings.                                                                   tasks (Alegre et al., 2025). However, Pareto-based approaches typically
+    To improve decision consistency under partial observability, re-              incur high computational costs, require extensive exploration to ap-
+current reinforcement learning algorithms such as DRQN (Hausknecht                proximate the Pareto front, and provide limited guidance for selecting
+and Stone, 2015), R2D2 (Kapturowski et al., 2018), and Zheng et al.’s             a single operational policy in real-time robotic control scenarios.
+MK-A3C — a memory- and knowledge-based asynchronous advantage                         From the perspective of reward function design, Tao et al. proposed
+actor–critic        integrating       a        GRU-based          memory          an adaptive hierarchical reward mechanism (AHRM) that dynamically
+network — have been developed, enabling continuous control for robot              adjusts reward weights according to task phases, significantly improv-
+navigation in unknown dynamic environments with moving obsta-                     ing learning efficiency in dexterous manipulation (Tao et al., 2022).
+cles (Zeng et al., 2019). Although effective for mitigating partial observ-       Additionally, Berducci et al. introduced HPRS (Hierarchical Potential-
+ability and accelerating task-specific convergence, temporal modeling             based Reward Shaping), a structured reward shaping framework that
+in these methods remains largely implicit and tightly coupled to policy           prioritizes task objectives in layered potential functions, dynamically
+optimization, lacking explicit and decoupled trend abstraction. As a              activating lower-priority rewards only after higher-priority objectives
+result, long-term temporal dependencies and motion evolution trends               are achieved. This effectively mitigates reward conflicts and accelerates
+are not explicitly modeled, limiting robustness and stability in dynamic          policy training (Berducci et al., 2021). While these methods reduce
+environments with non-Markovian state transitions.                                manual tuning effort and improve training stability, they still rely
+                                                                                  on handcrafted reward structures and task-specific heuristics, limiting
+2.3. Multi-objective task conflicts in decision-making                            scalability and generalization to unseen tasks or dynamic environments.
+                                                                                  To overcome the limited scalability of manual reward design and
+    In general, robotic positioning under obstacle avoidance relies               the poor generalization of demonstration-based methods, Cui et al.
+on evaluative functions comprising components for target achieve-                 proposed GROVE — a general reward framework that combines LLMs
+ment (Zhou et al., 2022), and for penalizing unsafe behaviors or                  and VLMs to iteratively optimize reward functions without manual
+constraint violations. While these components can be combined within              engineering or task-specific demonstrations, enabling flexible adapta-
+a unified motion planning framework through weighted penalties, they              tion across tasks (Cui et al., 2025). Although promising in reducing
+are not always consistent and may even conflict (Zhou et al., 2023). In           human effort, such approaches depend on external foundation models
+simple static environments, appropriately designed evaluative functions           and offline reasoning loops, introducing additional system complexity
+can effectively balance positioning accuracy and motion safety (Xie               and uncertainty in safety-critical robotic applications.
+et al., 2021), often relying on the designer’s intuition, experience, and
+prior knowledge (Shaker, 2016). However, with the growing demand                  2.4. Non-stationarity-induced challenges in policy convergence and gener-
+for intelligent industrial production, many real-world scenarios involve          alization
+dynamic and uncertain environments, such as human–robot collabo-
+ration tasks (Othman and Yang, 2023), where it becomes increasingly                    In dynamic environments, both the reward and state transition
+difficult to manually define appropriate evaluative criteria (Han et al.,         distributions may change over time in an exogenous manner — in-
+2022; Escontrela et al., 2022). A lack of systematic understanding of the         dependently of the agent’s policy — but within a constrained budget
+interactions between evaluative criteria and environment attributes can           to limit excessive non-stationarity (Cheung et al., 2020). This intrin-
+result in inefficiencies and increased system failure risks (Huang and            sic non-stationarity introduces significant challenges for reinforcement
+Jin, 2022).                                                                       learning. Although existing DRL-based trajectory planning approaches
+    In terms of Gradient Conflict Resolution, Liu and Zhao employed               have demonstrated promising performance in static environments, they
+an arbitration network (AR-SAC) to coordinate gradients from multi-               still face substantial obstacles in dynamic, obstacle-laden scenarios.
+ple tasks, effectively mitigating conflicts in multi-task reinforcement           Frequent and unpredictable changes in environmental states complicate
+learning for robotic manipulators (Wang et al., 2025). Similarly, Kim             the design of stable and informative reward functions, undermining
+et al. proposed CoMOGA (Constrained Multi-Objective Gradient Ag-                  policy convergence and training stability. Moreover, increased environ-
+gregator), which formulates multi-objective reinforcement learning as             mental complexity amplifies the non-stationarity of state distributions
+a constrained optimization problem and aggregates gradients through               and exacerbates task conflicts, making it difficult for policies to con-
+hierarchical constraints, successfully avoiding gradient conflicts while          verge effectively. This situation corresponds to a non-stationary envi-
+ensuring convergence performance (Kim et al., 2024) . To further ad-              ronment in which the agent must develop tailored dynamics models
+dress gradient interference issues, Sinha and Levine introduced DiGrad,           and policies to cope with distinct contexts and learning tasks.
+a differential policy gradient method that separates shared and task-                  Supervised meta-learning techniques (Finn et al., 2017) have re-
+specific action components to reduce inter-task gradient interference in          cently been incorporated into reinforcement learning frameworks to
+multi-objective robotic control (Dewangan et al., 2018). Despite their            facilitate swift policy adaptation in environments with changing dy-
+effectiveness in mitigating gradient conflicts during optimization, these         namics (Nagabandi et al., 2018b). Nagabandi et al. introduced a
+approaches operate primarily at the gradient or action decomposition              model-based algorithm where a meta-learning technique is used to
+level and assume predefined task objectives, offering limited insight             construct dynamics models capable of rapidly adapting to recent ex-
+into how conflicting objectives should be structured or prioritized in            periences (Nagabandi et al., 2018a)—either by updating the hidden
+dynamically changing environments.                                                state of a recurrent neural network (Duan et al., 2016), or by updating
+    In terms of Pareto-based Multi-objective Optimization, where solu-            the model parameters via a small number of gradient steps (Finn
+tions to multi-objective reinforcement learning (MORL) problems are               et al., 2017). Similarly, Bing et al. proposed CEMRL, an efficient meta-
+commonly evaluated based on Pareto dominance criteria and the goal                reinforcement learning algorithm designed to handle non-stationary
+is to approximate the set of non-dominated solutions (Bai et al., 2023),          environments and broad task distributions (Bing et al., 2022). Despite
+Xu et al. proposed an efficient evolutionary learning algorithm for con-          their ability to accelerate adaptation, these meta-reinforcement learn-
+tinuous robot control problems. This method extends a state-of-the-art            ing approaches generally rely on past task experiences and assume that
+reinforcement learning algorithm and incorporates a novel prediction              future dynamics resemble previously observed scenarios, which limits
+model to effectively guide the learning process toward the Pareto                 robustness and adaptability in highly non-stationary or previously
+frontier (Xu et al., 2020). In a related effort, Alegre et al. developed          unseen environments.
+
+                                                                              4
+D. Wang et al.                                                                                           Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+    In terms of context- and risk-aware reinforcement learning methods,         3.1. POMDP-based modeling for robotic manipulator dynamic obstacle
+Touati et al. introduced the OPT-WLSVI algorithm, which leverages               avoidance and positioning control
+weighted least-squares value iteration with exponential weighting to
+gradually forget outdated data. This effectively handles contextual vari-          To account for the dynamic and partially observable nature of the
+ations in non-stationary linear Markov decision processes, improving            environment, the robotic manipulator control task is formulated as a
+policy adaptability and stability (Touati and Vincent, 2020). Similarly,        POMDP, defined by the tuple:
+Hou et al. developed the Wasserstein Robust Advantage Actor–Critic
+(WRAAC) algorithm, which reformulates policy optimization as an                 (, , , 𝜌, 𝑏, 𝛾, 𝑟)                                                                  (1)
+iterative risk-sensitive task and links transition probability robustness       where:
+with state robustness, thereby enhancing policy reliability in dynamic
+settings (Hou et al., 2020). However, they typically rely on assump-                 •  denotes the set of true environment states (unobservable to the
+tions such as linearity, bounded perturbations, or predefined feature                  agent).
+representations, which can limit performance in highly nonlinear, un-                •  is the continuous action space.
+modeled, or rapidly evolving scenarios, highlighting the need for ap-                •  represents the observation space accessible to the agent.
+proaches that maintain stable and flexible policy learning under more                • 𝜌 ∶  ×  ×  → [0, 1] is the state transition probability function.
+general dynamic conditions.                                                          • 𝑏 ∶  ×  ×  → [0, 1] is the observation probability function.
+    To mitigate catastrophic forgetting in multi-task and continual                  • 𝛾 ∈ [0, 1] is the reward discount factor.
+learning scenarios, continual reinforcement learning methods have                    • 𝑟 ∶  ×  → R defines the reward function based on observations
+been widely applied. Rolnick et al. proposed CLEAR, a replay-based                     and actions.
+method combining off-policy learning and behavior cloning within a
+hybrid experience replay mechanism. This approach balances learn-                  In contrast to conventional POMDP solutions relying on belief states
+ing stability with policy plasticity, significantly reducing forgetting         or observation-action histories, this framework adopts an observation
+in multi-task reinforcement learning environments (Li et al., 2024).            sequence-based decision mechanism. At each timestep 𝑡, the agent
+Several distillation-based studies involve using one neural network as          receives an observation sequence:
+a reference or soft target for another. This technique enhances the
+training process by providing an additional auxiliary objective, with           ℎ𝑡 = (𝑜𝑡−𝑛+1 , 𝑜𝑡−𝑛+2 , … , 𝑜𝑡 )                                                        (2)
+the trained network aiming to approximate or replicate the behavior
+                                                                                    The objective is to maximize the expected cumulative discounted
+of this target model. Early foundational works in knowledge distillation
+                                                                                reward:
+include model compression (Buciluǎ et al., 2006), teacher-student soft-                      [∞                          ]
+max matching (Hinton et al., 2015), and attention transfer (Zagoruyko                          ∑                     |
+                                                                                𝑣𝜋 (ℎ𝑡 ) = E𝜋       𝑘                |
+                                                                                                   𝛾 𝑟(𝑜𝑡+𝑘 , 𝑎𝑡+𝑘 ) | ℎ𝑡                       (3)
+and Komodakis, 2016), which collectively highlight the importance of                           𝑘=0                   |
+effectively processing and transferring internal feature representations
+                                                                                    The optimal policy 𝜋 ∗ satisfies:
+from a teacher to a student model. Building on these insights, modern
+reinforcement learning frameworks increasingly incorporate distillation         𝑣𝜋 ∗ (ℎ𝑡 ) ≥ 𝑣𝜋 (ℎ𝑡 ),   ∀ℎ𝑡 , ∀𝜋.                                                      (4)
+mechanisms to stabilize training, guide policy learning, and transfer
+knowledge from expert or pretrained models, as demonstrated in recent               Unlike standard POMDPs, we ignore explicit action histories and
+reinforcement learning studies (Rusu et al., 2015; Zhang et al., 2022).         rely on sequential observations, as they sufficiently capture temporal
+While continual reinforcement learning approaches effectively mitigate          dynamics through the continuous evolution of the robot, target, and
+catastrophic forgetting, they predominantly focus on preserving prior           obstacles, while improving computational efficiency.
+knowledge and lack mechanisms to explicitly balance stability with                  To concretely implement this POMDP formulation, we next detail
+adaptability, limiting their responsiveness to novel tasks or abrupt            the design of the observation space, action space, and reward function.
+environmental changes.
+    Furthermore, transfer reinforcement learning methods have also              (1) Observation space
+been explored to improve policy transferability under non-stationary                At each timestep, the agent receives an observation vector 𝑜𝑡 ∈ ,
+conditions. Chai et al. proposed a re-weighted targeting procedure              comprising environmental and task-relevant features:
+and designed the transfer deep Q*-learning framework. By strategi-                   [                                                                   ]
+                                                                                           position posture position posture position  posture
+cally constructing transferable experience samples, this method en-             𝑜𝑡 = 𝜃𝑖 , 𝑃TCP , 𝑃TCP , 𝑃Target , 𝑃Target , 𝐸Target , 𝐸Target , 𝑑𝑖obs , 𝐻 . (5)
+hances decision-making performance and provides theoretical conver-                A detailed description of the selected state variables is provided in
+gence guarantees in dynamically changing environments (Chai et al.,             Table 1.
+2025). Nevertheless, the effectiveness of such methods is sensitive to
+task similarity and sample quality, and performance may degrade when
+                                                                                (2) Action space
+applied to highly heterogeneous or rapidly evolving tasks.
+                                                                                    The agent selects continuous actions , representing incremental
+                                                                                adjustments to joint angles:
+3. Methodology
+                                                                                     [                                      ]
+                                                                                𝑎𝑡 = 𝛥𝜃1 , 𝛥𝜃2 , 𝛥𝜃3 , 𝛥𝜃4 , 𝛥𝜃5 , 𝛥𝜃6 , 𝛥𝜃7 .                   (6)
+    This section first formulates the dynamic obstacle avoidance and po-
+sitioning control task of robotic manipulators as a Partially Observable
+Markov Decision Process (POMDP) under dynamic and partially observ-             (3) Reward function
+able environments. Based on this modeling, we construct the overall                The reward function is a weighted sum of three components, com-
+framework of the proposed TL-ARS-TDKDQ system. Then, we describe                puted based on observations:
+the proposed architecture, which consists of three key components:                               ‖ position  posture ‖
+                                                                                𝑟error (𝑜𝑡 ) = − ‖𝐸Target + 𝐸Target ‖ ,                                                 (7)
+(1) Trend Learning for temporal pattern extraction and uncertainty                               ‖                   ‖
+mitigation, (2) Adaptive Reward Shaping for task-specific reward guid-
+ance and balancing between dynamic obstacle avoidance and precise                                      ⎧ 𝑑 obs
+                                                                                                   ∑6
+                                                                                                       ⎪ 𝑑𝑖 − 1,     if 𝑑𝑖obs ≤ 𝑑0 ,
+positioning, and (3) Q-value knowledge distillation based on batch              𝑟collision (𝑜𝑡 ) =     ⎨ 0                                                              (8)
+temporal-difference (TD) error for stable and efficient policy learning.                           𝑖=1 ⎪0,           otherwise,
+                                                                                                       ⎩
+
+                                                                            5
+D. Wang et al.                                                                                                            Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+                                             Table 1
+                                             Description of observation space elements.
+                                              Symbol                    Description
+                                              𝜃𝑖                        Joint angles of the manipulator’s seven joints.
+                                                 position
+                                              𝑃TCP                      End-effector position in world coordinates.
+                                                 posture
+                                              𝑃TCP                      End-effector orientation in world coordinates.
+                                                 position
+                                              𝑃Target                   Target point position in world coordinates.
+                                                 posture
+                                              𝑃Target                   Target point orientation in world coordinates.
+                                                position
+                                              𝐸Target                   Euclidean distance between TCP and target position.
+                                                 posture
+                                              𝐸Target                   Orientation deviation between TCP and target.
+                                              𝑑𝑖obs                     Minimum distance between each potential collision module and obstacles.
+                                              𝐻                         Binary flag indicating whether TCP reached target pose (1: yes, 0: no).
+
+
+
+
+Fig. 1. The overall architecture of the proposed TL-ARS-TDKDQ framework for adaptive positioning control and obstacle avoidance in dynamic environments.
+
+
+                                                                                                  joint angles, and dynamic obstacle motion trends. The LSTM-enhanced
+              ⎧−1,                position
+                            if 𝑃TCP
+                                            position
+                                         ∉ 𝑝coverage ,
+              ⎪                 position    position    posture posture
+                                                                                                  actor–critic network extracts temporal features to support adaptive con-
+𝑟keep (𝑜𝑡 ) = ⎨−0.5,        if 𝑃TCP      ∈ 𝑝coverage , 𝑃TCP ∉ 𝑝coverage ,              (9)        trol decisions for complex manipulator positioning tasks under dynamic
+              ⎪
+              ⎩0,           otherwise,                                                            obstacle avoidance. Concurrently, The system continuously monitors
+     Total reward:                                                                                the end-effector pose and the frequency of safety boundary violations
+                                                                                                  by obstacles for potentially colliding manipulator modules, adaptively
+𝑟𝑡 (𝑜𝑡 , 𝑎𝑡 ) = 𝑟error (𝑜𝑡 ) + 𝑟collision (𝑜𝑡 ) + 𝑟keep (𝑜𝑡 ).                        (10)        adjusting rewards to maintain a balance between target localization
+                                                                                                  and obstacle avoidance to ensure smooth, balanced, and safe multi-
+                                                                                                  objective control of the manipulator. To accelerate training, expert
+3.2. The TL-ARS-TDKDQ framework
+                                                                                                  positioning control experiences relevant to robotic manipulators are
+                                                                                                  integrated early, gradually transitioning to data generated by the ma-
+     This study addresses the challenges of robotic manipulator position-
+                                                                                                  nipulator’s own interactions to enhance policy convergence. Finally,
+ing control under dynamic obstacle avoidance in uncertain environ-
+                                                                                                  the TD error-based Q-value knowledge distillation stabilizes training by
+ments by proposing a deep reinforcement learning framework named                                  smoothing reward fluctuations and resolving conflicts among compet-
+TL-ARS-TDKDQ (see Fig. 1). The framework consists of three main                                   ing objectives typical in robotic manipulator control. Their coordinated
+components:                                                                                       integration within a unified RL framework enables adaptive, temporally
+     1. Trend Learning (TL), which enhances the Actor–Critic network                              aware, and robust control of robotic manipulators in complex, dynamic
+with a temporal state encoding module to capture temporal dependen-                               environments.
+cies in the robotic manipulator’s sequential state data and optimize
+policy learning based on time-dependent motion trends;                                            3.3. Trend learning
+     2. Adaptive Reward Shaping (ARS), which dynamically balances the
+dual objectives of target localization and obstacle avoidance for the ma-                             In this section, we address the challenge that positioning control for
+nipulator by adjusting rewards based on end-effector pose constraints                             a robotic manipulator under dynamic obstacle avoidance is inherently
+and the frequency of boundary violations detected by the manipulator’s                            a dynamic and complex motion process operating within a partially
+various modules;                                                                                  observable environment, Relying solely on the current observation for
+     3. Temporal-Difference (TD) error-based Q-value Knowledge Dis-                               action decision-making and policy optimization may result in insuffi-
+tillation (TDKDQ) mechanism, which introduces a dynamic teacher                                   cient environmental representation, as it disregards valuable historical
+network and adaptively balances the construction of soft target Q-                                information and potential future variations. This limitation increases
+values based on TD error, thereby mitigating policy oscillations and                              the risk of collisions or leads to overly conservative obstacle avoidance
+learning instability in the manipulator’s control process caused by                               maneuvers in complex, dynamic workspaces, ultimately compromising
+environmental non-stationarity.                                                                   both safety and task efficiency.
+     The operation of the framework involves continuous perception of                                 To overcome the inherent limitations of conventional observation
+the robotic manipulator’s state—including end-effector target positions,                          representations in dynamic and partially observable environments, we
+
+                                                                                              6
+D. Wang et al.                                                                                                    Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+   Fig. 2. The architecture of the proposed LSTM-based trend learning module for capturing temporal state representations in adaptive positioning control.
+
+
+propose augmenting the decision-making process with trend-aware                   manipulator control tasks. By decoupling the LSTM structures, the
+temporal observation encoding and sequential experience integration               architecture prevents inter-network gradient interference, ensuring in-
+mechanisms (see Fig. 2). Specifically, to capture the latent temporal             dependent and stable updates of the policy and value functions. This de-
+dependencies inherent in robotic manipulator motion within dynamic                sign is particularly advantageous for robotic manipulators operating in
+workspaces, Long Short-Term Memory (LSTM) networks are employed                   dynamic, partially observable environments, where long-horizon tem-
+as temporal observation encoding and abstraction modules within both              poral correlations and non-Markovian state transitions often undermine
+the Actor and Critic networks. These modules transform sequential ob-             decision-making reliability.
+servation trajectories into compact, trend-aware latent representations              To support this framework, we enhance the network optimization
+for downstream policy optimization and value estimation tasks.                    process by storing and sampling sequential observation experiences
+    The temporal encoders are co-optimized with their respective RL               during the agent’s interaction with the environment. The experience
+objectives, giving rise to a co-evolutionary learning dynamic where               replay buffer  is structured as:
+temporal abstraction and policy optimization mutually reinforce each                   {                    }
+other in the context of robotic manipulator control. Concretely, this              = (ℎ𝑡 , 𝑎𝑡 , 𝑟𝑡 , ℎ𝑡+1 ) .                                       (15)
+dynamic is embodied in two LSTM-based temporal encoders— LSTM𝜃 𝜋
+                                                                                      At each training iteration, minibatches of sequential transitions
+for the Actor and LSTM𝜃𝑄 for the Critic—designed to process sequen-
+                                                                                  are sampled from  to perform off-policy updates for both the Ac-
+tial observations of the manipulator’s state. This ensures that both
+                                                                                  tor and Critic networks, ensuring that temporal dependencies within
+policy and value function learning capture temporally coherent mo-
+                                                                                  observation sequences are preserved during policy and value function
+tion patterns while remaining decoupled, enabling stable and efficient
+                                                                                  learning.
+decision-making in dynamic, partially observable environments.
+    The Actor LSTM processes the observation sequence and produces
+                                                                                  3.4. Task-guided reward shaping for balancing obstacle avoidance and
+a trend-aware latent state representation for policy decision-making:
+                                                                                  positioning conflicts
+𝑧𝜋𝑡 = LSTM𝜃𝜋 (ℎ𝑡 ).                                                    (11)
+                                                                                     The manipulator’s positioning control and dynamic obstacle avoid-
+    The policy network outputs a continuous action distribution condi-
+                                                                                  ance sub-tasks inherently conflict, especially when the manipulator
+tioned on the trend-aware latent state 𝑧𝜋𝑡 , modeled as a multivariate
+                                                                                  and obstacles approach the target simultaneously. To dynamically bal-
+diagonal Gaussian. Its probability density function is given by:
+                              (                             )                     ance these conflicting objectives, a task conflict-aware adaptive reward
+                   1            1
+𝜋(𝑎𝑡 ∣ 𝑧𝜋𝑡 ) = √           exp − (𝑎𝑡 − 𝜇𝑡 )𝑇 𝛴𝑡−1 (𝑎𝑡 − 𝜇𝑡 ) ,    (12)            weighting mechanism is proposed. This mechanism assigns and adjusts
+                (2𝜋)𝑛 |𝛴 |      2                                                 reward weights for each collision module’s avoidance sub-reward and
+                      𝑡
+
+where 𝜇𝑡 ∈ R𝑛 and 𝛴𝑡 = diag(𝜎𝑡2 ) are the mean and covariance matrix              the positioning control sub-reward based on real-time collision risk
+output by the policy network given 𝑧𝜋𝑡 , and 𝑛 is the dimensionality of           perception (see Fig. 3). The reward components are updated as follows:
+the action space.
+                                                                                          {
+    Similarly, the Critic LSTM independently processes the same obser-                        𝑡𝑐𝑖 + 1,        𝑑𝑖obs ≤ 𝑑0 ,
+vation sequence to produce its own trend-aware latent representation              𝑡𝑐𝑖 =                                                                                         (16)
+                                                                                              𝑡𝑐𝑖 ,           𝑑𝑖obs > 𝑑0 ,
+for value estimation:
+                                                                                                ∑ 6
+𝑧𝑄
+ 𝑡 = LSTM𝜃 𝑄 (ℎ𝑡 ).                                                    (13)       𝑡𝑒 = 𝑡 −            𝑡𝑐𝑖 ,                                                                     (17)
+                                                                                               𝑖=1
+   The Critic network then estimates the state–action value function                          ‖           position    posture ‖
+conditioned on this representation and the selected action:                       𝑟error = − ‖𝜇𝑒 × 𝑡𝑒 𝐸Target + 𝐸Target ‖ ,                                                     (18)
+                                                                                              ‖                               ‖
+                   [∞                            ]
+                    ∑                   | 𝑄                                                              ( obs      )
+𝑄(𝑧𝑄 , 𝑎   ) =          𝛾 𝑘
+                            𝑟(𝑜   , 𝑎 ) | 𝑧 , 𝑎                 (14)                          ⎧            𝑑𝑖
+   𝑡     𝑡     E 𝜋             𝑡+𝑘 𝑡+𝑘 | 𝑡      𝑡 .                                           ⎪𝜇 𝑐 × 𝑡𝑐𝑖         − 1 , 𝑑𝑖obs ≤ 𝑑0 ,
+                    𝑘=0                 |                                          collision
+                                                                                  𝑟𝑖         =⎨ 𝑖           𝑑0                                                                  (19)
+    This dual-LSTM architecture allows both the Actor and Critic to                           ⎪0,                         𝑑𝑖obs > 𝑑0 ,
+                                                                                              ⎩
+effectively capture historical sequential dependencies while maintain-
+ing distinct temporal modeling capacities aligned with their respec-                             ∑
+                                                                                                 6
+                                                                                  𝑟collision =            𝑟collision
+                                                                                                           𝑖         .                                                          (20)
+tive objectives of policy optimization and value estimation in robotic                            𝑖=1
+
+
+                                                                              7
+D. Wang et al.                                                                                                   Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+Algorithm 1 TL Module: Trend-Aware Observation Encoding for Policy
+and Value Estimation
+Require: Replay buffer ; Actor network 𝜋𝜙 ; Critic networks 𝑄𝜃
+Require: Max episodes 𝑀, horizon 𝑇 , batch size 𝑁; TL observation sequence
+    length 𝑛
+ 1: for episode = 1 to 𝑀 do
+ 2:      Initialize environment, obtain initial observation 𝑜0
+ 3:      Construct initial sequential observation buffer ℎ0 = (𝑜0 )
+ 4:      for timestep 𝑡 = 0 to 𝑇 do ⊳ — Capture current and historical states
+    for partially observable environment (Eq. 1–6) —
+ 5:          Receive current observation 𝑜𝑡
+ 6:          Update sequential observation buffer:
+       ℎ𝑡 = (𝑜𝑡−𝑛+1 , … , 𝑜𝑡 )
+            ⊳ — Trend Learning: Encode temporal patterns for Actor and Critic
+    (Eq. 11–14) —
+ 7:          Compute trend-aware latent for Actor (policy decision):
+       𝑧𝜋𝑡 = LSTM𝜃𝜋 (ℎ𝑡 )
+ 8:          Compute trend-aware latent for Critic (value estimation):
+       𝑧𝑄𝑡 = LSTM𝜃𝑄 (ℎ𝑡 )
+             ⊳ — Critic estimates state-action value conditioned on trend-aware       Fig. 3. The figure illustrates the potential collision modules of the robotic
+    latent and selected action [—                                                     arm within the spatial range of obstacle movement. These modules perform
+                                      ∑∞ 𝑘                  ]
+                                                   |                                  closest-distance detection with obstacles at each step of reinforcement learning
+ 9:          𝑄𝑡 = 𝑄𝜃 (𝑧𝑄𝑡 , 𝑎𝑡 ) = E𝜋       𝛾 𝑟𝑡+𝑘 |𝑧𝑄 ,𝑎
+                                        𝑘=0        | 𝑡 𝑡                              to obtain partial state information.
+            ⊳ — Sample action conditioned on trend-aware latent state for safe
+    and efficient motion —
+10:           Select action 𝑎𝑡 ∼ 𝜋𝜙 (𝑧𝜋𝑡 )                                            Algorithm 2 ARS Module: Adaptive Reward Shaping
+11:           Execute 𝑎𝑡 ; obtain reward 𝑟𝑡 and next observation 𝑜𝑡+1
+                                                                                      Require: ARS coefficients {𝜇𝑒 , 𝜇𝑖𝑐 }6𝑖=1 , safe distance 𝑑0
+12:           Store sequential transition (ℎ𝑡 , 𝑎𝑡 , 𝑟𝑡 , ℎ𝑡+1 ) in 
+                                                                                       1: for each timestep 𝑡 in episode do                      ⊳ — Adaptive Reward Shaping for
+13:       end for
+                                                                                          Balancing Positioning and Obstacle Avoidance (Eq. 7–10, 16–20) —
+14: end for
+                                                                                       2:    for 𝑖 = 1 to 6 do
+                                                                                       3:         if 𝑑𝑖obs ≤ 𝑑0 then
+                                                                                       4:               𝑡𝑐𝑖 ← 𝑡𝑐𝑖 + 1                     ⊳ Increase avoidance weight for module 𝑖
+    Here, 𝑡 is the total weight, set based on total obstacle violation                 5:         end if
+counts during training; 𝑡𝑒 and 𝑡𝑐𝑖 denote the dynamic reward weights                   6:    end for
+                                                                                                          ∑6
+                                                                                       7:    𝑡𝑒 = 𝑡 − 𝑖=1 𝑡𝑐𝑖
+for positioning and avoidance tasks, respectively, updated according                                                      position       posture
+                                                                                       8:    𝑟error = −𝜇𝑒 ⋅ 𝑡𝑒 ⋅ (𝐸Target + 𝐸Target )
+to historical violation frequencies. 𝜇𝑒 and 𝜇𝑖𝑐 are the corresponding
+                                                                                       9:    𝑟collision = 0
+weight adjustment rates. It is worth noting that the adaptive reward                  10:     for 𝑖 = 1 to 6 do
+shaping mechanism is inherently robust to the choice of weighting                     11:          if 𝑑𝑖obs ≤ 𝑑0 then
+                                                                                                                                   ( obs       )
+parameters. Empirically chosen initial values suffice, as the system                                                                𝑑
+                                                                                      12:                𝑟𝑖collision = 𝜇𝑖𝑐 ⋅ 𝑡𝑐𝑖 ⋅ 𝑑𝑖 − 1
+automatically adjusts reward weights based on historical obstacle vi-                                                               0
+                                                                                      13:              𝑟collision ← 𝑟collision + 𝑟𝑖collision
+olation counts. Parameters such as the safety margin 𝑑0 , total weight                14:         end if
+𝑡, and adjustment rates 𝜇𝑒 and 𝜇𝑐𝑖 can be flexibly configured according               15:    end for
+to collision likelihood, dynamic obstacle characteristics, and training               16:
+                                                                                                   pos
+                                                                                             if 𝑃TCP ∉ pos then
+duration. This adaptivity ensures stable policy learning and effective                17:         𝑟keep = −1
+                                                                                                          post
+balancing between positioning accuracy and collision avoidance across                 18:    else if 𝑃TCP ∉ post then
+diverse scenarios (see Fig. 4).                                                       19:         𝑟keep = −0.5
+    To alleviate low data quality and inefficient exploration in early                20:    else
+                                                                                      21:         𝑟keep = 0
+training, expert data collected from positioning control only (without
+                                                                                      22:    end if
+obstacle avoidance) is incorporated. The sampling ratio between the
+                                                                                      23:    𝑟′𝑡 = 𝑟error + 𝑟collision + 𝑟keep
+current replay buffer 𝐿 and the expert buffer 𝑃 transitions gradually:                24: end for
+⎧     ⌊        ⌋
+        𝑁   𝑡                         𝑁𝑇
+⎪𝐵𝑡𝐿 = 2 + 𝑇 , 𝐵𝑡𝑃 = 𝑁 − 𝐵𝑡𝐿 , 0 ≤ 𝑡 ≤ 2 𝑠 ,
+⎨ 𝐿          𝑠
+                                   𝑁𝑇
+                                                                          (21)
+⎪𝐵𝑡 = 𝑁, 𝐵𝑡𝑃 = 0,              𝑡 > 2𝑠,                                                gating such instability in robotic manipulator policy training (see Fig.
+⎩
+                                                                                      5).
+where 𝐵𝑡𝐿 and 𝐵𝑡𝑃 denote the batch sizes sampled from the current and                     Specifically, TDKDQ incorporates an additional teacher target net-
+expert buffers, respectively; 𝑁 is the total batch size; and 𝑇𝑠 is the decay          work, structurally identical to the main critic network, which periodi-
+step controlling the transition speed.                                                cally clones parameters from the main critic. This mechanism ensures
+                                                                                      the teacher target network retains more stable historical knowledge,
+3.5. Q-value distillation based on batch TD error                                     serving as an informative reference for guiding the main critic network
+                                                                                      in an online knowledge distillation manner, rather than transferring
+    In the non-stationary environment induced by Adaptive Reward                      knowledge from a model trained on a different task. During training,
+Shaping (ARS) for robotic manipulator control tasks, conventional                     based on the Temporal-Difference (TD) error computed from current
+target network-based Q-value estimations are prone to oscillations and                experience samples, the fusion ratio between the teacher target Q-value
+instability due to frequent policy updates and dynamic environment                    and the conventional target Q-value is dynamically adjusted, forming
+feedback. To address this issue, this study proposes the TDKDQ module,                a soft target Q-value for training the main critic network. When the
+which introduces a soft Q-value fusion mechanism between a teacher                    TD error is large, the model relies more on the teacher target network
+target network and the conventional target network, effectively miti-                 to utilize stable prior knowledge; when the TD error is small, it places
+
+                                                                                  8
+D. Wang et al.                                                                                                        Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+Fig. 4. This figure illustrates the adaptive task transition and balancing process achieved through reward shaping. The transition is guided by the frequency of
+obstacles crossing the safety boundaries of each robotic arm module in the real environment, progressively shifting the learning focus from positioning control
+to positioning control with dynamic obstacle avoidance, ensuring a balanced and efficient policy optimization process.
+
+                                                                                               ′′
+greater emphasis on the current target network to maintain sensitivity                        𝜃𝑗=1,2 ← 𝜃𝑗=1,2 .                                                                     (31)
+to the latest environment feedback.
+                                                                                                  Here, 𝜃𝑗 denotes the main critic network parameters (for 𝑗 = 1, 2), 𝜃𝑗′
+    This TD error-guided adaptive weighting mechanism effectively im-
+                                                                                              are the traditional target critic network parameters, 𝜃𝑗′′ are the teacher
+plements the distillation process by dynamically balancing reliance on
+                                                                                              target critic network parameters obtained by cloning the main critic
+stable prior knowledge and current environment feedback, mitigating
+                                                                                              parameters, 𝜙 and 𝜙′ are the actor network and its target network
+value function fluctuations caused by reward weight adjustments, while                        parameters, and 𝜏 is the soft update coefficient.
+avoiding excessive smoothing that could delay policy updates. Conse-                              Finally, to improve stability, the actor is updated less frequently
+quently, TDKDQ achieves a balanced trade-off between stability and                            than the critic:
+adaptability, significantly enhancing the robustness and convergence
+                                                                                                       𝑓 cur
+efficiency of robotic manipulator policy training in non-stationary en-                         cur
+                                                                                              𝑓Actor = Critic .                                                     (32)
+vironments.                                                                                              𝑛𝑓
+    Taking the combination of the Soft Actor–Critic (SAC) algorithm and                           Here, 𝑛𝑓 denotes the actor update frequency relative to the critic.
+TDKDQ as an example under a sequence-based POMDP formulation, the                             Algorithm 3 TDKDQ Module: TD-Error-Guided Soft Q-Value Fusion
+optimal policy is defined by:
+                     [∞                                   ]                                   Require: TDKDQ update interval 𝑛𝑓 ; fusion coefficient 𝛽; Teacher target
+                      ∑ (                                )                                        update interval 𝑇𝑓
+𝜋 ∗ = arg max Eℎ𝑡 ∼𝐷     𝛾 𝑡 𝑅(ℎ𝑡 , 𝑎𝑡 ) + 𝛼𝐻(𝜋(⋅ ∣ ℎ𝑡 )) .        (22)                       Require: Critic networks 𝑄𝜃 ; Target Critic networks 𝑄𝜃′ ; Teacher Critic
+             𝜋
+                           𝑡=0
+                                                                                                  networks 𝑄𝜃′′
+   Here, 𝐷 is the replay buffer containing observation sequences ℎ𝑡 ,                          1: for each training iteration do
+and 𝛼 is the temperature parameter, decayed over time as:                                      2:      Sample minibatch  from  and expert buffer 
+                                                                                                               ⊳ — Compute soft target Q-value based on batch-normalized TD
+𝛼 = 𝑒−𝜆𝑡 𝛼0 .                                                                    (23)             error (Eq. 24–27) —
+    The clipped double Q-learning structure adopts six Q-networks (Fu-                         3:      Compute standard target Q-value: 𝑄target (ℎ𝑡 , 𝑎𝑡 ) using Eq. (24)
+jimoto et al., 2018). The target Q-value for a sequence-based decision                         4:      Compute teacher target Q-value: 𝑄T-target (ℎ𝑡 , 𝑎𝑡 ) using Eq. (25)
+                                                                                               5:      Compute batch TD errors: 𝛿𝑡 = 𝑄target (ℎ𝑡 , 𝑎𝑡 ) − 𝑄𝜃 (ℎ𝑡 , 𝑎𝑡 )
+is computed as:
+                                             [                                                 6:      Normalize TD error within batch: 𝐸TD        norm
+                                                                                                                                                          = NormalizeBatch(|𝛿𝑡 |), 𝐸TD
+                                                                                                                                                                                    norm
+                                                                                                                                                                                         ∈
+𝑄target (ℎ𝑡 , 𝑎𝑡 ) = 𝑟𝑡 + 𝛾 E𝑎𝑡+1 ∼𝜋(⋅∣ℎ𝑡+1 ) min 𝑄target,𝑗 (ℎ𝑡+1 , 𝑎𝑡+1 )                        [0, 0.2]
+                                               𝑗=1,2                                           7:      Compute soft fused target:
+                                                                        ]  (24)
+                                                                                                                  norm                     norm
+                                               − 𝛼 log 𝜋(𝑎𝑡+1 ∣ ℎ𝑡+1 ) .                             𝑄sof t = 𝛽𝐸TD     𝑄T-target + (1 − 𝛽𝐸TD    ) 𝑄target
+                                                                                               8:      Critic loss:
+   Similarly, the teacher target Q-value is given by:                                                            1 ∑[                                    ]
+                                                                                                     𝐽 (𝑄) = |||      (𝑄1 − 𝑄sof t )2 + (𝑄2 − 𝑄sof t )2
+                                               [                                               9:      Update critic parameters 𝜃
+𝑄T−target (ℎ𝑡 , 𝑎𝑡 ) = 𝑟𝑡 + 𝛾 E𝑎𝑡+1 ∼𝜋(⋅∣ℎ𝑡+1 ) min 𝑄T−target,𝑗 (ℎ𝑡+1 , 𝑎𝑡+1 )                10:      if update step mod 𝑛𝑓 = 0 then
+                                                 𝑗=1,2
+                                                                         ]       (25)         11:           Actor loss:
+                                                 − 𝛼 log 𝜋(𝑎𝑡+1 ∣ ℎ𝑡+1 ) .                                           [                                         ]
+                                                                                                     𝐽 (𝜋) = Eℎ𝑡 ,𝑎𝑡 𝛼 log 𝜋(𝑎𝑡 |ℎ𝑡 ) − min𝑗=1,2 𝑄𝑗 (ℎ𝑡 , 𝑎𝑡 )
+    To address non-stationary environments, the soft target Q-value                           12:           Update actor parameters 𝜙
+                                                                                              13:      end if
+integrates both target and teacher target Q-values, weighted by the
+                                                                                                                             ⊳ — Soft update for target networks (Eq. 29–30) —
+batch-normalized TD error:
+                                                                                              14:      𝜃 ′ ← 𝜏𝜃 + (1 − 𝜏)𝜃 ′
+                      norm
+                                                 (      norm
+                                                             )
+𝑄sof t (ℎ𝑡 , 𝑎𝑡 ) = 𝛽𝐸TD   𝑄T−target (ℎ𝑡 , 𝑎𝑡 ) + 1 − 𝛽𝐸TD     𝑄target (ℎ𝑡 , 𝑎𝑡 ). (26)       15:      𝜙′ ← 𝜏𝜙 + (1 − 𝜏)𝜙′
+                                                                                              16:      if update episode mod 𝑇𝑓 = 0 then                    ⊳ — Periodically clone main
+where 𝐸TDnorm ∈ [0, 0.2].
+                                                                                                  critic parameters to teacher critic (Eq. 31) —
+    The critic loss is then computed as:                                                      17:           𝜃 ′′ ← 𝜃
+                              [(                                )2                            18:      end if
+𝐽 (𝑄) = E(ℎ𝑡 ,𝑎𝑡 ,𝑟𝑡 ,ℎ𝑡+1 )∼𝐷 𝑄1 (ℎ𝑡 , 𝑎𝑡 ) − 𝑄sof t (ℎ𝑡 , 𝑎𝑡 )                              19: end for
+                                 (                                 )2 ]          (27)
+                               + 𝑄2 (ℎ𝑡 , 𝑎𝑡 ) − 𝑄sof t (ℎ𝑡 , 𝑎𝑡 )      .
+                                                                                              4. Experiments and results
+    The actor loss follows the maximum entropy objective (Haarnoja
+et al., 2018):                                                                                   This section presents the experimental platform setup, parameter
+               [            [                                     ]]
+                                                                                              configurations, and the performance evaluation of the proposed method
+𝐽 (𝜋) = Eℎ𝑡 ∼𝐷 E𝑎𝑡 ∼𝜋(⋅∣ℎ𝑡 ) 𝛼 log 𝜋(𝑎𝑡 ∣ ℎ𝑡 ) − min 𝑄𝑗 (ℎ𝑡 , 𝑎𝑡 ) . (28)
+                                                      𝑗=1,2                                   through extensive experiments and ablation studies.
+
+   Soft updates for the target networks and parameter cloning for the                         4.1. Experimental platform and parameter settings
+teacher target critic network are performed as follows:
+ ′                         ′                                                                     The experimental simulation platform was established based on
+𝜃𝑗=1,2 ← 𝜏𝜃𝑗=1,2 + (1 − 𝜏)𝜃𝑗=1,2 ,                                               (29)
+                                                                                              CoppeliaSim Edu version 4.6. The proposed algorithm was imple-
+    𝜙′ ← 𝜏𝜙 + (1 − 𝜏)𝜙′ ,                                                        (30)         mented using the Python programming language with the PyTorch
+
+                                                                                          9
+D. Wang et al.                                                                                       Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+Fig. 5. This figure illustrates the update and training process for generating soft target Q-values by balancing the target Q-network and the teacher target
+Q-network, based on batch-normalized TD errors as evaluation indicators for non-stationary environments. During optimization, the past knowledge introduced
+by the teacher target Q-network effectively mitigates the risk of training collapse caused by instability in non-stationary reinforcement learning scenarios.
+
+
+framework. Through the Remote API provided by CoppeliaSim, net-                   4.2. Performance of TL-ARS-TDKDQ algorithm
+work communication between Python and the CoppeliaSim platform
+was realized. By parsing feedback data from the CoppeliaSim Edu                       To validate the generality and effectiveness of the proposed TL-
+simulation platform, the state information of the mobile manipulator              ARS-TDKDQ framework when integrated with different policy gradient-
+was acquired in real-time.                                                        based reinforcement learning algorithms, it was incorporated respec-
+   To assess the runtime efficiency of the proposed method, we mea-               tively into three mainstream continuous action space algorithms: Deep
+sured the per-step inference time of the trained policy on a workstation          Deterministic Policy Gradient (DDPG), Twin Delayed Deep Determinis-
+                                                                                  tic Policy Gradient (TD3), and Soft Actor–Critic (SAC), as well as three
+equipped with an 11th Gen Intel Core i9-11900K CPU and an NVIDIA
+                                                                                  additional representative baselines: Conservative Q-Learning (CQL),
+Quadro RTX 4000 GPU. The execution time per control cycle ranges
+                                                                                  Demonstration-Augmented Policy Gradient with behavior cloning
+from 3 to 8 ms, demonstrating that the model is capable of real-time
+                                                                                  (DAPG), and Truncated Quantile Critics (TQC). These integrated vari-
+control for industrial robotic applications.
+                                                                                  ants were evaluated within the dynamic obstacle avoidance and posi-
+    The dynamic obstacle avoidance and position control simulation en-            tion control task scenario for a mobile manipulator.
+vironment is illustrated in Fig. 6. A simulated seven-degree-of-freedom               A comprehensive evaluation was conducted using multiple per-
+(7-DOF) KUKA robotic manipulator was constructed within                           formance metrics, including: (i) the number of episodes required for
+CoppeliaSim. Compared to traditional manipulator models, this con-                reward convergence (𝑁conv ), (ii) the average episode reward after
+figuration provides enhanced flexibility, enabling it to better adapt to          convergence (𝑅conv ), (iii) the average number of time steps required to
+complex environments involving real-time dynamic obstacle avoidance.              complete the motion planning task after convergence (𝑇 task ), (iv) the
+                                                                                  standard deviation of episode rewards after convergence (𝜎conv𝑅 ), and
+The manipulator’s operational workspace is defined as an orange trans-
+parent rectangular area with dimensions of 0.3 m × 0.15 m × 0.1 m.                (v) the task success rate (𝑃rate ).
+Within this workspace, target points (represented as small blue squares)              The convergence criterion was defined as follows: if the abso-
+are randomly generated. The manipulator’s task is to start from an ini-           lute difference between the average rewards over the most recent 50
+tial state and accurately achieve the specified position and orientation          episodes and the preceding 50 episodes is less than a threshold 𝛿, and
+control at the target point using the TCP (Tool Center Point) of its end          the average reward exceeds a minimum threshold 𝑅min , the policy is
+effector, while avoiding dynamic obstacles and maintaining the target             considered converged. Formally,
+                                                                                  |                         |
+posture for a continuous period.                                                  | 1 ∑𝑛
+                                                                                                 1 ∑ ||
+                                                                                                    𝑛−50
+                                                                                                                       1 ∑
+                                                                                                                             𝑛
+                                                                                  |        𝑟𝑖 −          𝑟𝑖 | < 𝛿,              𝑟 > 𝑅min ,        𝑛 > 100,         (33)
+    To simulate dynamic obstacles, a green spherical object with a                | 50                                 50 𝑖=𝑛−49 𝑖
+                                                                                  | 𝑖=𝑛−49      50 𝑖=𝑛−99 |
+                                                                                  |                         |
+radius of 0.075 m moves at a constant speed of 0.22 m/s near the target
+point, representing the dynamic obstacle’s motion. The obstacle moves             where 𝛿 = 0.1 and 𝑅min = −50 in our experiments.
+                                                                                     The success rate was evaluated by conducting five rounds of exper-
+randomly within a cubic blue transparent space with a side length of
+                                                                                  iments with each trained policy model, each round consisting of 200
+0.7 m centered on the target point, and randomly changes direction
+                                                                                  independent tests. A test was considered successful if the manipulator
+upon colliding with the boundaries. The manipulator is controlled
+                                                                                  completed the task without any collisions with dynamic obstacles, and
+via network communication between Python and CoppeliaSim, while
+                                                                                  maintained the target pose continuously for a specific number of steps
+the motion of the dynamic obstacle is managed through an internal
+                                                                                  within the defined tolerances (|𝛥𝑑| ≤ 0.025 m, |𝛥𝜃| ≤ 0.087 rad, 𝑇 = 5
+CoppeliaSim script.                                                               steps). The final success rate was calculated as the average success rate
+    The key parameters involved in the experiment are listed in Table             across the five rounds of experiments (see Figs. 7–11).
+2. These include hyperparameters for training iterations, learning rates,            The detailed experimental results are presented in Table 3.
+experience replay settings, network architecture specifications, action              The experimental results demonstrate that the proposed TL-ARS-
+and state space configurations, as well as reward shaping and control             TDKDQ framework exhibits robust convergence and strong task perfor-
+constraints.                                                                      mance across multiple mainstream reinforcement learning algorithms.
+
+                                                                             10
+D. Wang et al.                                                                                              Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+             Fig. 6. Adaptive motion planning simulation environment for a robotic manipulator in a dynamic environment based on CoppeliaSim.
+
+
+                               Table 2
+                               Experimental parameter settings.
+                                Parameter                                                                             Value
+                                Training episodes 𝑀                                                                   3000.
+                                Max steps per episode 𝑇                                                               300.
+                                Discount factor 𝛾                                                                     0.97.
+                                Critic learning rate                                                                  0.0003.
+                                Actor learning rate                                                                   0.0003.
+                                Replay buffer size                                                                    1 × 104 .
+                                Mini-batch size 𝑁                                                                     128.
+                                Decay steps 𝑇𝑠                                                                        2000.
+                                Numerical stability constant                                                          1 × 10−6 .
+                                Gradient-safe clipping interval for policy gradient term ∇𝜋 log(1 − 𝜋 2 )             [0, 1].
+                                Actor update frequency relative to the Critic 𝑛𝑓                                      2.
+                                Soft update factor 𝜏                                                                  0.01.
+                                Teacher target critic update interval 𝑇𝑓                                              50.
+                                Weighting factor 𝛽                                                                    3.
+                                                                                norm
+                                Batch-normalized TD error truncation range 𝐸TD                                        [0, 0.2].
+                                Initial exploration noise range                                                       [−4, 4].
+                                Initial temperature coefficient 𝛼0                                                    0.1.
+                                Decay factor 𝜆                                                                        0.0016.
+                                Log std truncation range                                                              (−20, 2).
+                                                           cur
+                                Critic update frequency 𝑓Critic                                                       1.
+                                                           cur
+                                Actor update frequency 𝑓Actor                                                         1/2.
+                                LSTM sequence length                                                                  3.
+                                LSTM hidden size                                                                      256.
+                                Number of LSTM layers                                                                 1.
+                                Fully connected layers                                                                2.
+                                Hidden layer size                                                                     512.
+                                Action space dimension dim(𝑎𝑡 )                                                       7.
+                                State space dimension dim(𝑠𝑡 )                                                        29.
+                                Action increment range 𝛥𝜃𝑖 (rad)                                                      [−10, 10].
+                                Position error tolerance 𝛥𝑑 (m)                                                       [−0.025, 0.025].
+                                Orientation error tolerance 𝛥𝜃 (rad)                                                  [−0.087, 0.087].
+                                Pose maintenance steps 𝑛                                                              5.
+                                Safety boundary 𝑑0 (m)                                                                0.05.
+                                Total weight sum 𝑡                                                                    1 × 105 .
+                                Target reward shaping rate 𝜇𝑒                                                         3 × 10−4 .
+                                Obstacle reward shaping rates 𝜇𝑖𝑐 (Joints 1, 7)                                       3 × 10−2 .
+                                Obstacle reward shaping rates 𝜇𝑖𝑐 (Joints 2-6)                                        6 × 10−2 .
+                                Conservative regularization coefficient 𝛼CQL                                          1.0.
+                                Demonstration weight 𝜆BC (training episode 𝑖)                                         1.0 ⋅ exp(−0.01 𝑖).
+                                Demonstration batch size 𝑁demo                                                        64.
+                                Number of quantiles per critic 𝑁𝑞                                                     10.
+                                Number of dropped quantiles 𝑁drop                                                     3.
+                                Quantile Huber loss parameter 𝜅                                                       1.0.
+
+
+
+Compared with conventional continuous-control RL methods, our ap-                         or convergence. From the loss perspective, driven by the dominance
+proach can adaptively learn in complex dynamic scenarios involving                        of the positioning reward and the high proportion of positioning ex-
+highly conflicting tasks of precise positioning and dynamic obstacle                      pert experience samples early in training, the Critic loss starts low.
+avoidance, where other algorithms fail to achieve effective learning                      As rewards become non-stationary and expert samples diminish, the
+
+                                                                                     11
+D. Wang et al.                                                                                       Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+                                                                                   context effects without introducing architectural changes or parameter-
+                                                                                   scale discrepancies. In contrast, using a longer input sequence with
+                                                                                   𝑛 = 3 allows the LSTM to leverage short-term temporal context. The
+                                                                                   results demonstrate that incorporating temporal sequences significantly
+                                                                                   reduces decision biases induced by environmental uncertainty. For
+                                                                                   structural ablation, the LSTM module is entirely removed from the
+                                                                                   TL module. Compared to the temporal context ablation setting, this
+                                                                                   structural removal exhibits a more evident performance decline. The
+                                                                                   ablation analysis suggests that trend learning helps compensate for
+                                                                                   incomplete state observability in POMDPs, thereby improving policy
+                                                                                   robustness in dynamic environments (see Figs. 12–15).
+                                                                                       Furthermore, we investigated the impact of different temporal se-
+                                                                                   quence lengths on the control performance of the robotic manipulator.
+                                                                                   The experimental results show that incorporating state information
+                                                                                   from the past 2 to 3 time steps to construct temporal sequences yields
+                                                                                   the best performance for the manipulator’s policy. However, as the
+Fig. 7. Reward convergence trends of algorithms integrated with the TL-ARS-        sequence length continues to increase, the control performance be-
+TDKDQ framework in adaptive motion planning for robotic manipulators in
+                                                                                   gins to degrade (see Figs. 16 and 17). We attribute this phenomenon
+dynamic environments.
+                                                                                   to the characteristics of the operating environment: since obstacles
+                                                                                   move at a constant linear velocity and only change direction randomly
+Table 3                                                                            upon reaching motion boundaries, 2 to 3 consecutive states are suffi-
+Performance comparison of the TL-ARS-TDKDQ framework integrated into
+                                                                                   cient for the robotic manipulator to infer movement trends and make
+different policy gradient algorithms.
+                                                       𝑅
+                                                                                   reliable decisions. Excessively long sequences introduce redundant in-
+ Method          𝑁conv       𝑅conv        𝑇 task      𝜎conv       𝑆rate (%)
+                                                                                   formation and may exacerbate long-term dependency issues, such as
+ Our SAC         1373        −32.83       28.64       28.42       94.5             gradient vanishing or information dilution, thereby impeding effective
+ Our TD3         1419        −37.03       33.21       29.22       92.8
+ Our DDPG        1777        −46.05       42.57       42.29       91.3
+                                                                                   policy learning for the manipulator. In addition, overly long sequences
+ Our CQL         1184        −37.58       31.78       39.40       92.7             may incorporate irrelevant or outdated information, weakening the
+ Our DAPG        1858        −50.88       45.24       51.34       91.0             model’s sensitivity to current critical dynamic features in the manip-
+ Our TQC         1033        −27.16       22.13       19.86       91.4             ulator’s workspace. Since the setting without the Trend Learning (TL)
+                                                                                   module, as well as certain sequence length configurations under the TL-
+                                                                                   enabled setting, failed to achieve convergence within the given training
+loss converges with low-amplitude oscillations. CQL yields higher loss             episodes, we instead adopted three alternative indicators to evaluate
+due to regularization, whereas TQC achieves smaller loss variance via              the manipulator’s performance: the mean reward over the final 500
+quantile-based estimation and truncation. From the reward perspective,             episodes (𝑅500 ), the corresponding standard deviation (𝜎𝑅500 ), and the
+TL-ARS-TDKDQ-TQC achieved the fastest convergence (1033 episodes)                  task success rate (𝑆rate ). The results are presented in Table 4.
+and the most stable reward evolution, owing to its quantile-based critic
+design, which reduces reward variance but slightly limits the task                 4.2.2. Ablation study on adaptive reward shaping and generalization per-
+success rate (91.4%) due to conservative value estimation. TL-ARS-                 formance
+TDKDQ-SAC obtained the highest success rate (94.5%) with consistent                    To verify the guiding and balancing effects of the adaptive weight
+convergence, while TL-ARS-TDKDQ-TD3 offered a good balance be-                     adjustment mechanism in positioning control tasks for robotic manip-
+tween learning speed and policy stability. For TL-ARS-TDKDQ-DAPG,                  ulators under dynamic obstacle avoidance conditions, we directly as-
+although behavior cloning with expert data was applied during the                  signed the balanced parameters obtained from the adaptive adjustment
+early-stage positioning tasks, the task was simple and the effect was              mechanism to the corresponding parameters of each potential collision
+limited. During the transition to dynamic obstacle avoidance with                  module of the manipulator. The manipulator was then trained for the
+positioning control, the imitation influence slightly constrained the              same number of episodes. This experiment aims to demonstrate how
+learning of obstacle avoidance. Notably, in our implementation of                  the gradual transition from simple to complex environments guides and
+TL-ARS-TDKDQ-DDPG, a double-Q network was incorporated to mit-                     balances positioning control tasks specifically for robotic manipulators
+igate overestimation. Despite this, it converged more slowly (1777                 in dynamic obstacle avoidance scenarios. The experimental results indi-
+episodes) and achieved lower reward (−46.05) and longer task du-                   cate that, compared to conventional manually assigned reward–penalty
+ration (42.57 s). TL-ARS-TDKDQ-CQL benefited from conservative Q-                  functions, the adaptive reward adjustment mechanism effectively: (1)
+regularization, improving training stability, but its overall performance          Dynamically adjusts reward and penalty terms during training, en-
+remained moderate (converged in 1184 episodes, reward −37.58, task                 abling the manipulator’s control agent to autonomously find an optimal
+duration 31.78). Overall, these results confirm that the TL-ARS-TDKDQ              trade-off without the need for laborious manual orthogonal experi-
+framework enhances stability, adaptability, and convergence efficiency             ments to tune weight parameters. (2) Facilitates a gradual transition
+across different algorithm integrations, while the characteristics of each         from simple to complex task scenarios, which significantly accelerates
+integration reflect their inherent design trade-offs.                              training convergence and enhances the agent’s ability to learn and
+                                                                                   adapt in complex dynamic environments. By progressively adjusting
+4.2.1. Ablation study on trend learning                                            the reward and penalty mechanisms, the manipulator achieves a well-
+    In the ablation studies of the Trend Learning (TL) module for robotic          balanced performance between dynamic obstacle avoidance and precise
+manipulators operating in dynamic and uncertain environments, we                   positioning control, thereby significantly enhancing its overall task
+explicitly investigate two complementary settings to assess the contri-            effectiveness (see Figs. 18–21).
+bution of the LSTM: (i) temporal context ablation and (ii) structural                  To further validate the generalization capability of the proposed
+ablation. For temporal context ablation, the LSTM sequence length is               method, we conducted a comparative test between a model trained
+restricted to 𝑛 = 1, which inhibits the model’s ability to exploit temporal        with the adaptive reward shaping (ARS) mechanism and a model
+dependencies while preserving the original LSTM cell structure and                 trained with preset fixed weight parameters. Both models were eval-
+gating operations. This setting enables an examination of temporal                 uated 200 episodes. In testing, the task requirements were made
+
+                                                                              12
+D. Wang et al.                                                                                      Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+Fig. 8. Evolution curves of the reward weights for potential collision modules and the end-effector module during training under the TL-ARS-TDKDQ framework
+in adaptive motion planning for robotic manipulators.
+
+
+
+
+Fig. 9. Comparative analysis of reward convergence trends between algorithms integrated with the TL-ARS-TDKDQ framework and baseline algorithms in adaptive
+motion planning for robotic manipulators operating in dynamic environments.
+
+
+more stringent than during training—specifically, the position accuracy          controlled by the ARS-trained model consistently demonstrated strong
+threshold was tightened to 0.015 m, and the duration for maintaining             task completion ability and stability, reflecting robust generalization
+the target position was extended to 9 time steps. These adjustments              under increased task complexity. Conversely, the manipulator gov-
+increased the collision risk, thereby intensifying the challenge of the          erned by the fixed-weight model showed a noticeable performance
+testing scenarios. Under these heightened demands, the manipulator               decline, with a significantly lower success rate, highlighting its limited
+
+                                                                            13
+D. Wang et al.                                                                                        Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+Fig. 10. Evolution curves of per-episode collision counts for potential-collision modules of robotic manipulators during adaptive motion planning, comparing the
+TL-ARS-TDKDQ framework with other baseline algorithms.
+
+
+
+
+Fig. 11. Comparative analysis of value loss trends between algorithms integrated with the TL-ARS-TDKDQ framework and baseline algorithms in adaptive motion
+planning for robotic manipulators operating in dynamic environments.
+
+
+generalization in complex dynamic environments (see Fig. 22). This                  learning setups and conducted comparative experiments against their
+comparative experiment further confirms that the adaptive adjustment                corresponding baseline versions. The experimental environment was
+mechanism effectively enhances both the generalization and robustness
+                                                                                    configured as a dynamic reward disturbance (ARS) task scenario. We
+of the manipulator’s control system. The results are presented in Table
+5.                                                                                  employed convergence speed during training as well as the average
+                                                                                                                       𝑅 and the maximum sliding re-
+                                                                                    sliding reward standard deviation 𝜎avg
+4.2.3. Ablation study on Q-value knowledge distillation based on batch                                       𝑅 , which reflect reward volatility, as evalu-
+                                                                                    ward standard deviation 𝜎max
+experience sample TD error
+                                                                                    ation metrics to systematically analyze the performance improvements
+   To comprehensively evaluate the generality and effectiveness of
+the proposed TDKDQ framework in non-stationary reward environ-                      of the TDKDQ framework across different algorithms. In addition, we
+ments, we integrated it into multiple continuous-action reinforcement               conducted 20 independent training runs for each configuration and
+
+                                                                               14
+D. Wang et al.                                                                                     Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+Fig. 12. Evolution of per-episode rewards for motion planners in dynamic robotic manipulation tasks under ablation settings of the Trend Learning module,
+including structural ablation (with/without TL) and temporal context ablation (𝑛 = 1).
+
+
+
+
+Fig. 13. Evolution of per-episode collision numbers for motion planners in dynamic robotic manipulation tasks under ablation settings of the Trend Learning
+module, including structural ablation (with/without TL) and temporal context ablation (𝑛 = 1).
+
+
+
+
+                                                                            15
+D. Wang et al.                                                                                     Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+Fig. 14. Evolution of per-step value loss for motion planners in dynamic robotic manipulation tasks under ablation settings of the Trend Learning module,
+including structural ablation (with/without TL) and temporal context ablation (𝑛 = 1).
+
+
+
+
+Fig. 15. Evolution of sliding-window success rates for motion planners in dynamic robotic manipulation tasks under ablation settings of the Trend Learning
+module, including structural ablation (with/without TL) and temporal context ablation (𝑛 = 1).
+
+
+computed the convergence success rate (𝑆rate ), defined as the propor-           from higher policy exploration and relatively stable reward mecha-
+tion of runs in which the algorithm achieved stable convergence, to              nisms in low-conflict scenarios (primarily localization control), which
+quantitatively assess training robustness under dynamic conditions. The          partially mitigates value function estimation disturbances caused by
+results are presented in Table 6.                                                non-stationary rewards and leads to preliminary policy performance
+                                                                                 improvements, this mitigation effect progressively diminishes as train-
+   The experimental results demonstrate that integrating TDKDQ into
+                                                                                 ing proceeds (see Figs. 23–27). Specifically, as the policies gradually
+various continuous-action reinforcement learning frameworks signifi-
+                                                                                 converge in robotic manipulator control tasks, exploration decreases
+cantly improves policy stability and task completion in robotic ma-              notably and policy behaviors tend to become deterministic, while the
+nipulator positioning under dynamic obstacle avoidance, thereby val-             non-stationary rewards induce irreversible shifts in the state–action
+idating the generality and effectiveness of the TD-error-guided target           distribution. This causes network training in later stages to be prone
+value distillation mechanism in complex, non-stationary robotic envi-            to local overfitting or misleading updates, ultimately resulting in pol-
+ronments. In contrast, although the original algorithms initially benefit        icy degradation or even collapse, thereby failing to achieve the task
+
+                                                                            16
+D. Wang et al.                                                                                               Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+Table 4
+Performance comparison of different policy gradient algorithms under settings without the Trend Learning (TL) module and with varying temporal sequence
+lengths 𝑛 in the TL-enabled case.
+ Algorithm            Metric            Without TL            Sequence Length 𝑛(with TL)
+                                                              1                     2                   3                 4                     7                     10
+                      𝑅500              −356.88               −58.11                −33.85              −30.32            −68.14                −253.87               −279.43
+ Our SAC              𝜎𝑅500             93.65                 113.97                32.86               25.03             63.34                 126.19                129.82
+                      𝑆rate (%)         13.9                  86.7                  94.2                94.5              82.1                  36.5                  32.5
+                      𝑅500              −538.26               −234.08               −33.04              −33.03            −69.00                −249.60               −342.64
+ Our TD3              𝜎𝑅500             343.80                251.34                26.17               26.91             69.44                 131.40                101.86
+                      𝑆rate (%)         8.9                   52.3                  93.8                92.4              62.8                  10.5                  0.0
+                      𝑅500              −270.71               −124.50               −59.31              −43.23            −74.80                −284.56               −354.28
+ Our DDPG             𝜎𝑅500             292.08                238.01                92.33               40.14             77.50                 119.32                84.60
+                      𝑆rate (%)         66.8                  83.4                  87.1                91.3              44.8                  16.2                  2.8
+                      𝑅500              −261.57               −74.35                −36.12              −31.51            −321.86               −361.44               −283.89
+ Our CQL              𝜎𝑅500             296.52                117.96                34.50               29.50             130.92                84.99                 43.70
+                      𝑆rate (%)         68.4                  90.0                  92.9                92.7              82.1                  45.9                  29.0
+                      𝑅500              −125.03               −47.85                −36.47              −48.61            −196.67               −243.91               −291.55
+ Our DAPG             𝜎𝑅500             187.04                131.98                27.64               49.00             137.12                168.21                72.52
+                      𝑆rate (%)         84.8                  89.0                  92.0                91.0              82.8                  19.5                  4.5
+                      𝑅500              −826.98               −260.85               −25.78              −27.49            −164.39               319.69                389.26
+ Our TQC              𝜎𝑅500             220.38                283.32                17.12               21.64             111.81                187.22                80.72
+                      𝑆rate (%)         0.0                   67.2                  94.6                91.4              21.3                  0.0                   0.0
+
+
+                 Table 5
+                 Evaluation of generalization performance: Success rates (%) of different algorithms with and without adaptive reward shaping
+                 (ARS) under stricter testing conditions.
+                  Algorithm                       Steps(𝑇 )             Accuracy (𝜖)
+                                                                        0.015                   0.020                   0.025                       0.030
+                                                  3                     94.0/42.5               95.0/67.0               96.0/79.5                   95.5/88.0
+                  Our SAC                         5                     88.5/6.5                92.5/20.5               94.5/47.5                   95.5/68.5
+                  Our SAC w/o ARS                 7                     74.5/1.0                87.0/3.0                97.0/12.0                   96.0/26.5
+                                                  9                     58.5/0.0                82.0/0.5                92.5/3.0                    95.0/8.0
+                                                  3                     88.5/46.5               94.0/74.0               95.0/83.5                   93.0/89.5
+                  Our TD3                         5                     75.5/7.5                84.5/25.5               93.5/46.0                   90.0/63.5
+                  Our TD3 w/o ARS                 7                     58.0/0.0                78.0/4.0                89.5/11.5                   90.5/28.5
+                                                  9                     41.0/0.0                71.0/0.0                85.5/0.5                    85.5/9.5
+                                                  3                     87.5/58.0               90.5/83.5               94.5/91.5                   94.0/92.5
+                  Our DDPG                        5                     72.5/23.0               83.0/54.0               89.0/75.0                   89.5/83.5
+                  Our DDPG w/o ARS                7                     57.0/3.0                77.0/22.5               87.0/41.5                   88.0/56.0
+                                                  9                     31.0/0.0                62.0/0.5                83.0/11.5                   82.0/26.0
+                                                  3                     93.0/19.0               97.0/50.0               96.0/68.0                   97.5/80.0
+                  Our CQL                         5                     86.5/1.5                92.0/9.0                92.5/25.5                   96.5/38.5
+                  Our CQL w/o ARS                 7                     73.0/0.0                89.5/1.0                93.0/5.0                    95.0/11.0
+                                                  9                     53.0/0.0                84.5/0.0                91.0/2.0                    95.0/4.0
+                                                  3                     86.0/45.5               93.0/67.0               93.0/77.5                   94.0/89.0
+                  Our DAPG                        5                     72.0/8.0                85.0/25.5               91.0/38.0                   92.0/55.5
+                  Our DAPG w/o ARS                7                     46.5/0.0                70.0/8.5                82.5/20.0                   86.5/19.0
+                                                  9                     23.5/0.5                57.0/2.0                71.5/4.5                    76.0/7.0
+                                                  3                     86.0/11.0               91.0/26.5               96.0/48.5                   97.5/71.0
+                  Our TQC                         5                     71.0/0.0                86.5/5.0                92.0/15.5                   92.0/23.5
+                  Our TQC w/o ARS                 7                     53.5/0.0                71.5/1.0                78.0/6.0                    89.5/1.0
+                                                  9                     29.0/0.0                52.5/0.0                63.5/0.0                    75.5/3.0
+
+
+
+objectives. This phenomenon is particularly pronounced in traditional                    error as a measure of policy uncertainty to adaptively regulate the
+target networks lacking mechanisms for historical knowledge buffering                    fusion weights between the teacher target Q-values and the traditional
+and estimation stability, indicating the difficulty of conventional target               target network outputs. When the TD error is large, the model relies
+network designs in addressing long-term disturbance accumulation aris-                   more on the teacher network to suppress value function oscillations
+ing in dynamic reward environments typically encountered in robotic                      caused by drastic policy adjustments in robotic positioning and obstacle
+manipulator operations.                                                                  avoidance control. Conversely, when the error is small, it increases
+    The proposed TDKDQ module essentially functions as a TD-error-
+                                                                                         confidence in the current estimates, improving sensitivity to real-time
+driven target value distillation mechanism tailored for robotic ma-
+                                                                                         environmental feedback. To further support the effectiveness of this
+nipulator control, achieving a dynamic balance between inheriting
+historical knowledge and rapidly adapting to environmental changes                       mechanism, we present convergence plots illustrating the differences
+through multi-source Q-value fusion. It introduces a structurally con-                   in Q-values among the target critic, teacher critic, and soft Q dur-
+sistent teacher target network, periodically cloning parameters from                     ing training, providing an intuitive demonstration of the stabilization
+the main critic network to establish an auxiliary supervision path with                  and convergence behavior of the value function (see Fig. 28). This
+long-term memory capacity, thereby preserving stable value estima-                       soft-label construction strategy effectively bridges historical knowledge
+tions from early training stages. The core mechanism employs the TD                      constraints with current estimate guidance, forming a robust value
+
+                                                                                    17
+D. Wang et al.                                                                                             Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+                                                                                         dynamic task variations and non-stationary environment transition
+                                                                                         dynamics.
+
+
+                                                                                         5. Conclusion
+
+                                                                                             In this paper, we proposed a novel TL-ARS-TDKDQ framework
+                                                                                         for robotic dynamic obstacle avoidance and target localization under
+                                                                                         non-stationary environments. The framework integrates Trend Learn-
+                                                                                         ing (TL) and a TD-error-based Q-Value Knowledge Distillation (TD-
+                                                                                         KDQ) mechanism within an Adaptive Reward Shaping (ARS) scheme.
+                                                                                         It systematically tackles critical issues in robotic manipulator multi-
+                                                                                         task control for dynamic obstacle avoidance and positioning accuracy
+                                                                                         in highly dynamic and partially observable environments, including
+                                                                                         decision bias under partially observable Markov decision processes
+                                                                                         (POMDPs), conflicts among multiple task objectives, and instability in
+Fig. 16. Evolution of per-episode rewards under the Trend Learning mech-                 policy optimization due to non-stationary environmental conditions.
+anism with different temporal sequence lengths in adaptive robotic motion                    To validate the effectiveness of the proposed framework, we inte-
+planning tasks.                                                                          grated it into six mainstream continuous control reinforcement learn-
+                                                                                         ing algorithms and conducted comprehensive comparative experiments
+                                                                                         using a 7-DOF KUKA robotic manipulator within the CoppeliaSim
+                                                                                         simulation platform. Experimental results demonstrate that, compared
+                                                                                         with the original algorithms, the TL-ARS-TDKDQ-integrated methods
+                                                                                         achieve significant improvements in policy convergence speed, train-
+                                                                                         ing stability, and overall task performance. These findings verify the
+                                                                                         generality and effectiveness of the proposed framework for dynamic
+                                                                                         obstacle avoidance and localization control in robotic systems under
+                                                                                         dynamic multi-task environments.
+                                                                                             In future work, we will advance our framework toward real-world
+                                                                                         robotic deployment by integrating visual perception modules that fuse
+                                                                                         image data with proprioceptive state information, thereby enhancing
+                                                                                         environmental awareness and robustness under real sensory noise and
+                                                                                         dynamic uncertainty. Moreover, we plan to extend the proposed ap-
+                                                                                         proach to human–robot collaborative scenarios in unstructured and
+                                                                                         dynamic environments, aiming to achieve safe, efficient, and adaptive
+                                                                                         motion planning in practical applications.
+
+
+Fig. 17. Evolution of training success rates under the Trend Learning mech-              CRediT authorship contribution statement
+anism with varying temporal sequence lengths in adaptive robotic motion
+planning tasks.
+                                                                                             Dexian Wang: Writing – review & editing, Writing – original draft,
+                                                                                         Visualization, Validation, Software, Methodology, Investigation, For-
+                                                                                         mal analysis, Data curation, Conceptualization. Peng Zhang: Writing
+Table 6                                                                                  – review & editing, Validation, Supervision, Resources, Project admin-
+Stability evaluation results of TDKDQ module integrated into different policy            istration, Methodology, Funding acquisition, Data curation, Conceptu-
+gradient algorithms.                                                                     alization. Pengfei Ding: Writing – review & editing, Validation, Formal
+                                            𝑅             𝑅
+ Algorithm                     𝑁conv       𝜎avg          𝜎max          𝑃rate (%)         analysis, Data curation. Junliang Wang: Validation, Funding acqui-
+ Our SAC                       1373        45.08         117.49        100.0             sition. Jie Zhang: Resources, Project administration, Investigation,
+ Our SAC w/o TDKDQ             —           93.13         228.19        15.0              Funding acquisition, Conceptualization.
+ Our TD3                       1419        44.29         115.29        100.0
+ Our TD3 w/o TDKDQ             —           87.44         156.36        20.0
+                                                                                         Declaration of competing interest
+ Our DDPG                      1777        56.22         121.18        90.0
+ Our DDPG w/o TDKDQ            —           141.29        321.88        15.0
+ Our CQL                       1184        54.58         124.97        100.0                 The authors declare that they have no known competing finan-
+ Our CQL w/o TDKDQ             —           135.20        359.05        25.0              cial interests or personal relationships that could have appeared to
+ Our DAPG                      1858        62.13         118.36        95.0              influence the work reported in this paper.
+ Our DAPG w/o TDKDQ            —           94.47         174.63        20.0
+ Our TQC                       1033        42.72         157.67        100.0
+                                                                                         Acknowledgments
+ Our TQC w/o TDKDQ             —           50.93         146.17        55.0
+
+Note: 𝑁conv indicates the number of episodes required for convergence. The symbol
+— denotes cases where the agent failed to converge within the predefined training            We thank the editors and the anonymous reviewers for their fruitful
+episodes.                                                                                comments and suggestions in improving the quality of this paper.
+                                                                                         This work was supported by the National Natural Science Foundation
+                                                                                         of China [grant number 52005099]; Shanghai Soft Science Research
+function supervision mechanism well-suited for non-stationary, multi-                    Funds [grant number 25692107300]; the Fundamental Research Funds
+objective robotic manipulator training environments characterized by                     for the Central Universities, China [grant number 2232025G-14].
+
+                                                                                    18
+D. Wang et al.                                                                                   Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+Fig. 18. Evolution of per-episode rewards with and without the Adaptive Reward Shaping module in adaptive robotic motion planning tasks under dynamic
+environments.
+
+
+
+
+Fig. 19. Evolution of per-episode collision numbers with and without the Adaptive Reward Shaping module in adaptive robotic motion planning tasks under
+dynamic environments.
+
+
+
+
+                                                                          19
+D. Wang et al.                                                                                                Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+Fig. 20. Evolution of per-step value loss with and without the Adaptive Reward Shaping module in adaptive robotic motion planning tasks under dynamic
+environments.
+
+
+
+
+Fig. 21. Evolution of training success rates with and without the Adaptive Reward Shaping module in adaptive robotic motion planning tasks under dynamic
+environments.
+
+Appendix A. Convergence and stability analysis of TD-guided soft                   The teacher Critic is a delayed copy of the target Critic:
+target Q under ARS
+                                                                                   𝑄𝜙𝑡 = 𝑄𝜃𝑡−𝑘 ,    𝑘 > 0.
+                                                                                       The target Critic is updated with soft updates:
+
+1. Problem setup                                                                   𝑄𝜃𝑡+1 = (1 − 𝜏)𝑄𝜃𝑡 + 𝜏𝑇𝜋 𝑄𝜃𝑡 ,           0 < 𝜏 < 1.
+                                                                                       The Bellman operator is defined as:
+    Consider a finite state–action space:                                          (𝑇𝜋 𝑄)(𝑠, 𝑎) = E𝑠′ ∼𝑃 ,𝑎′ ∼𝜋 [𝑟𝑡 + 𝛾𝑄(𝑠′ , 𝑎′ )],       0 < 𝛾 < 1.
+|𝑆| < ∞,     |𝐴| < ∞.                                                                  The ARS-induced non-stationary reward is:
+
+   A fixed policy 𝜋 defines the action-value function 𝑄𝜋 (𝑠, 𝑎). The                               ∑
+                                                                                                   6
+                                                                                   𝑟𝑡 = 𝑟error +         𝑟collision,𝑖 + 𝑟keep ,   |𝛥𝑟𝑡 | ≤ 𝜖.
+target Critic and teacher Critic are denoted by 𝑄𝜃𝑡 and 𝑄𝜙𝑡 , respectively.
+                                                                                                   𝑖=1
+
+
+                                                                              20
+D. Wang et al.                                                                                      Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+Fig. 22. Success rate comparison with and without the Adaptive Reward Shaping (ARS) module in task generalization tests for adaptive robotic arm motion
+planning under dynamic environments. Subfigures show 3D success-rate surfaces and the corresponding 2D heatmaps for both variants across different precision
+levels and step settings.
+
+
+
+
+Fig. 23. Evolution of per-episode rewards with and without the TD Error-based Q-Value Distillation module in adaptive robotic motion planning tasks under
+dynamic environments.
+
+
+
+
+                                                                             21
+D. Wang et al.                                                                                         Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+Fig. 24. Evolution of per-episode collision numbers with and without the TD Error-based Q-Value Distillation module in adaptive robotic motion planning tasks
+under dynamic environments.
+
+
+
+
+Fig. 25. Evolution of per-step value loss with and without the TD Error-based Q-Value Distillation module in adaptive robotic motion planning tasks under
+dynamic environments.
+
+
+    The TD-guided soft target Q-value is defined as:                                 The iterative relationship is:
+
+𝑄sof
+ 𝑡
+     t
+       = 𝛽𝑡 𝑄𝜙𝑡 + (1 − 𝛽𝑡 )𝑄𝜃𝑡 ,   𝛽𝑡 = 𝑓 (TD error norm).                        𝛥𝜃𝑡+1 = (1 − 𝜏)𝛥𝜃𝑡 + 𝜏(𝑇𝜋 𝑄𝜃𝑡 − 𝑇𝜋 𝑄𝜋 ).
+
+                                                                                     Using the contraction property of the Bellman operator:
+2. Convergence analysis
+                                                                                  ‖𝑇𝜋 𝑄1 − 𝑇𝜋 𝑄2 ‖∞ ≤ 𝛾‖𝑄1 − 𝑄2 ‖∞ ,
+2.1 convergence of the target critic
+   Define the error:                                                                 we obtain:
+
+𝛥𝜃𝑡 ∶= 𝑄𝜃𝑡 − 𝑄𝜋 .                                                                 ‖𝛥𝜃𝑡+1 ‖∞ ≤ (1 − 𝜏(1 − 𝛾))‖𝛥𝜃𝑡 ‖∞ .
+
+
+                                                                             22
+D. Wang et al.                                                                                       Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+
+
+Fig. 26. Evolution of training success rates with and without the TD Error-based Q-Value Distillation module in adaptive robotic motion planning tasks under
+dynamic environments.
+
+
+
+
+Fig. 27. Evolution of sliding-window reward standard deviations with and without the TD Error-based Q-Value Distillation module in adaptive robotic motion
+planning tasks under dynamic environments.
+
+
+    Hence:                                                                        2.2 convergence of the teacher critic
+                                                                                      The teacher Critic is updated with a delay of 𝑘 steps:
+lim 𝛥𝜃𝑡 = 0      ⟹    lim 𝑄𝜃𝑡 = 𝑄𝜋 .
+𝑡→∞                   𝑡→∞
+                                                                                  𝑄𝜙𝑡 = 𝑄𝜃𝑡−𝑘 .
+
+                                                                             23
+D. Wang et al.                                                                                               Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+                                                                                      References
+
+                                                                                      Agha-mohammadi, A.-a., Agarwal, S., Kim, S.-K., Chakravorty, S., Amato, N.M., 2018.
+                                                                                          SLAP: Simultaneous localization and planning under uncertainty via dynamic
+                                                                                          replanning in belief space. IEEE Trans. Robot. 34 (5), 1195–1214.
+                                                                                      Alegre, L.N., Serifi, A., Grandia, R., Müller, D., Knoop, E., Bächer, M., 2025. AMOR:
+                                                                                          Adaptive character control through multi-objective reinforcement learning. arXiv
+                                                                                          preprint arXiv:2505.23708.
+                                                                                      Bai, H., Cheng, R., Jin, Y., 2023. Evolutionary reinforcement learning: A survey. Intell.
+                                                                                          Comput. 2, 0025.
+                                                                                      Berducci, L., Aguilar, E.A., Ničković, D., Grosu, R., 2021. Hierarchical potential-based
+                                                                                          reward shaping from task specifications. arXiv preprint arXiv:2110.02792.
+                                                                                      Bing, Z., Lerch, D., Huang, K., Knoll, A., 2022. Meta-reinforcement learning in non-
+                                                                                          stationary and dynamic environments. IEEE Trans. Pattern Anal. Mach. Intell. 45
+                                                                                          (3), 3476–3491.
+                                                                                      Blackmore, L., Ono, M., Bektassov, A., Williams, B.C., 2010. A probabilistic particle-
+                                                                                          control approximation of chance-constrained stochastic predictive control. IEEE
+                                                                                          Trans. Robot. 26 (3), 502–517.
+Fig. 28. Visualization of the adaptive Q-value fusion among the teacher target        Buciluǎ, C., Caruana, R., Niculescu-Mizil, A., 2006. Model compression. In: Proceedings
+Q, target Q, and soft Q guided by batch-normalized TD errors.                             of the 12th ACM SIGKDD International Conference on Knowledge Discovery and
+                                                                                          Data Mining. pp. 535–541.
+                                                                                      Chai, J., Chen, E., Fan, J., 2025. Deep transfer 𝑄-learning for offline non-stationary
+                                                                                          reinforcement learning. arXiv preprint arXiv:2501.04870.
+    Using the convergence of the target Critic:                                       Chen, G., Liu, D., Wang, Y., Jia, Q., Zhang, X., 2018. Path planning method with
+                                                                                          obstacle avoidance for manipulators in dynamic environment. Int. J. Adv. Robot.
+lim 𝑄𝜙𝑡 = lim 𝑄𝜃𝑡−𝑘 = 𝑄𝜋 .                                                                Syst. 15 (6), 1729881418820223.
+𝑡→∞         𝑡→∞
+                                                                                      Chen, P., Pei, J., Lu, W., Li, M., 2022. A deep reinforcement learning based method
+                                                                                          for real-time path planning and dynamic obstacle avoidance. Neurocomputing 497,
+                                                                                          64–75.
+2.3 convergence of the soft target critic                                             Cheung, W.C., Simchi-Levi, D., Zhu, R., 2020. Reinforcement learning for non-stationary
+                                                                                          markov decision processes: The blessing of (more) optimism. In: International
+    The soft target error is:
+                                                                                          Conference on Machine Learning. PMLR, pp. 1843–1854.
+                                                                                      Cui, J., Liu, T., Meng, Z., Yu, J., Song, R., Zhang, W., Zhu, Y., Huang, S., 2025. Grove:
+𝛥sof
+ 𝑡
+     t
+       ∶= 𝑄sof
+           𝑡
+               t
+                 − 𝑄𝜋 = 𝛽𝑡 𝛥𝜙𝑡 + (1 − 𝛽𝑡 )𝛥𝜃𝑡 .                                           A generalized reward for learning open-vocabulary physical skill. In: Proceedings
+                                                                                          of the Computer Vision and Pattern Recognition Conference. pp. 15781–15790.
+    Taking the infinity norm:                                                         Dai, S., Schaffert, S., Jasour, A., Hofmann, A., Williams, B., 2019. Chance constrained
+                                                                                          motion planning for high-dimensional robots. In: 2019 International Conference on
+              𝜙
+‖𝛥sof t
+  𝑡 ‖∞ ≤ 𝛽𝑡 ‖𝛥𝑡 ‖∞ + (1 − 𝛽𝑡 )‖𝛥𝑡 ‖∞ .
+                                𝜃
+                                                                                          Robotics and Automation. ICRA, IEEE, pp. 8805–8811.
+                                                                                      Dewangan, P., Phaniteja, S., Krishna, K.M., Sarkar, A., Ravindran, B., 2018. Digrad:
+    From Sections 2.1 and 2.2:                                                            Multi-task reinforcement learning with shared actions. arXiv preprint arXiv:1802.
+                                                                                          10463.
+lim ‖𝛥𝜃𝑡 ‖∞ = lim ‖𝛥𝜙𝑡 ‖∞ = 0,                                                        Ding, Z.-J., Meng, X.-J., Zhang, L.-X., Guo, Y.-B., Chen, M.-Q., Zhen, S.-H., 2025.
+𝑡→∞              𝑡→∞                                                                      Variable Sampling Area RRT algorithm based on limiting joint angle for robotic
+                                                                                          arm path planning. IEEE Access.
+    therefore:
+                                                                                      Duan, Y., Schulman, J., Chen, X., Bartlett, P.L., Sutskever, I., Abbeel, P., 2016. RI2 :
+                                                                                          Fast reinforcement learning via slow reinforcement learning. arXiv preprint arXiv:
+lim ‖𝛥sof t
+      𝑡 ‖∞ = 0            ⟹        lim 𝑄sof
+                                        𝑡
+                                            t
+                                              = 𝑄𝜋 .                                      1611.02779.
+𝑡→∞                                𝑡→∞
+                                                                                      Ekrem, Ö., Aksoy, B., 2023. Trajectory planning for a 6-axis robotic arm with particle
+                                                                                          swarm optimization algorithm. Eng. Appl. Artif. Intell. 122, 106099.
+                                                                                      Escontrela, A., Peng, X.B., Yu, W., Zhang, T., Iscen, A., Goldberg, K., Abbeel, P., 2022.
+3. Stability analysis (teacher network)                                                   Adversarial motion priors make good substitutes for complex reward functions. In:
+                                                                                          2022 IEEE/RSJ International Conference on Intelligent Robots and Systems. IROS,
+                                                                                          IEEE, pp. 25–32.
+    Define the variances:                                                             Finn, C., Abbeel, P., Levine, S., 2017. Model-agnostic meta-learning for fast adaptation
+                                                                                          of deep networks. In: International Conference on Machine Learning. PMLR, pp.
+𝜎𝜃2 ∶= Var[𝑄𝜃𝑡 ],      𝜎𝜙2 ∶= Var[𝑄𝜙𝑡 ] < 𝜎𝜃2 .                                           1126–1135.
+                                                                                      Fujimoto, S., Hoof, H., Meger, D., 2018. Addressing function approximation error in
+    The variance of the soft target Q-value:                                              actor-critic methods. In: International Conference on Machine Learning. PMLR, pp.
+                                                                                          1587–1596.
+                                                    𝜙
+Var[𝑄sof t  2 2             2 2                          𝜃
+     𝑡 ] = 𝛽𝑡 𝜎𝜙 + (1 − 𝛽𝑡 ) 𝜎𝜃 + 2𝛽𝑡 (1 − 𝛽𝑡 )Cov(𝑄𝑡 , 𝑄𝑡 ),
+                                                                                      Haarnoja, T., Zhou, A., Abbeel, P., Levine, S., 2018. Soft actor-critic: Off-policy maxi-
+                                                                                          mum entropy deep reinforcement learning with a stochastic actor. In: International
+    with covariance upper bound:                                                          Conference on Machine Learning. Pmlr, pp. 1861–1870.
+                                                                                      Han, R., Chen, S., Wang, S., Zhang, Z., Gao, R., Hao, Q., Pan, J., 2022. Reinforcement
+                                                                                          learned distributed multi-robot navigation with reciprocal velocity obstacle shaped
+|Cov(𝑄𝜙𝑡 , 𝑄𝜃𝑡 )| ≤ 𝜎𝜙 𝜎𝜃 .
+                                                                                          rewards. IEEE Robot. Autom. Lett. 7 (3), 5896–5903.
+                                                                                      Hausknecht, M.J., Stone, P., 2015. Deep recurrent Q-learning for partially observable
+    Thus:                                                                                 mdps.. In: AAAI Fall Symposia, vol. 45, p. 141.
+                                                                                      Hinton, G., Vinyals, O., Dean, J., 2015. Distilling the knowledge in a neural network.
+Var[𝑄sof t      2 2
+     𝑡 ] ≤ max(𝜎𝜙 , 𝜎𝜃 ),                                                                 arXiv preprint arXiv:1503.02531.
+                                                                                      Hoerger, M., Kurniawati, H., Elfes, A., 2023. Multilevel Monte Carlo for solving POMDPs
+   showing that the teacher Critic smooths historical information and                     on-line. Int. J. Robot. Res. 42 (4–5), 196–213.
+reduces fluctuations from non-stationary ARS rewards.                                 Hou, L., Pang, L., Hong, X., Lan, Y., Ma, Z., Yin, D., 2020. Robust reinforcement learning
+                                                                                          with wasserstein constraint. arXiv preprint arXiv:2006.00945.
+                                                                                      Huang, B., Jin, Y., 2022. Reward shaping in multiagent reinforcement learning for
+                                                                                          self-organizing systems in assembly tasks. Adv. Eng. Inform. 54, 101800.
+Data availability
+                                                                                      Kapturowski, S., Ostrovski, G., Quan, J., Munos, R., Dabney, W., 2018. Recurrent ex-
+                                                                                          perience replay in distributed reinforcement learning. In: International Conference
+                                                                                          on Learning Representations.
+    Data will be made available on request.
+                                                                                      Kiemel, J., Righetti, L., Kröger, T., Asfour, T., 2024. Safe reinforcement learning of
+                                                                                          robot trajectories in the presence of moving obstacles. IEEE Robot. Autom. Lett..
+
+
+                                                                                 24
+D. Wang et al.                                                                                                             Engineering Applications of Arti cial Intelligence 171 (2026) 114284
+
+
+Kim, D., Hong, M., Park, J., Oh, S., 2024. Conflict-averse gradient aggregation                     Sangiovanni, B., Rendiniello, A., Incremona, G.P., Ferrara, A., Piastra, M., 2018. Deep
+     for constrained multi-objective reinforcement learning. arXiv preprint arXiv:2403.                 reinforcement learning for collision avoidance of robotic manipulators. In: 2018
+     00282.                                                                                             European Control Conference. ECC, IEEE, pp. 2063–2068.
+Kochenderfer, M.J., 2015. Decision Making Under Uncertainty: Theory and Application.                Seddaoui, A., Saaj, C.M., 2021. Collision-free optimal trajectory generation for a space
+     MIT Press.                                                                                         robot using genetic algorithm. Acta Astronaut. 179, 311–321.
+Kong, L., He, W., Yang, W., Li, Q., Kaynak, O., 2020. Fuzzy approximation-based finite-             Shaker, N., 2016. Intrinsically motivated reinforcement learning: A promising
+     time control for a robot with actuator saturation under time-varying constraints of                framework for procedural content generation. In: 2016 IEEE Conference on
+     work space. IEEE Trans. Cybern. 51 (10), 4873–4884.                                                Computational Intelligence and Games. CIG, IEEE, pp. 1–8.
+Kuffner, J.J., LaValle, S.M., 2000. RRT-connect: An efficient approach to single-                   Sheng, S., Yu, P., Parker, D., Kwiatkowska, M., Feng, L., 2024. Safe pomdp online
+     query path planning. In: Proceedings 2000 ICRA. Millennium Conference. IEEE                        planning among dynamic agents via adaptive conformal prediction. IEEE Robot.
+     International Conference on Robotics and Automation. Symposia Proceedings (Cat.                    Autom. Lett..
+     No. 00CH37065), vol. 2, IEEE, pp. 995–1001.                                                    Silver, D., Veness, J., 2010. Monte-Carlo planning in large POMDPs. Adv. Neural Inf.
+Lauri, M., Hsu, D., Pajarinen, J., 2022. Partially observable markov decision processes                 Process. Syst. 23.
+     in robotics: A survey. IEEE Trans. Robot. 39 (1), 21–40.                                       Somani, A., Ye, N., Hsu, D., Lee, W.S., 2013. DESPOT: Online POMDP planning with
+Li, X., Liu, H., Dong, M., 2021. A general framework of motion planning for redundant                   regularization. Adv. Neural Inf. Process. Syst. 26.
+     robot manipulator based on deep reinforcement learning. IEEE Trans. Ind. Inform.               Szczepanski, R., Erwinski, K., Tejer, M., Bereit, A., Tarczewski, T., 2022. Optimal
+     18 (8), 5253–5263.                                                                                 scheduling for palletizing task using robotic arm and artificial bee colony algorithm.
+Li, X., Tang, B., Li, H., 2024. Adaer: An adaptive experience replay approach for                       Eng. Appl. Artif. Intell. 113, 104976.
+     continual lifelong learning. Neurocomputing 572, 127204.                                       Tao, L., Zhang, J., Zhang, X., 2022. Multi-phase multi-objective dexterous manipulation
+Lim, J., Ha, S., Choi, J., 2020. Prediction of reward functions for deep reinforcement                  with adaptive hierarchical curriculum. J. Intell. Robot. Syst. 106 (1), 1.
+     learning via Gaussian process regression. IEEE/ASME Trans. Mechatronics 25 (4),                Thrun, S., 2002. Particle filters in robotics.. In: UAI. 2, Citeseer, pp. 511–518.
+     1739–1746.                                                                                     Touati, A., Vincent, P., 2020. Efficient learning in non-stationary linear markov decision
+Lim, J., Tsiotras, P., 2021. A generalized a* algorithm for finding globally optimal paths              processes. arXiv preprint arXiv:2010.12870.
+     in weighted colored graphs. In: 2021 IEEE International Conference on Robotics                 Wang, T., Ruan, Z., Wang, Y., Chen, C., 2025. Control strategy of robotic manipulator
+     and Automation. ICRA, IEEE, pp. 7503–7509.                                                         based on multi-task reinforcement learning. Complex Intell. Syst. 11 (3), 175.
+Lin, H.-I., Shodiq, M.A.F., Hsieh, M.F., 2025. Robot path planning based on                         Wu, Z., Lian, W., Unhelkar, V., Tomizuka, M., Schaal, S., 2021. Learning dense rewards
+     three-dimensional artificial potential field. Eng. Appl. Artif. Intell. 144, 110127.               for contact-rich manipulation tasks. In: 2021 IEEE International Conference on
+Liu, S., Liu, Y., Hu, L., Zhou, Z., Xie, Y., Zhao, Z., Li, W., Gan, Z., 2024. DiffSkill:                Robotics and Automation. ICRA, IEEE, pp. 6214–6221.
+     Improving reinforcement learning through diffusion-based skill denoiser for robotic            Xie, Z., Xin, P., Dames, P., 2021. Towards safe navigation through crowded dynamic
+     manipulation. Knowl.-Based Syst. 300, 112190.                                                      environments. In: 2021 IEEE/RSJ International Conference on Intelligent Robots
+Nagabandi, A., Clavera, I., Liu, S., Fearing, R.S., Abbeel, P., Levine, S., Finn, C., 2018a.            and Systems. IROS, IEEE, pp. 4934–4940.
+     Learning to adapt in dynamic, real-world environments through meta-reinforcement               Xu, J., Tian, Y., Ma, P., Rus, D., Sueda, S., Matusik, W., 2020. Prediction-guided multi-
+     learning. arXiv preprint arXiv:1803.11347.                                                         objective reinforcement learning for continuous robot control. In: International
+Nagabandi, A., Finn, C., Levine, S., 2018b. Deep online learning via meta-learning:                     Conference on Machine Learning. PMLR, pp. 10607–10616.
+     Continual adaptation for model-based RL. arXiv preprint arXiv:1812.07671.                      Zagoruyko, S., Komodakis, N., 2016. Paying more attention to attention: Improving the
+Ortega-Aranda, D., Jimenez-Vielma, J.F., Saha, B.N., Lopez-Juarez, I., 2021. Dual-arm                   performance of convolutional neural networks via attention transfer. arXiv preprint
+     peg-in-hole assembly using DNN with double force/torque sensor. Appl. Sci. 11                      arXiv:1612.03928.
+     (15), 6970.                                                                                    Zeng, J., Ju, R., Qin, L., Hu, Y., Yin, Q., Hu, C., 2019. Navigation in unknown dynamic
+Othman, U., Yang, E., 2023. Human–robot collaborations in smart manufacturing                           environments based on deep reinforcement learning. Sensors 19 (18), 3837.
+     environments: review and outlook. Sensors 23 (12), 5663.                                       Zeng, A., Song, S., Welker, S., Lee, J., Rodriguez, A., Funkhouser, T., 2018. Learning
+Pineau, J., Gordon, G., Thrun, S., et al., 2003. Point-based value iteration: An anytime                synergies between pushing and grasping with self-supervised deep reinforcement
+     algorithm for POMDPs. In: Ijcai, vol. 3, pp. 1025–1032.                                            learning. In: 2018 IEEE/RSJ International Conference on Intelligent Robots and
+Rajeswaran, A., Kumar, V., Gupta, A., Vezzani, G., Schulman, J., Todorov, E., Levine, S.,               Systems. IROS, IEEE, pp. 4238–4245.
+     2017. Learning complex dexterous manipulation with deep reinforcement learning                 Zhang, T., Wang, X., Liang, B., Yuan, B., 2022. Catastrophic interference in reinforce-
+     and demonstrations. arXiv preprint arXiv:1709.10087.                                               ment learning: A solution based on context division and knowledge distillation.
+Rao, Y., Parimi, A.M., Rahul, D., Patel, D., Mythreya, Y.N., 2017. Robotics in dental                   IEEE Trans. Neural Netw. Learn. Syst. 34 (12), 9925–9939.
+     implantation. Mater. Today: Proc. 4 (8), 9327–9332.                                            Zhou, Z., Ren, J., Zeng, Z., Xiao, J., Zhang, X., Guo, X., Zhou, Z., Lu, H., 2023. A safe
+Rusu, A.A., Colmenarejo, S.G., Gulcehre, C., Desjardins, G., Kirkpatrick, J., Pascanu, R.,              reinforcement learning approach for autonomous navigation of mobile robots in
+     Mnih, V., Kavukcuoglu, K., Hadsell, R., 2015. Policy distillation. arXiv preprint                  dynamic environments. CAAI Trans. Intell. Technol..
+     arXiv:1511.06295.                                                                              Zhou, Z., Zhu, P., Zeng, Z., Xiao, J., Lu, H., Zhou, Z., 2022. Robot navigation in a crowd
+Saleem, M.S., Veerapaneni, R., Likhachev, M., 2024. A POMDP-based hierarchical                          by integrating deep reinforcement learning and online planning. Appl. Intell. 52
+     planning framework for manipulation under pose uncertainty. arXiv preprint arXiv:                  (13), 15600–15616.
+     2409.18775.
+
+
+
+
+                                                                                               25
+

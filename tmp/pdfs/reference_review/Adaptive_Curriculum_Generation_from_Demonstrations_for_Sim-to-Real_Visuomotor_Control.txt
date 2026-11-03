@@ -1,0 +1,516 @@
+2020 IEEE International Conference on Robotics and Automation (ICRA)
+31 May - 31 August, 2020. Paris, France
+
+
+
+
+Adaptive Curriculum Generation from Demonstrations for Sim-to-Real
+                       Visuomotor Control
+     Lukas Hermann∗ , Max Argus∗ , Andreas Eitel, Artemij Amiranashvili, Wolfram Burgard, Thomas Brox
+
+                                                                                        Simulation                           Real world
+   Abstract— We propose Adaptive Curriculum Generation
+from Demonstrations (ACGD) for reinforcement learning in
+the presence of sparse rewards. Rather than designing shaped
+reward functions, ACGD adaptively sets the appropriate task
+difficulty for the learner by controlling where to sample from
+the demonstration trajectories and which set of simulation
+parameters to use. We show that training vision-based control
+policies in simulation while gradually increasing the difficulty
+of the task via ACGD improves the policy transfer to the real
+world. The degree of domain randomization is also gradually
+increased through the task difficulty. We demonstrate zero-
+shot transfer for two real-world manipulation tasks: pick-and-
+stow and block stacking. A video showing the results can be
+found at https://lmb.informatik.uni-freiburg.de/
+projects/curriculum/
+                                                                           Fig. 1: Adaptive Curriculum Generation from Demonstra-
+                      I. INTRODUCTION                                      tions utilizes only 10 demonstration trajectories to enable
+   Reinforcement Learning (RL) holds the promise of solving                learning visuomotor policies for two fine manipulation tasks:
+a large variety of manipulation tasks with less engineer-                  block stacking (top) and pick-and-stow (bottom). The vi-
+ing and integration effort. Learning continuous visuomo-                   suomotor policies are trained in simulation and transferred
+tor controllers from raw images circumvents the need for                   without further training to a physical robot. The image-in-
+manually designing multi-stage manipulation and computer                   image shows the egocentric view of the arm-mounted RGB
+vision pipelines [1]. Vision-based closed-loop control can                 camera. The third person view is not provided to the robot.
+increase robustness of robots performing real-world fine
+manipulation tasks. Prior experience has shown that learning-
+                                                                           RL algorithm to initial rewards, from where it can be
+based methods can cope better with complex semi-structured
+                                                                           optimized further [7]. Behavior cloning usually requires a
+environments that are hard to model in a precise manner due
+                                                                           substantial amount of expert demonstrations.
+to contacts, non-rigid objects or cluttered scenes [2], [3], [4].
+                                                                              This paper tackles the exploration problem with curricu-
+   A major challenge preventing deep reinforcement learning
+                                                                           lum learning based on a few manual demonstrations. We
+methods from being used more widely on physical robots is
+                                                                           present an adaptive curriculum generation algorithm that con-
+exploration. RL algorithms often rely on random exploration
+                                                                           trols difficulty by controlling how initial states are sampled
+to search for rewards. This hinders the application to real-
+                                                                           from demonstration trajectories as well as controlling the de-
+world robotic tasks in which the reward is too sparse to ever
+                                                                           gree of domain randomization that is applied during training.
+be encountered through random actions. Additionally, in the
+                                                                           The algorithm continually adapts difficulty parameters during
+real world random exploration can also be dangerous for the
+                                                                           training to keep the rewards within a predetermined, desired
+robot or its environment.
+                                                                           success rate interval. Consequently, the robot can always
+   A common strategy to address the exploration problem is
+                                                                           learn at the appropriate difficulty level, which speeds up the
+reward shaping, in which distance measures and intermediate
+                                                                           convergence of the training process and the final generaliza-
+rewards continuously provide hints on how to reach the
+                                                                           tion performance. The method is simple and applicable to a
+goal [5]. Reward shaping is typically task specific and
+                                                                           variety of robotic tasks. We demonstrate its performance on
+requires manual setup as well as careful optimization. This
+                                                                           real world pick-and-stow and block stacking tasks. We apply
+contradicts the purpose of using RL as a general approach
+                                                                           the curriculum learning in conjunction with policy learning
+and can bias policies to satisfy shaped rewards.
+                                                                           in a physics simulator. Afterwards, the learned policies are
+   Poor exploration can also be compensated by providing
+                                                                           transferred without further re-training to the physical robot.
+demonstration trajectories and performing Behavior Cloning
+                                                                           The advantages of training in simulation include drastically
+(BC) [6]. Pre-training with behavior cloning can guide the
+                                                                           increased learning speed through distributed training, no
+  ∗ First two authors contributed equally. All authors are with the Uni-   human involvement during training, improved safety, and
+versity of Freiburg, Germany. Wolfram Burgard is also with the Toyota      added algorithmic possibilities due to access to simulator
+Research Institute, USA. This work has been supported partly by the
+BMBF grant No. 01IS18040B-OML and the DFG grant No. BR 3815/10-1.          state information.
+{hermannl,argusm,eitel}@cs.uni-freiburg.de                                    We present a novel perspective on domain randomization
+
+978-1-7281-7395-5/20/$31.00 ©2020 IEEE                                 6498
+   Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:42:44 UTC from IEEE Xplore. Restrictions apply.
+inside our curriculum learning framework. Our algorithm                    Therefore, our method is more robust against suboptimal
+automatically learns when to increase the amount of visual                 demonstrations.
+domain randomization and dynamics randomization during                        Demonstration data can also be provided in form of raw
+the training process, until the policy exhibits the desired                video data [15], [16], [17], [18]. These approaches can
+degree of domain invariance required for a successful simu-                work if sufficient demonstration data is provided, while our
+lation to reality transfer.                                                method requires only around a dozen demonstrations. Nair et
+   The main contributions of this paper are: 1) a curriculum               al. [19] combine off-policy learning with demonstrations to
+generation method for learning with sparse rewards that                    solve block stacking tasks. They use Hindsight Experience
+only requires a dozen demonstrations, 2) an algorithm for                  Replay [20] for multi-goal tasks, but this method is not
+automatic and controlled scaling of task difficulty, 3) a                  applicable to visual domains where the desired goal con-
+unified treatment of demonstration sampling and domain                     figuration is not given, as in our tasks. Zhu et al. [21]
+randomization as task difficulty parameters of the curriculum,             combine imitation learning and RL for training manipulation
+4) zero-shot transfer from simulation to real-world for two                policies in simulation. They report preliminary success for
+robot manipulation tasks.                                                  transferring the learned policies into the real world but also
+                                                                           challenges, due to different physical properties of simulation
+                    II. RELATED WORK
+                                                                           and the real world. We address this problem by leveraging
+A. Training Curricula                                                      our curriculum generation approach for gradually training
+   The seminal paper by Bengio et al. [8] shows that curricu-              with more realistic simulation parameters.
+lum learning provides benefits for classical supervised learn-
+                                                                           C. Sim-to-Real and Domain Randomization
+ing problems such as shape classification. Florensa et al. [9]
+propose a reverse curriculum for reinforcement learning that                  For sim-to-real transfer of our policy we build upon
+requires only the final state in which the task is achieved.               an efficient technique called domain randomization [22]. It
+Their curriculum is generated gradually by sampling random                 has been successfully applied to transfer imitation learning
+actions to move further away from the given goal and                       policies for a pick-and-place task on a real robot [23]. Since
+thus reversely expanding the start state distribution with                 our visuomotor controller operates in a first-person view
+increasingly more difficult states. The key difference of our              with sensor data from a camera-in-hand robot setup, there
+method is that we extend the idea of curriculum learning                   is significantly less background clutter, so we generally use
+to task difficulty parameters, which goes beyond sampling                  a smaller degree of domain randomization. Nevertheless, as
+start states nearby the goal. Further, we sample backwards                 we show in experiments domain randomization can harm
+from the demonstration trajectory in comparison to randomly                convergence during RL training, so we circumvent this
+sampling backwards in action space, which is likely to fail for            problem by incorporating domain randomization into our
+difficult states that are unlikely to be encountered randomly.             adaptive curriculum. Domain randomization has also been
+Another approach is to generate a linear reverse curriculum, a             extended to dynamics randomization [24], which we also
+baseline that we compare against in our experiments [10]. A                incorporate into our approach. A recent method proposes to
+more evolved approach generates a curriculum of goals using                close the sim-to-real gap by adapting domain randomization
+a Generative Adversarial Network (GAN) but cannot handle                   with experience collected in the real world [25]. Experiments
+visual goals [11]. Learning by playing also generates a form               with a real robot show impressive results for a drawer-
+of curriculum, where auxiliary tasks are leveraged to learn                opening and a peg-in-hole task, but the learned policies are
+increasingly more complicated tasks [12]. Nevertheless, it is              not based on visual input and it is unclear if the method also
+not straightforward to design auxiliary tasks that can benefit             works with sparse rewards. In concurrent work, OpenAI et
+the final goal task.                                                       al. [26] have also considered adaptive domain randomization
+                                                                           for sim-to-real dexterous manipulation.
+B. Learning from Demonstrations and Imitation                                 Sim-to-real transfer can also be viewed from a trans-
+   The most common approach for learning from demonstra-                   fer learning or domain adaptation perspective [27]. Here,
+tions is supervised learning, also known as behavior cloning.              methods that use GANs have been successfully applied for
+Behavior cloning has shown to enable training of successful                instance grasping on a real robot [28]. Nevertheless, training
+manipulation policies [6], but usually has to cope with the                the GAN requires a great amount of real-world training
+compounding-error problem and requires hundreds or even                    data (on the order of 100,000 grasps). Recent meta-learning
+thousands of expert demonstrations. Several methods have                   methods seem to be suitable to reduce the amount of data
+combined behavior cloning with RL, either in a hierarchical                needed in the real world for efficient domain adaptation [29].
+manner [13] or as a pre-training step to initialize the RL                 Those transfer learning methods are outside of the scope of
+agent [7]. Other methods leverage demonstration data for                   our work because we focus on zero-shot sim-to-real transfer.
+training off-policy algorithms by adding demonstration tran-
+sitions to the replay buffer [14]. In comparison to the those              D. Motor Control for Manipulation
+works our method does not try to copy the demonstrated                        Model-based reinforcement learning techniques with prob-
+policy. Only the visited states are used as initial conditions             abilistic dynamics models have been proposed to learn con-
+and the actions taken during demonstrations are not required.              trol policies for block stacking [30] and multi-phase manip-
+
+                                                                       6499
+   Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:42:44 UTC from IEEE Xplore. Restrictions apply.
+ulation tasks [31]. Guided Policy Search has been applied                    Algorithm 1: Adaptive Curriculum Generation from
+to visuomotor control tasks [32]. The mentioned approaches                   Demonstrations
+work well in the local range of trained trajectories, but                      Input : Iterations N, initial policy π0 , increment ε,
+                                                                                                                   j     j       j      j
+generalize less to larger variations in goal and robot state                              task params H j = {µinit   , σinit , µend , σend },
+positions, which is required for our tasks.                                               reward interval [α, β ]
+                                                                               Output: final policy πN
+   III. ADAPTIVE CURRICULUM GENERATION                                      1 srd , srr , δd , δr ← 0;
+           FROM DEMONSTRATIONS                                              2 for i ← 1 to N do
+   In this section we present Adaptive Curriculum Genera-                   3      with probability p = 0.5(srr + i/N) do
+tion from Demonstrations (ACGD), a method to overcome                       4           sample regular restart(H , δr );
+exploration difficulties of reinforcement learning from sparse              5           sr, δ ← srr , δr ;
+rewards in simulated environments. Depending on the current                 6      otherwise
+success rate, ACGD automatically schedules increasingly                     7           sample demonstration restart(Hd , δd );
+difficult subtasks by shaping the initial state distribution and              8          sr, δ ← srd , δd ;
+scaling a set of parameters that control the difficulty of the              9      rollouts ← generate rollouts(π);
+environment, such as the degree of domain randomization.                   10      π ← update policy(rollouts, π);
+                                                                           11      sr ← update success rates(rollouts);
+A. Reinforcement Learning                                                  12      δ ← δ + ε · 1(sr>β ) − ε · 1(sr<α) ;
+   In reinforcement learning an agent makes some observa-                      end
+tion (ot ) of an underlying environment state, which is used
+by a policy to compute an action at = π(ot ). This produces
+transitions consisting of (ot , a, r, ot+1 ) for discrete timesteps.
+                                                                           to prevent catastrophic forgetting, our experiments suggest
+In a sparse reward setting a correct sequence of actions
+                                                                           that this is not the case.
+produces rewards (rt ). The policy is optimized to maximize
+the discounted future rewards, R = ∑Ti=t γ (i−t) ri , called return.       C. Task and Environment Parameter Adaptation
+   A number of different RL algorithms exist, they can                        Apart from the distance between start states and goal
+be categorized as either off-policy algorithms or on-policy                states, the difficulty of a task also depends on a set of factors,
+algorithms based on if they make use of transitions that are               such as the degree of domain randomization, intrinsics of the
+not generated by the current policy being optimized. In our                physics simulator or criteria that define the task completion.
+work we use the Proximal Policy Optimization (PPO) [33]                    As an example, the complexity of block stacking depends
+algorithm, as on-policy algorithms are more suited to grad-                significantly on the bounciness of the blocks. Therefore, we
+ually changing the environment parameters.                                 design our tasks such that their difficulty can be controlled by
+                                                                           a set of parameters H . Examples can be found in Table II,
+B. Reverse-Trajectory Sampling
+                                                                           most of these are not task specific. At the beginning of the
+   During training in simulation it is possible to initialize              training all parameters are set to the intuitively easiest con-
+episodes from arbitrary states of demonstration trajectories.              figuration (e.g. less bouncy objects or smaller initial distance
+We bootstrap exploration by using reverse-trajectory sam-                  between objects). The parameters that determine the degree
+pling, meaning we initially sample states from the end of the              of appearance or dynamics randomization are initially set to a
+demonstration trajectories. These states are close to achieving            minimum. During training we scale the variance of the sam-
+sparse rewards, making these tasks much easier and solvable                pling distributions and thus increase the difficulty by linearly
+using RL. As the training progresses we successively sample                interpolating between 0 and the maximal value chosen based
+states closer to the beginning of demonstration trajectories.              on what is realistic. Our experiments clearly suggest, that it is
+This creates a curriculum in which the agent learns to solve               beneficial to gradually increase the degree of randomization
+a growing fraction of the task.                                            over time since too much domain randomization from the
+   However, sampling states from the demonstration trajec-                 beginning slows down training or might even prevent the
+tories restricts the policy to observing initial states present            policy from learning the task at all. To our knowledge,
+in the recorded demonstrations. Especially if we want our                  we are the first to apply curriculum learning to sim-to-real
+algorithm to work with few demonstrations this presents                    transfer. When sampling initial states from demonstration it
+a potential source of bias. To overcome this problem we                    is not possible to randomize all parameters because some
+mix resets from demonstrations with regular resets of the                  configurations are pre-determined by the demonstration. This
+environments which have automatic randomization of initial                 results in a different set of parameters being randomized for
+states. The choice of sampling demonstration or regular                    each type of reset, see Table II.
+resets is made by a mixing function depending linearly on
+the success rates srr of regular resets episodes and the overall           D. Adaptive Curriculum Generation
+progress of the training. As opposed to [10], who claim that                  The challenge of curriculum learning is to decide a good
+it is important for reverse curriculum learning to include                 strategy to choose the appropriate difficulty of start states
+previously sampled sections throughout the training in order               and task parameters in the course of the training. Previous
+
+                                                                       6500
+   Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:42:44 UTC from IEEE Xplore. Restrictions apply.
+                                                                           and stacking small blocks; see Fig. 1. We posed the following
+                                                                           questions: 1) can curriculum learning with demonstrations
+                                                                           enable learning tasks with sparse rewards that do not succeed
+                                                                           without curriculum learning? 2) what is the generalization
+                                                                           performance compared to the existing behavioral cloning and
+                                                                           reinforcement learning with shaped rewards? 3) does our
+                                                                           adaptive curriculum outperform other curriculum baselines?
+                                                                           4) can visuomotor policies trained in simulation generalize
+                                                                           to a physical robot?
+
+Fig. 2: Architecture of the policy network. The value function             A. Experimental Setup
+has the same architecture apart from having a single output
+for the value. Policy and value functions share the weights                   For training and evaluation of the policies we re-created
+of the CNN (dotted box).                                                   the two tasks and the robot setup in a physics simulator. We
+                                                                           aligned simulation and real-world as closely as possible; for
+                                                                           a side-by-side comparison see Fig. 1.
+approaches sampled initial states uniformly [34], [19], [21]                  Our KUKA iiwa manipulator is equipped with a WSG-
+or linearly backwards [10].                                                50 two finger gripper and an Intel SR300 camera mounted
+   However, sampling states from the end of the demonstra-                 on the gripper for an eye-in-hand view. The control of the
+tion trajectories for too long unnecessarily slows down the                end effector is limited to the rotation around the vertical
+training because the policy is trained on subtasks that it has             z-axis, such that the gripper always faces downwards, it
+already learned to master. On the other hand, sampling more                is parameterized as a reduced 5 DoF continuous action
+difficult task configurations too fast may prevent the policy              a = [∆x, ∆y, ∆z, ∆θ , agripper ] in the end effector frame. Here,
+from experiencing any reward at all. Especially tasks with                 ∆x, y, z specify a Cartesian offset for the desired end effector
+long episode lengths often do not have a constant difficulty at            position, ∆θ defines the yaw rotation of the end effector and
+every stage. Consider for instance a stacking task: it consists            agripper is the gripper action that is mapped to the binary
+of both easier parts that only require straight locomotion and             command open/close fingers.
+more difficult bottleneck moments like grasping and placing                   The observations that the policy receives are a combination
+the object. Our method adaptively generates a curriculum,                  of the 84×84 pixels RGB camera image and a proprioceptive
+such that the learning algorithm automatically dedicates more              state vector consisting of the gripper height above the table,
+time on hard parts of the task, while not wasting time at                  the angle that specifies the rotation of the gripper, the opening
+straightforward sections.                                                  width of the gripper fingers and the remaining timesteps of
+   Intuitively, we want the probability of experiencing a                  the episode normalized to the range [0, 1], see Fig. 2.
+reward to be neither too high, nor too low. Instead, our goal                 Consistent with results of [35], preliminary experiments
+is to confine the probability within a desired reward region               showed that it is beneficial to include the proprioceptive
+α ≤ P(Rt > 0|π) ≤ β , where Rt denotes the return of a rollout             features. The policy network is trained using PPO, but our
+started from a state sampled from the demonstration data at                approach can be used with any on-policy RL algorithm. For
+timestep t and the interval [α, β ] are hyperparameters which              all experiments, training runs 8 environments in parallel for
+we set to [0.4, 0.6] after empirical testing. This is inspired             a total number of 107 timesteps, this takes approximately 11
+by the Goals of Intermediate Difficulty of [11]. For sparse                hours on a system with one Titan X and 16 CPU cores.
+bi-modal tasks, the probability P(Rt > 0|π) corresponds to                 During training the performance of the policy is always
+the expected success rate of the task.                                     evaluated on the maximum task difficulty in order to obtain
+   We control all difficulty parameters with two coefficients              comparable results between different methods. The policy
+δd and δr ∈ [0, 1], which regulate the difficulty of resets from           output is the mean and standard deviation of a diagonal Gaus-
+demonstrations and regular resets respectively by scaling the              sian distribution over the 5-dimensional continuous actions.
+variances of H linearly w.r.t δ . A δ close to 0 corresponds               The value function yields a scalar value as output. We use the
+to the easiest and close to 1 corresponds to the most difficult            Adam [36] optimizer with an initial learning rate of 0.00025,
+task setting (i.e. initializing episodes further away from the             which is linearly decayed in the course of the training.
+goal and sampling task parameters with higher variance). Our
+method tunes the difficulty during training to ensure that the             B. Experiments in Simulation
+success rates of regular and demonstration resets (srr and
+srd ) stay in the desired region, as shown in the pseudo-code                 For experiments in simulation we use the PyBullet Physics
+in Algorithm 1. An example of this optimization can be seen                simulator [37]. We compare our approach against several
+in Fig. 3.                                                                 baselines: 1) training PPO with sparse and shaped rewards, 2)
+                                                                           behavior cloning, 3) PPO with behavior cloning initialization,
+                     IV. EXPERIMENTS                                       4) several standard non-adaptive curriculum learning meth-
+  We demonstrate the effectiveness of the proposed curricu-                ods that use demonstrations. For both tasks, we recorded a
+lum generation via two manipulation tasks: pick-and-stow                   set of 10 manual demonstrations for curriculum learning and
+
+                                                                       6501
+   Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:42:44 UTC from IEEE Xplore. Restrictions apply.
+                            1.0                                                                                                                                  1.0         Ours
+                                                                                                                                                                             Linear cur. w/ task diff. params and reg. resets
+Success Rate / Difficulty
+                                                                                                                                                                             Linear cur. w/ reg. resets
+                            0.8                                                                                                                                  0.8         Linear curriculum
+                                                                                                                                                                             Uniform curriculum
+
+
+
+
+                                                                                                                                                  Success Rate
+                                                                                                                                                                             Behavior cloning init. + RL sparse rewards
+                            0.6                                                                                                                                  0.6         RL shaped rewards
+                                                                                                                                                                             RL sparse rewards
+                                                                                                                                                                             Behavior cloning baseline
+
+                            0.4                                                                                                                                  0.4
+                                                                                                       Success rate demonstration resets
+                                                                                                       Success rate regular resets
+                            0.2                                                                        Success rate evaluation                                   0.2
+                                                                                                       Difficulty of demonstration resets δd
+                                                                                                       Difficulty of regular resets δr
+                                                                                                       Success rate interval [α, β]
+                            0.0                                                                                                                                  0.0
+                                  0.0                   0.2                    0.4               0.6          0.8                     1.0                              0.0                    0.2                    0.4               0.6   0.8   1.0
+                                                                                     Timesteps                                          ×107                                                                                                        ×107
+                                                                                                                                                                                                                           Timesteps
+Fig. 3: Example training run showing evolution of success                                                                                         Fig. 5: ACGD vs baseline methods for the block stacking
+rates and difficulty coefficients δ over the course of training.                                                                                  task, evaluated in simulation.
+First the success rate and thus difficulties increase for resets                                                                                                 1.0         Adaptive task difficulty params
+from demonstrations (blue curves), followed by increases for                                                                                                                 Adaptive task difficulty params, shared δ
+                                                                                                                                                                             Constant task difficulty params
+regular resets (red). The plot shows that the success rate                                                                                                       0.8
+is kept in the desired interval (grey area) by the difficulty
+
+
+
+
+                                                                                                                                                  Success Rate
+coefficients until the highest difficulty is reached.                                                                                                            0.6
+
+                            1.0         Ours                                                                                                                     0.4
+                                        Behavior cloning init. + RL sparse rewards
+                                        RL shaped rewards
+                            0.8         RL sparse rewards                                                                                                        0.2
+                                        Behavior cloning baseline
+Success Rate
+
+
+
+
+                            0.6                                                                                                                                  0.0
+                                                                                                                                                                       0.0                    0.2                    0.4               0.6   0.8   1.0
+                                                                                                                                                                                                                           Timesteps                ×107
+                            0.4
+
+                                                                                                                                                  Fig. 6: Here we investigate the different methods for choos-
+                            0.2
+                                                                                                                                                  ing the task difficulty for all parameters H besides the
+                            0.0                                                                                                                   location of demonstration resets. We compare adaptively
+                                  0.0                   0.2                    0.4               0.6          0.8                     1.0         increasing the difficulty of those parameters during training
+                                                                                     Timesteps                                          ×107
+                                                                                                                                                  against always training on the highest difficulty.
+Fig. 4: ACGD vs. baseline methods for the pick-and-stow
+task, evaluated in simulation.                                                                                                                    block but fails to place it inside the box.
+                                                                                                                                                     Block stacking To solve the task, the agent has to stack
+an additional set of 100 demonstrations for the BC baseline,                                                                                      one block on top of the other one, which involves several
+both with a 3D mouse.                                                                                                                             important subproblems such as reaching, grasping and plac-
+   Pick-and-stow. The robot has to pick up a small block and                                                                                      ing objects precisely. The task features complex, contact-
+place it within a box. The initial position of the robot and                                                                                      rich interactions that require substantial precision. We further
+the block randomly change every episode. A sparse reward                                                                                          increased the difficulty of the task compared to prior work
+of 1 − φ is received only after reaching a goal state, where                                                                                      by using smaller blocks. Since it is a task of long episode
+φ denotes a penalty for collisions of gripper and block with                                                                                      length that requires at least around 70 steps to be solved with
+the edges of the box. The dense reward function for the                                                                                           our choice of per-step action ranges, it is particularly well
+RL baseline is composed of the Euclidean distance between                                                                                         suited for curriculum learning.
+gripper and block as well as the distance between block and                                                                                          We define a successful stack as one block being on top of
+a location above the box plus additional sparse rewards for                                                                                       the other one for at least 10 timesteps, which indicates stable
+successfully grasping and placing the block.                                                                                                      stacking. A sparse reward of 1 − φ is given after a successful
+   Fig. 4 shows the task success rates during training. The                                                                                       stack where φ denotes a penalty for the movement of the
+results show averages over five different random seeds for                                                                                        bottom block during the execution of the task. The shaped
+every experiment. Our method successfully solves the task                                                                                         reward function consists of a mixture of distance functions
+with an average final success rate of 94%. The policy                                                                                             and sparse rewards similar to the pick-and-stow task.
+trained with BC achieves a notable success rate of 23%,                                                                                              The training progress and the evolution of difficulty co-
+but overall lacks consistency having overfitted to the small                                                                                      efficients are shown in Fig. 3. We see that the success rate
+set of demonstrations. Interestingly, the policy that used BC                                                                                     is kept in the desired interval through the adaption of the
+as initialization for RL performed poorly and experienced                                                                                         difficulty coefficients until the highest difficulty is reached.
+catastrophic forgetting after few timesteps. Neither RL with                                                                                      The success rate of evaluation runs (green) is higher due
+sparse rewards nor RL with shaped rewards are able to                                                                                             to execution of a deterministic policy. Fig. 5 shows the
+completely finish the task. While the former is unable to                                                                                         results compared to baselines. As it is considerably harder
+learn any meaningful behavior, the latter learns to grasp the                                                                                     than the previous task, none of the curriculum-free baselines
+
+                                                                                                                                               6502
+                             Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:42:44 UTC from IEEE Xplore. Restrictions apply.
+     Fig. 7: Each image shows the progress of the robot attempting to stack a small blue block on top of a red block.
+
+     Task              Train          Test           Trials   Success Rate          Difficulty Parameters: Hd
+ Block stacking                                      91/100       91%               bounciness of objects, num. steps stacked for task success, gripper
+                    Simulation     Simulation                                       speed, position offset of relative Cartesian position control, camera
+ Pick-and-stow                                       94/100       94%
+ Block stacking                                       12/20       60%               field of view, camera position and orientation, block color, table color,
+                    Simulation        Real                                          camera image brightness, camera image contrast, camera image hue,
+ Pick-and-stow                                        17/20       85%
+                                                                                    camera image saturation, camera image sharpness, camera image blur,
+   TABLE I: Success rates in simulation and real-world.                             light direction
+
+                                                                                    Additional Regular Reset Parameters: Ha
+are able to solve the stacking task. In comparison to the                           initial gripper height, lateral gripper offset, distance between blocks,
+uniform and linear reverse curriculum learning variants, our                        min. final block vel. for task success, table height, height of the robot
+method learns faster and achieves a better final performance,                       base, initial gripper rotation, block size
+with the final success rate being more than 20% higher.                         TABLE II: Task parameters used to adapt the difficulty
+For the linear curriculum variant start states are sampled                      of the stacking task. When initializing from demonstration
+linearly further away from the goal during the course of the                    states only a subset Hd can be randomized, regular resets
+training. Our method shows less variance across the seeds,                      randomize Hr = Hd ∪ Ha .
+which indicates that the adaptive curriculum improves the
+stability of learning. The experiment also demonstrates the                     stacking. Both task were evaluated with a constant episode
+importance of not learning exclusively from demonstrations,                     length of 300 timesteps (15 seconds). Within the given time
+especially if the amount of demonstration data is limited.                      frame, the policy can attempt a second trial after a failed
+Linear curricula with regular resets, similar to [10], clearly                  first execution of the task. This shows the advantages of a
+outperform uniform and linear curriculum learning that are                      policy learned in closed-loop as it implicitly aims to re-grasp
+trained only on initial states sampled from demonstrations.                     the block in case of a failed stacking or stowing attempt.
+   Another advantage of our method is that it can learn sub-                    Using small wooden blocks with an edge length of only
+stantially more efficient solutions than those provided by the                  2.5cm requires a highly precise actuation. as the block tends
+demonstrations. This results from the use of demonstration                      to fall over if not placed precisely or dropped from a too
+states, but not the actions taken. For the stacking task, manual                large height. In contrast, polices learned with non-adaptive
+demonstration episodes had a mean duration of 164 ± 17                          curriculum learning baselines were unable to achieve the
+transitions, while the learned solution had a mean duration                     sim-to-real transfer. It is difficult to compare performance
+of 73 ± 15 transitions. This means that in simulation our                       with previous approaches due to the lack of clear benchmark
+trained policy solves the task twice as fast as a human expert                  setups. In a related approach, Zhu et al. [21] performed zero-
+operating the robot with a 3D mouse.                                            shot sim-to-real transfer of a block stacking task, however,
+   We further evaluated how adaptively changing the task                        they use large deformable foam blocks for stacking. These
+parameters H 1 for the task difficulty and domain randomiza-                    are easier to grasp because they are made of foam and easier
+tion improves the training speed and performance. In Fig. 6                     to stack because they are larger and have more friction. They
+we compare our full model with the following ablations:                         report a success rate of 35% for stacking on the real robot,
+1) shared δ for demonstration resets and regular resets i.e.                    which is lower than ours.
+δr = δd , 2) constant task difficulty, i.e. adaptive curriculum                                           V. CONCLUSIONS
+from demonstrations, but without changing the difficulty of
+                                                                                   The proposed Adaptive Curriculum Generation from
+the task parameters H , which were set to the maximum
+                                                                                Demonstration (ACGD) method enables robust training of
+difficulty for the complete training.
+                                                                                policies for difficult multi-step tasks. It does this by adap-
+C. Experiments with Real Robot                                                  tively setting the appropriate task difficulty for the learner
+  We applied the trained policies without any additional fine-                  by controlling where to sample from the demonstration
+tuning on the real robot. Our results are shown in Table I.                     trajectories and which set of simulation parameters to use.
+We see that despite incurring a performance penalty by                          This unified treatment of demonstration sampling and do-
+evaluating on the real robot, the policies transfer with a good                 main randomization as task difficulty improves training. In
+success rate of 85% for pick-and-stow and 60% for block                         combination with domain randomization the method can
+                                                                                train policies in simulation that achieve good success rates
+  1 not including the trajectory sampling position                              when evaluated on a real robot.
+
+                                                                             6503
+   Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:42:44 UTC from IEEE Xplore. Restrictions apply.
+                             R EFERENCES                                       [19] A. Nair, B. McGrew, M. Andrychowicz, W. Zaremba, and P. Abbeel,
+                                                                                    “Overcoming exploration in reinforcement learning with demonstra-
+ [1] F. Wirnshofer, P. S. Schmitt, W. Feiten, G. v. Wichert, and W. Burgard,        tions,” in Proc. of the IEEE International Conference on Robotics &
+     “Robust, compliant assembly via optimal belief space planning,” in             Automation (ICRA), 2018, pp. 6292–6299.
+     Proc. of the IEEE International Conference on Robotics & Automation       [20] M. Andrychowicz, F. Wolski, A. Ray, J. Schneider, R. Fong, P. Welin-
+     (ICRA), May 2018, pp. 1–5.                                                     der, B. McGrew, J. Tobin, O. P. Abbeel, and W. Zaremba, “Hindsight
+ [2] A. Zeng, S. Song, K. Yu, E. Donlon, F. R. Hogan, M. Bauza,                     experience replay,” in Advances in Neural Information Processing
+     D. Ma, O. Taylor, M. Liu, E. Romo, N. Fazeli, F. Alet, N. C. Dafle,            Systems, 2017, pp. 5048–5058.
+     R. Holladay, I. Morena, P. Qu Nair, D. Green, I. Taylor, W. Liu,          [21] Y. Zhu, Z. Wang, J. Merel, A. Rusu, T. Erez, S. Cabi, S. Tunya-
+     T. Funkhouser, and A. Rodriguez, “Robotic pick-and-place of novel              suvunakool, J. KramÃ¡r, R. Hadsell, N. de Freitas, and N. Heess,
+     objects in clutter with multi-affordance grasping and cross-domain             “Reinforcement and imitation learning for diverse visuomotor skills,”
+     image matching,” in Proc. of the IEEE International Conference on              in Proc. of Robotics: Science and Systems (RSS), Pittsburgh, Pennsyl-
+     Robotics & Automation (ICRA), May 2018, pp. 1–8.                               vania, June 2018.
+ [3] A. Zeng, S. Song, S. Welker, J. Lee, A. Rodriguez, and T. Funkhouser,     [22] J. Tobin, R. Fong, A. Ray, J. Schneider, W. Zaremba, and P. Abbeel,
+     “Learning synergies between pushing and grasping with self-                    “Domain randomization for transferring deep neural networks from
+     supervised deep reinforcement learning,” in Proc. of the IEEE/RSJ              simulation to the real world,” in Proc. of the IEEE/RSJ International
+     International Conference on Intelligent Robots and Systems (IROS).             Conference on Intelligent Robots and Systems (IROS). IEEE, 2017,
+     IEEE, 2018, pp. 4238–4245.                                                     pp. 23–30.
+ [4] A. Eitel, N. Hauff, and W. Burgard, “Learning to singulate objects us-    [23] S. James, A. J. Davison, and E. Johns, “Transferring end-to-end
+     ing a push proposal network,” in Proc. of the International Symposium          visuomotor control from simulation to real world for a multi-
+     on Robotics Research (ISRR), 2017.                                             stage task,” in Conference on Robot Learning (CoRL), vol. 78.
+ [5] A. Y. Ng, D. Harada, and S. Russell, “Policy invariance under reward           PMLR, 13–15 Nov 2017, pp. 334–343. [Online]. Available:
+     transformations: Theory and application to reward shaping,” in Proc. of        http://proceedings.mlr.press/v78/james17a.html
+     the International Conference on Machine Learning (ICML), 1999, pp.        [24] X. B. Peng, M. Andrychowicz, W. Zaremba, and P. Abbeel, “Sim-
+     278–287.                                                                       to-real transfer of robotic control with dynamics randomization,” in
+ [6] T. Zhang, Z. McCarthy, O. Jow, D. Lee, X. Chen, K. Goldberg, and               Proc. of the IEEE International Conference on Robotics & Automation
+     P. Abbeel, “Deep imitation learning for complex manipulation tasks             (ICRA). IEEE, 2018, pp. 1–8.
+     from virtual reality teleoperation,” in Proc. of the IEEE International   [25] Y. Chebotar, A. Handa, V. Makoviychuk, M. Macklin, J. Issac,
+     Conference on Robotics & Automation (ICRA). IEEE, 2018, pp. 1–8.               N. Ratliff, and D. Fox, “Closing the sim-to-real loop: Adapting
+ [7] A. Rajeswaran, V. Kumar, A. Gupta, G. Vezzani, J. Schulman,                    simulation randomization with real world experience,” in Proc. of the
+     E. Todorov, and S. Levine, “Learning complex dexterous manipulation            IEEE International Conference on Robotics & Automation (ICRA),
+     with deep reinforcement learning and demonstrations,” in Proc. of              2019, pp. 8973–8979.
+     Robotics: Science and Systems (RSS), Pittsburgh, Pennsylvania, June       [26] OpenAI, I. Akkaya, M. Andrychowicz, M. Chociej, M. Litwin,
+     2018.                                                                          B. McGrew, A. Petron, A. Paino, M. Plappert, G. Powell, R. Ribas,
+ [8] Y. Bengio, J. Louradour, R. Collobert, and J. Weston, “Curriculum              J. Schneider, N. Tezak, J. Tworek, P. Welinder, L. Weng, Q. Yuan,
+     learning,” in Proc. of the International Conference on Machine                 W. Zaremba, and L. Zhang, “Solving rubik’s cube with a robot hand,”
+     Learning (ICML). New York, NY, USA: ACM, 2009, pp. 41–48.                      arXiv preprint, 2019.
+     [Online]. Available: http://doi.acm.org/10.1145/1553374.1553380           [27] A. A. Rusu, M. Večerı́k, T. Rothörl, N. Heess, R. Pascanu,
+ [9] C. Florensa, D. Held, M. Wulfmeier, M. Zhang, and P. Abbeel, “Re-              and R. Hadsell, “Sim-to-real robot learning from pixels with
+     verse curriculum generation for reinforcement learning,” in Conference         progressive nets,” in Conference on Robot Learning (CoRL),
+     on Robot Learning (CoRL), 2017, pp. 482–495.                                   vol. 78. PMLR, 13–15 Nov 2017, pp. 262–270. [Online]. Available:
+[10] L. Fan, Y. Zhu, J. Zhu, Z. Liu, O. Zeng, A. Gupta, J. Creus-Costa,             http://proceedings.mlr.press/v78/rusu17a.html
+     S. Savarese, and L. Fei-Fei, “Surreal: Open-source reinforcement          [28] K. Bousmalis, A. Irpan, P. Wohlhart, Y. Bai, M. Kelcey, M. Kalakr-
+     learning framework and robot manipulation benchmark,” in Confer-               ishnan, L. Downs, J. Ibarz, P. Pastor, K. Konolige, et al., “Using
+     ence on Robot Learning (CoRL), 2018, pp. 767–782.                              simulation and domain adaptation to improve efficiency of deep
+[11] C. Florensa, D. Held, X. Geng, and P. Abbeel, “Automatic                       robotic grasping,” in Proc. of the IEEE International Conference on
+     goal generation for reinforcement learning agents,” in Proc. of                Robotics & Automation (ICRA). IEEE, 2018, pp. 4243–4250.
+     the 35th International Conference on Machine Learning, vol. 80.           [29] T. Yu, C. Finn, S. Dasari, A. Xie, T. Zhang, P. Abbeel, and S. Levine,
+     PMLR, 10–15 Jul 2018, pp. 1515–1528. [Online]. Available:                      “One-shot imitation from observing humans via domain-adaptive
+     http://proceedings.mlr.press/v80/florensa18a.html                              meta-learning,” in Proc. of Robotics: Science and Systems (RSS),
+[12] M. A. Riedmiller, R. Hafner, T. Lampe, M. Neunert, J. Degrave,                 Pittsburgh, Pennsylvania, June 2018.
+     T. V. de Wiele, V. Mnih, N. Heess, and J. T. Springenberg, “Learning      [30] M. Deisenroth, C. Rasmussen, and D. Fox, “Learning to control a
+     by playing - solving sparse reward tasks from scratch,” CoRR, vol.             low-cost manipulator using data-efficient reinforcement learning,” in
+     abs/1802.10567, 2018.                                                          Proc. of Robotics: Science and Systems (RSS), June 2011.
+[13] R. Strudel, A. Pashevich, I. Kalevatykh, I. Laptev, J. Sivic, and         [31] O. Kroemer, C. Daniel, G. Neumann, H. Van Hoof, and J. Peters,
+     C. Schmid, “Combining learned skills and reinforcement learning for            “Towards learning hierarchical skills for multi-phase manipulation
+     robotic manipulations,” arXiv preprint arXiv:1908.00722, 2019.                 tasks,” in Proc. of the IEEE International Conference on Robotics
+[14] M. Večerı́k, T. Hester, J. Scholz, F. Wang, O. Pietquin, B. Piot,             & Automation (ICRA). IEEE, 2015, pp. 1503–1510.
+     N. Heess, T. Rothörl, T. Lampe, and M. Riedmiller, “Leveraging           [32] S. Levine, C. Finn, T. Darrell, and P. Abbeel, “End-to-end
+     demonstrations for deep reinforcement learning on robotics problems            training of deep visuomotor policies,” Journal of Machine Learning
+     with sparse rewards,” arXiv preprint arXiv:1707.08817, 2017.                   Research, vol. 17, no. 39, pp. 1–40, 2016. [Online]. Available:
+[15] P. Sermanet, C. Lynch, Y. Chebotar, J. Hsu, E. Jang, S. Schaal,                http://jmlr.org/papers/v17/15-522.html
+     S. Levine, and G. Brain, “Time-contrastive networks: Self-supervised      [33] J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and
+     learning from video,” in Proc. of the IEEE International Conference            O. Klimov, “Proximal policy optimization algorithms,” CoRR,
+     on Robotics & Automation (ICRA). IEEE, 2018, pp. 1134–1141.                    vol. abs/1707.06347, 2017.
+[16] Y. Aytar, T. Pfaff, D. Budden, T. Paine, Z. Wang, and N. de Freitas,      [34] I. Popov, N. Heess, T. P. Lillicrap, R. Hafner, G. Barth-Maron,
+     “Playing hard exploration games by watching youtube,” in Advances              M. Vecerik, T. Lampe, Y. Tassa, T. Erez, and M. A. Riedmiller, “Data-
+     in Neural Information Processing Systems, 2018, pp. 2930–2941.                 efficient deep reinforcement learning for dexterous manipulation,”
+[17] L. Tai, J. Zhang, M. Liu, and W. Burgard, “Socially compliant navi-            CoRR, vol. abs/1704.03073, 2017.
+     gation through raw depth inputs with generative adversarial imitation     [35] D. Kalashnikov, A. Irpan, P. P. Sampedro, J. Ibarz, A. Herzog,
+     learning,” in Proc. of the IEEE International Conference on Robotics           E. Jang, D. Quillen, E. Holly, M. Kalakrishnan, V. Vanhoucke,
+     & Automation (ICRA), May 2018, pp. 1111–1117.                                  and S. Levine, “Qt-opt: Scalable deep reinforcement learning
+[18] O. Mees, M. Merklinger, G. Kalweit, and W. Burgard, “Adversarial               for vision-based robotic manipulation,” 2018. [Online]. Available:
+     skill networks: Unsupervised robot skill learning from video,” 2019.           https://arxiv.org/pdf/1806.10293
+
+
+                                                                           6504
+    Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:42:44 UTC from IEEE Xplore. Restrictions apply.
+[36] D. P. Kingma and J. Ba, “Adam: A method for stochastic optimiza-
+     tion,” in ICLR, 2015.
+[37] E. Coumans, “Bullet physics simulation,” in ACM SIGGRAPH 2015
+     Courses, ser. SIGGRAPH ’15. New York, NY, USA: ACM, 2015.
+     [Online]. Available: http://doi.acm.org/10.1145/2776880.2792704
+
+
+
+
+                                                                       6505
+   Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:42:44 UTC from IEEE Xplore. Restrictions apply.
+

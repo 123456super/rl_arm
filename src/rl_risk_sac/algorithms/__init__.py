@@ -1,5 +1,5 @@
-"""Algorithms for the V13.5 serial thesis protocol."""
+"""On-policy algorithms for the thesis reaching protocol."""
 
-from rl_risk_sac.algorithms.thesis_sac import ThesisSACAgent
+from rl_risk_sac.algorithms.thesis_ppo import ThesisPPOAgent
 
-__all__ = ["ThesisSACAgent"]
+__all__ = ["ThesisPPOAgent"]

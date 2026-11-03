@@ -26,8 +26,6 @@ robot:
   # 每个 episode reset 时的默认 6 关节角，单位 rad。
   reset:
     default_joint_positions: [0.0, -1.25, 1.35, -0.95, -1.1, 0.0]
-    # reset 时叠加到每个关节的均匀随机扰动范围，实际采样区间为 [-joint_noise_range, joint_noise_range]。
-    joint_noise_range: 0.22
 
   # 连杆胶囊体近似参数，用于连杆级距离、TTC 和风险计算。
   # parent_link_name/child_link_name 使用 URDF link 名称，代码会在 PyBullet 加载后自动解析成 link id。

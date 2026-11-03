@@ -1,13 +1,15 @@
-# 新论文实验配置
+# 论文实验配置
 
-正式实验只使用以下五个入口：
+当前训练入口：
 
 | 方法 | 配置 | 训练入口 |
 |---|---|---|
-| Hybrid KP-SAC-Base | `paper_kp_sac.yaml` | `train_thesis_homotopy_reduced_observation.py` |
-| Full | `paper_full.yaml` | `train_thesis_homotopy.py` |
-| M1 | `paper_m1_no_bottleneck.yaml` | `train_thesis_homotopy.py` |
-| M2 | `paper_m2_no_boundary_replay.yaml` | `train_thesis_homotopy.py` |
-| M3 | `paper_m3_no_jacobian.yaml` | `train_thesis_homotopy_reduced_observation.py` |
+| 固定目标姿态的关键点 PPO | `paper_full.yaml` | `scripts/core/train_thesis_ppo.py` |
 
-五个配置使用 L0–L13、6M transition 和统一自动升档协议。所有配置由操作系统自由调度 CPU。统一评估入口是 `scripts/core/evaluate_thesis_homotopy.py`。
+`thesis.fixed_orientation_goal.enabled: true` 在两种模式下启用同一任务：随机目标位置、固定目标欧拉角 `[0, 1.57, 1.57]` rad、弯曲准备构型 `[45, -90, 90, 0, 45, -90]` 度；目标位置采用相同的 `xyztorus` 提议、IK/FK、动作可执行范围和目标自碰撞筛选。两种模式均要求位置误差≤0.01 m、姿态误差≤0.10 rad并连续保持5步。S1/S2 保持同一目标定义。当前关键点 v2 使用38维输入、绝对关节角目标、有界负到达代价、任务期限终止；不能加载旧36维增量模型。`reference_ppo` 仍使用25维观测和参考奖励。
+
+`--reward-mode reference_ppo` 使用8个并行环境，每个环境采集512步，仍保持每轮4096条样本。它保留参考奖励、25维观测、动态gamma和绝对关节角控制，但初态、目标生成与到达标准已经向关键点任务对齐，不再是原论文任务的原样复现。应新建run训练，不将旧零初态参考结果混作同一任务基线。
+
+两种 S0 模式均启用优势归一化、关闭梯度裁剪但保留原始梯度范数记录和非有限值检查、最多10轮更新，以及 `target_kl: 0.05`。每次 Actor 提案后在完整 rollout 上检查 KL；超过0.075时连同 Adam 状态回滚该提案，Critic 仍完成全部更新。关键点 S1/S2 模式仍使用自己配置的0.5梯度裁剪，并按全局训练进度将 Actor 学习率从 `3e-4` 线性衰减到 `3e-5`、Critic 从 `3e-4` 衰减到 `1e-4`，并在 KL 拒绝时将 Actor 学习率乘0.5。非有限值或绝对对数概率差超过20时保存诊断并报错停止。
+
+当前不使用 L0–L13 或旧自动升档训练流程。训练与检查命令见 [训练与实验说明](../../docs/训练与实验说明.md)。

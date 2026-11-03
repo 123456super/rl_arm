@@ -73,7 +73,6 @@ def _color(value: Any) -> Color:
 @dataclass(frozen=True)
 class RobotResetConfig:
     default_joint_positions: tuple[float, ...]
-    joint_noise_range: float
 
 
 @dataclass(frozen=True)
@@ -223,30 +222,6 @@ class DeviceSelectionConfig:
 
 
 @dataclass(frozen=True)
-class SACRuntimeConfig:
-    gamma: float
-    tau: float
-    actor_lr: float
-    critic_lr: float
-    alpha_lr: float
-    lambda_lr: float
-    cost_ema_rho: float
-    batch_size: int
-    replay_size: int
-    warmup_steps: int
-    update_after: int
-    update_every: int
-    hidden_dims: tuple[int, ...]
-    fixed_risk_penalty: float
-    predictive_risk_penalty: float
-    predictive_risk_penalty_mode: str
-    initial_alpha: float
-    initial_lambda: float
-    target_entropy: float = -3.0
-    min_alpha: float = 3.0e-3
-
-
-@dataclass(frozen=True)
 class TrainRuntimeConfig:
     method: str
     total_steps: int
@@ -274,8 +249,6 @@ class SmokeRuntimeConfig:
     no_obstacle_seed: int
     max_episode_steps: int
     rollout_steps: int
-    replay_capacity: int
-    batch_size: int
 
 
 @dataclass(frozen=True)
@@ -289,7 +262,6 @@ class RuntimeConfig:
     risk_cost: RiskCostConfig
     smoothing: SmoothingRuntimeConfig
     reward: RewardRuntimeConfig
-    sac: SACRuntimeConfig
     train: TrainRuntimeConfig
     eval: EvalRuntimeConfig
     smoke: SmokeRuntimeConfig
@@ -318,7 +290,6 @@ class RuntimeConfig:
             tool_link_name=str(robot["tool_link_name"]),
             reset=RobotResetConfig(
                 default_joint_positions=tuple(float(value) for value in reset["default_joint_positions"]),
-                joint_noise_range=float(reset["joint_noise_range"]),
             ),
             capsules=capsules,
         )
@@ -454,7 +425,6 @@ class RuntimeConfig:
         cost = risk["cost"]
         smoothing = config["smoothing"]
         reward = config["reward"]
-        sac = config["sac"]
         device_selection = config["device_selection"]
         candidate_ids = device_selection["candidate_ids"]
         train = config["train"]
@@ -495,28 +465,6 @@ class RuntimeConfig:
                 success_bonus=float(reward["success_bonus"]),
                 collision_penalty=float(reward["collision_penalty"]),
             ),
-            sac=SACRuntimeConfig(
-                gamma=float(sac["gamma"]),
-                tau=float(sac["tau"]),
-                actor_lr=float(sac["actor_lr"]),
-                critic_lr=float(sac["critic_lr"]),
-                alpha_lr=float(sac["alpha_lr"]),
-                lambda_lr=float(sac["lambda_lr"]),
-                cost_ema_rho=float(sac["cost_ema_rho"]),
-                batch_size=int(sac["batch_size"]),
-                replay_size=int(sac["replay_size"]),
-                warmup_steps=int(sac["warmup_steps"]),
-                update_after=int(sac["update_after"]),
-                update_every=int(sac["update_every"]),
-                hidden_dims=tuple(int(value) for value in sac["hidden_dims"]),
-                fixed_risk_penalty=float(sac["fixed_risk_penalty"]),
-                predictive_risk_penalty=float(sac["predictive_risk_penalty"]),
-                predictive_risk_penalty_mode=str(sac["predictive_risk_penalty_mode"]),
-                initial_alpha=float(sac["initial_alpha"]),
-                initial_lambda=float(sac["initial_lambda"]),
-                target_entropy=float(sac.get("target_entropy", -3.0)),
-                min_alpha=float(sac.get("min_alpha", 3.0e-3)),
-            ),
             train=TrainRuntimeConfig(
                 method=str(train["method"]),
                 total_steps=int(train["total_steps"]),
@@ -546,8 +494,6 @@ class RuntimeConfig:
                 no_obstacle_seed=int(smoke["no_obstacle_seed"]),
                 max_episode_steps=int(smoke["max_episode_steps"]),
                 rollout_steps=int(smoke["rollout_steps"]),
-                replay_capacity=int(smoke["replay_capacity"]),
-                batch_size=int(smoke["batch_size"]),
             ),
         )
 

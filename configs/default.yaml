@@ -3,7 +3,7 @@
 includes:
   - robot/ur5.yaml
   - environment/sim.yaml
-  - algo/sac.yaml
+  - algo/ppo.yaml
   - run/dev.yaml
 
 # 全局随机种子。训练、评估和环境采样都会使用它，正式对比时应固定同一组 seed。

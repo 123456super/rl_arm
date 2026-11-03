@@ -1,0 +1,595 @@
+IEEE ROBOTICS AND AUTOMATION LETTERS, VOL. 7, NO. 1, JANUARY 2022                                                                                     65
+
+
+
+
+       Sim2real Learning of Obstacle Avoidance for
+      Robotic Manipulators in Uncertain Environments
+                   Tan Zhang , Kefang Zhang, Jiatao Lin, Wing-Yue Geoffrey Louie , and Hui Huang
+
+
+   Abstract—Obstacle avoidance for robotic manipulators can be                   an environment that contains objects without collisions. When
+challenging when they operate in unstructured environments. This                 the environment changes, the planning task becomes notoriously
+problem is probed with the sim-to-real (sim2real) deep reinforce-                difficult. Mathematical models for such a motion planning task
+ment learning, such that a moving policy of the robotic arm is learnt
+in a simulator and then adapted to the real world. However, the                  are usually characterized with high-dimensional and continuous
+problem of sim2real adaptation is notoriously difficult. To this end,            states [1]. Robots with high degrees of freedom increase the
+this work proposes (1) a unified representation of obstacles and                 computational complexity of such a motion planning task.
+targets to capture the underlying dynamics of the environment                       In recent years, deep learning (DL) has rapidly evolved and
+while allowing generalization to unseen goals and (2) a flexible                 gained wide popularity in various domains, such as computer
+end-to-end model combining the unified representation with the
+deep reinforcement learning control module that can be trained by                vision and video games [2]. Using deep learning techniques,
+interacting with the environment. Such a representation is agnostic              advanced methods (e.g., [3]) can adapt knowledge from other
+to the shape and appearance of the underlying objects, which sim-                motion planners to speed up the exploration for a given robot
+plifies and unifies the scene representation in both simulated and               planning task. The recent advances in deep reinforcement learn-
+real worlds. We implement this idea with a vision-based actor-critic             ing (DRL) enabled the development of vision-based controllers
+framework by devising a bounding box predictor module. The
+predictor estimates the 3D bounding boxes of obstacles and targets               for robots. Such models perform end-to-end learning, mapping
+from the RGB-D input. The features extracted by the predictor are                the observations directly to actions. Compared with a large
+fed into the policy network, and all the modules are jointly trained.            number of DRL applications in navigating aerial [4] and mobile
+This makes the policy learn object-aware scene representation,                   vehicles [5], [6], the training of the obstacle avoiding moving
+which leads to a data-efficient learning of the obstacle avoidance               policy for robotic manipulators using DRL is limited to a simu-
+policy. Our experiments in simulated environment and the real-
+world show that the end-to-end model of the unified representation               lated environment, handling manipulators either in 2D space [7]
+achieves better sim2real adaption and scene generalization than                  or with discrete actions [8]. In real-world scenarios, such DRL
+state-of-the-art techniques.                                                     training can hardly be conducted, because the trial-and-error
+  Index Terms—Planning under uncertainty, collision
+                                                                                 search of a control policy through physical agent-environment
+avoidance, reinforcement learning, robotic manipulator, unified                  interaction is then prohibitively time consuming [9], [10].
+representation.                                                                     Recent works have shown promising results in sim2real
+                                                                                 learning of navigation and manipulation policies, where the
+                                                                                 DRL-based policy learning is conducted in a simulator and
+                           I. INTRODUCTION                                       then transferred to the real-world environment [6], [4]. How-
+         OTION planning is a fundamental task in robotics, which                 ever, such sim2real adaptation is still not trivial due to the
+M        aims at navigating a robot from one location to another in              lack of high-fidelity replication of real-world scenes and the
+                                                                                 imprecise simulation models [11]. Various approaches have been
+   Manuscript received April 11, 2021; accepted September 16, 2021. Date of      attempted to bridge the sim2real gap in domain adaptation.
+publication September 30, 2021; date of current version October 19, 2021. This   Some works focus on domain randomization by generating
+letter was recommended for publication by Associate Editor J. Pan and Editor     randomized configurations in a simulator [12], [13]. Other works
+H. Kurniawati upon evaluation of the reviewers’ comments. This work was
+supported in part by NSFC under Grant U2001206, in part by the Guangdong         used pixel-level or feature-level domain adaptation or multi-task
+Talent Program under Grant 2019JC05X328, in part by the Guangdong Sci-           learning [14], still requiring a significant amount of unlabeled
+ence and Technology Program under Grant 2020A0505100064, in part by the          real-world data. Furthermore, many works tried either to make
+DEGP Key Project under Grant 2018KZDXM058, and in part by the Shenzhen
+Science and Technology Program under Grants RCJC20200714114435012 and            the simulation environment more realistic [5], [4], [6] or to
+JCYJ20210324120213036. (Corresponding author: Hui Huang.)                        manually create physical scenes that are similar to simulated
+   Tan Zhang is with the Sino-German College of Intelligent Manufac-             environments [8]. However, the domain discrepancy between
+turing, Shenzhen Technology University, Shenzhen 518118, China (e-mail:
+tandy.zhang@gmail.com).                                                          the simulated and real worlds is difficult to eliminate.
+   Kefang Zhang, Jiatao Lin, and Hui Huang are with the College of Com-             In order to achieve sim2real model adaption, a unified repre-
+puter Science and Software Engineering, Shenzhen University, Shenzhen            sentation for both simulated and real environments is desired.
+518061, China (e-mail: zhangkefang45@gmail.com; 1213666795@qq.com;
+hhzhiyan@gmail.com).                                                             The unified representation learns the shared representation and
+   Wing-Yue Geoffrey Louie is with the Department of Electrical and Com-         exploits their generality in different scenes. In this work, we
+puter Engineering, Oakland University, Rochester, MI 48309 USA (e-mail:          propose the use of 3D bounding boxes to represent the obstacle
+louie@oakland.edu).
+   Digital Object Identifier 10.1109/LRA.2021.3116700                            and target objects in both the virtual and real worlds. Such a
+
+                         2377-3766 © 2021 IEEE. Personal use is permitted, but republication/redistribution requires IEEE permission.
+                                       See https://www.ieee.org/publications/rights/index.html for more information.
+
+
+      Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:41:40 UTC from IEEE Xplore. Restrictions apply.
+66                                                                              IEEE ROBOTICS AND AUTOMATION LETTERS, VOL. 7, NO. 1, JANUARY 2022
+
+
+
+representation is agnostic to the geometry and appearance of the              cost. A typical method is to train policies in the simulation and
+underlying objects. To realize this idea using DRL, we opt for                transfer it to the real world. However, due to the imprecise simu-
+the shared representation learning inspired by [15] that proposed             lation models and lack of high-fidelity replication of real-world
+the concept of successor representation for RL to improve its                 scenes, policies learned in the simulation often cannot be directly
+generalization.                                                               applied to real-world systems [11]. To overcome this limitation,
+   We work with a vision-based actor-critic framework in which                many studies investigated the so-called sim-to-real (sim2real)
+a bounding box predictor module is devised. Specifically, after               [17] problem, where the core is to find accurate models of the
+receiving the environment input information, the system gener-                environment to facilitate the optimization of control policies in
+ates the bounding box of the targets and obstacles and feeds it               the real world.
+to the deep reinforcement learning system, and then outputs the
+robot’s action.                                                               A. Motion Planning for Manipulators in Simulated
+   Compared with state-of-the-art neural networks and RL-                     Environments
+based approaches to handle the manipulator obstacle avoidance
+                                                                                 Recent developments in DL have allowed the researchers to
+problem, the contributions of our work can be listed as follows:
+                                                                              apply various DL architectures to robotic control and planning.
+   1) First, we propose unified representation and show how
+                                                                              An early learning-based method [18] used a sample-based mo-
+       they can be applied to RL algorithms in an end-to-end
+                                                                              tion planner to obtain the state of obstacles and manipulators.
+       manner. The RL states are not pre-determined: the bound-
+                                                                              Then, a learning-based method was used to generate efficient
+       ing boxes are dynamic, i.e., they change over time as the
+                                                                              paths to push the obstacles away and move toward the target.
+       detected bounding boxes change. This problem setting
+                                                                              Other works [19], [20] used a learning-based algorithm in mo-
+       precludes the direct application of the trained policy in
+                                                                              tion planning for a simulated environment to explore collision-
+       simulation to the real world by making the simulation more
+                                                                              free trajectories by modeling the robot arm links with cylinders.
+       realistic [4] or creating physical scenes that are similar
+                                                                              However, the success of the DL approach in manipulator motion
+       to the simulation [8]. We use unified representation of
+                                                                              planning tasks that require high precision is still rather limited
+       obstacles and targets in both simulated and real worlds
+                                                                              [7].
+       based on 3D bounding boxes, which allows a seamless
+                                                                                 Robot exploration when obstacles exist in the environment is
+       transferring of the knowledge learnt from simulation to
+                                                                              inherently a sequential decision-making problem under uncer-
+       new scenarios in the real world.
+                                                                              tainty; thus, it is appropriate to design obstacle avoidance as a
+   2) Second, we perform policy generation after every box
+                                                                              reinforcement learning (RL) problem. Obstacle avoidance using
+       generation and feed the updated robot state back to the
+                                                                              DRL techniques is so far still limited to robotic manipulators,
+       network for a new representation learning: unlike typical
+                                                                              handling either only point robots [4], [21], [6], [5] or manip-
+       sim2real approaches to policy generation [7], [8], where
+                                                                              ulators with discrete actions [8]. These methods cannot adapt
+       the network is only tasked to produce a policy, the pro-
+                                                                              to higher dimensional manipulators with continuous actions.
+       posed obstacle avoidance approach integrates two tasks:
+                                                                              A previous work [8] proposed an obstacle avoidance method
+       representation learning, which is directly impacted by how
+                                                                              for redundant manipulators using a Q- learning technique. This
+       the control policy is generated, and control policy learning.
+                                                                              approach trains the obstacle avoidance model in randomized
+       It is noted that representation learning is directly impacted
+                                                                              simulations with only a single obstacle, and then transfers the
+       by how the control policy is generated.
+                                                                              trained model to the real-world environment that has a good
+   3) At last, we conduct extensive simulated and real-world ex-
+                                                                              replica of the virtual setup. More recently, some preliminary
+       periments to show the notable generalization ability of our
+                                                                              research has applied DRL techniques for robot manipulators,
+       method. The experiments demonstrate that the proposed
+                                                                              where the learned policy was used to avoid unpredictable obsta-
+       soft actor-critic (SAC) [16] with unified representation
+                                                                              cles. One study [22] combined a normalized advantage function
+       outperforms other RL algorithms in terms of success rate.
+                                                                              (NAF) and Q-learning for manipulator obstacle avoidance in a
+       The experiments show that the proposed method performs
+                                                                              structured 3D environment. Similarly, the techniques proposed
+       better than other state representation (e.g., direct training
+                                                                              in other works [23], [7] used a deep deterministic policy gradient
+       without bounding boxes) and other training method (e.g.,
+                                                                              (DDPG) framework for a 4-DoF manipulator in simulation only.
+       the bounding box is trained in advance, separately from
+                                                                              Both methods [23], [7] handled only simple obstacles in the
+       the controller’s model).
+                                                                              environment. Besides, the method in [7] used a 2D simulator for
+                                                                              training, which makes the trained agent completely agnostic to
+                                                                              the perception of depth. Hence, this approach may not reach
+                                                                              a target object when implemented on a real robot in a 3D
+                         II. RELATED WORK                                     environment.
+   Obstacle avoidance represents a fundamental problem for au-
+tonomous robotic manipulators, which operate in the real world                B. Sim2Real for Manipulators
+and interact with existing objects [6]. In order to learn effective              To overcome the discrepancy between the simulated and
+collision prediction models, the robot needs to see a number                  real worlds, training has been performed on a large variety of
+of real-world collisions during training, which comes at a high               simulated scenarios [5], [6]. On the other hand, the policies
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:41:40 UTC from IEEE Xplore. Restrictions apply.
+ZHANG et al.: SIM2REAL LEARNING OF OBSTACLE AVOIDANCE FOR ROBOTIC MANIPULATORS IN UNCERTAIN ENVIRONMENTS                                              67
+
+
+
+trained in simulation were fine-tuned to enable a successful use
+in the real world [4], and common feature representations of real
+and synthetic data were obtained [24].
+   In the context of sim2real, model-based RL is often used
+to explore control policies [5], [4], [6]. A common method
+for sim2real approaches is an accurate 3D rendered simulator.
+A previous work [5] used an asynchronous advantage actor-
+critic(A3C) to train the control policy for visual navigation
+in the AI2-THOR framework, which provides an environment                    Fig. 1. An overview of our vision-based manipulator obstacle avoidance
+                                                                            system.
+with high-quality 3D scenes and a physics engine. Similarly,
+another work extended deep RL methods to real-world robotic
+                                                                                                 III. PROBLEM DESCRIPTION
+applications through collecting a large number of 3D synthetic
+indoor environments [4]. However, some limitations still exist.                Fig. 1 shows an overview of the proposed obstacle avoidance
+Firstly, despite the existence of high-quality 3D scene models,             method for robotic manipulators. In summary, the Vision Mod-
+the real-world scenes are usually different from environments on            ule generates the 3D bounding boxes of targets and obstacles.
+which the robot was trained, and thus the generalization to new             Then, the DRL model uses these bounding boxes and the states
+scenes is weak. Secondly, the reconstruction is time-consuming,             of the robot to determine the next robot action to reach the target.
+which makes it difficult to quickly adapt the simulated model to            Robot actions are represented by a set of joint angles that are fed
+the real world.                                                             into the robot low-level controller in the exploration model. We
+   The concept of successor representation for RL was first                 train the model in randomized simulated environments, such
+proposed in [16] to improve the generalization for the learning in          that it can effectively generalize to unseen scenes. We will
+different domains and was combined with deep networks [25].                 first describe the formulation of our model and reinforcement
+Recent work [24] used DRL to train a mobile robot to navigate in            learning algorithm, and then we present the training details.
+a simulator with rendered depth images, and then transferred to
+the real world with depth images. Nonetheless, the existing ap-             A. Path Planning for Robot Manipulators
+proaches are limited to similar scenes. Besides, the robot needs               In the path planning problem for a robot manipulator, the
+to be trained in a very similarly rendered simulated environment,           configuration is defined as a position representation of the robot
+which largely limits its generalization ability to new scenes               in the workspace. In other words, the configuration space G is
+where objects have new positions and geometries. Moreover, it is            a set of all possible joint angles of the robot manipulator. To be
+computationally expensive to calculate the distances between the            specific, G is defined as a subset of n-dimensional vector space,
+robot and obstacles [22], [23]. Thus, it remains hard to generalize         where n is the number of the joints of the robot manipulator. The
+existing methods to deal with unseen complex environments in                set G consists of free space Gfree and collision space Gcollide.
+the real world.                                                             Gfree is comprised of all possible configurations in which the
+   In order to narrow the reality gap, we propose to use the 3D             robot does not collide with any obstacles or itself, while Gcollide
+bounding box-based representation for obstacles and targets in              in which the robot arm manipulator collides with obstacles or
+both simulated and real environments. This method reduces the               itself.
+discrepancy between the same objects in different domains and
+different objects. The presented reinforcement learning-based               B. Collision Detection Using the 3D Bounding Box
+model predicts the robot’s actions using the data acquired from
+the robot’s sensors. Its Vision Module is based on a built-in                  The goal of the robot’s controller is to choose the velocity
+convolutional network or a pre-trained Mask R-CNN networks                  settings so that the robot, starting from point P0, reaches des-
+and outputs information of basic features, raw features, or a               tination point Pࢩ in the shortest possible time. Both points are
+bounding box. The Mask R-CNN network is an object de-                       given as a four-element vector (Eq. (1)), relative to the center.
+tection model, i.e., it estimates the position and the size of                                          P = {x, y, z, ϕ}                             (1)
+each object on the image, thus acquiring the 2D bounding box
+of each object. We then combine the 2D bounding box and                     where x, y, z are the positions on axes X, Y, Z, and ϕ is the angle
+the depth information to learn the 3D bounding box of each                  about the vertical axis.
+object.                                                                       To solve this problem, the robot’s controller finds the best
+   To generalize the obstacle avoidance control policy in un-               move to the target using the information from the visual sensors.
+certain environments, we use a deep reinforcement learn-                    The main task of the controller is to estimate the setting vector
+ing framework. Specifically, we use the soft actor-critic                   Yvision based on the input data Xvision , as can be expressed by
+method (SAC) [16] to model the obstacle avoidance problem.                  Eq. (2).
+This method takes the distance between the end-effector and                                                    model
+                                                                                                     Xvision     → Yvision                           (2)
+target as a reward, without considering the distance between the
+robot links and obstacles. We show that the trained policy can                 The robotic manipulator was equipped with a depth camera.
+be extended to allow a more general, robust and rapid transfer              The camera generates an image tensor Xvision , containing in-
+across tasks and scenes.                                                    tegers in the range [0, 255] and the depth value. Yvision is the
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:41:40 UTC from IEEE Xplore. Restrictions apply.
+68                                                                              IEEE ROBOTICS AND AUTOMATION LETTERS, VOL. 7, NO. 1, JANUARY 2022
+
+
+
+coordinates of the target object’s bounding box on the image.
+In the environment, both targets and obstacles are detected as
+boxes. Thus, the collision checking between two boxes only has
+fifteen cases: three faces of the first box, three faces of the second
+box, and nine edge combinations between the first box and
+second box. Based on the two neighboring boxes, the collision
+check between one robot and one obstacle can be implemented
+as a repeated two bounding box checking.                                      Fig. 2. The Vision Module with a vision processing method. Fully connected
+                                                                              layers are optional, trainable layers, which process the output of preceding
+                                                                              blocks; the module receives a vector Xvision and outputs a vector Yvision .
+C. Reinforcement Learning
+   We model the manipulator exploration problem in the frame-
+work of Markov decision process (MDP). An MDP can be
+represented by n-tuple S, A, O, P, R, Ω, γ where S is the set
+of states, and A is the set of actions. P is the transition model
+which consists of the probability of state transitions. R is the
+reward function of taking action a in the state s. O is the set of
+observations which is used for estimating the current state using
+the model Ω which represents the probability of observing o after
+taking the action which results in the state s. γ is the discount             Fig. 3.   Network architecture.
+factor.
+   In order to acquire the optimal policy, the optimal value
+function (i.e., estimate of the maximum return) is approximated               scalable and can be executed safer than in the real world. The
+by value-based methods like deep Q-network (DQN) as function                  image from the camera is processed by the Vision Module first.
+approximation. The other way to get the optimal policy is using               This module is responsible for feature extraction from an image
+the policy gradient methods to compute the optimal policy di-                 and dimensionality reduction. Its output is concatenated with
+rectly from the agent experience. Representative methods of the               data from depth sensors in the module that also performs further
+policy gradient are REINFORCE [26], actor–critic method [27],                 processing.
+deterministic policy gradient (DPG) [28], deep DPG (DDPG)                        Fig. 2 shows the Vision Module. Mask R-CNN performs
+[29], etc. This letter aims at devising techniques to utilize the             image analysis in a single-shot manner. As an output, it estimates
+samples effectively for better learning, for example replay mem-              the coordinates of the target object’s bounding box on the image.
+ory and HER, we present a DRL which enables the manipulator                   In this module, Mask R-CNN delivers three different layers of
+to collect and store relevant observations gathered over time.                output information: basic features, raw features, and a 2D bound-
+   This method is based on a soft actor-critic (SAC) architec-                ing box. In addition, the images are pre-processed with bounding
+ture [16]. This approach utilizes two models; the actor (policy               boxes of detect objects to modify the depth image received from
+gradient method) is used to control the agent behavior, while                 the depth camera in order to improve depth estimation of objects.
+the critic (action-value function method) evaluates the actor’s               The Vision Module returns a vector Yvision .
+decision. Both models are trained in parallel: the actor policy                  We used 3D bounding boxes to represent the information of
+π(s, a) is trained to maximize the value of rewards received                  the obstacles and targets in the environment. The advantage
+for actions taken by the agent and the critic function Q(s, a)                of this representation is that it is invariant to the shape and
+is optimized to minimize reward function approximation error.                 appearance of the objects, thus unifying the scene representation
+Here, s refers to the state vector (in our case, equivalent to the            of the simulated world and real world. Therefore, the model
+input vector containing the information from the environment:                 trained for certain objects can be used for unseen objects with
+visual observations Xvision ), and a is the action vector (which              complicated shapes. In this letter, we considered one target and
+refers to the joint actions). The reward function keeps the robot             multiple obstacles in one scene, and the obstacles in the tested
+links stay away from the obstacles.                                           scenarios were fewer than those in the training scenarios.
+
+                                                                              B. Exploration Module
+                             IV. METHOD
+                                                                                 For the exploration module, we adopted the soft actor-critic
+A. Vision Module
+                                                                              (SAC). SAC is an off-policy RL algorithm that optimizes a
+   We trained our model in a robotics simulator. The general                  stochastic policy and can be used for continuous actions. It
+idea is that the information of all the objects (including the                is composed of three neural networks, including a state value
+geometry and positions) in the physics engine is streamed to                  network to obtain the value of the next state, a critic network to
+the RL framework. The RL framework, in turn, issues control                   obtain Q value of actions from the actor network and an actor
+commands based on the object information and sends them back                  (policy) network to generate the policy. As can be seen in Fig. 3,
+to the robot in the physics engine. The use of the physics engine             the input to the state value network is the current observation,
+to model the environment is advantageous because it is highly                 including the vision information of all the objects and the robot’s
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:41:40 UTC from IEEE Xplore. Restrictions apply.
+ZHANG et al.: SIM2REAL LEARNING OF OBSTACLE AVOIDANCE FOR ROBOTIC MANIPULATORS IN UNCERTAIN ENVIRONMENTS                                                    69
+
+
+
+joint states. The model consists of several convolutional layer,
+each followed by a ReLU activation function. The output of the
+network is the joint actions for the next state.
+
+C. Training
+   With the SAC, the model is trained by interacting with indi-
+vidual environments, using their copies of the global network.              Fig. 4. Experimental setup in a simulated environment: the three middle
+Agents train their individual network’s weights independently,              images from top to bottom denote the scene from the perspective of our Fetch
+and at the end of each set of episodes, the global network is               robot, the corresponding depth image, and the semantically segmented image,
+                                                                            respectively; the right image represents the 3D bounding boxes of the observed
+updated synchronously.                                                      objects.
+   During training, the robot reaches a circular object (i.e.,
+the target) while avoiding box-shaped obstacles. As shown in
+Fig. 3, the targets and the obstacles could have various sizes and                                          TABLE I
+positions. It is noticed that the Vision Module can be used to                                 TUNING PARAMETERS FOR SAC TRAINING
+detect any desired targets automatically, without indicating the
+position components of the RL setup. The reward function is
+defined as follows:
+                  R = w1 R a + w2 R c + w3 R d ,                     (3)
+where w1, w2, w3 are the weights of the action Ra, collision
+situation Rc and distance between the end-effector and the target
+destination Rd, respectively. The reward function is tuned by the
+weights according to their priority in the training process.
+   The magnitude of the actions Ra by the manipulator is com-
+puted as the square of the norm of the action vector, as follows:
+                            Ra = −||a||2                             (4)
+such that it gives a negative contribution to the reward, thus
+encouraging smaller actions. If a collision is detected, then Rc
+is 0; otherwise, Rc is 1.
+   The distance Rd is calculated using the Huber loss function:
+                   
+                      0.5 ∗ d2 ,          for d < δ
+            Rd =                                              (5)
+                      δ (|d| − 0.5 ∗ δ) , otherwise                         Fig. 5. Some training scenes. (a–d) are for pre-training and (e–h) are for
+                                                                            training in Gazebo. In the pre-training scenes, the green ball is set as the target
+ where d denotes the Euclidean distance between the end-effector            and the other boxes are obstacles. In the training scenes, the vase is set as the
+                                                                            target and the other objects are obstacles.
+of the manipulator and the target, and the parameter δ determines
+the smoothness.
+   When a manipulator completes an episode, a reward is given.
+This reward is independent on the information gain and moving               A. Training Setup
+distance at every step during the episode. The objective is to
+                                                                               1) Environment Setup: The experiment involved several ob-
+provide higher rewards to the robot that has moved closer to
+                                                                            jects around the reachable workspace of a Fetch robot, as shown
+the target during the earlier steps of an episode. Therefore,
+                                                                            in Fig. 4. We obtained the 3D bounding boxes of all the objects.
+the weights of the network are tuned to prefer the actions that
+                                                                            We trained the models on an NVIDIA GeForce GTX Titan X
+maximize the total information gain of a robot in the shortest
+                                                                            CPU. The values used for the hyper-parameters along with their
+possible distance.
+                                                                            definitions for the SAC training are summarized in Table I.
+                                                                               2) Implementation: We trained our SAC controllers on dif-
+                         V. EXPERIMENTS                                     ferent scenes, see Fig. 5 for examples. Fig. 5(a)-(d) represent the
+   To investigate the feasibility of our proposed architecture for          first-stage training, in which the robot learns motion planning
+the manipulator motion planning task, we conducted three sets of            policies for scenes with cubic boxes. For the pre-training, we
+experiments: 1) training and sim2real performance and scalabil-             use a robotics simulator MuJoCo [30] due to its fast dynamics
+ity tests for our approach in simple and complex environments;              simulation. All the obstacles were box-shaped and had diverse
+2) a comparison of our proposed approach with other baselines;              sizes and positions to change the difficulty of the scenes. It is
+3) a real-world experiment with the deployment of our approach              noted that we set the maximum number of obstacles as ten. The
+on a physical robotic manipulator reaching a target in a changing           current state of some “obstacles” are set as zero if there are less
+environment.                                                                than ten obstacles.
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:41:40 UTC from IEEE Xplore. Restrictions apply.
+70                                                                                  IEEE ROBOTICS AND AUTOMATION LETTERS, VOL. 7, NO. 1, JANUARY 2022
+
+
+
+
+                                                                                  Fig. 7. Three scenes for testing: (a) a scene with a cola bottle target and a
+Fig. 6.   The total distance and reward per episode for the scene in Fig. 5(c).   single green obstacle; (b) a scene with a vase target and some obstacles located
+                                                                                  in random positions; (c) a scene with a vase target and some new obstacles with
+                                                                                  unseen geometric shapes.
+
+   Fig. 5(e)–(h) shows the scenes used for further training with
+the pre-trained weights using box-shaped scenes. In Fig. 3(e)–
+                                                                                  outperforms the other methods in terms of the training speed and
+(h), we used the open-source simulator Gazebo combined with
+                                                                                  performance. Unlike DDPG, which achieved an average reward
+ROS (Robot Operating System) for training due to its good
+                                                                                  of only –25000, the SAC network learned policies with higher
+support for sensing systems in virtual environments. At this
+                                                                                  rewards. This is because overestimating the Q value cannot be
+stage, the obstacles were in various sizes and positions. As shown
+                                                                                  solved by getting more exploration in the obstacle avoidance
+in Figs. 3 and 5(e)–(h), we used Vision Module to detect the
+                                                                                  problem.
+bounding boxes of the objects. The robot can use the knowledge
+                                                                                     Conversely, with a longer training period, the effect is more
+from pre-training and quickly adapt to these irregular shapes,
+                                                                                  severe, preventing DDPG from obtaining better performance.
+to learn a more advanced control policy while considering the
+                                                                                  In addition, the results show that the method that uses MSE
+inaccuracies caused by sensory systems.
+                                                                                  rather than the Huber loss does not converge. This is because
+   3) Baseline: For comparison, we trained the controller with
+                                                                                  the Huber loss is less sensitive to outliers in the data than the
+seven other methods:
+   r DQN (Deep Q-Network). Since it can handle only the                           MSE. Also, the proposed approach performs better than the
+                                                                                  SAC-NA, which does not consider the magnitude of the action in
+      discrete action space, we divided the range of the joint
+                                                                                  the reward. This is because the weights in the proposed method
+      angle evenly into 20 values.
+   r RRT (Rapidly-exploring Random Trees). We selected                            tune the reward function according to the priority of the actions,
+                                                                                  collision and target reaching situation in the training process. We
+      RRT to compare the query time with RL methods.
+   r DDPG (Deep deterministic policy gradient). We used                           also compared our method with DQN, which mainly works for
+                                                                                  discrete action space. It can be seen that DQN performs better
+      the similar parameter setting as SAC.
+   r SAC-NHL (SAC method that does not include Huber                              than other baselines and converges earlier than our method.
+                                                                                  This is because the training scenarios are relatively simple,
+      loss). We used mean square error (MSE) as the loss to
+                                                                                  and the robot’s action space is larger. However, as DQN can
+      train the controller rather than the Huber loss.
+   r SAC-NA (SAC method that does not include the magni-                          easily fall into local minima in a small-scale discrete space, the
+                                                                                  convergence cannot reach a good result, which can be seen from
+      tude of the actions). We used SAC to train the controller
+                                                                                  Fig. 6.
+      using the reward that does not consider the magnitude of
+      the actions, see Eq. 3.
+   r SAC-NUR (SAC method that does not use the unified                            B. Evaluation in Simulation
+      representation). This is the scenario that does not use                        To analyze the advantage of introducing the unified represen-
+      the unified representation for both training and testing                    tation for the sim2real problem, we compared the control policy
+      environments.                                                               trained in Fig. 5(e)–(h) with that trained in the pre-training stage
+   r SAC-SVC (SAC method with separate training of visual                         in Fig. 5(a)–(d). The latter is the regular sim2real method that
+      output and control policy). This is the scenario that con-                  directly transfers the policy from simulation to the real world.
+      troller is trained separately from the 3D bounding box                      We tested these policies in three unseen scenes with various
+      training. That is, the 3D bounding boxes are trained in                     shapes and positions, see Fig. 7.
+      advance.                                                                       1) Performance Metrics: We adopted two metrics to measure
+   4) Training Efficiency: To analyze the training efficiency of                  the performance of different methods: the query time to reach
+the SAC model for the manipulator obstacle avoidance and the                      the destination and the simulation success rate. The results are
+advantage of using a reward function defined in Eq. 2, we com-                    detailed in the next section.
+pared the proposed SAC method with DQN, DDPG, SAC- NHL                               2) Sim2Real Results: All the controllers were tested ten
+and SAC-NA using the scene with three obstacles. Fig. 6 shows                     times for each scene in simulation in Fig. 7. The average eval-
+the training progress, which shows that our proposed model                        uation results are listed in Table II. Fig. 7 shows three scenes,
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:41:40 UTC from IEEE Xplore. Restrictions apply.
+ZHANG et al.: SIM2REAL LEARNING OF OBSTACLE AVOIDANCE FOR ROBOTIC MANIPULATORS IN UNCERTAIN ENVIRONMENTS                                                 71
+
+
+
+                                                             TABLE II
+QUANTITATIVE EVALUATION AND GENERALIZATION FOR DIFFERENT METHODS UNDER VARIED ENVIRONMENT SETUPS. THE BOLD FONT HIGHLIGHTS THE BEST
+                                                  OR WORST RESULTS IN EACH COLUMN
+
+
+
+
+where the sizes and locations of the obstacles are different from
+those in the training scenarios. The task in Scene 1 is to reach
+the cola bottle in the first scene. The tasks for Scenes 2 and 3 are
+to reach the vase, as shown in Fig. 7(b) and (c), respectively.
+   query time: We selected RRT to compare the performance. For
+our method, the results include both the time required to load
+the weights for the model and the time required to implement
+the joint actions. Table II presents the timing results for these
+two approaches and shows that compared with RRT, all the RL                 Fig. 8. Experiment Setup. (a–b) The real experimental setup (a) and the real
+                                                                            time reconstruction and recognition (b) of the scene using a depth sensor. (c–j)
+methods achieve shorter query time in all setups. This is because           The Fetch robot successfully reached the purple metal box as a target while the
+RL uses the trained control policy, while RRT performs online               whole scene was changing.
+calculation and is a probabilistically complete motion planner
+that searches for feasible paths using a heuristic approach. Due
+to the computational overload, the search time marginally in-
+creases when the number of workspace obstacles increases. We
+anticipate that other sampling-based methods, such as optimal               settings, we tested our trained model in dynamic scenes where
+RRT (RRT∗) and probabilistic roadmaps (PRM) may have the                    the objects have different geometries and keep changing their
+same problem. Therefore, RRT is not guaranteed for real-time                positions. To achieve this, we put obstacles and targets on a
+motion planning for robotic manipulators in complex scenes.                 box mounted on a Turtlebot, as shown in Fig. 8(a) and (b).
+   avoidance analysis and generalization: The success rate in-              The Turtlebot rotates 360 degrees clockwise, which drives the
+dicates whether the control policy reaches the target without               obstacles and targets to rotate 360 degrees. A new scene was
+colliding with the obstacles based only on the visual information           generated each time the Turtlebot rotated 30 degree to a new
+of the current state. We used SAC-NUR as a baseline. As shown               position. We used the depth sensor on the Fetch robot to obtain
+in Table II, our approach achieves better success rate in the three         the 3D bounding boxes of the objects in the environment. The
+test scenes (70%, 60%, 60%) compared with SAC-NUR (50%,                     right image in Fig. 8(c)–(j) shows the result of the scene model.
+40%, 40%), and SAC-SVC (70%, 60%, 50%). For comparison,                     A magnet was mounted on the end-effector of the robot, and the
+we also present the success rate for SAC-NA, which performs                 target was picked when the robot reached it.
+worse (40%, 30%, 30%) than the proposed approach, as the                       We also evaluated the performance of the proposed approach
+policy does not reach a good result during training.                        from the sim2real viewpoint. We trained a model in a similar
+   In addition, the success rate of the proposed approach in Scene          way as the proposed approach, using geometries and locations
+1 is higher than both in Scenes 2 and 3. This is because the latter         as observations instead of the 3D bounding boxes. In the training
+two scenes are more complex than Scene 1, and the vase is                   scenario, we used all box-shaped objects. Then, we applied the
+an irregular object with a bounding box that may be changing.               new model to scenes where objects were represented as bound-
+As this uncertainty is included in the training process using               ing boxes. Ten scenes in both simulated and real environments
+the bounding box representation, SAC-UR adapts the obstacle                 were tested.
+avoidance policy to the inaccurate modeling of the obstacles                   The success rate is shown in Table II. It was found that the
+caused by the sensory system.                                               robot was able to reach the target in the real world for five times.
+                                                                            In five times, the robot collided with the obstacles when two
+                                                                            consecutive scenes required a larger magnitude of the actions.
+C. Testing in the Real World                                                This was mainly because of the low quality of the point clouds
+   We performed experiments in unseen real environments with                captured by our low-cost depth sensor, which possibly resulted
+our overall architecture using a physical Fetch robot. To validate          in the inaccurate location of the dynamic objects. Fig. 9 shows
+the generalization ability of the model to different real-world             that the direct training without detecting the bounding boxes,
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:41:40 UTC from IEEE Xplore. Restrictions apply.
+72                                                                                    IEEE ROBOTICS AND AUTOMATION LETTERS, VOL. 7, NO. 1, JANUARY 2022
+
+
+
+                                                                                     [6] L. Xie, S. Wang, A. Markham, and N. Trigoni, “Towards monocular vision
+                                                                                         based obstacle avoidance through deep reinforcement learning,” in Proc.
+                                                                                         RSS Workshop New Front. for Deep Learn. Robot., 2017, pp. 1–6.
+                                                                                     [7] T. Jurgenson and A. Tamar, “Harnessing reinforcement learning for neural
+                                                                                         motion planning,” in Proc. Robot.: Sci. Syst., 2019, pp. 1–13.
+                                                                                     [8] M. Duguleana, F. G. Barbuceanu, A. Teirelbar, and G. Mogan, “Obsta-
+                                                                                         cle avoidance of redundant manipulators using neural networks based
+Fig. 9. Physical experiment with direct training without detection of 3D                 reinforcement learning,” Robot Comput. Integr. Manuf., vol. 28, no. 2,
+bounding boxes (SAC-NUR).                                                                pp. 132–146, 2012.
+                                                                                     [9] S. Levine, P. Pastor, A. Krizhevsky, and D. Quillen, “Learning hand-eye
+                                                                                         coordination for robotic grasping with deep learning and large-scale data
+                                                                                         collection,” Int. J. Rob. Res., vol. 37, pp. 421–436, 2018.
+SAC-NUR. As the point cloud of some obstacles is unclear, the                       [10] L. Pinto and A. Gupta, “Supersizing self-supervision: Learning to grasp
+collision occurred when the robot arm reaches the target.                                from 50k tries and 700 robot hours,” in Proc. IEEE Int. Conf. Robot.
+                                                                                         Automat., 2016, pp. 3406–3413.
+    For simulated scenarios, there was three failed cases using                     [11] N. Jakobi, P. Husbands, and I. Harvey, “Noise and the reality gap: The
+our model. The statistic results are shown in Table II. It can be                        use of simulation in evolutionary robotics,” in Proc. Eur. Conf. Artif. Life,
+seen that the proposed method outperforms other methods in                               1995, pp. 704–720.
+                                                                                    [12] S. James, A. J. Davison, and E. Johns, “Transferring end-to-end visuo-
+transferring the model from simulation to the real world. Also,                          motor control from simulation to real world for a multi-stage task,” in
+it can be seen that the control policy with trained bounding boxes                       Proc. Conf. Rob. Learn., 2017, pp. 334–343.
+(SAC-SVC) performs better than SAC-NUR. This demonstrate                            [13] J. Tobin et al., “Using simulation and domain adaptation to improve
+                                                                                         efficiency of deep robotic grasping,” in Proc. IEEE Int. Conf. Robot.
+the effectiveness of the bounding box representation. The perfor-                        Automat., 2018, pp. 4243–4250.
+mance of SAC-SVC performs worse than our proposed method                            [14] K. Fang, Y. Bai, S. Hinterstoisser, S. Savarese, and M. Kalakrishnan,
+with an end-to-end training in complex scenarios (e.g., Scene 3                          “Multi-task domain adaptation for deep learning of instance grasping
+                                                                                         from simulation,” in Proc. IEEE Int. Conf. Robot. Automat., 2018,
+in simulated environment). This is caused by the accumulated                             pp. 3516–3523.
+errors. In summary, the experiment demonstrates the effec-                          [15] P. Dayan, “Improving generalization for temporal difference learning: The
+tiveness of the unified representation based on an end-to-end                            successor representation,” Neural Comput., vol. 5, no. 4, pp. 613–624,
+                                                                                         1993.
+training in learning real-world interactions and shows a robust                     [16] T. Haarnoja, A. Zhou, P. Abbeel, and S. Levine, “Soft actor-critic:
+generalization from simulation to the real world.                                        Off-policy maximum entropy deep reinforcement learning with a
+                                                                                         stochastic actor,” in Proc. Int. Conf. Mach. Learn, PMRL, 2018,
+                                                                                         pp. 1861–1870.
+               VI. CONCLUSION AND FUTURE WORK                                       [17] E. Tzeng et al., “Towards adapting deep visuomotor representations from
+                                                                                         simulated to real environments,” CoRR, vol. abs/1511.07111, 2015.
+   In this letter, we presented a DRL-based technique to train                      [18] Z. Wei, W. Chen, H. Wang, and J. Wang, “Manipulator motion planning
+a manipulator in a virtual simulator to avoid obstacles. Our                             using flexible obstacle avoidance based on model learning,” Int. J. Adv.
+technique employs a SAC method together with a novel reward                              Rob. Res., vol. 14, no. 3, pp. 1–12, 2017.
+                                                                                    [19] N. Das, N. Gupta, and M. C. Yip, “Fastron: An online learning-based
+function and the Huber loss to significantly reduce the training                         model and active learning strategy for proxy collision detection,” in Proc.
+time. These settings resulted in a fast response time and adapta-                        Conf. Rob. Learn., 2017, pp. 496–504.
+tion to unseen environments. We have evaluated our method in                        [20] H. Qureshi, A. Simeonov, M. J. Bency, and M. C. Yip, “Motion
+                                                                                         planning networks,” in Proc. IEEE Int. Conf. Robot. Automat., 2019,
+both virtual and physical environments. All the presented results                        pp. 2118–2124.
+were obtained upon a single CPU. The model update and query                         [21] S. Singla and S. Bhatnagar, “Memory-based deep reinforcement learning
+times may be improved with the use of multi-core or GPUs,                                for obstacle avoidance in uav with limited environment knowledge,” IEEE
+                                                                                         Trans. Intell. Transp. Syst., vol. 22, pp. 107–118, 2019.
+which can be performed in future work.                                              [22] B. Sangiovanni, A. Rendiniello, G. P. Incremona, A. Ferrara,
+   In future work, we plan to explore the combination of the                             and M. Piastra, “Deep reinforcement learning for collision avoid-
+DRL approach with Long Short-Term Memory (LSTM) units to                                 ance of robotic manipulators,” in Proc. Europ. Contr. Conf., 2018,
+                                                                                         pp. 2063–2068.
+handle the purely vision-based navigation, in which the robotic                     [23] S. Wen, J. Chen, S. Wang, H. Zhang, and X. Hu, “Path planning of
+manipulators reach the target based upon the visual information                          humanoid arm based on deep deterministic policy gradient,” in Proc. IEEE
+of the current state only. We believe that the system will be able                       Int. Conf. Rob. Biomed., 2018, pp. 1755–1760.
+                                                                                    [24] J. Zhang, J. T. Springenberg, J. Boedecker, and W. Burgard, “Deep
+to handle heavy occlusion among various objects in the scene                             reinforcement learning with successor features for navigation across sim-
+with the use of the memory.                                                              ilar environments,” in Proc. IEEE Int. Conf. Intell. Robots Syst ., 2017,
+                                                                                         pp. 2371–2378.
+                                                                                    [25] T. D. Kulkarni, A. Saeedi, S. Gautam, and S. J. Gershman, “Deep successor
+                                  REFERENCES                                             reinforcement learning,” CoRR, vol. abs/1606.02396, 2016.
+                                                                                    [26] R. Williams, “Simple statistical gradient-following algorithms for connec-
+ [1] J. Kober, J. A. Bagnell, and J. Peters, “Reinforcement learning in robotics:
+                                                                                         tionist reinforcement learning,” Mach. Learn., vol. 8, no. 3, pp. 229–256,
+     A survey,” Int. J. Rob. Res., vol. 32, no. 11, pp. 1238–1274, 2013.
+                                                                                         1992.
+ [2] A. Krizhevsky, I. Sutskever, and G. E. Hinton, “Imagenet classification
+                                                                                    [27] V. Konda and J. N. Tsitsiklis, “Actor-critic algorithms,” in Proc. Adv.
+     with deep convolutional neural networks,” in Adv. Neural Inf. Process.
+                                                                                         Neural Inf. Process. Syst., 2000, pp. 1008–1014.
+     Syst., vol. 25, pp. 1097–1105, 2012.
+                                                                                    [28] D. Silver, G. Lever, N. Heess, T. Degris, D. Wierstra, and M. Riedmiller,
+ [3] A. D. Dragan, G. J. Gordon, and S. S. Srinivasa, “Learning from experience
+                                                                                         “Deterministic policy gradient algorithms,” in Proc. Int. Conf. Mach.
+     in manipulation planning: Setting the right goals,” in Robotics Research.
+                                                                                         Learn., PMRL, 2014, pp. 387–395.
+     Berlin/Heidelberg, Germany: Springer, 2017, pp. 309–326.
+                                                                                    [29] T. P. Lillicrap et al., “Continuous control with deep reinforcement learn-
+ [4] F. Sadeghi and S. Levine, “Cad2rl: Real single-image flight without a
+                                                                                         ing,” in Proc. Int. Conf. Learn. Represent., 2015, pp. 1–14.
+     single real image,” in Proc. Robot.: Sci. Syst., 2017, pp. 1–12.
+                                                                                    [30] E. Todorov, T. Erez, and Y. Tassa, “Mujoco: A physics engine for
+ [5] Y. Zhu et al., “Target-driven visual navigation in indoor scenes using deep
+                                                                                         model-based control,” in Proc. IEEE Int. Conf. Intell. Robots Syst., 2012,
+     reinforcement learning,” in Proc. IEEE Int. Conf. Robot. Automat., 2017,
+                                                                                         pp. 5026–5033.
+     pp. 3357–3364.
+
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:41:40 UTC from IEEE Xplore. Restrictions apply.
+

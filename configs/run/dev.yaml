@@ -28,12 +28,10 @@ eval:
   # 不需要典型 episode 曲线时保持 null；需要时可设为某次训练目录下的 traces。
   trace_output: null
 
-# smoke test 的轻量验证参数，只用于检查环境、回放池和一次网络更新能否跑通。
+  # smoke test 的轻量验证参数，用于检查环境和 PPO rollout。
 smoke:
   method: ldrc_adaptive
   seed: 7
   no_obstacle_seed: 11
   max_episode_steps: 8
   rollout_steps: 12
-  replay_capacity: 64
-  batch_size: 8
