@@ -8,7 +8,7 @@ from rl_risk_sac.robots.ur5_capsules import CapsuleState
 from rl_risk_sac.utils.risk import closest_point_on_segment
 
 
-REFERENCE_PPO_OBSERVATION_DIM = 25
+REFERENCE_PPO_OBSERVATION_DIM = 31
 SELF_DISTANCE_UPPER = 0.25
 
 
@@ -104,10 +104,11 @@ def build_reference_observation(
     ee_quaternion: np.ndarray,
     goal_position: np.ndarray,
     goal_quaternion: np.ndarray,
+    position_error: np.ndarray,
     orientation_error: np.ndarray,
     reference_point_offset_m: float = 0.001,
 ) -> np.ndarray:
-    """Build the sole supported 25-dimensional FTP4RM observation."""
+    """Build the 25-D FTP4RM observation plus signed 6-D pose error."""
     point_errors = reference_point_errors(
         goal_position,
         goal_quaternion,
@@ -133,6 +134,8 @@ def build_reference_observation(
             np.asarray(goal_quaternion, dtype=np.float32),
             scalar_errors,
             obstacle_slots,
+            np.asarray(position_error, dtype=np.float32),
+            np.asarray(orientation_error, dtype=np.float32),
         ]
     ).astype(np.float32)
     if observation.shape != (REFERENCE_PPO_OBSERVATION_DIM,):

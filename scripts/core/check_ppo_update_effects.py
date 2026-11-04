@@ -226,7 +226,7 @@ def main():
         config["thesis"].update(simple_reaching_mode=True, blocking_obstacle_mode=False, stage="s0")
         config["thesis"]["reward"]["reward_mode"] = "reference_ppo"
         config["ppo"].update(epochs=10, minibatch_size=1024, target_kl=.02)
-        agent = ThesisPPOAgent(25, 6, config)
+        agent = ThesisPPOAgent(31, 6, config)
         source = "fresh initialization"
         if case == "reference_narrow_std_stress":
             source = "fresh mean/value weights with std forced to .035 rad; stress test, NOT a trained reference checkpoint"

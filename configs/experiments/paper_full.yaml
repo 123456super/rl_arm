@@ -16,7 +16,9 @@ thesis:
   physics_dt: 0.004166666666666667
   control_dt: 0.4166666666666667
   horizon: 100
+  action_mode: joint_delta
   action_limit_rad: 3.14
+  joint_delta_limit_rad: 0.25
   joint_target_margin_rad: 0.02
   joint_limit_tolerance_rad: 0.001
   qdot_observation_scale: 0.8
@@ -72,7 +74,7 @@ thesis:
   reward:
     reward_mode: reference_ppo
     reference_obstacle_threshold_m: 0.08
-    reference_collision_penalty: 1.0
+    reference_collision_penalty: 10.0
 
   observation:
     reference_point_offset_m: 0.001
@@ -98,13 +100,20 @@ ppo:
   critic_lr: 3.0e-4
   entropy_coef: 0.01
   value_coef: 1.0
-  normalize_advantage: false
+  normalize_advantage: true
   max_grad_norm: null
   target_kl: null
   max_abs_log_ratio: 20.0
-  action_std_init: 1.0
+  # 0.08 / 0.25 preserves approximately the same initial normalized
+  # exploration scale as 1.0 / 3.14 in the former absolute-angle policy.
+  action_std_init: 0.08
   lr_decay: true
   actor_lr_final: 0.0
   critic_lr_final: 0.0
+  # Adapt only the Actor LR to its narrowing Gaussian action distribution.
+  # The Critic continues to use the progress-based linear decay above.
+  actor_std_lr_adaptation: true
+  actor_std_lr_ema_decay: 0.95
+  actor_lr_min: 1.0e-5
   adaptive_kl_lr: false
   hidden_dims: [256, 256]

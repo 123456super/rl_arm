@@ -66,7 +66,9 @@ def audit(config: dict, *, samples: int, control_trials: int, seed: int) -> dict
             # Validate the actual physics controller can hold a known IK endpoint.
             env._set_joint_state(env.goal_joint_positions)
             for _ in range(env.success_hold_steps):
-                _, _, _, terminated, truncated, info = env.step(env.goal_joint_positions)
+                _, _, _, terminated, truncated, info = env.step(
+                    np.zeros(6, dtype=np.float32)
+                )
                 if terminated or truncated:
                     break
             hold_successes += int(info["success"])
@@ -77,7 +79,11 @@ def audit(config: dict, *, samples: int, control_trials: int, seed: int) -> dict
             had_collision = False
             for step in range(env.horizon):
                 q, _ = env.robot.joint_state_exact()
-                action = q + np.clip(env.goal_joint_positions - q, -0.25, 0.25)
+                action = np.clip(
+                    env.goal_joint_positions - q,
+                    -env.policy_action_limit,
+                    env.policy_action_limit,
+                )
                 _, _, _, terminated, truncated, info = env.step(action)
                 had_collision |= bool(info["collision"])
                 if terminated or truncated:

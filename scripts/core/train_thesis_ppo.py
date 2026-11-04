@@ -39,6 +39,14 @@ def compute_gae(rewards, values, next_values, terminated, dones, gammas, gae_lam
     return advantages, advantages + values
 
 
+def fixed_discount_factors(rewards: np.ndarray, gamma: float) -> np.ndarray:
+    """Use one stationary MDP discount for every transition."""
+    discount = float(gamma)
+    if not np.isfinite(discount) or not 0.0 < discount <= 1.0:
+        raise ValueError("PPO gamma must be finite and in (0, 1]")
+    return np.full(rewards.shape, discount, dtype=np.float32)
+
+
 def episode_stats(info):
     distances = np.asarray(info["reference_point_distances"])
     reference_error = float(
@@ -46,6 +54,7 @@ def episode_stats(info):
     )
     return {
         "return": 0.0, "length": 0, "collision": False, "joint_limit": False,
+        "success": False,
         "best_position_m": float(info["goal_error_norm"]),
         "best_orientation_rad": float(info["orientation_error_norm"]),
         "best_reference_error": reference_error,
@@ -69,7 +78,11 @@ def make_contract(stage: str, scene: str) -> dict:
         "position_tolerance": 0.01,
         "orientation_tolerance": 0.10,
         "lambda_self": 1.0,
-        "terminate_on_success": True,
+        # Keep the 100-step horizon after a threshold hit.  The dense
+        # reference reward is positive near the goal, so terminating on a hit
+        # would otherwise make an early success less valuable than hovering
+        # just outside the threshold for the rest of the episode.
+        "terminate_on_success": False,
     }
 
 
@@ -203,6 +216,10 @@ def main() -> None:
                     stat["return"] += reward; stat["length"] += 1
                     stat["collision"] |= bool(info.get("collision", False))
                     stat["joint_limit"] |= bool(info.get("joint_limit", False))
+                    # Preserve the old episode-success meaning (the threshold
+                    # was reached at least once) now that a hit no longer ends
+                    # the episode immediately.
+                    stat["success"] |= bool(info.get("success", False))
                     reference_error = float(info["reference_error"])
                     stat["best_position_m"] = min(stat["best_position_m"], info["next_rho_position"])
                     stat["best_orientation_rad"] = min(stat["best_orientation_rad"], info["next_rho_orientation"])
@@ -219,10 +236,14 @@ def main() -> None:
                         episodes += 1
                         stat["action_clip_fraction"] /= stat["length"]
                         run_step = completed_steps + args.num_envs
+                        episode_success = bool(stat["success"])
+                        horizon_after_success = bool(
+                            episode_success and info.get("timeout", False)
+                        )
                         row = {**stat, "episode": episodes,
                                "step": initial_global_step + run_step,
                                "run_step": run_step, "scene": scenes[i],
-                               "success": int(info.get("success", False)), "terminal_collision": int(info.get("collision", False)), "timeout": int(info.get("timeout", False)), "termination_reason": info.get("termination_reason", "unknown"), "final_position_m": info["next_rho_position"], "final_orientation_rad": info["next_rho_orientation"], "final_reference_error": reference_error}
+                               "success": int(episode_success), "terminal_collision": int(info.get("collision", False)), "timeout": int(info.get("timeout", False) and not episode_success), "termination_reason": "success_horizon" if horizon_after_success else info.get("termination_reason", "unknown"), "final_position_m": info["next_rho_position"], "final_orientation_rad": info["next_rho_orientation"], "final_reference_error": reference_error}
                         row["collision"] = int(row["collision"]); row["joint_limit"] = int(row["joint_limit"])
                         writer.writerow(row); recent.append(row)
                         scenes[i] = stage_scene()
@@ -235,13 +256,8 @@ def main() -> None:
             next_obs_rollout = np.asarray(rollout["next_obs"], dtype=np.float32)
             next_values_rollout = agent.predict_values(next_obs_rollout.reshape(-1, obs_dim))
             next_values_rollout = next_values_rollout.reshape(len(next_obs_rollout), args.num_envs)
-            rewards = np.asarray(rollout["rewards"], dtype=np.float32); values = np.asarray(rollout["values"], dtype=np.float32); dones = np.asarray(rollout["dones"], dtype=np.float32); terminated = np.asarray(rollout["terminated"], dtype=np.float32); logp_rollout = np.asarray(rollout["logp"], dtype=np.float32)
-            logp_mean = logp_rollout / float(action_dim)
-            gammas = np.clip(
-                np.where(logp_mean > 0.0, np.tanh(0.1 * logp_mean), np.exp(logp_mean)),
-                0.6,
-                0.99,
-            )
+            rewards = np.asarray(rollout["rewards"], dtype=np.float32); values = np.asarray(rollout["values"], dtype=np.float32); dones = np.asarray(rollout["dones"], dtype=np.float32); terminated = np.asarray(rollout["terminated"], dtype=np.float32)
+            gammas = fixed_discount_factors(rewards, agent.gamma)
             adv, value_targets = compute_gae(rewards, values, next_values_rollout, terminated, dones, gammas, agent.gae_lambda)
             batch = {"obs": np.asarray(rollout["obs"], dtype=np.float32).reshape(-1, obs_dim), "actions": np.asarray(rollout["actions"], dtype=np.float32).reshape(-1, action_dim), "std_scale": np.asarray(rollout["std_scale"], dtype=np.float32).reshape(-1, 1), "logp": np.asarray(rollout["logp"], dtype=np.float32).reshape(-1), "advantages": adv.reshape(-1), "returns": value_targets.reshape(-1)}
             # The reference implementation applies its linear schedule after
@@ -259,10 +275,10 @@ def main() -> None:
             mean = lambda key: float(np.mean([r[key] for r in recent])) if recent else None
             record = {"step": initial_global_step + completed_steps,
                       "run_step": completed_steps, "update": update, "episodes": episodes,
-                      "mean_return_last100": mean("return"), "success_rate_last100": mean("success"), "collision_rate_last100": mean("collision"), "mean_length_last100": mean("length"), "mean_reward": float(rewards.mean()), "gamma_mean": float(gammas.mean()), "action_clip_fraction": float(np.mean(np.abs(batch["actions"]) > float(config["thesis"].get("action_limit_rad", np.pi)))), **metrics}
+                      "mean_return_last100": mean("return"), "success_rate_last100": mean("success"), "collision_rate_last100": mean("collision"), "mean_length_last100": mean("length"), "mean_reward": float(rewards.mean()), "gamma_mean": float(gammas.mean()), "action_clip_fraction": float(np.mean(np.abs(batch["actions"]) > float(config["thesis"].get("joint_delta_limit_rad", 0.25)))), **metrics}
             updates_file.write(json.dumps(record, allow_nan=False) + "\n"); updates_file.flush(); episodes_csv.flush()
             if update % args.log_interval == 0:
-                print(f"step={record['step']}/{global_target_steps} run_step={completed_steps}/{args.steps} update={update} episodes={episodes} return100={record['mean_return_last100']} success100={record['success_rate_last100']} len100={record['mean_length_last100']} reward={record['mean_reward']:.3f} actor={metrics['actor_loss']:.4f} critic={metrics['critic_loss']:.4f} entropy={metrics['entropy']:.3f} std={metrics['action_std_mean']:.3f} kl={metrics['approx_kl']:.4f} kl_max={metrics['max_approx_kl']:.4f} kl_reject={int(metrics['actor_update_rejected'])} actor_steps={metrics['optimizer_steps']}/{metrics['actor_optimizer_attempts']} critic_steps={metrics['critic_optimizer_steps']} lr=({metrics['actor_lr']:.3g},{metrics['critic_lr']:.3g}) clip={metrics['clip_fraction']:.3f} action_clip={record['action_clip_fraction']:.3f} grad=({metrics['actor_grad_norm']:.2f},{metrics['critic_grad_norm']:.2f})", flush=True)
+                print(f"step={record['step']}/{global_target_steps} run_step={completed_steps}/{args.steps} update={update} episodes={episodes} return100={record['mean_return_last100']} success100={record['success_rate_last100']} len100={record['mean_length_last100']} reward={record['mean_reward']:.3f} actor={metrics['actor_loss']:.4f} critic={metrics['critic_loss']:.4f} entropy={metrics['entropy']:.3f} std={metrics['action_std_mean']:.3f} std_ema={metrics['actor_std_ema']:.3f} kl={metrics['approx_kl']:.4f} kl_max={metrics['max_approx_kl']:.4f} kl_reject={int(metrics['actor_update_rejected'])} actor_steps={metrics['optimizer_steps']}/{metrics['actor_optimizer_attempts']} critic_steps={metrics['critic_optimizer_steps']} lr=({metrics['actor_lr']:.3g},{metrics['critic_lr']:.3g}) clip={metrics['clip_fraction']:.3f} action_clip={record['action_clip_fraction']:.3f} grad=({metrics['actor_grad_norm']:.2f},{metrics['critic_grad_norm']:.2f})", flush=True)
             if metrics["kl_early_stopped"]:
                 print(f"KL early stop: update={update} epoch={metrics['stop_epoch']} "
                       f"kl={metrics['max_approx_kl']:.6g} > {kl_stop:.6g}; "

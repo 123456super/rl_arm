@@ -42,7 +42,7 @@ class PPONumericalSafetyTests(unittest.TestCase):
         config["ppo"].update(
             hidden_dims=[16, 16], epochs=3, minibatch_size=8, target_kl=.02
         )
-        return ThesisPPOAgent(25, 6, config)
+        return ThesisPPOAgent(31, 6, config)
 
     def batch(self, agent):
         obs = np.random.default_rng(10).normal(0, .1, (8, agent.obs_dim)).astype(np.float32)
@@ -82,12 +82,46 @@ class PPONumericalSafetyTests(unittest.TestCase):
         config = load_config(ROOT / "configs/experiments/paper_full.yaml")
         config["device"] = "cpu"
         config["ppo"]["hidden_dims"] = [16, 16]
-        agent = ThesisPPOAgent(25, 6, config)
-        self.assertFalse(agent.normalize_advantage)
+        agent = ThesisPPOAgent(31, 6, config)
+        self.assertTrue(agent.normalize_advantage)
         self.assertIsNone(agent.max_grad_norm)
         self.assertEqual(agent.epochs, 20)
         self.assertIsNone(agent.target_kl)
         self.assertEqual(agent.max_abs_log_ratio, 20)
+        self.assertTrue(agent.actor_std_lr_adaptation)
+        self.assertEqual(agent.actor_std_lr_ema_decay, .95)
+        self.assertEqual(agent.actor_lr_min, 1e-5)
+
+    def test_training_uses_configured_fixed_discount(self):
+        rewards = np.zeros((100, 8), dtype=np.float32)
+        gammas = TRAINER.fixed_discount_factors(rewards, .99)
+        self.assertEqual(gammas.shape, rewards.shape)
+        self.assertEqual(gammas.dtype, np.float32)
+        np.testing.assert_array_equal(gammas, np.full_like(rewards, .99))
+        with self.assertRaisesRegex(ValueError, "gamma"):
+            TRAINER.fixed_discount_factors(rewards, 0.0)
+
+    def test_actor_lr_tracks_smoothed_std_while_critic_remains_linear(self):
+        config = load_config(ROOT / "configs/experiments/paper_full.yaml")
+        config["device"] = "cpu"
+        config["ppo"].update(hidden_dims=[16, 16], actor_std_lr_ema_decay=.95)
+        agent = ThesisPPOAgent(31, 6, config)
+        with torch.no_grad():
+            agent.actor_log_std.fill_(np.log(.04))
+        agent._update_actor_std_ema()
+        actor_lr, critic_lr = agent._apply_learning_rate_schedule(.25)
+        expected_ema = .95 * .08 + .05 * .04
+        self.assertAlmostEqual(agent.actor_std_ema, expected_ema, places=8)
+        self.assertAlmostEqual(actor_lr, 3e-4 * expected_ema / .08, places=10)
+        self.assertAlmostEqual(critic_lr, 3e-4 * .75, places=10)
+
+    def test_old_checkpoint_initializes_actor_std_ema_from_learned_std(self):
+        agent = self.agent()
+        state = deepcopy(agent.state_dict())
+        state.pop("actor_std_ema")
+        state["actor_log_std"].fill_(np.log(.012))
+        agent.load_state_dict(state)
+        self.assertAlmostEqual(agent.actor_std_ema, .012, places=7)
 
     def test_disabled_gradient_clipping_still_reports_finite_raw_norms(self):
         agent = self.agent()
@@ -292,7 +326,7 @@ class PPONumericalSafetyTests(unittest.TestCase):
 
         class FakeTemplate:
             def __init__(self, config):
-                self.observation_space = SimpleNamespace(shape=(25,))
+                self.observation_space = SimpleNamespace(shape=(31,))
                 self.action_space = SimpleNamespace(shape=(6,))
 
             def close(self):
@@ -305,10 +339,10 @@ class PPONumericalSafetyTests(unittest.TestCase):
                 torch.save({"known_good": True}, checkpoint)
 
             def reset_many(self, contracts):
-                return {i: (np.zeros(25, dtype=np.float32), info) for i in contracts}
+                return {i: (np.zeros(31, dtype=np.float32), info) for i in contracts}
 
             def step_many(self, actions):
-                return {i: (np.zeros(25, dtype=np.float32), -1., 0., False, False, info) for i in actions}
+                return {i: (np.zeros(31, dtype=np.float32), -1., 0., False, False, info) for i in actions}
 
             def close(self):
                 FakePool.closed = True
@@ -332,7 +366,7 @@ class PPONumericalSafetyTests(unittest.TestCase):
         self.assertEqual(len(diagnostics), 1)
         artifact = torch.load(diagnostics[0], weights_only=False)
         self.assertEqual(artifact["context"]["step"], 8)
-        self.assertEqual(artifact["batch"]["obs"].shape, (8, 25))
+        self.assertEqual(artifact["batch"]["obs"].shape, (8, 31))
 
 
 if __name__ == "__main__":

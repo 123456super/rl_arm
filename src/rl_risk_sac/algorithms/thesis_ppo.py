@@ -90,7 +90,7 @@ class PPONumericalError(RuntimeError):
 class ThesisPPOAgent:
     """On-policy PPO actor-critic used by the thesis reaching trainer.
 
-    Actions are absolute joint-angle targets in radians. Keep latent Gaussian
+    Actions are bounded joint-angle increments in radians. Keep latent Gaussian
     samples/log probabilities separate from the actuator-clipped commands.
     """
 
@@ -102,10 +102,17 @@ class ThesisPPOAgent:
         )
         if reward_mode != "reference_ppo":
             raise ValueError("ThesisPPOAgent supports only reference_ppo")
+        action_mode = str(config.get("thesis", {}).get("action_mode", "joint_delta"))
+        if action_mode != "joint_delta":
+            raise ValueError("ThesisPPOAgent requires action_mode=joint_delta")
+        if obs_dim != 31:
+            raise ValueError(
+                "reference PPO requires the 31-D observation with signed pose error"
+            )
         self.reference_ppo = True
         self.reference_training_contract = True
         ppo = dict(config.get("ppo", {}))
-        self.policy_contract = "ppo_absolute_raw_gaussian_v2"
+        self.policy_contract = "ppo_joint_delta_raw_gaussian_signed_pose_v4"
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.device = torch.device(resolve_device(config))
@@ -164,26 +171,35 @@ class ThesisPPOAgent:
             raise ValueError("max_grad_norm must be null or finite and positive")
         self.action_std_init = float(ppo.get("action_std_init", 1.0))
         self.lr_decay_enabled = bool(ppo.get("lr_decay", True))
+        self.actor_std_lr_adaptation = bool(
+            ppo.get("actor_std_lr_adaptation", False)
+        )
+        self.actor_std_lr_ema_decay = float(
+            ppo.get("actor_std_lr_ema_decay", 0.95)
+        )
+        self.actor_lr_min = float(ppo.get("actor_lr_min", self.actor_lr_final))
+        self.actor_std_ema = self.action_std_init
+        if not self.action_std_init > 0.0:
+            raise ValueError("action_std_init must be positive")
+        if not 0.0 <= self.actor_std_lr_ema_decay < 1.0:
+            raise ValueError("actor_std_lr_ema_decay must be in [0, 1)")
+        if not 0.0 <= self.actor_lr_min <= self.actor_lr:
+            raise ValueError("actor_lr_min must be in [0, actor_lr]")
         action_limit = float(
-            config.get("thesis", {}).get("action_limit_rad", np.pi)
+            config.get("thesis", {}).get("joint_delta_limit_rad", 0.25)
         )
         if action_limit <= 0.0:
-            raise ValueError("action_limit_rad must be positive")
+            raise ValueError("joint_delta_limit_rad must be positive")
         self.action_limit = torch.full(
             (action_dim,), action_limit, dtype=torch.float32, device=self.device
         )
         if len(hidden) != 2:
             raise ValueError("reference PPO requires exactly two hidden layers")
         self.actor = mlp(obs_dim, hidden, action_dim, activation="tanh", orthogonal_init=True, output_gain=0.01).to(self.device)
-        # Explore around the configured bent home rather than the singular zero pose.
-        home = config.get("thesis", {}).get("fixed_orientation_goal", {}).get(
-            "initial_joint_positions_rad", [0.0] * action_dim
-        )
-        ratio = torch.as_tensor(home, dtype=torch.float32, device=self.device) / self.action_limit
-        if ratio.shape != (action_dim,) or bool((ratio.abs() >= 1.0).any()):
-            raise ValueError("fixed home must be strictly inside absolute action bounds")
+        # A zero-mean incremental policy initially asks the controller to hold
+        # the current pose; exploration supplies the first joint changes.
         with torch.no_grad():
-            self.actor[-1].bias.copy_(torch.atanh(ratio))
+            self.actor[-1].bias.zero_()
         self.actor_log_std = nn.Parameter(torch.full((action_dim,), np.log(self.action_std_init), device=self.device))
         self.value = mlp(obs_dim, hidden, 1, activation="tanh", orthogonal_init=True).to(self.device)
         self.actor_optimizer = torch.optim.Adam(
@@ -253,18 +269,43 @@ class ThesisPPOAgent:
         return final + (initial - final) * (1.0 - fraction)
 
     def _apply_learning_rate_schedule(self, progress: float | None) -> tuple[float, float]:
-        if self.lr_decay_enabled and progress is not None:
-            scheduled_actor = self._linear_learning_rate(self.actor_lr, self.actor_lr_final, progress)
-            scheduled_critic = self._linear_learning_rate(self.critic_lr, self.critic_lr_final, progress)
+        if self.actor_std_lr_adaptation:
+            # For a Gaussian policy, the same absolute mean displacement is a
+            # much larger policy change after its standard deviation narrows.
+            # Keep the Actor step size proportional to the smoothed learned
+            # standard deviation. The Critic remains progress-scheduled.
+            scheduled_actor = max(
+                self.actor_lr_min,
+                self.actor_lr * self.actor_std_ema / self.action_std_init,
+            )
+        elif self.lr_decay_enabled and progress is not None:
+            scheduled_actor = self._linear_learning_rate(
+                self.actor_lr, self.actor_lr_final, progress
+            )
         else:
             scheduled_actor = self.actor_lr
+        if self.lr_decay_enabled and progress is not None:
+            scheduled_critic = self._linear_learning_rate(self.critic_lr, self.critic_lr_final, progress)
+        else:
             scheduled_critic = self.critic_lr
-        effective_actor = max(self.actor_lr_final, scheduled_actor * self.actor_lr_scale)
+        effective_actor = max(self.actor_lr_min, scheduled_actor * self.actor_lr_scale)
         for group in self.actor_optimizer.param_groups:
             group["lr"] = effective_actor
         for group in self.value_optimizer.param_groups:
             group["lr"] = scheduled_critic
         return scheduled_actor, scheduled_critic
+
+    def _update_actor_std_ema(self) -> float:
+        current_std = float(
+            self.actor_log_std.clamp(-5.0, 1.0).exp().mean().detach().cpu()
+        )
+        # Avoid a meaningless first-step LR perturbation caused only by the
+        # float32 representation of the configured initial standard deviation.
+        if np.isclose(current_std, self.actor_std_ema, rtol=1e-6, atol=1e-9):
+            return current_std
+        decay = self.actor_std_lr_ema_decay
+        self.actor_std_ema = decay * self.actor_std_ema + (1.0 - decay) * current_std
+        return current_std
 
     def _decrease_actor_learning_rate(self, progress: float | None) -> None:
         self.actor_lr_scale *= self.kl_lr_decrease_factor
@@ -344,6 +385,7 @@ class ThesisPPOAgent:
     def _update_impl(self, batch: dict[str, np.ndarray], progress: float | None) -> dict[str, Any]:
         _require_finite(batch, "batch")
         _require_finite(progress, "progress")
+        self._update_actor_std_ema()
         scheduled_actor_lr, scheduled_critic_lr = self._apply_learning_rate_schedule(progress)
         obs = torch.as_tensor(batch["obs"], dtype=torch.float32, device=self.device)
         actions = torch.as_tensor(batch["actions"], dtype=torch.float32, device=self.device)
@@ -558,6 +600,7 @@ class ThesisPPOAgent:
             "critic_lr": self.value_optimizer.param_groups[0]["lr"],
             "scheduled_actor_lr": scheduled_actor_lr,
             "scheduled_critic_lr": scheduled_critic_lr,
+            "actor_std_ema": self.actor_std_ema,
             "actor_lr_scale": self.actor_lr_scale,
             "kl_early_stopped": early_stopped,
             "actor_update_rejected": bool(rejected_actor_steps),
@@ -573,11 +616,11 @@ class ThesisPPOAgent:
         }
 
     def state_dict(self) -> dict[str, Any]:
-        return {"policy_contract": self.policy_contract, "obs_dim": self.obs_dim, "reference_ppo": self.reference_ppo, "actor": self.actor.state_dict(), "actor_log_std": self.actor_log_std.detach().cpu(), "value": self.value.state_dict(), "actor_optimizer": self.actor_optimizer.state_dict(), "value_optimizer": self.value_optimizer.state_dict(), "actor_lr_scale": self.actor_lr_scale, "low_kl_streak": self.low_kl_streak}
+        return {"policy_contract": self.policy_contract, "obs_dim": self.obs_dim, "reference_ppo": self.reference_ppo, "actor": self.actor.state_dict(), "actor_log_std": self.actor_log_std.detach().cpu(), "value": self.value.state_dict(), "actor_optimizer": self.actor_optimizer.state_dict(), "value_optimizer": self.value_optimizer.state_dict(), "actor_lr_scale": self.actor_lr_scale, "low_kl_streak": self.low_kl_streak, "actor_std_ema": self.actor_std_ema}
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
         if state.get("policy_contract") != self.policy_contract or state.get("obs_dim") != self.obs_dim or state.get("reference_ppo") != self.reference_ppo:
-            raise ValueError("incompatible checkpoint: expected the 25-D reference PPO contract")
+            raise ValueError("incompatible checkpoint: expected the 31-D joint-delta PPO contract")
         _require_finite(state, "checkpoint")
         self.actor.load_state_dict(state["actor"])
         self.actor_log_std.data.copy_(state["actor_log_std"].to(self.device)); self.value.load_state_dict(state["value"])
@@ -585,4 +628,10 @@ class ThesisPPOAgent:
         if "value_optimizer" in state: self.value_optimizer.load_state_dict(state["value_optimizer"])
         self.actor_lr_scale = float(state.get("actor_lr_scale", 1.0))
         self.low_kl_streak = int(state.get("low_kl_streak", 0))
+        # Older checkpoints predate the EMA. Starting from their actual
+        # learned std avoids briefly restoring the overly large initial LR.
+        self.actor_std_ema = float(state.get(
+            "actor_std_ema",
+            self.actor_log_std.clamp(-5.0, 1.0).exp().mean().detach().cpu(),
+        ))
         self.validate_training_state()

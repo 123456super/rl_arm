@@ -35,8 +35,8 @@ class PPOUpdateEffectsTests(unittest.TestCase):
         self.config["thesis"]["reward"]["reward_mode"] = "reference_ppo"
         self.config["ppo"].update(hidden_dims=[16, 16], epochs=1, minibatch_size=8)
         EFFECTS.seed_all(42)
-        self.agent = ThesisPPOAgent(25, 6, self.config)
-        obs = np.random.default_rng(42).normal(0, .1, (8, 25)).astype(np.float32)
+        self.agent = ThesisPPOAgent(31, 6, self.config)
+        obs = np.random.default_rng(42).normal(0, .1, (8, 31)).astype(np.float32)
         _, logp, _, policy = self.agent.act(obs)
         self.batch = dict(obs=obs, actions=policy["raw_actions"], std_scale=policy["std_scale"],
                           logp=logp, advantages=np.linspace(-10, -1, 8, dtype=np.float32),

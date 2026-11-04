@@ -86,11 +86,19 @@ class ThesisHomotopyEnv(gym.Env):
                 "thesis protocol requires 100 physics substeps per control period"
             )
         self.horizon = int(thesis.get("horizon", 500))
+        self.action_mode = str(thesis.get("action_mode", "joint_delta"))
+        if self.action_mode != "joint_delta":
+            raise ValueError("reference PPO requires action_mode=joint_delta")
         self.action_limit = np.full(
             6, float(thesis.get("action_limit_rad", np.pi)), dtype=np.float32
         )
         if np.any(self.action_limit <= 0.0):
             raise ValueError("action_limit_rad must be positive")
+        self.policy_action_limit = np.full(
+            6, float(thesis.get("joint_delta_limit_rad", 0.25)), dtype=np.float32
+        )
+        if np.any(self.policy_action_limit <= 0.0):
+            raise ValueError("joint_delta_limit_rad must be positive")
         self.joint_target_margin = float(thesis.get("joint_target_margin_rad", 0.02))
         self.joint_limit_tolerance = float(thesis.get("joint_limit_tolerance_rad", 0.001))
         if self.joint_target_margin < 0.0 or self.joint_limit_tolerance <= 0.0:
@@ -297,8 +305,8 @@ class ThesisHomotopyEnv(gym.Env):
             dtype=np.float32,
         )
         self.action_space = spaces.Box(
-            -self.action_limit,
-            self.action_limit,
+            -self.policy_action_limit,
+            self.policy_action_limit,
             shape=(6,),
             dtype=np.float32,
         )
@@ -486,7 +494,7 @@ class ThesisHomotopyEnv(gym.Env):
         """Reference position proposals filtered by real pose IK and collision checks.
 
         Reward mode does not affect this sampler. IK is used only to validate
-        reset targets, never to generate absolute joint-angle policy actions.
+        reset targets, never to generate policy actions.
         """
         initial_q, initial_qdot = self.robot.joint_state_exact()
         initial_position, initial_quaternion = self.robot.end_effector_pose()
@@ -522,8 +530,8 @@ class ThesisHomotopyEnv(gym.Env):
                 ):
                     continue
                 candidate = np.asarray(validation["q_ik"], dtype=np.float64)
-                # Equivalent revolute-joint windings must be executable by
-                # the absolute-angle actor, not only inside URDF +/-2pi.
+                # Equivalent revolute-joint windings must remain executable by
+                # the controller's retained +/-pi command envelope.
                 candidate = (candidate + np.pi) % (2.0 * np.pi) - np.pi
                 command_lower = np.maximum(self.robot.joint_lower_limits + self.joint_target_margin, -self.action_limit)
                 command_upper = np.minimum(self.robot.joint_upper_limits - self.joint_target_margin, self.action_limit)
@@ -644,11 +652,13 @@ class ThesisHomotopyEnv(gym.Env):
     def step(self, action: np.ndarray):
         action = np.asarray(action, dtype=np.float32)
         if action.shape != (6,) or not np.isfinite(action).all():
-            raise ValueError("action must contain six finite absolute joint targets")
-        action = np.clip(action, -self.action_limit, self.action_limit)
+            raise ValueError("action must contain six finite joint-angle increments")
+        action = np.clip(action, -self.policy_action_limit, self.policy_action_limit)
         q_before, qdot_before = self.robot.joint_state()
         lower, upper = self.robot.joint_lower_limits, self.robot.joint_upper_limits
-        target_positions = np.clip(action, lower, upper)
+        command_lower = np.maximum(lower, -self.action_limit)
+        command_upper = np.minimum(upper, self.action_limit)
+        target_positions = np.clip(q_before + action, command_lower, command_upper)
         projection_info = {
             "projection_applied": False,
             "projection_iterations": 0,
@@ -734,8 +744,7 @@ class ThesisHomotopyEnv(gym.Env):
         )
         strict_pose_reached = bool(reference_error < self.reference_success_threshold)
         position_reached = strict_pose_reached
-        self.success_hold_count = int(strict_pose_reached)
-        task_reached = strict_pose_reached
+        task_reached = self._advance_success_hold(strict_pose_reached)
         terminated = bool(
             hard_failure or obstacle_failure
             or (task_reached and self.contract.terminate_on_success)
@@ -798,7 +807,8 @@ class ThesisHomotopyEnv(gym.Env):
                 "safety_penalty": reward_fields["safety_penalty"],
                 "terminal_guard_penalty": reward_fields["terminal_guard_penalty"],
                 "cost": cost,
-                "policy_joint_target": action.copy(),
+                "policy_joint_delta": action.copy(),
+                "policy_joint_target": target_positions.copy(),
                 "policy_joint_velocity": np.zeros(6, dtype=np.float32),
                 "commanded_joint_delta": (target_positions - q_before).copy(),
                 "target_joint_positions": target_positions.copy(),
@@ -1405,6 +1415,7 @@ class ThesisHomotopyEnv(gym.Env):
             ee_quaternion=ee_quaternion,
             goal_position=self.goal_position,
             goal_quaternion=self.goal_quaternion,
+            position_error=position_error,
             orientation_error=orientation_error,
             reference_point_offset_m=self.reference_point_offset_m,
         )
@@ -1424,6 +1435,8 @@ class ThesisHomotopyEnv(gym.Env):
             "ee_angular_velocity": ee_angular_velocity.copy(),
             "goal_error_norm": float(np.linalg.norm(position_error)),
             "orientation_error_norm": float(np.linalg.norm(orientation_error)),
+            "position_error_vector": position_error.copy(),
+            "orientation_error_vector": orientation_error.copy(),
             "orientation_error_vector": orientation_error.copy(),
             "reference_point_errors": point_errors.copy(),
             "reference_point_distances": point_distances.copy(),
