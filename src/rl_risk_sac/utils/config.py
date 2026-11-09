@@ -88,10 +88,12 @@ def validate_config(config: dict[str, Any]) -> None:
         ("thesis", "obstacle_speed"), ("thesis", "d_safe"),
         ("thesis", "position_tolerance"), ("thesis", "orientation_tolerance"),
         ("thesis", "goal_sample_max_attempts"),
+        ("thesis", "scene_sample_max_attempts"),
         ("thesis", "dynamic_motion"), ("thesis", "dynamic_prediction"),
         ("thesis", "self_collision"),
         ("thesis", "fixed_orientation_goal"),
         ("thesis", "static_obstacle_count_probabilities"),
+        ("thesis", "hybrid_static_obstacle_count"),
         ("thesis", "static_obstacle_layout_probabilities"),
         ("thesis", "path_offset_min_m"), ("thesis", "path_offset_max_m"),
         ("thesis", "obstacle_surface_clearance_min_m"),
@@ -159,11 +161,20 @@ def validate_config(config: dict[str, Any]) -> None:
         values = thesis["scene_mixture"].get(stage)
         if not isinstance(values, dict) or not values:
             raise ValueError(f"thesis.scene_mixture.{stage} must be non-empty")
-        if set(values) - {"none", "static", "dynamic"}:
+        if set(values) - {"none", "static", "dynamic", "hybrid"}:
             raise ValueError(f"invalid scene in thesis.scene_mixture.{stage}")
         probabilities = np.asarray(list(values.values()), dtype=np.float64)
         if not np.isfinite(probabilities).all() or np.any(probabilities < 0.0) or probabilities.sum() <= 0.0:
             raise ValueError(f"invalid probabilities in thesis.scene_mixture.{stage}")
+    if int(thesis["scene_sample_max_attempts"]) < 1:
+        raise ValueError("thesis.scene_sample_max_attempts must be positive")
+    max_obstacles = int(thesis["observation"]["obstacle_set"]["max_obstacles"])
+    hybrid_static_count = int(thesis["hybrid_static_obstacle_count"])
+    if hybrid_static_count < 1 or hybrid_static_count + 1 > max_obstacles:
+        raise ValueError(
+            "thesis.hybrid_static_obstacle_count must leave room for one "
+            "dynamic obstacle"
+        )
 
     ppo = config["ppo"]
     if not 0.0 < float(ppo["gamma"]) <= 1.0 or not 0.0 < float(ppo["gae_lambda"]) <= 1.0:

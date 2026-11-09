@@ -8,6 +8,29 @@ from typing import Any, Collection
 
 import numpy as np
 
+
+# Every PyBullet environment is deliberately pinned to one physical CPU.  A
+# spawned child imports NumPy/PyTorch before entering ``_worker``; without
+# these limits their native runtimes size thread pools for the whole machine
+# and then all of those threads contend for the child's single assigned CPU.
+# Set the variables only while children are spawned so the CUDA learner keeps
+# its own process-wide threading policy.
+_WORKER_THREAD_ENVIRONMENT = {
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+}
+
+
+def _restore_environment(previous: dict[str, str | None]) -> None:
+    for name, value in previous.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+
 def _environment_class(config: dict[str, Any]):
     """Return the sole supported reference-PPO environment."""
     from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import ThesisHomotopyEnv
@@ -23,6 +46,14 @@ def _worker(
 ) -> None:
     if cpu_id is not None and hasattr(os, "sched_setaffinity"):
         os.sched_setaffinity(0, {int(cpu_id)})
+    # The environment's LSTM performs small CPU inference calls.  One native
+    # thread is faster here and, crucially, matches the one-core affinity
+    # contract.  The inter-op setter must run before the first Torch operation
+    # in this process.
+    import torch
+
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
     env = _environment_class(config)(config)
     env.rng = np.random.default_rng(seed)
     try:
@@ -91,18 +122,25 @@ class ParallelThesisEnvPool:
         self.connections: list[Connection] = []
         self.processes: list[mp.Process] = []
         self._pending_step_indices: tuple[int, ...] | None = None
-        for index, seed in enumerate(seeds):
-            parent, child = context.Pipe()
-            cpu_id = None if cpu_ids is None else int(cpu_ids[index])
-            process = context.Process(
-                target=_worker,
-                args=(child, config, int(seed), cpu_id, selected_info_keys),
-                name=f"thesis-env-{index}",
-            )
-            process.start()
-            child.close()
-            self.connections.append(parent)
-            self.processes.append(process)
+        previous_thread_environment = {
+            name: os.environ.get(name) for name in _WORKER_THREAD_ENVIRONMENT
+        }
+        os.environ.update(_WORKER_THREAD_ENVIRONMENT)
+        try:
+            for index, seed in enumerate(seeds):
+                parent, child = context.Pipe()
+                cpu_id = None if cpu_ids is None else int(cpu_ids[index])
+                process = context.Process(
+                    target=_worker,
+                    args=(child, config, int(seed), cpu_id, selected_info_keys),
+                    name=f"thesis-env-{index}",
+                )
+                process.start()
+                child.close()
+                self.connections.append(parent)
+                self.processes.append(process)
+        finally:
+            _restore_environment(previous_thread_environment)
         ready = [connection.recv() for connection in self.connections]
         if any(message[0] != "ready" for message in ready):
             self.close()

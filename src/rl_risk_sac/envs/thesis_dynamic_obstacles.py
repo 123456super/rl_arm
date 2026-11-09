@@ -10,9 +10,12 @@ from rl_risk_sac.envs.thesis_obstacles import _swept_obb_envelope
 
 class DynamicObstacleMixin:
     def _advance_obstacle(self) -> None:
-        if self.obstacle_id is None or self.contract.scene != "dynamic":
+        if self.obstacle_id is None or not np.any(self.obstacle_dynamic_mask):
             return
-        if len(self.dynamic_motion_centers) != len(self.obstacle_positions):
+        if (
+            len(self.dynamic_motion_centers) != len(self.obstacle_positions)
+            or self.obstacle_dynamic_mask.shape != (len(self.obstacle_positions),)
+        ):
             raise RuntimeError("dynamic obstacle motion state is incomplete")
         self.dynamic_motion_time += self.physics_dt
         angles = (
@@ -32,10 +35,15 @@ class DynamicObstacleMixin:
                 * np.sin(angles)
             )[:, None]
         )
-        self.obstacle_positions = (
+        next_positions = (
             self.dynamic_motion_centers + offsets
         ).astype(np.float32)
-        self.obstacle_velocities = velocities.astype(np.float32)
+        self.obstacle_positions[self.obstacle_dynamic_mask] = next_positions[
+            self.obstacle_dynamic_mask
+        ]
+        self.obstacle_velocities[self.obstacle_dynamic_mask] = velocities[
+            self.obstacle_dynamic_mask
+        ].astype(np.float32)
         self._sync_primary_obstacle()
         for body_id, position, velocity, quaternion in zip(
             self._obstacle_body_ids,
@@ -66,18 +74,20 @@ class DynamicObstacleMixin:
 
     def _record_dynamic_history(self) -> None:
         """Store one timestamped position per dynamic obstacle, without duplicates."""
-        if self.contract.scene != "dynamic" or not len(self.obstacle_positions):
+        if not np.any(self.obstacle_dynamic_mask):
             return
         if len(self.dynamic_position_history) != len(self.obstacle_positions):
             self.dynamic_position_history = [
                 [] for _ in range(len(self.obstacle_positions))
             ]
         timestamp = float(self.dynamic_motion_time)
-        for history, position in zip(
+        for obstacle_index, (history, position) in enumerate(zip(
             self.dynamic_position_history,
             self.obstacle_positions,
             strict=True,
-        ):
+        )):
+            if not self.obstacle_dynamic_mask[obstacle_index]:
+                continue
             if history and np.isclose(history[-1][0], timestamp):
                 history[-1] = (timestamp, position.copy())
             else:
@@ -106,6 +116,8 @@ class DynamicObstacleMixin:
     def _predicted_obstacle_positions(self, obstacle_index: int) -> np.ndarray:
         """Predict current plus three future centres for one logical obstacle."""
         current = self.obstacle_positions[obstacle_index]
+        if not self.obstacle_dynamic_mask[obstacle_index]:
+            return current.reshape(1, 3).copy()
         if not self.dynamic_prediction_enabled:
             return current.reshape(1, 3).copy()
         if self.dynamic_predictor is None:

@@ -10,6 +10,7 @@ import csv
 import json
 import random
 import sys
+import time
 import traceback
 from collections import deque
 from datetime import datetime
@@ -92,6 +93,8 @@ def episode_stats(info):
     return {
         "return": 0.0, "length": 0, "collision": False,
         "obstacle_count": int(info.get("obstacle_count", 0)),
+        "dynamic_obstacle_count": int(info.get("dynamic_obstacle_count", 0)),
+        "static_obstacle_count": int(info.get("static_obstacle_count", 0)),
         "obstacle_layout": str(info.get("obstacle_layout", "none")),
         "obstacle_collision": False, "self_collision": False,
         "environment_collision": False, "joint_limit": False,
@@ -111,7 +114,10 @@ def stage_scene(stage: str, config: dict) -> str:
     probabilities = config["thesis"]["scene_mixture"][stage]
     scenes = tuple(probabilities)
     weights = np.asarray([probabilities[scene] for scene in scenes], dtype=np.float64)
-    if not scenes or any(scene not in {"none", "static", "dynamic"} for scene in scenes):
+    if not scenes or any(
+        scene not in {"none", "static", "dynamic", "hybrid"}
+        for scene in scenes
+    ):
         raise ValueError(f"invalid scene mixture for {stage}")
     if not np.isfinite(weights).all() or np.any(weights < 0.0) or weights.sum() <= 0.0:
         raise ValueError(f"invalid scene probabilities for {stage}")
@@ -138,7 +144,7 @@ def main() -> None:
     parser.add_argument("--steps", type=int)
     parser.add_argument("--num-envs", type=int, default=None)
     # Controlled PPO collects 4096 transitions per update. With the default
-    # eight parallel environments this is 512 decisions per environment.
+    # sixteen parallel environments this is 256 decisions per environment.
     parser.add_argument("--rollout-length", type=int, default=None)
     parser.add_argument("--run-name")
     parser.add_argument("--output-dir")
@@ -272,9 +278,11 @@ def main() -> None:
     if affinity_enabled:
         if configured_cpu_ids is None:
             raise ValueError("train.cpu_ids is required when cpu_affinity is enabled")
-        cpu_ids = [int(value) for value in configured_cpu_ids]
+        cpu_ids = [int(value) for value in configured_cpu_ids[:args.num_envs]]
         if len(cpu_ids) != args.num_envs or len(set(cpu_ids)) != len(cpu_ids):
-            raise ValueError("train.cpu_ids must contain one unique CPU per environment")
+            raise ValueError(
+                "train.cpu_ids must contain at least one unique CPU per environment"
+            )
     pool = ParallelThesisEnvPool(
         config,
         seeds,
@@ -318,7 +326,7 @@ def main() -> None:
     if resume_payload:
         recent.extend(resume_payload.get("recent_episodes", []))
     episodes_csv = (output / "episodes.csv").open("w", newline="", encoding="utf-8")
-    fields = ["episode", "step", "run_step", "scene", "obstacle_count", "obstacle_layout", "return", "length", "success", "collision", "obstacle_collision", "self_collision", "environment_collision", "terminal_collision", "timeout", "joint_limit", "termination_reason", "best_position_m", "best_orientation_rad", "best_reference_error", "final_position_m", "final_orientation_rad", "final_reference_error", "max_hold", "action_abs_mean", "action_abs_max", "dense_reward_sum", "terminal_reward_sum", "self_collision_penalty_sum", "residual_penalty_sum", "joint_limit_violation_max_rad"]
+    fields = ["episode", "step", "run_step", "scene", "obstacle_count", "dynamic_obstacle_count", "static_obstacle_count", "obstacle_layout", "return", "length", "success", "collision", "obstacle_collision", "self_collision", "environment_collision", "terminal_collision", "timeout", "joint_limit", "termination_reason", "best_position_m", "best_orientation_rad", "best_reference_error", "final_position_m", "final_orientation_rad", "final_reference_error", "max_hold", "action_abs_mean", "action_abs_max", "dense_reward_sum", "terminal_reward_sum", "self_collision_penalty_sum", "residual_penalty_sum", "joint_limit_violation_max_rad"]
     writer = csv.DictWriter(episodes_csv, fieldnames=fields)
     writer.writeheader()
     updates_file = (output / "updates.jsonl").open("w", encoding="utf-8")
@@ -353,6 +361,7 @@ def main() -> None:
             obs[i] = value
             stats[i] = episode_stats(info)
         while completed_steps < args.steps:
+            rollout_started = time.perf_counter()
             T = min(args.rollout_length, max(1, (args.steps - completed_steps + args.num_envs - 1) // args.num_envs))
             rollout = {k: [] for k in ("obs", "actions", "std_scale", "logp", "values", "rewards", "residual_penalties", "dones", "terminated", "next_obs")}
             for _ in range(T):
@@ -458,6 +467,7 @@ def main() -> None:
                 rollout["obs"].append(obs.copy()); rollout["actions"].append(policy_info["raw_actions"]); rollout["std_scale"].append(policy_info["std_scale"]); rollout["logp"].append(logp); rollout["values"].append(values); rollout["rewards"].append(rewards); rollout["residual_penalties"].append(residual_penalties); rollout["dones"].append(dones); rollout["terminated"].append(terminated_flags); rollout["next_obs"].append(raw_next_obs.copy())
                 obs = next_obs; completed_steps += args.num_envs
                 if completed_steps >= args.steps: break
+            rollout_seconds = time.perf_counter() - rollout_started
             next_obs_rollout = np.asarray(rollout["next_obs"], dtype=np.float32)
             next_values_rollout = agent.predict_values(next_obs_rollout.reshape(-1, obs_dim))
             next_values_rollout = next_values_rollout.reshape(len(next_obs_rollout), args.num_envs)
@@ -469,6 +479,7 @@ def main() -> None:
             # an update.  Scheduling this update from the rollout's starting
             # step is equivalent and preserves the full initial learning rate.
             rollout_start_step = initial_global_step + completed_steps - len(batch["obs"])
+            update_started = time.perf_counter()
             metrics = agent.update(
                 batch,
                 progress=rollout_start_step / max(1.0, float(global_target_steps)),
@@ -477,6 +488,8 @@ def main() -> None:
                                     "run_step": completed_steps, "update": update + 1,
                                     "stage": args.stage, "config": config},
             ); update += 1
+            update_seconds = time.perf_counter() - update_started
+            training_seconds = rollout_seconds + update_seconds
             mean = lambda key: float(np.mean([r[key] for r in recent])) if recent else None
             record = {"step": initial_global_step + completed_steps,
                       "run_step": completed_steps, "update": update, "episodes": episodes,
@@ -485,6 +498,11 @@ def main() -> None:
                       "self_collision_rate_last100": mean("self_collision"),
                       "environment_collision_rate_last100": mean("environment_collision"),
                       "mean_length_last100": mean("length"), "mean_reward": float(rewards.mean()), "mean_residual_penalty": float(np.mean(rollout["residual_penalties"])), "gamma_mean": float(gammas.mean()), "action_abs_mean": float(np.mean(np.abs(batch["actions"]))), "action_abs_max": float(np.max(np.abs(batch["actions"]))), **metrics}
+            record.update(
+                rollout_seconds=float(rollout_seconds),
+                update_seconds=float(update_seconds),
+                training_steps_per_second=float(len(batch["obs"]) / training_seconds),
+            )
             updates_file.write(json.dumps(record, allow_nan=False) + "\n"); updates_file.flush(); episodes_csv.flush()
             if metrics["actor_update_rejected"]:
                 rejection_directory = output / "diagnostics"
@@ -508,7 +526,7 @@ def main() -> None:
                     encoding="utf-8",
                 )
             if update % args.log_interval == 0:
-                print(f"step={record['step']}/{global_target_steps} run_step={completed_steps}/{args.steps} update={update} episodes={episodes} return100={record['mean_return_last100']} success100={record['success_rate_last100']} len100={record['mean_length_last100']} reward={record['mean_reward']:.3f} residual_penalty={record['mean_residual_penalty']:.4f} actor={metrics['actor_loss']:.4f} critic={metrics['critic_loss']:.4f} entropy={metrics['entropy']:.3f} std={metrics['action_std_mean']:.3f} std_ema={metrics['actor_std_ema']:.3f} residual_on={metrics['residual_enabled_fraction']:.3f} residual=({metrics['residual_action_abs_mean']:.4f},{metrics['residual_action_abs_max']:.4f}) action=({record['action_abs_mean']:.4f},{record['action_abs_max']:.4f}) kl={metrics['approx_kl']:.4f} kl_max={metrics['max_approx_kl']:.4f} kl_reject={int(metrics['actor_update_rejected'])} actor_steps={metrics['optimizer_steps']}/{metrics['actor_optimizer_attempts']} critic_steps={metrics['critic_optimizer_steps']} lr=({metrics['actor_lr']:.3g},{metrics['critic_lr']:.3g}) clip={metrics['clip_fraction']:.3f} adv_clip={metrics['advantage_clip_fraction']:.3f} grad=({metrics['actor_grad_norm']:.2f},{metrics['critic_grad_norm']:.2f})", flush=True)
+                print(f"step={record['step']}/{global_target_steps} run_step={completed_steps}/{args.steps} update={update} episodes={episodes} return100={record['mean_return_last100']} success100={record['success_rate_last100']} len100={record['mean_length_last100']} reward={record['mean_reward']:.3f} residual_penalty={record['mean_residual_penalty']:.4f} actor={metrics['actor_loss']:.4f} critic={metrics['critic_loss']:.4f} entropy={metrics['entropy']:.3f} std={metrics['action_std_mean']:.3f} std_ema={metrics['actor_std_ema']:.3f} residual_on={metrics['residual_enabled_fraction']:.3f} residual=({metrics['residual_action_abs_mean']:.4f},{metrics['residual_action_abs_max']:.4f}) action=({record['action_abs_mean']:.4f},{record['action_abs_max']:.4f}) kl={metrics['approx_kl']:.4f} kl_max={metrics['max_approx_kl']:.4f} kl_reject={int(metrics['actor_update_rejected'])} actor_steps={metrics['optimizer_steps']}/{metrics['actor_optimizer_attempts']} critic_steps={metrics['critic_optimizer_steps']} lr=({metrics['actor_lr']:.3g},{metrics['critic_lr']:.3g}) clip={metrics['clip_fraction']:.3f} adv_clip={metrics['advantage_clip_fraction']:.3f} grad=({metrics['actor_grad_norm']:.2f},{metrics['critic_grad_norm']:.2f}) time=({record['rollout_seconds']:.2f},{record['update_seconds']:.2f}) steps/s={record['training_steps_per_second']:.1f}", flush=True)
             if metrics["kl_early_stopped"]:
                 if metrics["actor_rejection_reason"] == "target_kl":
                     rejection_detail = (

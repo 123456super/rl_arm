@@ -11,7 +11,10 @@ import pybullet as p
 
 from rl_risk_sac.envs.thesis_goal_sampling import GoalSamplingMixin
 from rl_risk_sac.envs.thesis_dynamic_obstacles import DynamicObstacleMixin
-from rl_risk_sac.envs.thesis_static_obstacles import StaticObstacleMixin
+from rl_risk_sac.envs.thesis_static_obstacles import (
+    ObstacleSamplingError,
+    StaticObstacleMixin,
+)
 from rl_risk_sac.envs.thesis_reward import compute_step_reward
 from rl_risk_sac.prediction import LSTMObstaclePredictor, load_lstm_predictor
 from rl_risk_sac.robots.pybullet_robot import PyBulletRobot
@@ -300,6 +303,9 @@ class ThesisHomotopyEnv(
         self.goal_sample_max_attempts = int(thesis["goal_sample_max_attempts"])
         if self.goal_sample_max_attempts < 1:
             raise ValueError("goal_sample_max_attempts must be positive")
+        self.scene_sample_max_attempts = int(thesis["scene_sample_max_attempts"])
+        if self.scene_sample_max_attempts < 1:
+            raise ValueError("scene_sample_max_attempts must be positive")
         fixed_goal = thesis["fixed_orientation_goal"]
         self.fixed_orientation_goal_enabled = bool(fixed_goal["enabled"])
         if not self.fixed_orientation_goal_enabled:
@@ -344,6 +350,7 @@ class ThesisHomotopyEnv(
         self.obstacle_velocities = np.empty((0, 3), dtype=np.float32)
         self.obstacle_half_extents_all = np.empty((0, 3), dtype=np.float32)
         self.obstacle_quaternions = np.empty((0, 4), dtype=np.float32)
+        self.obstacle_dynamic_mask = np.empty(0, dtype=bool)
         self.dynamic_motion_centers = np.empty((0, 3), dtype=np.float32)
         self.dynamic_motion_directions = np.empty((0, 3), dtype=np.float32)
         self.dynamic_motion_amplitudes = np.empty(0, dtype=np.float32)
@@ -408,6 +415,17 @@ class ThesisHomotopyEnv(
             [probability / probability_sum for _, probability in count_probabilities],
             dtype=np.float64,
         )
+        self.hybrid_static_obstacle_count = int(
+            thesis["hybrid_static_obstacle_count"]
+        )
+        if (
+            self.hybrid_static_obstacle_count < 1
+            or self.hybrid_static_obstacle_count + 1 > self.max_obstacles
+        ):
+            raise ValueError(
+                "hybrid_static_obstacle_count must leave room for one "
+                "dynamic obstacle"
+            )
         allowed_layouts = {
             "legacy_blocking", "path_offset", "mixed", "structured",
         }
@@ -495,8 +513,10 @@ class ThesisHomotopyEnv(
     def configure_episode(
         self, scene: str, *, terminate_on_success: bool = True,
     ) -> None:
-        if scene not in {"none", "static", "dynamic"}:
-            raise ValueError("scene must be one of: none, static, dynamic")
+        if scene not in {"none", "static", "dynamic", "hybrid"}:
+            raise ValueError(
+                "scene must be one of: none, static, dynamic, hybrid"
+            )
         self.contract = EpisodeContract(
             scene=scene,
             terminate_on_success=bool(terminate_on_success),
@@ -506,10 +526,32 @@ class ThesisHomotopyEnv(
         del options
         if seed is not None:
             self.rng = np.random.default_rng(seed)
-        self._disable_obstacle()
-        self._reset_fixed_initial_state()
-        self._sample_fixed_orientation_goal_pose()
-        self._create_obstacle()
+        total_obstacle_proposals = 0
+        total_obstacle_sampling_time = 0.0
+        last_sampling_error: ObstacleSamplingError | None = None
+        for scene_sample_attempt in range(1, self.scene_sample_max_attempts + 1):
+            self._disable_obstacle()
+            self._reset_fixed_initial_state()
+            self._sample_fixed_orientation_goal_pose()
+            try:
+                self._create_obstacle()
+            except ObstacleSamplingError as error:
+                total_obstacle_proposals += self.obstacle_sampling_proposals
+                total_obstacle_sampling_time += self.obstacle_sampling_time_s
+                last_sampling_error = error
+                continue
+            total_obstacle_proposals += self.obstacle_sampling_proposals
+            total_obstacle_sampling_time += self.obstacle_sampling_time_s
+            self.obstacle_sampling_proposals = total_obstacle_proposals
+            self.obstacle_sampling_time_s = total_obstacle_sampling_time
+            self.scene_sampling_attempts = scene_sample_attempt
+            break
+        else:
+            raise ObstacleSamplingError(
+                "failed to sample a feasible goal and obstacle scene after "
+                f"{self.scene_sample_max_attempts} goal attempts; "
+                f"last error: {last_sampling_error}"
+            ) from last_sampling_error
         self.step_count = 0
         self.success_hold_count = 0
         self.obstacle_contact_seen = False
@@ -837,7 +879,7 @@ class ThesisHomotopyEnv(
 
 
     def _observe(self):
-        if self.contract.scene == "dynamic":
+        if np.any(self.obstacle_dynamic_mask):
             # Include the exact policy-decision timestamp even when it falls
             # between regular 30 Hz tracker samples.
             self._record_dynamic_history()
@@ -909,12 +951,12 @@ class ThesisHomotopyEnv(
             "reference_point_errors": point_errors.copy(),
             "reference_point_distances": point_distances.copy(),
         }
-        if self.contract.scene == "dynamic" and len(self.obstacle_positions):
+        if np.any(self.obstacle_dynamic_mask):
             predicted_positions = []
             envelope_centers = []
             envelope_half_extents = []
             tracked_velocities = []
-            for obstacle_index in range(len(self.obstacle_positions)):
+            for obstacle_index in np.flatnonzero(self.obstacle_dynamic_mask):
                 center, half_extents, positions = (
                     self._predicted_obstacle_envelope(obstacle_index)
                 )
@@ -1001,6 +1043,7 @@ class ThesisHomotopyEnv(
         velocity: np.ndarray,
         half_extents: np.ndarray | None = None,
         quaternion: np.ndarray | None = None,
+        capsule_endpoint_velocities: np.ndarray | None = None,
     ) -> ThesisGeometry:
         obstacle_half_extents = (
             self.obstacle_half_extents if half_extents is None else half_extents
@@ -1012,7 +1055,11 @@ class ThesisHomotopyEnv(
             capsules,
             position,
             velocity,
-            self._closest_point_velocities(position, capsules),
+            self._closest_point_velocities(
+                position,
+                capsules,
+                capsule_endpoint_velocities=capsule_endpoint_velocities,
+            ),
             obstacle_half_extents=obstacle_half_extents,
             obstacle_rotation=quaternion_to_matrix(obstacle_quaternion),
             d_safe=self.d_safe,
@@ -1051,6 +1098,8 @@ class ThesisHomotopyEnv(
         if self.obstacle_id is None:
             return []
         capsules = self.robot.capsules()
+        # Link state is shared by all obstacles at one policy timestamp.
+        capsule_endpoint_velocities = self._capsule_endpoint_velocities(capsules)
         geometries: list[ThesisGeometry] = []
         for obstacle_index, (
             position,
@@ -1064,13 +1113,21 @@ class ThesisHomotopyEnv(
             self.obstacle_quaternions,
             strict=True,
         )):
-            if self.contract.scene == "dynamic" and self.dynamic_prediction_enabled:
+            if (
+                self.obstacle_dynamic_mask[obstacle_index]
+                and self.dynamic_prediction_enabled
+            ):
                 position, half_extents, _ = self._predicted_obstacle_envelope(
                     obstacle_index
                 )
                 velocity = self._tracked_obstacle_velocity(obstacle_index)
             geometries.append(self._obstacle_geometry_for(
-                capsules, position, velocity, half_extents, quaternion
+                capsules,
+                position,
+                velocity,
+                half_extents,
+                quaternion,
+                capsule_endpoint_velocities=capsule_endpoint_velocities,
             ))
         return geometries
 
@@ -1173,13 +1230,10 @@ class ThesisHomotopyEnv(
         angular = np.asarray(state[7], dtype=np.float32)
         return linear + np.cross(angular, np.asarray(world_point) - center_of_mass)
 
-    def _closest_point_velocities(
-        self,
-        obstacle_position: np.ndarray,
-        capsules: list[Any] | None = None,
+    def _capsule_endpoint_velocities(
+        self, capsules: list[Any],
     ) -> np.ndarray:
-        if capsules is None:
-            capsules = self.robot.capsules()
+        """Query start/end world velocities once for every capsule."""
         link_states: dict[int, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = {}
 
         def point_velocity(link_name: str, local_offset: np.ndarray) -> np.ndarray:
@@ -1204,16 +1258,49 @@ class ThesisHomotopyEnv(
             radius = rotation @ np.asarray(local_offset, dtype=np.float32)
             return linear + np.cross(angular, radius)
 
-        velocities = []
+        endpoint_velocities = []
         for capsule, spec in zip(capsules, self.robot.capsule_model.specs):
-            _, fraction = closest_point_on_segment(obstacle_position, capsule.start, capsule.end)
             start_velocity = point_velocity(
                 spec.parent_link_name, spec.parent_offset
             )
             end_velocity = point_velocity(
                 spec.child_link_name, spec.child_offset
             )
-            velocities.append((1.0 - fraction) * start_velocity + fraction * end_velocity)
+            endpoint_velocities.append((start_velocity, end_velocity))
+        return np.asarray(endpoint_velocities, dtype=np.float32)
+
+    def _closest_point_velocities(
+        self,
+        obstacle_position: np.ndarray,
+        capsules: list[Any] | None = None,
+        *,
+        capsule_endpoint_velocities: np.ndarray | None = None,
+    ) -> np.ndarray:
+        if capsules is None:
+            capsules = self.robot.capsules()
+        if capsule_endpoint_velocities is None:
+            capsule_endpoint_velocities = self._capsule_endpoint_velocities(
+                capsules
+            )
+        endpoint_velocities = np.asarray(
+            capsule_endpoint_velocities, dtype=np.float32
+        )
+        expected_shape = (len(capsules), 2, 3)
+        if endpoint_velocities.shape != expected_shape:
+            raise ValueError(
+                "capsule endpoint velocities must have shape "
+                f"{expected_shape}"
+            )
+        velocities = []
+        for capsule, (start_velocity, end_velocity) in zip(
+            capsules, endpoint_velocities, strict=True,
+        ):
+            _, fraction = closest_point_on_segment(
+                obstacle_position, capsule.start, capsule.end
+            )
+            velocities.append(
+                (1.0 - fraction) * start_velocity + fraction * end_velocity
+            )
         return np.asarray(velocities, dtype=np.float32)
 
     def _resolve_collision_links(self) -> None:
@@ -1323,9 +1410,17 @@ class ThesisHomotopyEnv(
             "terminate_on_success": self.contract.terminate_on_success,
             "obstacle_enabled": self.obstacle_id is not None,
             "obstacle_count": int(len(self._obstacle_body_ids)),
+            "dynamic_obstacle_count": int(np.count_nonzero(
+                self.obstacle_dynamic_mask
+            )),
+            "static_obstacle_count": int(
+                len(self._obstacle_body_ids)
+                - np.count_nonzero(self.obstacle_dynamic_mask)
+            ),
             "obstacle_layout": self.obstacle_layout,
             "obstacle_sampling_proposals": self.obstacle_sampling_proposals,
             "obstacle_sampling_time_s": self.obstacle_sampling_time_s,
+            "scene_sampling_attempts": self.scene_sampling_attempts,
         }
 
     @staticmethod

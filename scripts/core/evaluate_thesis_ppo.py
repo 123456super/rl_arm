@@ -48,6 +48,8 @@ def new_stats(info: dict) -> dict[str, object]:
         "return": 0.0,
         "length": 0,
         "obstacle_count": int(info.get("obstacle_count", 0)),
+        "dynamic_obstacle_count": int(info.get("dynamic_obstacle_count", 0)),
+        "static_obstacle_count": int(info.get("static_obstacle_count", 0)),
         "obstacle_layout": str(info.get("obstacle_layout", "none")),
         "success": False,
         "collision": False,
@@ -140,7 +142,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=41001)
     parser.add_argument("--stage", choices=("s0", "s1", "s2"))
     parser.add_argument(
-        "--scene", choices=("mixture", "none", "static", "dynamic"),
+        "--scene", choices=("mixture", "none", "static", "dynamic", "hybrid"),
         default="mixture",
     )
     parser.add_argument("--device")
@@ -180,7 +182,7 @@ def main() -> None:
     )
     if stage == "s0" and any(scene != "none" for scene in scheduled_scenes):
         raise ValueError("S0 evaluation supports only obstacle-free scenes")
-    if any(scene == "dynamic" for scene in scheduled_scenes):
+    if any(scene in {"dynamic", "hybrid"} for scene in scheduled_scenes):
         prediction = config["thesis"]["dynamic_prediction"]
         if not prediction["enabled"] or not prediction["checkpoint"]:
             raise ValueError("dynamic evaluation requires an enabled LSTM checkpoint")
@@ -343,6 +345,10 @@ def main() -> None:
         "rates": rates(rows),
         "by_scene": grouped_report(rows, "scene"),
         "by_obstacle_count": grouped_report(rows, "obstacle_count"),
+        "by_dynamic_obstacle_count": grouped_report(
+            rows, "dynamic_obstacle_count"
+        ),
+        "by_static_obstacle_count": grouped_report(rows, "static_obstacle_count"),
         "by_obstacle_layout": grouped_report(rows, "obstacle_layout"),
     }
     output = args.output.resolve()

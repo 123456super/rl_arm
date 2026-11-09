@@ -55,6 +55,10 @@ thesis:
   position_tolerance: 0.01
   orientation_tolerance: 0.1
   goal_sample_max_attempts: 10000
+  # A valid goal can occasionally admit no obstacle layout under all endpoint
+  # and full-path clearance constraints. Resample the goal instead of killing
+  # an otherwise healthy parallel training run.
+  scene_sample_max_attempts: 8
 
   fixed_orientation_goal:
     enabled: true
@@ -102,6 +106,9 @@ thesis:
       output_dim: 32
 
   static_obstacle_count_probabilities: {1: 1.0}
+  # The first hybrid S2 curriculum step combines one moving obstacle with one
+  # static obstacle. Later stages may raise this without changing the network.
+  hybrid_static_obstacle_count: 1
   static_obstacle_layout_probabilities: {legacy_blocking: 1.0}
   path_offset_min_m: 0.03
   path_offset_max_m: 0.15
@@ -119,11 +126,12 @@ thesis:
 
 train:
   cpu_affinity: true
-  # Two physical cores from each Threadripper NUMA node; no SMT siblings.
-  cpu_ids: [0, 6, 12, 18, 1, 7, 13, 19]
+  # Four physical cores from each Threadripper NUMA node; no SMT siblings.
+  # 16 x 256 preserves the previous 4096-transition PPO update batch.
+  cpu_ids: [0, 6, 12, 18, 1, 7, 13, 19, 2, 8, 14, 20, 3, 9, 15, 21]
   total_steps: 1500000
-  num_envs: 8
-  rollout_length: 512
+  num_envs: 16
+  rollout_length: 256
   save_interval: 25000
   update_log_interval: 10
   stage_transfer_action_std: 0.03

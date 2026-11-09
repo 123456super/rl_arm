@@ -16,6 +16,7 @@ from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import (
     ThesisHomotopyEnv,
 )
 from rl_risk_sac.envs.thesis_obstacles import _swept_obb_envelope
+from rl_risk_sac.envs.thesis_static_obstacles import ObstacleSamplingError
 from rl_risk_sac.prediction.obstacle_lstm import CHECKPOINT_FORMAT, ObstacleMotionLSTM
 from rl_risk_sac.tasks.reference_reaching import (
     DEFAULT_MAX_OBSTACLES,
@@ -125,6 +126,30 @@ class ReferenceS0Tests(unittest.TestCase):
             physicsClientId=self.env.client_id,
         )
         self.assertEqual(collision_data[0][2], p.GEOM_BOX)
+
+    def test_reset_resamples_goal_after_infeasible_obstacle_scene(self):
+        self.env.configure_episode("static")
+        create_obstacle = self.env._create_obstacle
+        call_count = 0
+
+        def fail_first_scene():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                self.env.obstacle_sampling_proposals = 16000
+                self.env.obstacle_sampling_time_s = 1.0
+                raise ObstacleSamplingError("forced infeasible scene")
+            return create_obstacle()
+
+        with patch.object(
+            self.env, "_create_obstacle", side_effect=fail_first_scene
+        ):
+            _, info = self.env.reset(seed=11001)
+
+        self.assertEqual(call_count, 2)
+        self.assertEqual(info["scene_sampling_attempts"], 2)
+        self.assertGreaterEqual(info["obstacle_sampling_proposals"], 16000)
+        self.assertGreaterEqual(info["obstacle_sampling_time_s"], 1.0)
 
     def test_segment_obb_distance_and_direction_are_exact(self):
         segment_point, box_point, direction, distance, fraction = (
@@ -239,6 +264,39 @@ class ReferenceS0Tests(unittest.TestCase):
                 np.testing.assert_array_equal(rows[1:], 0.0)
             finally:
                 env.close()
+
+    def test_hybrid_scene_moves_only_dynamic_obstacle(self):
+        config = load_config(
+            ROOT / "configs/experiments/paper_s2_lstm_sweep_hybrid.yaml"
+        )
+        config["device"] = "cpu"
+        config["device_selection"]["print_summary"] = False
+        config["thesis"]["dynamic_prediction"]["enabled"] = False
+        config["thesis"]["dynamic_prediction"]["checkpoint"] = None
+        env = ThesisHomotopyEnv(config)
+        try:
+            env.configure_episode("hybrid")
+            observation, info = env.reset(seed=11001)
+            self.assertEqual(info["obstacle_count"], 2)
+            self.assertEqual(info["dynamic_obstacle_count"], 1)
+            self.assertEqual(info["static_obstacle_count"], 1)
+            np.testing.assert_array_equal(
+                env.obstacle_dynamic_mask, [True, False]
+            )
+            mask = observation[-DEFAULT_MAX_OBSTACLES:]
+            np.testing.assert_array_equal(mask, [1.0, 1.0] + [0.0] * 6)
+            before = env.obstacle_positions.copy()
+            _, _, _, _, _, step_info = env.step(
+                np.zeros(6, dtype=np.float32)
+            )
+            motion = np.linalg.norm(env.obstacle_positions - before, axis=1)
+            self.assertGreater(float(motion[0]), 1.0e-5)
+            self.assertEqual(float(motion[1]), 0.0)
+            self.assertEqual(
+                step_info["dynamic_predicted_positions"].shape, (1, 1, 3)
+            )
+        finally:
+            env.close()
 
     def test_obstacle_encoder_is_permutation_invariant_and_empty_is_zero(self):
         torch.manual_seed(7)

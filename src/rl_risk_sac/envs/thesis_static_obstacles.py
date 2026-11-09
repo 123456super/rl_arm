@@ -14,6 +14,10 @@ from rl_risk_sac.envs.thesis_obstacles import (
 )
 
 
+class ObstacleSamplingError(RuntimeError):
+    """Raised when no valid obstacle set exists for the sampled goal."""
+
+
 class StaticObstacleMixin:
     def _disable_obstacle(self) -> None:
         self.obstacle_id = None
@@ -23,6 +27,7 @@ class StaticObstacleMixin:
         self.obstacle_velocities = np.empty((0, 3), dtype=np.float32)
         self.obstacle_half_extents_all = np.empty((0, 3), dtype=np.float32)
         self.obstacle_quaternions = np.empty((0, 4), dtype=np.float32)
+        self.obstacle_dynamic_mask = np.empty(0, dtype=bool)
         self.dynamic_motion_centers = np.empty((0, 3), dtype=np.float32)
         self.dynamic_motion_directions = np.empty((0, 3), dtype=np.float32)
         self.dynamic_motion_amplitudes = np.empty(0, dtype=np.float32)
@@ -47,26 +52,36 @@ class StaticObstacleMixin:
         sampling_started = perf_counter()
         self.obstacle_sampling_proposals = 0
         self.obstacle_sampling_time_s = 0.0
-        obstacle_count = (
-            int(self.rng.choice(
+        if self.contract.scene == "static":
+            static_obstacle_count = int(self.rng.choice(
                 self.static_obstacle_counts,
                 p=self.static_obstacle_count_probabilities,
             ))
-            if self.contract.scene == "static"
-            else 1
-        )
+            obstacle_count = static_obstacle_count
+        elif self.contract.scene == "dynamic":
+            static_obstacle_count = 0
+            obstacle_count = 1
+        elif self.contract.scene == "hybrid":
+            static_obstacle_count = self.hybrid_static_obstacle_count
+            obstacle_count = 1 + static_obstacle_count
+        else:
+            raise ValueError(f"unsupported obstacle scene {self.contract.scene!r}")
         layout = (
             str(self.rng.choice(
                 self.static_obstacle_layouts,
                 p=self.static_obstacle_layout_probabilities,
             ))
-            if self.contract.scene == "static" and self.blocking_obstacle_mode
+            if self.contract.scene in {"static", "hybrid"}
+            and self.blocking_obstacle_mode
             else "legacy_blocking"
         )
         self.obstacle_layout = layout
         blocking_candidates: list[np.ndarray] = []
         blocking_candidates_by_state: list[list[np.ndarray]] = []
-        if self.contract.scene == "static" and self.blocking_obstacle_mode:
+        if (
+            self.contract.scene in {"static", "hybrid"}
+            and self.blocking_obstacle_mode
+        ):
             # Build witnesses on the straight joint-space path from reset to
             # the sampled goal.  An OBB centered on an intermediate capsule
             # blocks that nominal path while remaining clear of both endpoints.
@@ -109,6 +124,9 @@ class StaticObstacleMixin:
             motion_amplitudes: list[float] = []
             motion_angular_frequencies: list[float] = []
             motion_phases: list[float] = []
+            dynamic_mask: list[bool] = []
+            sampling_positions: list[np.ndarray] = []
+            sampling_half_extents: list[np.ndarray] = []
             legacy_candidates = [
                 blocking_candidates[int(index)].copy()
                 for index in self.rng.permutation(len(blocking_candidates))
@@ -126,18 +144,26 @@ class StaticObstacleMixin:
             )).astype(np.int64)
             valid_set = True
             for obstacle_index in range(obstacle_count):
+                is_dynamic = bool(
+                    self.contract.scene == "dynamic"
+                    or (
+                        self.contract.scene == "hybrid"
+                        and obstacle_index == 0
+                    )
+                )
                 mixed_is_random = bool(
                     layout == "mixed"
-                    and obstacle_count > 1
-                    and obstacle_index == 0
+                    and static_obstacle_count > 1
+                    and obstacle_index == (1 if self.contract.scene == "hybrid" else 0)
                 )
                 half_extents = (
+                    self.dynamic_obstacle_half_extents.copy()
+                    if is_dynamic
+                    else
                     self.rng.uniform(
                         self.obstacle_half_extents_min,
                         self.obstacle_half_extents_max,
                     ).astype(np.float32)
-                    if self.contract.scene == "static"
-                    else self.dynamic_obstacle_half_extents.copy()
                 )
                 obstacle_yaw = float(self.rng.uniform(-np.pi, np.pi))
                 quaternion = np.asarray(
@@ -147,7 +173,7 @@ class StaticObstacleMixin:
                 accepted = False
                 for _ in range(500):
                     self.obstacle_sampling_proposals += 1
-                    if self.contract.scene == "static":
+                    if not is_dynamic:
                         if layout == "legacy_blocking" and legacy_candidates:
                             position = legacy_candidates.pop()
                         elif layout == "path_offset":
@@ -169,8 +195,13 @@ class StaticObstacleMixin:
                             layout == "structured"
                             and blocking_candidates_by_state
                         ):
+                            static_index = (
+                                obstacle_index - 1
+                                if self.contract.scene == "hybrid"
+                                else obstacle_index
+                            )
                             state_index = int(np.clip(
-                                structured_states[obstacle_index]
+                                structured_states[static_index]
                                 + int(self.rng.integers(-1, 2)),
                                 0,
                                 len(blocking_candidates_by_state) - 1,
@@ -179,7 +210,7 @@ class StaticObstacleMixin:
                             position = state_candidates[int(self.rng.integers(
                                 0, len(state_candidates)
                             ))].copy()
-                            side = -1.0 if obstacle_index % 2 == 0 else 1.0
+                            side = -1.0 if static_index % 2 == 0 else 1.0
                             position += side * structured_direction * float(
                                 self.rng.uniform(
                                     self.structured_offset_min,
@@ -258,7 +289,7 @@ class StaticObstacleMixin:
                         self.mounting_plane_enabled
                         and (
                             position[2] - half_extents[2]
-                            if self.contract.scene == "static"
+                            if not is_dynamic
                             else path_envelope_position[2]
                             - path_envelope_half_extents[2]
                         )
@@ -271,16 +302,22 @@ class StaticObstacleMixin:
                     # never the accepted scene distribution.
                     separated = all(
                         _horizontal_obb_surface_distance(
-                            position,
-                            half_extents,
+                            (
+                                path_envelope_position
+                                if is_dynamic else position
+                            ),
+                            (
+                                path_envelope_half_extents
+                                if is_dynamic else half_extents
+                            ),
                             quaternion,
                             other_position,
                             other_half_extents,
                             other_quaternion,
                         ) >= self.obstacle_surface_clearance_min
                         for other_position, other_half_extents, other_quaternion in zip(
-                            positions,
-                            half_extents_all,
+                            sampling_positions,
+                            sampling_half_extents,
                             quaternions,
                             strict=True,
                         )
@@ -288,14 +325,10 @@ class StaticObstacleMixin:
                     if not separated:
                         continue
                     query_position = (
-                        position
-                        if self.contract.scene == "static"
-                        else path_envelope_position
+                        path_envelope_position if is_dynamic else position
                     )
                     query_half_extents = (
-                        half_extents
-                        if self.contract.scene == "static"
-                        else path_envelope_half_extents
+                        path_envelope_half_extents if is_dynamic else half_extents
                     )
                     initial_distance = self._minimum_obstacle_clearance_for(
                         initial_capsules,
@@ -315,6 +348,7 @@ class StaticObstacleMixin:
                         continue
                     if (
                         layout == "path_offset"
+                        and not is_dynamic
                         and not self.path_offset_min <= min(
                             self._minimum_obstacle_clearance_for(
                                 capsules, position, half_extents, quaternion
@@ -328,7 +362,10 @@ class StaticObstacleMixin:
                         velocities.append(velocity.copy())
                         half_extents_all.append(half_extents.copy())
                         quaternions.append(quaternion.copy())
-                        if self.contract.scene == "dynamic":
+                        sampling_positions.append(query_position.copy())
+                        sampling_half_extents.append(query_half_extents.copy())
+                        dynamic_mask.append(is_dynamic)
+                        if is_dynamic:
                             motion_centers.append(motion_center.copy())
                             motion_directions.append(motion_direction.copy())
                             motion_amplitudes.append(motion_amplitude)
@@ -336,6 +373,12 @@ class StaticObstacleMixin:
                                 motion_angular_frequency
                             )
                             motion_phases.append(motion_phase)
+                        else:
+                            motion_centers.append(position.copy())
+                            motion_directions.append(np.zeros(3, dtype=np.float32))
+                            motion_amplitudes.append(0.0)
+                            motion_angular_frequencies.append(0.0)
+                            motion_phases.append(0.0)
                         accepted = True
                         break
                 if not accepted:
@@ -349,7 +392,8 @@ class StaticObstacleMixin:
                 half_extents_all, dtype=np.float32
             )
             self.obstacle_quaternions = np.asarray(quaternions, dtype=np.float32)
-            if self.contract.scene == "dynamic":
+            self.obstacle_dynamic_mask = np.asarray(dynamic_mask, dtype=bool)
+            if np.any(self.obstacle_dynamic_mask):
                 self.dynamic_motion_centers = np.asarray(
                     motion_centers, dtype=np.float32
                 )
@@ -368,15 +412,21 @@ class StaticObstacleMixin:
                 self.dynamic_motion_time = 0.0
                 self.dynamic_history_substeps = 0
                 history_dt = 1.0 / self.dynamic_history_sample_hz
-                self.dynamic_position_history = []
-                for center, direction, amplitude, frequency, phase in zip(
+                self.dynamic_position_history = [
+                    [] for _ in range(len(self.obstacle_positions))
+                ]
+                for obstacle_index, (
+                    center, direction, amplitude, frequency, phase,
+                ) in enumerate(zip(
                     self.dynamic_motion_centers,
                     self.dynamic_motion_directions,
                     self.dynamic_motion_amplitudes,
                     self.dynamic_motion_angular_frequencies,
                     self.dynamic_motion_phases,
                     strict=True,
-                ):
+                )):
+                    if not self.obstacle_dynamic_mask[obstacle_index]:
+                        continue
                     history: list[tuple[float, np.ndarray]] = []
                     for history_index in range(
                         self.dynamic_history_length - 1, -1, -1
@@ -388,7 +438,7 @@ class StaticObstacleMixin:
                             + direction * amplitude * np.cos(angle)
                         ).astype(np.float32)
                         history.append((timestamp, historical_position))
-                    self.dynamic_position_history.append(history)
+                    self.dynamic_position_history[obstacle_index] = history
             self._sync_primary_obstacle()
             self.obstacle_layout = layout
             self._create_obstacle_bodies()
@@ -397,7 +447,8 @@ class StaticObstacleMixin:
                 self.obstacle_sampling_time_s = perf_counter() - sampling_started
                 return
             self._disable_obstacle()
-        raise RuntimeError(
+        self.obstacle_sampling_time_s = perf_counter() - sampling_started
+        raise ObstacleSamplingError(
             f"failed to sample a valid set of {obstacle_count} obstacles "
             f"after {self.obstacle_sampling_proposals} proposals"
         )
