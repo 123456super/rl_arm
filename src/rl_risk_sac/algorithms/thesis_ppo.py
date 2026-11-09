@@ -12,7 +12,12 @@ import torch
 import torch.nn as nn
 from torch.distributions import Normal
 
-from rl_risk_sac.algorithms.networks import mlp
+from rl_risk_sac.algorithms.networks import ObstacleSetEncoder, mlp
+from rl_risk_sac.tasks.reference_reaching import (
+    OBSTACLE_FEATURE_DIM,
+    REFERENCE_BASE_OBSERVATION_DIM,
+    reference_ppo_observation_dim,
+)
 from rl_risk_sac.utils.device import resolve_device
 
 
@@ -90,60 +95,77 @@ class PPONumericalError(RuntimeError):
 class ThesisPPOAgent:
     """On-policy PPO actor-critic used by the thesis reaching trainer.
 
-    Actions are bounded joint-angle increments in radians. Keep latent Gaussian
-    samples/log probabilities separate from the actuator-clipped commands.
+    Actions are joint-angle increments in radians.  In S1/S2 the frozen S0
+    mean and the learned residual mean are added without gating, scaling, or
+    clipping; the physical environment remains responsible only for enforcing
+    the robot's absolute joint-position limits.
     """
 
     def __init__(self, obs_dim: int, action_dim: int, config: dict[str, Any]) -> None:
-        reward_mode = str(
-            config.get("thesis", {}).get("reward", {}).get(
-                "reward_mode", "reference_ppo"
-            )
-        )
+        thesis = config["thesis"]
+        reward_mode = str(thesis["reward"]["reward_mode"])
         if reward_mode != "reference_ppo":
             raise ValueError("ThesisPPOAgent supports only reference_ppo")
-        action_mode = str(config.get("thesis", {}).get("action_mode", "joint_delta"))
+        action_mode = str(thesis["action_mode"])
         if action_mode != "joint_delta":
             raise ValueError("ThesisPPOAgent requires action_mode=joint_delta")
-        if obs_dim != 31:
+        observation_config = thesis["observation"]
+        obstacle_config = observation_config["obstacle_set"]
+        self.max_obstacles = int(obstacle_config["max_obstacles"])
+        expected_obs_dim = reference_ppo_observation_dim(self.max_obstacles)
+        if obs_dim != expected_obs_dim:
             raise ValueError(
-                "reference PPO requires the 31-D observation with signed pose error"
+                f"reference PPO requires the {expected_obs_dim}-D masked "
+                "obstacle-set observation"
             )
         self.reference_ppo = True
         self.reference_training_contract = True
-        ppo = dict(config.get("ppo", {}))
-        self.policy_contract = "ppo_joint_delta_raw_gaussian_signed_pose_v4"
+        self.stage = str(thesis["stage"]).lower()
+        if self.stage not in {"s0", "s1", "s2"}:
+            raise ValueError("thesis stage must be s0, s1, or s2")
+        self.freeze_base_actor = self.stage != "s0"
+        ppo = config["ppo"]
+        self.policy_contract = (
+            "ppo_joint_delta_residual_obb_clearance_direction_set_v10"
+        )
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.device = torch.device(resolve_device(config))
-        hidden = [int(v) for v in ppo.get("hidden_dims", [256, 256])]
-        self.gamma = float(ppo.get("gamma", 0.99))
-        self.gae_lambda = float(ppo.get("gae_lambda", 0.95))
-        self.clip_ratio = float(ppo.get("clip_ratio", 0.2))
-        self.epochs = int(ppo.get("epochs", 10))
-        self.minibatch_size = int(ppo.get("minibatch_size", 1024))
-        self.actor_lr = float(ppo.get("actor_lr", 3e-4))
-        self.critic_lr = float(ppo.get("critic_lr", 3e-4))
-        self.actor_lr_final = float(ppo.get("actor_lr_final", 0.0))
-        self.critic_lr_final = float(ppo.get("critic_lr_final", 0.0))
-        self.entropy_coef = float(ppo.get("entropy_coef", 0.01))
-        self.value_coef = float(ppo.get("value_coef", 1.0))
-        self.normalize_advantage = bool(ppo.get("normalize_advantage", True))
-        configured_max_grad_norm = ppo.get("max_grad_norm", 0.5)
+        hidden = [int(v) for v in ppo["hidden_dims"]]
+        obstacle_embedding_dim = int(obstacle_config["embedding_dim"])
+        self.obstacle_encoding_dim = int(obstacle_config["output_dim"])
+        self.gamma = float(ppo["gamma"])
+        self.gae_lambda = float(ppo["gae_lambda"])
+        self.clip_ratio = float(ppo["clip_ratio"])
+        self.epochs = int(ppo["epochs"])
+        self.minibatch_size = int(ppo["minibatch_size"])
+        self.actor_lr = float(ppo["actor_lr"])
+        self.critic_lr = float(ppo["critic_lr"])
+        self.actor_lr_final = float(ppo["actor_lr_final"])
+        self.critic_lr_final = float(ppo["critic_lr_final"])
+        self.entropy_coef = float(ppo["entropy_coef"])
+        self.value_coef = float(ppo["value_coef"])
+        self.normalize_advantage = bool(ppo["normalize_advantage"])
+        configured_advantage_clip = ppo["advantage_clip"]
+        self.advantage_clip = (
+            None if configured_advantage_clip is None
+            else float(configured_advantage_clip)
+        )
+        configured_max_grad_norm = ppo["max_grad_norm"]
         self.max_grad_norm = (
             None if configured_max_grad_norm is None
             else float(configured_max_grad_norm)
         )
-        configured_target_kl = ppo.get("target_kl", 0.05)
+        configured_target_kl = ppo["target_kl"]
         self.target_kl = (
             None if configured_target_kl is None else float(configured_target_kl)
         )
-        self.max_abs_log_ratio = float(ppo.get("max_abs_log_ratio", 20.0))
-        self.adaptive_kl_lr = bool(ppo.get("adaptive_kl_lr", False))
-        self.kl_lr_decrease_factor = float(ppo.get("kl_lr_decrease_factor", 0.5))
-        self.kl_lr_increase_factor = float(ppo.get("kl_lr_increase_factor", 1.05))
-        self.kl_lr_low_threshold = float(ppo.get("kl_lr_low_threshold", 0.01))
-        self.kl_lr_low_patience = int(ppo.get("kl_lr_low_patience", 10))
+        self.max_abs_log_ratio = float(ppo["max_abs_log_ratio"])
+        self.adaptive_kl_lr = bool(ppo["adaptive_kl_lr"])
+        self.kl_lr_decrease_factor = float(ppo["kl_lr_decrease_factor"])
+        self.kl_lr_increase_factor = float(ppo["kl_lr_increase_factor"])
+        self.kl_lr_low_threshold = float(ppo["kl_lr_low_threshold"])
+        self.kl_lr_low_patience = int(ppo["kl_lr_low_patience"])
         self.actor_lr_scale = 1.0
         self.low_kl_streak = 0
         if self.target_kl is not None and (
@@ -169,15 +191,15 @@ class ThesisPPOAgent:
             not np.isfinite(self.max_grad_norm) or self.max_grad_norm <= 0.0
         ):
             raise ValueError("max_grad_norm must be null or finite and positive")
-        self.action_std_init = float(ppo.get("action_std_init", 1.0))
-        self.lr_decay_enabled = bool(ppo.get("lr_decay", True))
-        self.actor_std_lr_adaptation = bool(
-            ppo.get("actor_std_lr_adaptation", False)
-        )
-        self.actor_std_lr_ema_decay = float(
-            ppo.get("actor_std_lr_ema_decay", 0.95)
-        )
-        self.actor_lr_min = float(ppo.get("actor_lr_min", self.actor_lr_final))
+        if self.advantage_clip is not None and (
+            not np.isfinite(self.advantage_clip) or self.advantage_clip <= 0.0
+        ):
+            raise ValueError("advantage_clip must be null or finite and positive")
+        self.action_std_init = float(ppo["action_std_init"])
+        self.lr_decay_enabled = bool(ppo["lr_decay"])
+        self.actor_std_lr_adaptation = bool(ppo["actor_std_lr_adaptation"])
+        self.actor_std_lr_ema_decay = float(ppo["actor_std_lr_ema_decay"])
+        self.actor_lr_min = float(ppo["actor_lr_min"])
         self.actor_std_ema = self.action_std_init
         if not self.action_std_init > 0.0:
             raise ValueError("action_std_init must be positive")
@@ -186,7 +208,7 @@ class ThesisPPOAgent:
         if not 0.0 <= self.actor_lr_min <= self.actor_lr:
             raise ValueError("actor_lr_min must be in [0, actor_lr]")
         action_limit = float(
-            config.get("thesis", {}).get("joint_delta_limit_rad", 0.25)
+            thesis["joint_delta_limit_rad"]
         )
         if action_limit <= 0.0:
             raise ValueError("joint_delta_limit_rad must be positive")
@@ -195,21 +217,108 @@ class ThesisPPOAgent:
         )
         if len(hidden) != 2:
             raise ValueError("reference PPO requires exactly two hidden layers")
-        self.actor = mlp(obs_dim, hidden, action_dim, activation="tanh", orthogonal_init=True, output_gain=0.01).to(self.device)
+        self.actor_obstacle_encoder = ObstacleSetEncoder(
+            OBSTACLE_FEATURE_DIM,
+            self.max_obstacles,
+            obstacle_embedding_dim,
+            self.obstacle_encoding_dim,
+        ).to(self.device)
+        self.value_obstacle_encoder = ObstacleSetEncoder(
+            OBSTACLE_FEATURE_DIM,
+            self.max_obstacles,
+            obstacle_embedding_dim,
+            self.obstacle_encoding_dim,
+        ).to(self.device)
+        network_input_dim = REFERENCE_BASE_OBSERVATION_DIM + self.obstacle_encoding_dim
+        self.actor = mlp(network_input_dim, hidden, action_dim, activation="tanh", orthogonal_init=True, output_gain=0.01).to(self.device)
         # A zero-mean incremental policy initially asks the controller to hold
         # the current pose; exploration supplies the first joint changes.
         with torch.no_grad():
             self.actor[-1].bias.zero_()
+        # S1/S2 never rewrite the already learned reaching controller.  The
+        # residual starts at zero and has full authority whenever the obstacle
+        # set is non-empty.  An empty set bypasses it exactly.
+        for parameter in self.actor.parameters():
+            parameter.requires_grad_(not self.freeze_base_actor)
         self.actor_log_std = nn.Parameter(torch.full((action_dim,), np.log(self.action_std_init), device=self.device))
-        self.value = mlp(obs_dim, hidden, 1, activation="tanh", orthogonal_init=True).to(self.device)
+        self.value = mlp(network_input_dim, hidden, 1, activation="tanh", orthogonal_init=True).to(self.device)
+        self.residual_actor = mlp(
+            network_input_dim, hidden, action_dim, activation="tanh",
+            orthogonal_init=True, output_gain=0.001,
+        ).to(self.device)
+        with torch.no_grad():
+            self.residual_actor[-1].bias.zero_()
         self.actor_optimizer = torch.optim.Adam(
-            list(self.actor.parameters()) + [self.actor_log_std],
+            self._actor_parameters(),
             lr=self.actor_lr,
         )
-        self.value_optimizer = torch.optim.Adam(self.value.parameters(), lr=self.critic_lr)
+        self.value_optimizer = torch.optim.Adam(
+            list(self.value.parameters())
+            + list(self.value_obstacle_encoder.parameters()),
+            lr=self.critic_lr,
+        )
+
+    def _actor_parameters(self) -> list[nn.Parameter]:
+        if self.freeze_base_actor:
+            return (
+                list(self.residual_actor.parameters())
+                + list(self.actor_obstacle_encoder.parameters())
+                + [self.actor_log_std]
+            )
+        return list(self.actor.parameters()) + [self.actor_log_std]
+
+    def _encode_observation(
+        self, obs: torch.Tensor, encoder: ObstacleSetEncoder
+    ) -> torch.Tensor:
+        feature_start = REFERENCE_BASE_OBSERVATION_DIM
+        feature_end = feature_start + self.max_obstacles * OBSTACLE_FEATURE_DIM
+        features = obs[..., feature_start:feature_end].reshape(
+            *obs.shape[:-1], self.max_obstacles, OBSTACLE_FEATURE_DIM
+        )
+        mask = obs[..., feature_end:feature_end + self.max_obstacles]
+        obstacle_encoding = encoder(features, mask)
+        return torch.cat(
+            [obs[..., :REFERENCE_BASE_OBSERVATION_DIM], obstacle_encoding], dim=-1
+        )
+
+    def _base_actor_input(self, obs: torch.Tensor) -> torch.Tensor:
+        zeros = torch.zeros(
+            (*obs.shape[:-1], self.obstacle_encoding_dim),
+            dtype=obs.dtype, device=obs.device,
+        )
+        return torch.cat(
+            [obs[..., :REFERENCE_BASE_OBSERVATION_DIM], zeros], dim=-1
+        )
+
+    def _residual_enabled(self, obs: torch.Tensor) -> torch.Tensor:
+        """Binary semantic switch: any obstacle enables the full residual."""
+        mask_start = (
+            REFERENCE_BASE_OBSERVATION_DIM
+            + self.max_obstacles * OBSTACLE_FEATURE_DIM
+        )
+        mask = obs[..., mask_start:mask_start + self.max_obstacles]
+        return (mask > 0.0).any(dim=-1, keepdim=True).to(obs.dtype)
+
+    def _policy_components(
+        self, obs: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        base_mean = torch.tanh(self.actor(self._base_actor_input(obs))) * self.action_limit
+        residual_raw = self.residual_actor(
+            self._encode_observation(obs, self.actor_obstacle_encoder)
+        )
+        residual = residual_raw * self._residual_enabled(obs)
+        mean = base_mean + residual
+        return mean, base_mean, residual
+
+    def _actor_output(self, obs: torch.Tensor) -> torch.Tensor:
+        """Compatibility helper returning the directly added policy mean."""
+        return self._policy_components(obs)[0]
+
+    def _value_output(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.value(self._encode_observation(obs, self.value_obstacle_encoder))
 
     def _dist(self, obs: torch.Tensor) -> Normal:
-        mean = torch.tanh(self.actor(obs)) * self.action_limit
+        mean = self._policy_components(obs)[0]
         log_std = self.actor_log_std.clamp(-5.0, 1.0).expand_as(mean)
         return Normal(mean, log_std.exp())
 
@@ -222,7 +331,7 @@ class ThesisPPOAgent:
     @torch.no_grad()
     def predict_values(self, observations: np.ndarray) -> np.ndarray:
         obs = torch.as_tensor(observations, dtype=torch.float32, device=self.device)
-        return self.value(obs).squeeze(-1).cpu().numpy()
+        return self._value_output(obs).squeeze(-1).cpu().numpy()
 
     @torch.no_grad()
     def act(
@@ -232,7 +341,9 @@ class ThesisPPOAgent:
         episode_fraction: float = 0.0,
     ):
         obs = torch.as_tensor(observations, dtype=torch.float32, device=self.device)
-        dist = self._dist(obs)
+        mean, _base_mean, residual_mean = self._policy_components(obs)
+        log_std = self.actor_log_std.clamp(-5.0, 1.0).expand_as(mean)
+        dist = Normal(mean, log_std.exp())
         sample_count = 1
         if deterministic:
             action = dist.mean
@@ -252,11 +363,11 @@ class ThesisPPOAgent:
         sampling_dist = Normal(dist.mean, dist.stddev * std_scale)
         log_prob = sampling_dist.log_prob(action).sum(-1)
         raw_action = action.cpu().numpy().astype(np.float32)
-        command = action.clamp(-self.action_limit, self.action_limit)
-        value = self.value(obs).squeeze(-1)
-        return command.cpu().numpy().astype(np.float32), log_prob.cpu().numpy(), value.cpu().numpy(), {
+        value = self._value_output(obs).squeeze(-1)
+        return raw_action, log_prob.cpu().numpy(), value.cpu().numpy(), {
             "raw_actions": raw_action,
             "std_scale": np.full((*raw_action.shape[:-1], 1), std_scale, dtype=np.float32),
+            "residual_actions": residual_mean.cpu().numpy().astype(np.float32),
         }
 
     def validate_training_state(self) -> None:
@@ -272,11 +383,20 @@ class ThesisPPOAgent:
         if self.actor_std_lr_adaptation:
             # For a Gaussian policy, the same absolute mean displacement is a
             # much larger policy change after its standard deviation narrows.
-            # Keep the Actor step size proportional to the smoothed learned
-            # standard deviation. The Critic remains progress-scheduled.
+            # Combine distribution-width adaptation with the ordinary
+            # training-progress decay.  Previously this branch bypassed the
+            # progress schedule entirely, leaving a narrowed policy at a
+            # constant Actor learning rate.
+            progress_actor = (
+                self._linear_learning_rate(
+                    self.actor_lr, self.actor_lr_final, progress
+                )
+                if self.lr_decay_enabled and progress is not None
+                else self.actor_lr
+            )
             scheduled_actor = max(
                 self.actor_lr_min,
-                self.actor_lr * self.actor_std_ema / self.action_std_init,
+                progress_actor * self.actor_std_ema / self.action_std_init,
             )
         elif self.lr_decay_enabled and progress is not None:
             scheduled_actor = self._linear_learning_rate(
@@ -355,12 +475,15 @@ class ThesisPPOAgent:
                 "failed_state": _cpu_copy(self.state_dict()), "clean_state": clean_state,
                 "gradients": _cpu_copy({
                     **{f"actor.{k}": p.grad for k, p in self.actor.named_parameters()},
+                    **{f"residual_actor.{k}": p.grad for k, p in self.residual_actor.named_parameters()},
+                    **{f"actor_obstacle_encoder.{k}": p.grad for k, p in self.actor_obstacle_encoder.named_parameters()},
                     "actor_log_std": self.actor_log_std.grad,
                     **{f"value.{k}": p.grad for k, p in self.value.named_parameters()},
                 }), "rng_state": rng_state,
                 "ppo_settings": {key: getattr(self, key) for key in (
                     "epochs", "minibatch_size", "target_kl", "max_abs_log_ratio",
-                    "normalize_advantage", "max_grad_norm", "entropy_coef", "value_coef",
+                    "normalize_advantage", "advantage_clip", "max_grad_norm",
+                    "entropy_coef", "value_coef",
                 )},
             }
             directory = Path(diagnostic_dir) if diagnostic_dir is not None else Path(tempfile.mkdtemp(prefix="ppo-diagnostic-"))
@@ -403,17 +526,26 @@ class ThesisPPOAgent:
             raise ValueError("sampling std scales must be positive")
         if self.normalize_advantage:
             advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
+        advantage_clip_fraction = 0.0
+        if self.advantage_clip is not None:
+            advantage_clip_fraction = float(
+                (advantages.abs() > self.advantage_clip).float().mean()
+            )
+            advantages = advantages.clamp(
+                -self.advantage_clip, self.advantage_clip
+            )
         _require_finite(advantages, "normalized_advantages")
         actor_losses, value_losses, entropies, ratios = [], [], [], []
         attempted_kls, accepted_kls, clip_fractions = [], [], []
         actor_norms, value_norms = [], []
         actor_clips, value_clips = [], []
-        actor_parameters = list(self.actor.parameters()) + [self.actor_log_std]
+        actor_parameters = self._actor_parameters()
         early_stopped = False
         actor_epochs_completed = 0
         max_log_ratio = 0.0
         actor_attempts = 0
         rejected_actor_steps = 0
+        rejection_reason = None
         kl_limit = None if self.target_kl is None else 1.5 * self.target_kl
 
         # A rollout must initially belong to the loaded policy. This also
@@ -491,6 +623,12 @@ class ThesisPPOAgent:
                 self.validate_training_state()
                 actor_snapshot = {
                     "actor": _device_copy(self.actor.state_dict()),
+                    "residual_actor": _device_copy(
+                        self.residual_actor.state_dict()
+                    ),
+                    "actor_obstacle_encoder": _device_copy(
+                        self.actor_obstacle_encoder.state_dict()
+                    ),
                     "actor_log_std": self.actor_log_std.detach().clone(),
                     "optimizer": _device_copy(self.actor_optimizer.state_dict()),
                 }
@@ -511,19 +649,47 @@ class ThesisPPOAgent:
                     full_largest = float(full_log_ratio.abs().max())
                     max_log_ratio = max(max_log_ratio, full_largest)
                     if full_largest > self.max_abs_log_ratio:
-                        raise FloatingPointError(
-                            f"abnormal abs(full_logp_new-full_logp_old)={full_largest:.6g} "
-                            f"> {self.max_abs_log_ratio}"
+                        # The rollout matched the policy before optimization,
+                        # so this is an over-large *candidate* Actor step, not
+                        # corrupted input. Restore both weights and Adam state,
+                        # explicitly reject it, and let the Critic finish. An
+                        # already-mismatched rollout is still a hard failure in
+                        # the checks above.
+                        self.actor.load_state_dict(actor_snapshot["actor"])
+                        self.residual_actor.load_state_dict(
+                            actor_snapshot["residual_actor"]
                         )
+                        self.actor_obstacle_encoder.load_state_dict(
+                            actor_snapshot["actor_obstacle_encoder"]
+                        )
+                        self.actor_log_std.data.copy_(
+                            actor_snapshot["actor_log_std"]
+                        )
+                        self.actor_optimizer.load_state_dict(
+                            actor_snapshot["optimizer"]
+                        )
+                        self.actor_optimizer.zero_grad(set_to_none=True)
+                        rejected_actor_steps += 1
+                        rejection_reason = "max_abs_log_ratio"
+                        early_stopped = True
+                        self.validate_training_state()
+                        break
                     full_kl = float((torch.expm1(full_log_ratio) - full_log_ratio).mean())
                 _require_finite(full_kl, "full_rollout_kl")
                 attempted_kls.append(full_kl)
                 if kl_limit is not None and full_kl > kl_limit:
                     self.actor.load_state_dict(actor_snapshot["actor"])
+                    self.residual_actor.load_state_dict(
+                        actor_snapshot["residual_actor"]
+                    )
+                    self.actor_obstacle_encoder.load_state_dict(
+                        actor_snapshot["actor_obstacle_encoder"]
+                    )
                     self.actor_log_std.data.copy_(actor_snapshot["actor_log_std"])
                     self.actor_optimizer.load_state_dict(actor_snapshot["optimizer"])
                     self.actor_optimizer.zero_grad(set_to_none=True)
                     rejected_actor_steps += 1
+                    rejection_reason = "target_kl"
                     early_stopped = True
                     if self.adaptive_kl_lr:
                         self._decrease_actor_learning_rate(progress)
@@ -553,12 +719,17 @@ class ThesisPPOAgent:
             for start in range(0, n, self.minibatch_size):
                 idx = indices[start:start + self.minibatch_size]
                 self._update_context.update(phase="critic_backward", epoch=epoch, minibatch_start=start, indices=idx)
-                value_loss = (self.value(obs[idx]).squeeze(-1) - returns[idx]).square().mean()
+                value_loss = (
+                    self._value_output(obs[idx]).squeeze(-1) - returns[idx]
+                ).square().mean()
                 self._diagnostic_tensors = {"value_loss": value_loss, "returns": returns[idx]}
                 _require_finite(value_loss, "value_loss")
                 self.value_optimizer.zero_grad(set_to_none=True)
                 (self.value_coef * value_loss).backward()
-                value_parameters = list(self.value.parameters())
+                value_parameters = (
+                    list(self.value.parameters())
+                    + list(self.value_obstacle_encoder.parameters())
+                )
                 if self.max_grad_norm is None:
                     value_norm = _gradient_norm(value_parameters)
                 else:
@@ -580,7 +751,9 @@ class ThesisPPOAgent:
                 ))
             critic_epochs_completed += 1
         with torch.no_grad():
-            predictions = self.value(obs).squeeze(-1)
+            predictions = self._value_output(obs).squeeze(-1)
+            _, _, residual_actions = self._policy_components(obs)
+            residual_enabled = self._residual_enabled(obs)
             variance = returns.var(unbiased=False)
             explained = float((1.0 - (returns - predictions).var(unbiased=False) / variance).cpu()) if float(variance) > 1e-8 else None
         mean_or_zero = lambda xs: float(np.mean(xs)) if xs else 0.0
@@ -594,8 +767,18 @@ class ThesisPPOAgent:
             "actor_grad_norm": mean_or_zero(actor_norms), "critic_grad_norm": mean_or_zero(value_norms),
             "actor_gradient_clip_fraction": mean_or_zero(actor_clips),
             "critic_gradient_clip_fraction": mean_or_zero(value_clips),
+            "advantage_clip_fraction": advantage_clip_fraction,
             "explained_variance": explained,
             "action_std_mean": float(self.actor_log_std.clamp(-5.0, 1.0).exp().mean().detach().cpu()),
+            "residual_action_abs_mean": float(
+                residual_actions.abs().mean().detach().cpu()
+            ),
+            "residual_action_abs_max": float(
+                residual_actions.abs().max().detach().cpu()
+            ),
+            "residual_enabled_fraction": float(
+                residual_enabled.mean().detach().cpu()
+            ),
             "actor_lr": self.actor_optimizer.param_groups[0]["lr"],
             "critic_lr": self.value_optimizer.param_groups[0]["lr"],
             "scheduled_actor_lr": scheduled_actor_lr,
@@ -604,6 +787,7 @@ class ThesisPPOAgent:
             "actor_lr_scale": self.actor_lr_scale,
             "kl_early_stopped": early_stopped,
             "actor_update_rejected": bool(rejected_actor_steps),
+            "actor_rejection_reason": rejection_reason,
             "rejected_actor_steps": rejected_actor_steps,
             "actor_optimizer_attempts": actor_attempts,
             "optimizer_steps": len(actor_losses),
@@ -616,18 +800,162 @@ class ThesisPPOAgent:
         }
 
     def state_dict(self) -> dict[str, Any]:
-        return {"policy_contract": self.policy_contract, "obs_dim": self.obs_dim, "reference_ppo": self.reference_ppo, "actor": self.actor.state_dict(), "actor_log_std": self.actor_log_std.detach().cpu(), "value": self.value.state_dict(), "actor_optimizer": self.actor_optimizer.state_dict(), "value_optimizer": self.value_optimizer.state_dict(), "actor_lr_scale": self.actor_lr_scale, "low_kl_streak": self.low_kl_streak, "actor_std_ema": self.actor_std_ema}
+        return {
+            "policy_contract": self.policy_contract,
+            "stage": self.stage,
+            "obs_dim": self.obs_dim,
+            "reference_ppo": self.reference_ppo,
+            "max_obstacles": self.max_obstacles,
+            "obstacle_encoding_dim": self.obstacle_encoding_dim,
+            "actor": self.actor.state_dict(),
+            "residual_actor": self.residual_actor.state_dict(),
+            "actor_obstacle_encoder": self.actor_obstacle_encoder.state_dict(),
+            "actor_log_std": self.actor_log_std.detach().cpu(),
+            "value": self.value.state_dict(),
+            "value_obstacle_encoder": self.value_obstacle_encoder.state_dict(),
+            "actor_optimizer": self.actor_optimizer.state_dict(),
+            "value_optimizer": self.value_optimizer.state_dict(),
+            "actor_lr_scale": self.actor_lr_scale,
+            "low_kl_streak": self.low_kl_streak,
+            "actor_std_ema": self.actor_std_ema,
+            "action_std_lr_reference": self.action_std_init,
+        }
+
+    @staticmethod
+    def _migrate_legacy_network(
+        module: nn.Module, legacy_state: dict[str, torch.Tensor]
+    ) -> None:
+        """Map the legacy 31-D S0 MLP into base-state + zero set encoding."""
+        migrated = module.state_dict()
+        for key, legacy_value in legacy_state.items():
+            if key == "0.weight":
+                if legacy_value.shape[1] != 31:
+                    raise ValueError("legacy PPO first layer is not 31-D")
+                target = torch.zeros_like(migrated[key])
+                # Legacy columns 22:25 were constant obstacle sentinels.
+                target[:, :22] = legacy_value[:, :22]
+                target[:, 22:REFERENCE_BASE_OBSERVATION_DIM] = legacy_value[:, 25:31]
+                migrated[key] = target
+            elif key in migrated and migrated[key].shape == legacy_value.shape:
+                migrated[key] = legacy_value
+            else:
+                raise ValueError(f"cannot migrate legacy PPO parameter {key}")
+        module.load_state_dict(migrated)
+
+    def _load_legacy_s0_state(self, state: dict[str, Any]) -> None:
+        """Load a trained 31-D S0 policy without changing its empty-set output."""
+        _require_finite(state, "legacy_checkpoint")
+        self._migrate_legacy_network(self.actor, state["actor"])
+        self._migrate_legacy_network(self.value, state["value"])
+        self.actor_log_std.data.copy_(state["actor_log_std"].to(self.device))
+        # Optimizer moment shapes depend on the old first layer. They are
+        # intentionally reset while policy/value functions are preserved.
+        self.actor_lr_scale = float(state.get("actor_lr_scale", 1.0))
+        self.low_kl_streak = int(state.get("low_kl_streak", 0))
+        self.actor_std_ema = float(state.get(
+            "actor_std_ema",
+            self.actor_log_std.clamp(-5.0, 1.0).exp().mean().detach().cpu(),
+        ))
+
+    def initialize_from_stage_checkpoint(
+        self, state: dict[str, Any], *, action_std: float
+    ) -> None:
+        """Transfer model weights into a new stage with fresh optimization state."""
+        if not np.isfinite(action_std) or action_std <= 0.0:
+            raise ValueError("stage initialization action_std must be positive")
+        legacy_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_raw_gaussian_signed_pose_v4"
+            and state.get("obs_dim") == 31
+            and state.get("reference_ppo") is True
+        )
+        current_contract = (
+            state.get("policy_contract") == self.policy_contract
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        previous_obstacle_set_contract = (
+            state.get("policy_contract") in {
+                "ppo_joint_delta_risk_gated_residual_obstacle_set_v7",
+                "ppo_joint_delta_additive_residual_obstacle_set_v8",
+                "ppo_joint_delta_presence_switched_residual_obstacle_set_v9",
+            }
+            # Old obstacle semantics may initialize a new avoidance stage only
+            # from an obstacle-free S0 policy.  Reusing an old S1/S2 encoder
+            # would silently interpret relative positions as clearances.
+            and state.get("stage") == "s0"
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        _require_finite(state, "stage_checkpoint")
+        if legacy_contract:
+            self._migrate_legacy_network(self.actor, state["actor"])
+            self._migrate_legacy_network(self.value, state["value"])
+        elif current_contract or previous_obstacle_set_contract:
+            self.actor.load_state_dict(state["actor"])
+            self.residual_actor.load_state_dict(state["residual_actor"])
+            self.actor_obstacle_encoder.load_state_dict(
+                state["actor_obstacle_encoder"]
+            )
+            self.value.load_state_dict(state["value"])
+            self.value_obstacle_encoder.load_state_dict(
+                state["value_obstacle_encoder"]
+            )
+        else:
+            raise ValueError("incompatible stage-initialization checkpoint")
+        with torch.no_grad():
+            self.actor_log_std.fill_(float(np.log(action_std)))
+        # Optimizers were constructed immediately before this call and remain
+        # fresh. Stage clocks and adaptive-LR history must also restart.
+        self.actor_lr_scale = 1.0
+        self.low_kl_streak = 0
+        # LR/std adaptation must use the newly initialized stage distribution
+        # as its reference. Keeping S0's 0.08 here would silently reduce an
+        # S1 Actor LR by 0.03/0.08 and would change again after resume.
+        self.action_std_init = float(action_std)
+        self.actor_std_ema = float(action_std)
+        self.validate_training_state()
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
-        if state.get("policy_contract") != self.policy_contract or state.get("obs_dim") != self.obs_dim or state.get("reference_ppo") != self.reference_ppo:
-            raise ValueError("incompatible checkpoint: expected the 31-D joint-delta PPO contract")
+        legacy_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_raw_gaussian_signed_pose_v4"
+            and state.get("obs_dim") == 31
+            and state.get("reference_ppo") is True
+        )
+        if legacy_contract:
+            self._load_legacy_s0_state(state)
+            self.validate_training_state()
+            return
+        if (
+            state.get("policy_contract") != self.policy_contract
+            or state.get("stage", self.stage) != self.stage
+            or state.get("obs_dim") != self.obs_dim
+            or state.get("reference_ppo") != self.reference_ppo
+            or state.get("max_obstacles") != self.max_obstacles
+            or state.get("obstacle_encoding_dim") != self.obstacle_encoding_dim
+        ):
+            raise ValueError(
+                "incompatible checkpoint: expected masked obstacle-set PPO contract"
+            )
         _require_finite(state, "checkpoint")
         self.actor.load_state_dict(state["actor"])
-        self.actor_log_std.data.copy_(state["actor_log_std"].to(self.device)); self.value.load_state_dict(state["value"])
+        self.residual_actor.load_state_dict(state["residual_actor"])
+        self.actor_obstacle_encoder.load_state_dict(state["actor_obstacle_encoder"])
+        self.actor_log_std.data.copy_(state["actor_log_std"].to(self.device))
+        self.value.load_state_dict(state["value"])
+        self.value_obstacle_encoder.load_state_dict(state["value_obstacle_encoder"])
         if "actor_optimizer" in state: self.actor_optimizer.load_state_dict(state["actor_optimizer"])
         if "value_optimizer" in state: self.value_optimizer.load_state_dict(state["value_optimizer"])
         self.actor_lr_scale = float(state.get("actor_lr_scale", 1.0))
         self.low_kl_streak = int(state.get("low_kl_streak", 0))
+        self.action_std_init = float(
+            state.get("action_std_lr_reference", self.action_std_init)
+        )
         # Older checkpoints predate the EMA. Starting from their actual
         # learned std avoids briefly restoring the overly large initial LR.
         self.actor_std_ema = float(state.get(

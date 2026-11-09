@@ -1,0 +1,914 @@
+                                                                                                                                                                                                     1
+
+
+
+
+                                                  Solving Multi-Entity Robotic Problems Using
+                                                     Permutation Invariant Neural Networks
+                                                             Tianxu An*1 , Joonho Lee*1 , Marko Bjelonic2 , Flavio De Vincenti3 , Marco Hutter1
+
+
+
+
+                                            Abstract—Challenges in real-world robotic applications often
+                                         stem from managing multiple, dynamically varying entities such
+                                         as neighboring robots, manipulable objects, and navigation goals.
+                                         Existing multi-agent control strategies face scalability limitations,
+arXiv:2402.18345v1 [cs.RO] 28 Feb 2024
+
+
+
+
+                                         struggling to handle arbitrary numbers of entities. Additionally,
+                                         they often rely on engineered heuristics for assigning entities
+                                         among agents. We propose a data driven approach to address
+                                         these limitations by introducing a decentralized control system
+                                         using neural network policies trained in simulation. Leveraging
+                                         permutation invariant neural network architectures and model-
+                                         free reinforcement learning, our approach allows control agents
+                                         to autonomously determine the relative importance of different
+                                         entities without being biased by ordering or limited by a fixed
+                                         capacity. We validate our approach through both simulations
+                                         and real-world experiments involving multiple wheeled-legged
+                                         quadrupedal robots, demonstrating their collaborative control
+                                         capabilities. We prove the effectiveness of our architectural
+                                         choice through experiments with three exemplary multi-entity
+                                         problems. Our analysis underscores the pivotal role of the
+                                         end-to-end trained permutation invariant encoders in achieving
+                                         scalability and improving the task performance in multi-object
+                                         manipulation or multi-goal navigation problems. The adaptability
+                                         of our policy is further evidenced by its ability to manage varying
+                                         numbers of entities in a zero-shot manner, showcasing near-                   Fig. 1. Multi-entity problems studied in this work. (A) Robot 1 is given
+                                         optimal autonomous task distribution and collision avoidance                  multiple goals to visit while interacting with other robots. (B) Multiple robots
+                                         behaviors.                                                                    packing multiple boxes into the goal region. (C) Soccer.
+
+
+
+                                                                  I. I NTRODUCTION                                     problems that involve four entity types: collaborators, oppo-
+                                                                                                                       nents, navigation goals, and objects to manipulate. Specifically,
+                                         H      UMANS routinely deal with multi-entity problems in
+                                                daily life. For example, human workers collaborate with
+                                         co-workers to construct structures, or a group of friends
+                                                                                                                       Fig. 1A shows a multi-robot multi-goal (MRMG) navigation
+                                                                                                                       problem where robots are given multiple navigation goals,
+                                         splits up to find various products in a grocery store. In such                Fig. 1B illustrates box packing problem where robots have
+                                         scenarios, individuals naturally decide where to work within                  to move boxes to the packing site in the center, and Fig. 1C
+                                         the site, with whom to collaborate, and which object or sub-                  shows a soccer game. Each task episode may have a different
+                                         task to prioritize. Can robots have similar capabilities? Despite             number of entities of each type. We aim to develop a control
+                                         recent advances that have made robots proficient in tasks                     strategy that can effectively handle flexible number of entities
+                                         like locomotion [1, 2, 3], navigation [4, 5, 6], and object                   and generalize to new scenarios.
+                                         manipulation [7, 8, 9], existing approaches cannot be readily                    Existing approaches to controlling multi-agent systems
+                                         applied to collaborative multi-entity tasks. The majority of                  (MAS) struggle at tackling two main challenges. First, scaling
+                                         literature focuses on solving single-robot problems, leaving a                up to flexible numbers of entities. Traditional centralized
+                                         gap in addressing the complexities of multi-agent collaboration               methods [10, 11, 12, 13] struggle at scaling their controllers
+                                         and coordination in real-world scenarios.                                     to higher numbers of entities, because the number of decision
+                                            Our goal is to develop a framework to tackle multi-entity                  variables can grow arbitrarily depending on the number of
+                                         problems involving multiple mobile robots, as illustrated in                  entities, leading to high computational cost. Although decen-
+                                         Fig. 1. To explore this problem, we define three multi-entity                 tralized controllers can alleviate the computation cost, many
+                                                                                                                       of them still focus on tasks with a fixed number of entities. For
+                                           * Tianxu An and Joonho Lee contributed equally to this work. (Correspond-   example, multi-agent controllers in [14, 15, 16] only accept a
+                                         ing author: Joonho Lee).                                                      fixed number of robots. Similarly, multi-agent policy by Baker
+                                           1 The authors are with Robotic Systems Lab; ETH Zurich, Switzerland
+                                           2 The author was with Robotic Systems Lab; ETH Zurich, Switzerland.         et al. [17] limits the maximum numbers of agents and manip-
+                                         The author is now with Swiss-Mile Robotics AG, Switzerland.                   ulable objects. Second, prioritization and assignment of goals
+                                           3 The author is with Computational Robotics Lab; ETH Zurich, Switzerland    and objects among agents is not straightforward. A common
+                                                                                                                                    2
+
+
+
+practice is to assign goals and objects among agents based           common in the robotics domain and take the form of point
+on predefined rules or heuristics, such as manually assigning        clouds, sensory inputs, and neighboring agents’ states in multi-
+each agent with a specific goal [18, 19, 20] or assigning objects    agent problems. Various network structures achieve the per-
+based on proximity or manual commands [21, 22, 23].                  mutation invariance property. For instance, PointNet [24] and
+   To tackle these challenges, we develop decentralized multi-       DGCNN [27] use pooling operations on point cloud inputs.
+agent reinforcement learning (MARL) policies that enable a           Self-attention encoders [28] can also preserve permutation
+robot to work with flexible numbers of entities. We adopt a          invariant inputs by removing any positional encodings from
+decentralized approach to maintain constant inference time,          the input elements [29, 30]. Another line of work uses Mean-
+leveraging distributed computational costs regardless of the         Field Approximation to model large-scale multi-agent states or
+number of agents. Additionally, we opt for a model-free              collective actions, thus maintaining the permutation invariance
+reinforcement learning (RL) approach to eliminate hand-              properties of neighboring agents [31, 32]. Likewise, Zhang
+engineered heuristics typically present in optimization-based        et al. [33] ensure the permutation invariance using explicit
+approaches.                                                          constraints. They introduce a decentralized multi-agent navi-
+   We further enhance the performance of our agents when             gation algorithm that constrains the network outputs to match
+prioritizing and distributing entities in long-horizon tasks by      those with shuffled orders of neighboring agents. In this work,
+using a permutation-invariant neural network called global           we adopt the PointNet [24] architecture to ensure permutation
+entity encoder (GEE). Leveraging an architecture similar to          invariance of all entities in the same category, such as robots,
+PointNet [24], GEE processes an arbitrary number of state            objects, and goals.
+vectors from all entities for each entity type. This architectural
+choice ensures that agents can act consistently regardless           B. Multi-object Manipulation
+of the order in which they perceive the entities. In other
+                                                                        Many research tackle the problem of controlling robots
+words, the action remains invariant to the permutations in
+                                                                     to manipulate multiple objects. A large body of work in
+the input space (i.e., order of entities). By eliminating order
+                                                                     multi-object manipulation focuses on a single manipulator
+dependency in the decision making, we enable agents to assess
+                                                                     sequentially packing various objects [7, 8, 34]. These meth-
+the relative importance of different entities without being
+                                                                     ods prioritize identifying individual objects and their visual
+biased by ordering. In doing so, we remove the need for
+                                                                     relationship with the background but de-emphasize the inter-
+engineered heuristics.
+   We validate our approach on the the previously mentioned          object relationships and the manipulation sequence. Li et al.
+multi-entity problems in Fig. 1. For each problem, we use the        [9] and Huang et al. [35] use graph neural networks (GNN) to
+same policy to control each robot. The robots with identical         reason about relationships among variable numbers of objects,
+policy collaborate with an arbitrary number of other robots          enabling a single manipulator arm to stack blocks into multiple
+across various task configurations. Our permutation invariant        configurations by planning a manipulation sequence.
+network policy effectively addresses multi-entity tasks and             It became more popular recently to control multiple agents
+outperforms typical fixed-input encoders. Simulation experi-         to increase efficiency in multi-object manipulation. Envall
+ments show that our approach enables robots to autonomously          et al. [22] propose a differentiable task assignment and motion
+prioritize entities depending on the situation and engage in         planning (TAMP) strategy to control multiple manipulator
+collaborative problem solving.                                       arms to smoothly handover blocks. The authors also exper-
+   Furthermore, we conduct real-world MRMG navigation                iment on the scenarios with multiple objects. However, the
+experiments with two wheeled-legged quadrupedal robots [25],         approach uses manual heuristics to decide the manipulation
+with communication facilitated by WI-FI and gRPC frame-              sequence. Another line of work in multi-agent multi-object
+work [26]. Our real-world experiments demonstrate intelligent        manipulation is multi-agent foraging (MAF) [36, 37]. MAF
+multi-agent navigation behavior, where robots autonomously           problems closely resemble our box packing task, both of which
+distribute tasks and avoid collisions.                               ask a team of agents to pack arbitrary numbers of loads into
+   Our key contributions are as follows:                             one or multiple packing sites. Agents in MAF often need to
+   1) We introduce a scalable control policy for multi-entity        closely interact with collaborators and automatically determine
+       robotic problems. Our policy is based on permutation          the manipulation sequence of objects. Similar to MAF, in
+       invariant neural networks, which allows it to handle          our box packing task, we ask multiple robots to implicitly
+       flexible numbers of different entities.                       plan a manipulation sequence that considers all objects and
+   2) We verify the effectiveness of our system through              collaborators. This requires each robot to discern the relation-
+       real-world multi-entity navigation experiments with two       ship of objects with respect to the target, collaborators, and
+       wheeled-legged quadrupedal robots [25]. We provide            themselves.
+       important technical details regarding training and hard-
+       ware implementation for communication.                        C. Multi-goal Navigation
+                                                                        When it comes to multi-goal navigation, a robot usually
+                   II. R ELATED W ORK
+                                                                     receives all the goal locations at the beginning and then
+A. Permutation Invariant Neural Networks                             navigates to each one. Schmalstieg et al. [38] use a greedy
+  Permutation invariant neural networks ensure output in-            strategy that always navigates the robot to the closest goal in
+variance to permutations of the input data. Set inputs are           an unknown map, while Chen et al. [5] propose computing an
+                                                                                                                                     3
+
+
+
+offline path from a known map without a specific goal-visiting      because each agent essentially treats all neighboring agents as
+order and following the planned path during execution. Both         equally important, often resulting in inundation with irrelevant
+methods are likely to get stuck if a goal point is unreachable,     information while potentially overlooking crucial neighbors.
+as common in real-world scenarios, e.g., due to improper goal       ATOC [39] tackles this issue by employing an Attention
+setup or unexpected map changes.                                    Network to determine if an agent should initiate communi-
+   For MRMG navigation, early works separate goal assign-           cation, while a bi-directional LSTM network handles shared
+ment and cooperative path planning into two problems [19,           messages from collaborators. Ha et al. [18] employ a similar
+20]. More recent works apply MARL algorithms to let robots          approach using LSTM for message aggregation to enable a
+autonomously decide goal assignments and cooperative path           variable number of manipulators to converge on a joint end-
+planning with neighbor awareness [37, 39]. Similar to this          effector state using a decentralized control policy for each.
+approach, we couple goal assignment and cooperative path            Nevertheless, using LSTM as the aggregator poses challenges
+planning into a single problem. Our policies are optimized          as neighboring agents are not permutation invariant, necessi-
+synchronously to prioritize and distribute goals while planning     tating the reordering of neighbors based on hand-engineered
+their motion to avoid collisions with neighbors.                    heuristics. This can lead to earlier neighbors’ states being
+                                                                    forgotten, potentially limiting the ego agent’s ability to learn
+D. Competitive RL                                                   from the most important neighbors.
+                                                                       Niu et al. [57] introduces a Graph-Attention based ap-
+   Competitive RL adopts self-play to simultaneously improve
+                                                                    proach aimed at enhancing multi-agent coordination. Initially,
+policies of the training teams and their opponents in a wide
+                                                                    a central planner learns a graph representing communication
+range of games, such as hide and seek, Go, soccer, and
+                                                                    directions at each policy step. Subsequently, an Attention
+Sumo [17, 40, 41, 42, 43]. In our soccer task, we also apply
+                                                                    network is employed for each agent to prioritize messages
+self-play. Unlike soccer policies in [41, 42], our policies do
+                                                                    from neighbors, considering incoming communication direc-
+not restrict the number of players on either team, thanks to
+                                                                    tions, including messages from the agent itself. While this
+the permutation invariant encoder which enable ego robot to
+                                                                    mechanism ensures permutation invariance in neighbor orders,
+accept arbitrary numbers of teammates and opponents.
+                                                                    scalability issues arise due to the centralized system. Das et al.
+                                                                    [58] adopt a similar approach, but each agent solely relies on
+E. Neighbor Awareness in Multi-Agent Systems                        an Attention network to determine message priorities based
+   Most MASs require robots to be aware of their neighbors          on the Attention weights of other agents. More recently, Yu
+to facilitate effective collaborative behaviors. Early works        et al. [59] have also leveraged Attention Networks in MARL
+consider fully decentralized controllers and attempt to induce      for real-robot exploration tasks within simplified grid worlds.
+neighbor awareness through environment changes [16, 44, 45,            Another line of work to facilitate agent communication is
+46]. However, these approaches are limited when agents work         by constructing overhead 2-D maps, from where ego agents
+closely, as the agents can collide with each other due to the       can observe information of others [36, 37]. Inspired by so-
+lack of mutual observability. In contrast, centralized strategies   cial insects such as ants, Shaw et al. [36] allow agents to
+guarantee global neighbor awareness, but they suffer from high      communicate with temporary pheromone trails in 2-D maps.
+computational burdens and scalability issues [10, 11, 12, 13].      On the other hand, Wu et al. [37] generates agents’ 2-D
+To mitigate these problems while incentivizing collaboration,       intention maps to inform others about their next actions. As
+some researchers adopt the centralized training decentralized       a form of visual information, orders of neighboring agents
+execution (CTDE) paradigm [47, 48, 49, 50, 51, 52, 53].             in overhead 2-D maps are naturally permutation invariant.
+In this approach, the agents do not actively communicate at         However, this approach restricts working environments to
+execution time, and all emerging collaborations are the result      single-level terrains.
+of a centralized training in physics-based simulators.                 In our work, we use a lightweight encoder architecture
+   In recent times, there has been an increase in the use of        inspired by PointNet [24]. This architecture allows each agent
+wireless networks to enable communication between agents            to process information from a variable number of permutation
+for enhanced collaboration during the execution. Optimization-      invariant entities, effectively facilitating intelligent robot be-
+based controllers have utilized these communication channels        haviors that dynamically focus on key entities during policy
+to control a swarm of drones for navigation in the wild [54].       execution.
+However, optimization-based methods are often computation-
+ally expensive and may require heuristics, resulting in sub-                                 III. M ETHOD
+optimal performance. Therefore, many researchers have com-
+bined communication networks with decentralized RL policies         A. Overview
+to achieve faster execution times and more robust behaviors.           The overview of our MARL pipeline is shown in Fig. 2. We
+   Early approaches using RL endow agents with an auxiliary         adopt a hierarchical architecture, similar to [16], where high-
+neural network for generating communication messages and            level policies produce body position or velocity commands to
+deciding whether to share them with others [55, 56]. However,       the low-level policies. In this work, our focus lies on training
+in these approaches, receiving agents passively process the         high-level policies. The low-level policy is pre-trained and
+messages either discretely or by aggregating their mean from        fixed. Each agent observes entities using separate GEEs per
+all broadcasting neighbors. This approach can be problematic        entity type. (Fig. 2A, B) These GEEs produce fixed size feature
+                                                                                                                                                                  4
+
+
+
+
+    A         Neighbors
+                                                                               B
+
+           Goals                                             Pooling
+                                                                                                                      C
+                                                                            Global
+                                                                             Entity                                                                           D
+   Objects                                                                  Feature                                                      High Level Policy
+
+                                                                                                                                        High Level Action
+                                                                                             Universal Entity
+                                                             Global Entity                                                           (Body Position / Velocity)
+                                       Weight    Local
+                                                                                                 Feature
+                                      Sharing    Entity        Encoder                                                                                        E
+                                      Encoder   Features                                       Proprioceptive &
+                                                                                                Exteroceptive                            Low Level Policy
+                                                                                                 Observation                            Low Level Action
+                                                                                                                                         (Joint Torques)
+
+                                                                               Environments
+                           1                                                          2                           3
+
+
+
+     Ego Robot
+
+
+
+
+Fig. 2. Pipeline overview for a decentralized ego robot. (A) The ego robot and its environments: robot can observe entities such as neighbors, goals, objects,
+etc. (A-1) MRMG navigation environments. (A-2) Box packing environment. (A-3) Soccer environment. (B) All entities belonging to one category are passed
+to one GEE. Their entity states are first passed into individual weight sharing encoders to get local entity features. The local entity features are then max-pooled
+to obtain the global entity feature for this entity category. (C) All global entity features belonging to different entity categories are concatenated to form the
+universal entity feature, which is then concatenated with the ego robot’s proprioceptive & exteroceptive observations from the environment to form the input
+to the high-level policy. (D) The high-level policy is an RL policy network that outputs high-level actions for the ego robot. The high-level actions can be
+the target body position or body velocity, depending on required task settings. (E) The low-level policy takes high-level actions and outputs joint torques to
+control the ego robot. The low-level policy is pretrained based on the work by Lee et al. [60] and fixed when training high-level policies.
+
+
+
+vectors via pooling operations for each entity type (Fig. 2C).                     full global state st at time step t, but a partial observation
+These features, along with the robot’s local observations, are                     state ont ∈ Ω output by the observation function O(st , an ).
+then concatenated and provided to the downstream part of the                       P denotes the transition dynamics, with P (st+1 |st , ut ) being
+network. The local observations include both proprioceptive                        the probability of transitioning to the next global state st+1 by
+and exteroceptive measurements. The GEE is trained end-to-                         taking the joint action u at global state st . R : S×U → R is the
+end via RL.                                                                        common reward function shared by all robots, and γ ∈ [0, 1) is
+   For our hardware experiments, we establish a robot commu-                       the discount factor. The robots collectively roll out a trajectory
+nication pipeline using the gRPC framework [26], as described                      τ = (s0 , u0 , s1 , . . . ), based on the shared decentralized policy
+in Appendix D.                                                                     π(un |on ) : Ω × U → [0, 1]. The goal of all robots is to find
+                                                                                   the best
+                                                                                        " ∞policy to maximize   #     the cumulative discounted reward
+B. Problem Formulation                                                                    X
+                                                                                     E        γ t R (st , ut ) .
+   We model the multi-entity problems mentioned in Fig. 1                          τ ∼π
+                                                                                           t=0
+as decentralized partially observable Markov decision process                         We used two different action spaces. For MRMG navigation,
+(Dec-POMDP)s. A Dec-POMDP is defined by a tuple:                                   the high-level policy commands target body xy positions in
+                                                                                   the current baseframe. This is then tracked by a position
+                      < A, S, U, Ω, O, P , R , γ > ,
+                                                                                   tracking controller by [61] for robot experiments. For other
+where A denotes the set of all robots A = {an }N       n=1 , and                   problems, we used target body velocities consisting of linear
+s ∈ S is the global state of the environment. Unlike previous                      xy velocity and yaw rates in base frame for simplicity. More
+works [15, 16, 42], where the number of robots N is fixed for                      implementation details can be found in Appendix A, and
+all environments, we allow N to be a random system state.                          we refer the interested reader to [60] for more details about
+Since we use identical robots, they all share the same action                      the low-level policy. To ensure that the outputs of our high-
+space U and observation space Ω. We use o ∈ ΩN and u ∈                             level policies adhere to the constraints of our robot’s physical
+U N to represent the joint observations and joint actions of                       capabilities, we adopt a bounded action space based on Beta
+all robots, where o = (o1 , . . . , oN ) and u = (u1 , . . . , uN ).               distribution [62, 63]. We refer readers to Appendix B for more
+Due to partial observability, each robot an cannot observe the                     information.
+                                                                                                                                        5
+
+
+
+   The rewards and observations for our three Dec-POMDPs                   A terrain curriculum similar to Rudin et al. [2] is used,
+are displayed in Table III and IV in the Appendix, for brevity.         where the terrain becomes more difficult if a task is completed
+   In all experiments, the agents do not have access to                 successfully, or becomes easier if no goal is reached. Terrain
+the global map information. Each agent only observes a                  difficulty is associated with certain attributes, such as the
+4.35 m×2.85 m rectangular local height map around itself.               narrowness of corridors, ground flatness, height of stairs, etc.
+                                                                           2) Box Packing: The box packing task requires a group of
+C. Global Entity Encoder                                                robots to push a group of boxes to a packing site, as shown in
+   Since we let the number of robots N be random, each                  Fig. 2A-2. The packing site is a 1.5 m radius sphere, while the
+robot an needs to observe flexible numbers of neighbors in a            robots and boxes are randomly positioned in various direction
+fixed size observation vector on . Such variability of numbers          within 1.5–10 m. An episode ends in failure if any robot falls
+also applies to other task-related entities, such as navigation         or if the time limit is exceeded. Similar to MRMG navigation,
+goals, boxes, opponents, etc. To this end, we approximate the           each training episode involve a maximum of four robots and
+observation function as:                                                up to four boxes, with the number of entities varying between
+                                                                        episodes.
+              on = O(s, an ) ≃ O(f (s, an ), sn ) ,               (1)      We uniformly sample the initial distances of the robots and
+                                                                        boxes from the packing site. if the robots successfully push
+where f (s, an ) is the universal entity feature (Fig. 2C) and
+                                                                        all boxes to the packing site, we increase the upper bounds
+sn is the local observation of robot an . The universal entity
+                                                                        of the sampling range by 1 m. Otherwise, we decrease both
+feature is the concatenation of a number E of global entity
+                                                                        upper bounds by 1 m. The sampling range is capped between
+features, each corresponding to a unique entity category in the
+                                                                        2–10 m for robots and 1.5–10 m for boxes.
+environment:
+                                                                           3) Soccer: Two groups of robots try to push a ball into
+            f (s, an ) = [g 1 (s, an ), . . . , g E (s, an )] .   (2)   the other team’s goal while defending their own. As shown
+                                                                        in Fig. 2A-3, the goal is a 1 m-radius sphere located near
+Each g represents a global entity feature from a GEE. In our
+                                                                        the end of each side of the soccer environment. The field
+box packing task, for example, two GEEs are used (E = 2),
+                                                                        is a 18 m×12 m rectangle and 45◦ slopes are installed at
+where one is applied to all neighbors while another is applied
+                                                                        the field boundaries to prevent the ball from rolling away.
+to all boxes. Depending on the number of entity categories in
+                                                                        At the beginning, all robots are lined up in a row in front
+the environment, any number of GEEs can be chosen for a
+                                                                        of their respective goals, and the soccer ball is initialized at
+given task.
+                                                                        the center with random initial velocity. An episode terminates
+   The operation to get a global entity feature g and the
+                                                                        whenever the ball enters either team’s goal, or if the time limit
+universal entity feature f is shown in Fig. 2B and 2C. Similarly
+                                                                        is exceeded. We assign 1–3 robots on the training side, while
+to PointNet [24], for each robot an , all observed entities from
+                                                                        0–3 robots are on the opponent side.
+the same category are passed to a weight sharing MLP to
+get corresponding local entity features; then, all local entity            We implemented a self-play curriculum, a popular method
+features are max-pooled to obtain an associated global entity           in competitive RL implementations [17, 41, 42, 43]. In this
+feature g . All global entity features representing different           strategy, the robots on the opponent team are equipped with
+entity categories are concatenated to get the universal entity          earlier policies used against the training team. This allows both
+feature f . Together with the robot’s proprioceptive and exte-          teams’ strategies to improve simultaneously.
+roceptive observations from the environment, the observation
+state on is passed to the Policy Net to get a single robot’s                          IV. E XPERIMENTS AND R ESULTS
+action un .
+                                                                           We validate our approach in a series of hardware and
+                                                                        simulation experiments. Our tests on real robots, as discussed
+D. Training Environments                                                in Section IV-A, qualitatively showcase the effectiveness of
+   Here we describe the training environments for the three             our policies. Section IV-B quantitatively analyzes our policies’
+multi-entitiy problems. All environments have time limit of             internal reasoning during intensive robot collaborations and
+45 s and the number of entities is randomized per episode.              examines the impact on task performance when varying the
+   1) MRMG Navigation: The MRMG navigation task re-                     number of collaborators. We further conduct ablation studies in
+quires a group of robots to visit multiple goal positions. Each         Section IV-C to show the contribution of the GEE architecture
+goal has to be visited at least once by any robots. We represent        and communication on robots’ intelligent collaborative behav-
+each goal as a 0.5 m radius sphere and initialize it 15–30 m            iors. Finally, we compare our MARL policy with a centralized
+away from the centroid of the robot group. An episode ends              optimization-based controller in a simplified multi-agent task
+successfully when all goals are reached, or ends in failure if the      in Section IV-D and show that our policy automatically learns
+time limit is exceeded. We design different terrains as shown in        near-optimal solutions.
+Fig. 2A-1. During training, each episode involve a maximum
+of four robots and up to four goals, with the number of entities
+varying between episodes. Note that in policy deployment, the           A. Robot Navigation
+number of entities can be higher than the maximum values in              We conduct three different multi-entity navigation experi-
+the training stage.                                                     ments using two wheeled-legged quadrupedal robots [25]. The
+                                                                                                                                                      6
+
+
+
+
+Fig. 3. Robot experiments. (A) MRMG navigation with two robots and three goals. (B, C) Dead-end experiment. (D) Single-robot Multi-goal navigation.
+
+
+
+results are shown in the supplementary video. In each exper-                3 in the figure), both robots try to reach goal 2 and meet at
+iment, the same control policy is used across all robots, and               the narrow corridor. At the entrance, the robots avoid collision,
+the robots’ states are shared through gRPC communication—                   and one robot stops and leaves the last goal to the other robot.
+see Appendix D. Robots in all experiments do not possess                       The distribution of goals and collision avoidance behavior
+the global map or share any map information. Instead, each                  observed in this experiment is learned, with no handcrafted
+robot only observes a 4.35 m×2.85 m rectangular local height                state machine or task scheduling as seen in [20, 38].
+scan centered on itself, as indicated by the red points in the                 2) Dead End: In the experiment shown in Fig. 3B and C,
+top-down views in Fig. 3.                                                   two robots are given a single waypoint to reach. Unlike the
+   1) MRMG Navigation: Two robots are tasked with reaching                  previous experiment, both robots have to reach the waypoint.
+three shared goals, as shown in Fig. 3A-1. The task is                      Robot A has an obstacle-free path to the goal in the line of
+completed once all goals are reached, regardless of which                   sight, whereas robot B starts from a corridor with a dead end.
+robot reaches each goal. Each robot strategically chooses the               It is important to note that neither robot has access to a global
+closest goal while leaving the farther goal to the other robot              map; they rely solely on local perception.
+(Fig. 3A-2). Upon finishing the first two goals (goal 1 and goal               At the beginning, both robots navigate towards the goal.
+                                                                                                                                                         7
+
+
+
+
+Fig. 4. Saliency maps of two robots during the box packing task. The four robots have to move the boxes into the goal point. (A) At the beginning, robot
+G does not focus on any box but attends to the states of robot R. (B) Then robot G joins robot R to transport the box R together. (C) Once all boxes are at
+the goal except for box R, all robots shift their focus to box R.
+
+
+
+Then robot B encounters the dead end. Observing the robot
+A’s successful path to the goal, the trapped robot B adapts
+and follows robot A’s path, successfully escaping from the
+dead end. In contrast, Fig. 3C shows a single robot scenario.
+Without its collaborator, robot B fails to find the exit and
+becomes trapped in a local minimum, oscillating back and
+forth.
+   This experiment demonstrates the effectiveness of our ap-
+proach: the control policy observes the other agents’ behavior
+and utilizes this information to resolve navigation challenges.
+   3) Multi-Goal Navigation with Obstacles: Mobile robots
+are often tasked with multiple waypoints, e.g., path-following
+or multi-goal delivery tasks. Typically, the goals are given
+to the robot in a fixed order [5, 25, 38]. Additional state
+machines or human intervention may be necessary if a given
+waypoint becomes unreachable due to unexpected obstacles or
+environmental changes.
+   Our approach addresses this challenge by letting the policy
+determine the visiting order of waypoints dynamically. In
+another experiment, we give a robot multiple intermediate
+waypoints along a straight path, one of which is blocked by                    Fig. 5. Impact of Robot Numbers on Packing tasks. (A) Success Rate (bar
+                                                                               columns) and Completion Time (dotted lines) of 1-10 robots packing 1-10
+obstacles—see Fig. 3D. The robot navigates to the waypoints                    boxes. (B) 1 robot transports a box by walking sideways. (C) 2 robots are
+sequentially, automatically skipping the blocked waypoint. As                  faster by squeezing the box in between them. (D) 2 robots can transport more
+shown in Fig. 3D-2, our multi-entity RL method can delegate                    than 1 box at the same time.
+such high-level decision-making challenges to the policy.
+                                                                               may interact with. This focus dynamically adapts in real-time
+B. Learned Collaborative Behaviors                                             to the evolving situation. This dynamic entity prioritization is
+   We then analyse the emergent collaborative behaviors with                   a learned behavior, a significant advancement over traditional
+two experiments on box packing task. For both experiments,                     approaches. Conventional methods using heuristic-based task
+we use the same policy trained in the environment depicted in                  assignments lack the flexibility to adjust to changing contexts
+Fig. 2A-2 following the training procedure in Section III-D2.                  in this manner.
+   1) Dynamic Focus on Neighboring Entities: We conduct a                         2) Adaptation to Higher Entity Numbers: We examine
+sensitivity analysis to examine what entities each agent focuses               whether an increase in the number of robots leads to improved
+on at each time step. Similarly to [1], we compute the gradient                task performance, as well as the effectiveness of our policies
+magnitude of the output feature of GEE with respect to each                    across different numbers of targets. We trained a policy for
+entity state. Intuitively, if an entity has no impact on the robot’s           the box packing task with a randomized number of robots and
+behavior, perturbing the entity would not change the output of                 boxes, ranging up to four. We then execute the same policy
+the GEE.                                                                       with different combinations of robots and boxes.
+   The resulting saliency map during the box packing task is                      Fig. 5A shows the success rate and completion time of
+shown in Fig. 4. It is observed that the robots strategically                  different numbers of robots packing boxes within a 20 s time
+allocate their attention to boxes and adjacent robots that they                limit. We observe that, as the number of robots increases, the
+                                                                                                                                                       8
+
+
+
+
+Fig. 6. Ball passing maneuver during the soccer game. The robots 1, 2, 3   Fig. 7. Ablation study on GEE. (A) MRMG navigation test environment. Four
+advance towards the right side.                                            robots are spawned in the bottom right corner, and the goals are sampled from
+                                                                           the other three corners. (B) With GEE, when one robot finds a way out of the
+                                                                           local minima, robots exhibit the leader-following behavior. (C) When GEE is
+                                                                           replaced with a naive concatenation of features, the leader-following behavior
+task is more likely to succeed and requires less time, especially          does not emerge.
+when for higher numbers of boxes.
+   It is noteworthy that the completion time decreases as more
+robots are involved, even in scenarios with just one box. This             The neighbor-unaware team often collide with their teammates
+tendency persists across all combinations of robot and box                 and does not exhibit such collaboration.
+numbers once the number of robots surpasses the number of                     2) Global Entity Encoder: We now assess the role of
+boxes.                                                                     GEE in enhancing the collaborative task performance. We
+   The decrease in completion time would not be as significant             replace the GEE with naively concatenating entity features
+if each box were always assigned to a single robot. We observe             and compared the success rate for MRMG navigation task
+that when one robot pushes one box, it uses its side to avoid the          (see Fig. 2A-1). Training the concatenation model is the same
+box from slipping away (Fig. 5B). The presence of more robots              as training the GEE models as described in Section III-D1.
+allows for faster transportation by squeezing boxes between                The only difference is that we have to set a maximum entity
+them, as shown in Fig. 5C and Fig. 5D.                                     number for each entity, and pad the concatenated features
+   This example shows a benefit of learning collaborative                  with zeros if the environment has fewer entities than the max
+behaviors through RL. Such behavior cannot be easily hand-                 number. We set the maximum entity numbers as those used
+crafted, highlighting the effectiveness of our approach in                 when training the GEE model (4 robots, 4 goals). Note that the
+solving complex problems.                                                  concatenation model cannot handle more than the max entity
+                                                                           numbers but the GEE models can.
+C. Enhanced Coordination with GEE                                             The GEE model yields a success rate of 96.7% on the
+                                                                           task and an average completion time of 20.3 s, compared
+   We identified two key components crucial to enhancing                   to 86.4% and 22.7 s for the concatenation. Fig. 7 shows
+multi-robot coordination in our experiments: the observation               their different behaviors in one example. In the cross-like
+of neighboring agents (neighbor awareness) and the Global                  corridor environment, the policy with GEE exhibits the leader-
+Entity Encoder (GEE).                                                      following behavior in Fig. 7B. The behavior is also shown in
+   We conduct two ablation studies focusing on their roles in              Fig. 3B. Once one of the robots finds a way out of the first
+addressing multi-entity problems. We conducted two experi-                 room, the others follow the robot.
+ments with MRMG navigation (see Fig. 2A-1) and soccer en-                     Our results show that the GEE significantly improves the
+vironments (see Fig. 2A-3). The training procedures of the two             performance of neighbor-aware policies by effectively lever-
+policies are described in Section III-D1 and Section III-D3.               aging global contextual information.
+   1) Neighbor Awareness: We first assess the influence of
+neighbor awareness on a 3 vs. 3 soccer game, as depicted in
+Fig. 6. Two teams are set to compete: one with full awareness              D. Comparison to an Optimal Control Approach
+of both teammates and opponents (neighbor-aware), and the                     To evaluate the optimality of our learned control policy,
+other devoid of any awareness regarding either teammates or                we conduct a comparative analysis with a centralized model
+opponents (neighbor-unaware). Each policy for each team is                 predictive control (MPC) approach for the centroid control task
+trained independently with its corresponding setup.                        illustrated in Fig. 8. In this task, the objective is to generate
+   The neighbor-aware team wins 86.4% of the matches                       position and velocity targets for each cuboid to move the
+against the neighbor-unaware team. In the snapshots in Fig. 6,             group’s centroid to a goal position while avoiding collisions.
+we observe that robots in the fully aware team have learned                   Our policy is trained with 1–6 cuboid agents in each
+collaborative strategies such as spreading out and passing                 environment and benchmarked against a simplified version of
+balls to teammates (1 & 2), sometimes passing balls to their               the planner by De Vincenti and Coros [13] as the baseline.
+opponents and catch the ball when it bounces back (3 & 4).                 The control task is formulated as a kinematic planar system
+                                                                                                                                               9
+
+
+
+                                                                                both methods on both setups. We remark that the 10-cuboid
+                                                                                scenario is not seen during our policy training stage, as the
+                                                                                training environments only consist of 1 to 6 cuboids.
+                                                                                   Both approaches exhibit a very similar performance. With
+                                                                                4 cuboids, MPC leads by a narrow margin on the tracking
+                                                                                error (∼1 cm), but it has slightly longer settling times. In
+                                                                                all setups, our RL policy showcases shorter centroid travel
+                                                                                distances, suggesting more efficient goal-pursuit trajectories.
+Fig. 8. Two-dimensional centroid control problem. A controller (Ours or         The compared metrics indicate that our Multi-Entity RL policy
+MPC) controls the position and velocity of cuboids to let their centroid (red   can find near-optimal solutions in the considered scenario.
+dot) track the target position. The cuboids are randomly spawned between
+5–15 m away from the goal.                                                         Our decentralized policy generalizes to unseen tasks involv-
+                                                                                ing 10 cuboids with minimal deterioration from the 4-cuboid
+                                                                                setup, with ∼3 cm higher tracking errors and ∼3.3 s longer
+involving R cuboids. Both approaches solve for the desired                      settling times. The increased solver times of the MPC approach
+velocity and position of each cuboid.                                           highlight the limited scalability of conventional centralized
+   1) MPC Formulation: We approximate each robot i in a                         methods. In contrast, our decentralized RL policy maintains
+squad of R robots as a cuboid with a two-dimensional position                   nearly constant computation times regardless of the number
+pi ∈ R2 and a yaw angle ψi ∈ R. Given a discrete time                           of entities involved.
+horizon N ∈ N and a step size ∆t > 0, and having defined
+the ith robot’s state and input sampled at time step k as
+                                                                                                      V. C ONCLUSION
+xi,k := [p⊤             ⊤
+             i,k ψi,k ṗi,k ψ̇i,k ]
+                                   ⊤
+                                     and ui,k := [p̈⊤          ⊤
+                                                    i,k ψ̈i,k ] ,
+respectively, we formulate our optimal control problem (OCP)                       We present a MARL framework using permutation invariant
+as the following nonlinear programming problem:                                 neural network encoders capable of processing various cate-
+            N −1
+                 "                                                              gories of entities in a wide range of robotic environments. We
+                                                                                validated our approach by implementing and testing a com-
+            X       X
+      min         ∥    pi,k /R − c∗ ∥1,Wc +
+       X,U                                                                      plete system to control MAS with wheeled-legged quadrupeds.
+             k=0         i
+                         X                                                      The system consists of decentralized multi-entity control pol-
+                     ∥       ṗi,k /R − ċ∗ ∥2Wċ +
+                                                                                icy and communication among robots using gRPC [26].
+                       i
+                     R−1
+                                                                #                  Our real-world MRMG navigation experiments with two
+                                                                                robots demonstrated collaborative multi-goal navigation be-
+                     X
+                             ∥xi,k − x∗i,k ∥2Wx + ∥ui,k ∥2Wu            (3a)
+                      i=0                                                       haviors learned to optimize task performance without the
+      s.t.   xi,0 = xi,m , ∀i ,                                                 use of heuristics. We observed intelligent sub-goal selection,
+                                                                                navigation, and collision avoidance.
+             xi,k+1 = Axk + Buk , ∀i , ∀k ,
+                                                                                   Furthermore, we conducted controlled experiments in simu-
+             ∥pi,k − pj,k ∥ ≥ 2ρ , ∀i , ∀j , ∀k ,                               lation on three distinct multi-entity tasks, aiming to showcase
+             |b ṗxi,k | ≤ vmax
+                            x
+                                , ∀i , ∀k ,                                     the scalability and generalizability of our approach. Our exper-
+             |b ṗyi,k | ≤ vmax
+                            y
+                                , ∀i , ∀k ,                                     iments showed that the GEEs enables agents to process a flex-
+                                                                                ible number of entities in execution time. GEEs enable each
+             |ψ̇i,k | ≤ ωmax , ∀i , ∀k ,                                        robot to collaborate with flexible numbers of teammates and
+where c∗ and ċ∗ are the reference centroid position and                        prioritize suitable objects or goals. This resulted in improved
+velocity, respectively, while x∗i,k is the reference state of                   overall performance compared to teams without the permu-
+the ith robot at time step k. W□ is a positive definite                         tation invariant encoder structure or communication among
+diagonal matrix for the weighted 1- and 2-norms ∥·∥1,W□ and                     robots. Additionally, we conducted a sensitivity analysis on
+∥·∥W□ , respectively; xi,m is the ith robot’s measured state. We                GEEs, providing an evidence that our policy automatically
+integrate the input accelerations using a semi-implicit Euler                   adjusts its focus to different entities in the environment at
+method, which translates to the following system matrices:                      each moment.
+                                        2                                      Moreover, we compared our policy to an existing optimal-
+                    I ∆tI3                 ∆t I3
+             A := 3              , B :=            .                            control approach on a multi-agent navigation problem and
+                     0    I3                ∆tI3                                showed that our policy learns a near-optimal solution in this
+We provide more details about our MPC implementation in                         scenario.
+Appendix C.                                                                        We plan to extend our research to encompass heterogeneous
+   2) Results: Table I shows the mean and standard deviation                    robots, such as robots equipped with different sensors or
+of three evaluation metrics for both our decentralized Multi-                   manipulators for specialized tasks. We hope this work could
+Entity RL policy and the centralized MPC planner on two                         inspire future research on general purpose AI and robotics.
+setups: centroid control with 4 cuboids and 10 cuboids. We                      Our goal is to advance robots beyond simple lab environments
+run 10 experiments with cuboids randomly positioned 5–15 m                      with constrained task configurations. We aim to enhance their
+away from the goal and compare the final tracking errors,                       capabilities to excel in diverse real-world environments with
+settling times, centroid travel distances, and solver time of                   a wide range or entities and tasks.
+                                                                                                                                                 10
+
+
+
+                                                                    TABLE I
+                                                     C OMPARISON IN CENTROID CONTROL TASK .
+
+                                    Tracking error (m)       Settling time to 0.1 m (s)   Centroid travel distance (m)     Solver time (ms)
+        Ours 4 robots                0.0168 ± 0.0085                4.70 ± 1.48                  10.11 ± 3.03                0.51 ± 0.03
+      MPC [13] 4 robots              0.0070 ± 0.0030                5.35 ± 0.92                  10.38 ± 1.90                9.61 ± 0.29
+       Ours 10 robots                0.0478 ± 0.0249                8.02 ± 0.78                  10.53 ± 1.82                0.77 ± 0.07
+      MPC [13] 10 robots             0.0044 ± 0.0020                5.90 ± 1.35                  11.18 ± 2.44               91.03 ± 5.52
+
+
+
+                       ACKNOWLEDGMENTS                                       [13] F. De Vincenti and S. Coros, “Centralized model predictive
+                                                                                  control for collaborative loco-manipulation,” Proceedings of
+   We thank Yifan Liu for the support in implementing simu-                       Robotics: Science and System XIX, p. 050, 2023.
+lation environments for MRMG navigation training. We thank                   [14] K. A. Hamed, V. R. Kamidi, A. Pandala, W.-L. Ma, and A. D.
+                                                                                  Ames, “Distributed feedback controllers for stable cooperative
+Alexander Reske and Turcan Tuna for helping with the real
+                                                                                  locomotion of quadrupedal robots: A virtual constraint ap-
+robot experiments.                                                                proach,” in 2020 American Control Conference (ACC). IEEE,
+   This project was supported by the Swiss National Science                       2020, pp. 5314–5321.
+Foundation through the National Centre of Competence in                      [15] Y. Ji, B. Zhang, and K. Sreenath, “Reinforcement learning for
+Digital Fabrication (NCCR dfab) and the European Research                         collaborative quadrupedal manipulation of a payload over chal-
+                                                                                  lenging terrain,” in 2021 IEEE 17th International Conference
+Council (Grants 852044, 101070596, and 101121321).                                on Automation Science and Engineering (CASE). IEEE, 2021,
+                                                                                  pp. 899–904.
+                                                                             [16] O. Nachum, M. Ahn, H. Ponte, S. Gu, and V. Kumar, “Multi-
+                            R EFERENCES                                           agent manipulation via locomotion using hierarchical sim2real,”
+ [1] J. Lee, J. Hwangbo, L. Wellhausen, V. Koltun, and M. Hutter,                 arXiv preprint arXiv:1908.05224, 2019.
+     “Learning quadrupedal locomotion over challenging terrain,”             [17] B. Baker, I. Kanitscheider, T. Markov, Y. Wu, G. Powell,
+     Science robotics, vol. 5, no. 47, p. eabc5986, 2020.                         B. McGrew, and I. Mordatch, “Emergent tool use from multi-
+ [2] N. Rudin, D. Hoeller, P. Reist, and M. Hutter, “Learning to                  agent autocurricula,” arXiv preprint arXiv:1909.07528, 2019.
+     walk in minutes using massively parallel deep reinforcement             [18] H. Ha, J. Xu, and S. Song, “Learning a decentralized multi-arm
+     learning,” in Conference on Robot Learning. PMLR, 2022,                      motion planner,” arXiv preprint arXiv:2011.02608, 2020.
+     pp. 91–100.                                                             [19] J. Yang, A. Nakhaei, D. Isele, K. Fujimura, and H. Zha, “Cm3:
+ [3] T. Miki, J. Lee, J. Hwangbo, L. Wellhausen, V. Koltun,                       Cooperative multi-goal multi-stage multi-agent reinforcement
+     and M. Hutter, “Learning robust perceptive locomotion for                    learning,” arXiv preprint arXiv:1809.05188, 2018.
+     quadrupedal robots in the wild,” Science Robotics, vol. 7, no. 62,      [20] Q. Xu, J. Li, S. Koenig, and H. Ma, “Multi-goal multi-agent
+     p. eabk2822, 2022.                                                           pickup and delivery,” in 2022 IEEE/RSJ International Confer-
+ [4] D. Hoeller, L. Wellhausen, F. Farshidian, and M. Hutter,                     ence on Intelligent Robots and Systems (IROS). IEEE, 2022,
+     “Learning a state representation and navigation in cluttered and             pp. 9964–9971.
+     dynamic environments,” IEEE Robotics and Automation Letters,            [21] S. Zimmermann, G. Hakimifard, M. Zamora, R. Poranne, and
+     vol. 6, no. 3, pp. 5081–5088, 2021.                                          S. Coros, “A multi-level optimization framework for simul-
+ [5] C. Chen, J. Frey, P. Arm, and M. Hutter, “Smug planner:                      taneous grasping and motion planning,” IEEE Robotics and
+     A safe multi-goal planner for mobile robots in challenging                   Automation Letters, vol. 5, no. 2, pp. 2966–2972, 2020.
+     environments,” IEEE Robotics and Automation Letters, 2023.              [22] J. Envall, R. Poranne, and S. Coros, “Differentiable task assign-
+ [6] H. Kondoh and A. Kanezaki, “Multi-goal audio-visual naviga-                  ment and motion planning,” in 2023 IEEE/RSJ International
+     tion using sound direction map,” in 2023 IEEE/RSJ Interna-                   Conference on Intelligent Robots and Systems (IROS). IEEE,
+     tional Conference on Intelligent Robots and Systems (IROS).                  2023, pp. 2049–2056.
+     IEEE, 2023, pp. 5219–5226.                                              [23] F. Kennel-Maushart, R. Poranne, and S. Coros, “Interacting
+ [7] F. Wang and K. Hauser, “Stable bin packing of non-convex                     with multi-robot systems via mixed reality,” in 2023 IEEE
+     3d objects with a robot manipulator,” in 2019 International                  International Conference on Robotics and Automation (ICRA).
+     Conference on Robotics and Automation (ICRA). IEEE, 2019,                    IEEE, 2023, pp. 11 633–11 639.
+     pp. 8698–8704.                                                          [24] C. R. Qi, H. Su, K. Mo, and L. J. Guibas, “Pointnet: Deep
+ [8] J. Mahler and K. Goldberg, “Learning deep policies for robot                 learning on point sets for 3d classification and segmentation,”
+     bin picking by simulating robust grasping sequences,” in Con-                in Proceedings of the IEEE conference on computer vision and
+     ference on robot learning. PMLR, 2017, pp. 515–524.                          pattern recognition, 2017, pp. 652–660.
+ [9] R. Li, A. Jabri, T. Darrell, and P. Agrawal, “Towards prac-             [25] M. Bjelonic, C. D. Bellicoso, Y. de Viragh, D. Sako, F. D.
+     tical multi-object manipulation using relational reinforcement               Tresoldi, F. Jenelten, and M. Hutter, “Keep rollin’—whole-body
+     learning,” in 2020 ieee international conference on robotics and             motion control and planning for wheeled quadrupedal robots,”
+     automation (icra). IEEE, 2020, pp. 4051–4058.                                IEEE Robotics and Automation Letters, vol. 4, no. 2, pp. 2116–
+[10] C. Yang, G. N. Sue, Z. Li, L. Yang, H. Shen, Y. Chi,                         2123, 2019.
+     A. Rai, J. Zeng, and K. Sreenath, “Collaborative navigation and         [26] gRPC, “About grpc,” https://grpc.io/about/, 2023.
+     manipulation of a cable-towed load by multiple quadrupedal              [27] Y. Wang, Y. Sun, Z. Liu, S. E. Sarma, M. M. Bronstein, and
+     robots,” IEEE Robotics and Automation Letters, vol. 7, no. 4,                J. M. Solomon, “Dynamic graph cnn for learning on point
+     pp. 10 041–10 048, 2022.                                                     clouds,” ACM Transactions on Graphics (tog), vol. 38, no. 5,
+[11] S. Sukhbaatar, R. Fergus et al., “Learning multiagent communi-               pp. 1–12, 2019.
+     cation with backpropagation,” Advances in neural information            [28] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N.
+     processing systems, vol. 29, 2016.                                           Gomez, Ł. Kaiser, and I. Polosukhin, “Attention is all you need,”
+[12] Y. Lee, J. Yang, and J. J. Lim, “Learning to coordinate manip-               Advances in neural information processing systems, vol. 30,
+     ulation skills via skill behavior diversification,” in International         2017.
+     conference on learning representations, 2019.                           [29] J. Lee, Y. Lee, J. Kim, A. Kosiorek, S. Choi, and Y. W. Teh,
+                                                                                                                                             11
+
+
+
+     “Set transformer: A framework for attention-based permutation-          you need in the starcraft multi-agent challenge?” arXiv preprint
+     invariant neural networks,” in International conference on ma-          arXiv:2011.09533, 2020.
+     chine learning. PMLR, 2019, pp. 3744–3753.                         [47] C. Yu, A. Velu, E. Vinitsky, J. Gao, Y. Wang, A. Bayen, and
+[30] Y. Tang and D. Ha, “The sensory neuron as a transformer:                Y. Wu, “The surprising effectiveness of ppo in cooperative
+     Permutation-invariant neural networks for reinforcement learn-          multi-agent games,” Advances in Neural Information Processing
+     ing,” Advances in Neural Information Processing Systems,                Systems, vol. 35, pp. 24 611–24 624, 2022.
+     vol. 34, pp. 22 574–22 587, 2021.                                  [48] R. Lowe, Y. I. Wu, A. Tamar, J. Harb, O. Pieter Abbeel, and
+[31] Y. Yang, R. Luo, M. Li, M. Zhou, W. Zhang, and J. Wang,                 I. Mordatch, “Multi-agent actor-critic for mixed cooperative-
+     “Mean field multi-agent reinforcement learning,” in Interna-            competitive environments,” Advances in neural information
+     tional conference on machine learning.        PMLR, 2018, pp.           processing systems, vol. 30, 2017.
+     5571–5580.                                                         [49] P. Sunehag, G. Lever, A. Gruslys, W. M. Czarnecki, V. Zam-
+[32] Y. Li, L. Wang, J. Yang, E. Wang, Z. Wang, T. Zhao, and H. Zha,         baldi, M. Jaderberg, M. Lanctot, N. Sonnerat, J. Z. Leibo,
+     “Permutation invariant policy optimization for mean-field multi-        K. Tuyls et al., “Value-decomposition networks for cooperative
+     agent reinforcement learning: A principled approach,” arXiv             multi-agent learning,” arXiv preprint arXiv:1706.05296, 2017.
+     preprint arXiv:2105.08268, 2021.                                   [50] T. Rashid, M. Samvelyan, C. S. De Witt, G. Farquhar, J. Foer-
+[33] R. Zhang, G. Chen, J. Hou, Z. Li, and A. Knoll, “Pipo:                  ster, and S. Whiteson, “Monotonic value function factorisation
+     Policy optimization with permutation-invariant constraint for           for deep multi-agent reinforcement learning,” The Journal of
+     distributed multi-robot navigation,” in 2022 IEEE International         Machine Learning Research, vol. 21, no. 1, pp. 7234–7284,
+     Conference on Multisensor Fusion and Integration for Intelli-           2020.
+     gent Systems (MFI). IEEE, 2022, pp. 1–7.                           [51] J. Wang, Z. Ren, T. Liu, Y. Yu, and C. Zhang, “Qplex:
+[34] A. Zeng, S. Song, J. Lee, A. Rodriguez, and T. Funkhouser,              Duplex dueling multi-agent q-learning,” arXiv preprint
+     “Tossingbot: Learning to throw arbitrary objects with residual          arXiv:2008.01062, 2020.
+     physics,” IEEE Transactions on Robotics, vol. 36, no. 4, pp.       [52] J. Wang, D. Ye, and Z. Lu, “More centralized training, still
+     1307–1319, 2020.                                                        decentralized execution: Multi-agent conditional policy factor-
+[35] Y. Huang, A. Conkey, and T. Hermans, “Planning for multi-               ization,” arXiv preprint arXiv:2209.12681, 2022.
+     object manipulation with graph neural network relational clas-     [53] Y. Zhou, S. Liu, Y. Qing, K. Chen, T. Zheng, Y. Huang, J. Song,
+     sifiers,” in 2023 IEEE International Conference on Robotics and         and M. Song, “Is centralized training with decentralized execu-
+     Automation (ICRA). IEEE, 2023, pp. 1822–1829.                           tion framework centralized enough for marl?” arXiv preprint
+[36] S. Shaw, E. Wenzel, A. Walker, and G. Sartoretti, “Formic:              arXiv:2305.17352, 2023.
+     Foraging via multiagent rl with implicit communication,” IEEE      [54] X. Zhou, X. Wen, Z. Wang, Y. Gao, H. Li, Q. Wang, T. Yang,
+     Robotics and Automation Letters, vol. 7, no. 2, pp. 4877–4884,          H. Lu, Y. Cao, C. Xu et al., “Swarm of micro flying robots in
+     2022.                                                                   the wild,” Science Robotics, vol. 7, no. 66, p. eabm5954, 2022.
+[37] J. Wu, X. Sun, A. Zeng, S. Song, S. Rusinkiewicz, and              [55] J. Foerster, I. A. Assael, N. De Freitas, and S. Whiteson,
+     T. Funkhouser, “Spatial intention maps for multi-agent mo-              “Learning to communicate with deep multi-agent reinforcement
+     bile manipulation,” in 2021 IEEE International Conference on            learning,” Advances in neural information processing systems,
+     Robotics and Automation (ICRA). IEEE, 2021, pp. 8749–8756.              vol. 29, 2016.
+[38] F. Schmalstieg, D. Honerkamp, T. Welschehold, and A. Valada,       [56] A. Singh, T. Jain, and S. Sukhbaatar, “Learning when to
+     “Learning long-horizon robot exploration strategies for multi-          communicate at scale in multiagent cooperative and competitive
+     object search in continuous action spaces,” in The International        tasks,” arXiv preprint arXiv:1812.09755, 2018.
+     Symposium of Robotics Research. Springer, 2022, pp. 52–66.         [57] Y. Niu, R. R. Paleja, and M. C. Gombolay, “Multi-agent graph-
+[39] J. Jiang and Z. Lu, “Learning attentional communication for             attention communication and teaming.” in AAMAS, 2021, pp.
+     multi-agent cooperation,” Advances in neural information pro-           964–973.
+     cessing systems, vol. 31, 2018.                                    [58] A. Das, T. Gervet, J. Romoff, D. Batra, D. Parikh, M. Rabbat,
+[40] D. Silver, J. Schrittwieser, K. Simonyan, I. Antonoglou,                and J. Pineau, “Tarmac: Targeted multi-agent communication,”
+     A. Huang, A. Guez, T. Hubert, L. Baker, M. Lai, A. Bolton               in International Conference on Machine Learning. PMLR,
+     et al., “Mastering the game of go without human knowledge,”             2019, pp. 1538–1546.
+     nature, vol. 550, no. 7676, pp. 354–359, 2017.                     [59] C. Yu, X. Yang, J. Gao, J. Chen, Y. Li, J. Liu, Y. Xiang,
+[41] S. Liu, G. Lever, Z. Wang, J. Merel, S. Eslami, D. Hennes,              R. Huang, H. Yang, Y. Wu et al., “Asynchronous multi-agent
+     W. M. Czarnecki, Y. Tassa, S. Omidshafiei, A. Abdolmaleki               reinforcement learning for efficient real-time multi-robot coop-
+     et al., “From motor control to team play in simulated humanoid          erative exploration,” arXiv preprint arXiv:2301.03398, 2023.
+     football,” arXiv preprint arXiv:2105.12196, 2021.                  [60] J. Lee, M. Bjelonic, and M. Hutter, “Control of wheeled-legged
+[42] T. Haarnoja, B. Moran, G. Lever, S. H. Huang, D. Tiru-                  quadrupeds using deep reinforcement learning,” in Climbing
+     mala, M. Wulfmeier, J. Humplik, S. Tunyasuvunakool, N. Y.               and Walking Robots Conference. Springer, 2022, pp. 119–127.
+     Siegel, R. Hafner et al., “Learning agile soccer skills for a      [61] M. Tranzatto, T. Miki, M. Dharmadhikari, L. Bernreiter,
+     bipedal robot with deep reinforcement learning,” arXiv preprint         M. Kulkarni, F. Mascarich, O. Andersson, S. Khattak, M. Hutter,
+     arXiv:2304.13653, 2023.                                                 R. Siegwart et al., “Cerberus in the darpa subterranean chal-
+[43] T. Bansal, J. Pachocki, S. Sidor, I. Sutskever, and I. Mor-             lenge,” Science Robotics, vol. 7, no. 66, p. eabp9742, 2022.
+     datch, “Emergent complexity via multi-agent competition,”          [62] P.-W. Chou, D. Maturana, and S. Scherer, “Improving stochastic
+     arXiv preprint arXiv:1710.03748, 2017.                                  policy gradients in continuous control with deep reinforcement
+[44] T. Ming, “Multi-agent reinforcement learning: Independent ver-          learning using the beta distribution,” in International conference
+     sus cooperative agents,” in Proceedings of the Tenth Interna-           on machine learning. PMLR, 2017, pp. 834–843.
+     tional Conference on Machine Learning (ICML 1993), San             [63] I. G. Petrazzini and E. A. Antonelo, “Proximal policy opti-
+     Francisco, CA, USA, 1993, pp. 330–337.                                  mization with continuous bounded action space via the beta
+[45] T. Chu, J. Wang, L. Codecà, and Z. Li, “Multi-agent deep rein-         distribution,” in 2021 IEEE Symposium Series on Computational
+     forcement learning for large-scale traffic signal control,” IEEE        Intelligence (SSCI). IEEE, 2021, pp. 1–8.
+     Transactions on Intelligent Transportation Systems, vol. 21,       [64] J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and O. Klimov,
+     no. 3, pp. 1086–1095, 2019.                                             “Proximal policy optimization algorithms,” arXiv preprint
+[46] C. S. de Witt, T. Gupta, D. Makoviichuk, V. Makoviychuk, P. H.          arXiv:1707.06347, 2017.
+     Torr, M. Sun, and S. Whiteson, “Is independent learning all        [65] F. De Vincenti and S. Coros, “Ungar - a c++ framework for
+                                                                                                                                     12
+
+
+
+     real-time optimal control using template metaprogramming,” in                              TABLE II
+     2023 IEEE/RSJ International Conference on Intelligent Robots                            MPC PARAMETERS
+     and Systems (IROS), 2023, pp. 6297–6303.
+[66] W. Jakob, J. Rhinelander, and D. Moldovan, “pybind11                             N                 30
+     – seamless operability between c++11 and python,” 2017,                          ∆t               0.03
+     https://github.com/pybind/pybind11.                                              ρ                 0.8
+[67] protobuf.dev,       “Protocol     buffers     documentation,”                   Wc            diag(10, 10)
+     https://protobuf.dev/, 2023.                                                    Wċ           diag(0.6, 0.6)
+                                                                                     Wx     10−2 diag(0, 0, 1000, 4, 4, 4)
+                                                                                     Wu        10−5 diag(1, 1, 1000)
+                                                                                      x
+                                                                                     vmax                2
+                           A PPENDIX                                                  y
+                                                                                     vmax                1
+                                                                                     ωmax               1.5
+A. Hierarchical Policy
+   Hierarchical policies have been widely applied on complex
+robotic tasks [10, 12, 16], as modularized policies provide
+easier control over desired behaviors at each task level. We                                       1
+                                                                               Beta(x; α, β) =           xα−1 (1 − x)β−1           (4)
+use a similar way to train hierarchical policies as in [16].                                     B(α, β)
+First, a locomotion policy is trained according to the work            The shape of the distribution function depends only on
+by Lee et al. [60]. This policy takes body velocity commands         the two parameters α and β, and B(α, β) is called the beta
+and executes joint-level control on individual robots. The           function, which also depends on α and β and ensure the total
+locomotion policy is treated as the low-level policy and fixed       probability equals to 1.
+when training higher level policies. In this project, both the         Stochastic actions are sampled from the Beta distribution
+box packing task and the soccer task use two-level policy            during training to encourage exploration. During policy exe-
+structure: the low-level policy is the locomotion policy, and                                               α
+                                                                     cution, we take the distribution mean α+β as the deterministic
+the high-level policies output body velocity commands to             action.
+complete specific multi-agent tasks. The MRMG navigation
+task uses three-level policy structure, where the low-level
+policy is the same locomotion policy. Similar to the high-           C. MPC Baseline Implementation Details
+level policies of the other two tasks, the mid-level policy in           We implement a simplified MPC planner based on the work
+MRMG navigation outputs body velocity commands to control            by De Vincenti and Coros [13] and delineate its formulation in
+individual robots towards a shorter goal point (0–2 m from ego       Section IV-D1. In this section, we lay out more implementation
+robot) without observing neighboring robots, and the high-           details for our MPC controller to complete the multi-agent
+level policy outputs these shorter goal points to navigate each      problem in Section IV-D.
+robot to flexible numbers of far goal points (15–30 m) in a              To prevent robot collisions, we enforce a minimum distance
+MAS. In fact, the low-level policy is the same for all three         of 2ρ between all pairs of robots (ρ > 0). The quantities
+tasks, as the desired locomotion behaviors are the same in such          x           y
+                                                                     b ṗi,k and b ṗi,k represent the x- and y-components of the ith
+low level. This is the advantage of modularized hierarchical         robot’s linear velocity at time step k expressed in its base
+policy structure, as some parts of the policy can be shared                               x         y
+                                                                     frame. Finally, vmax     and vmax  denote the maximum forward
+among different tasks, thus greatly reducing the time to train       and sideways linear velocities, while ωmax is the maximum
+robots from scratch.                                                 yaw rate. We remark that we adopted a 1-norm for the centroid
+                                                                     tracking cost in (3a) to prevent steep gradients for distant goal
+B. Bounded Action Space using Beta Distribution                      positions c∗ that would cause numerical issues.
+                                                                         We implement our MPC in C++ using Ungar [65] and
+   For stochastic policy gradient methods such as PPO [64],          send the optimized trajectories to our low-level PD controller
+a practical limitation is that the Gaussian distribution has         through Python bindings [66]. Specifically, the output planar
+infinite support over the action space. This creates challenges      linear velocities and yaw rates are converted into force and
+to constrain policy outputs for robots’ physical limitations.        torque signals to drive each individual cuboid in the simulator.
+For example, the maximum speed of our robots is 2 m/s                We use the parameters listed in Table II for all our experi-
+in longitudinal directions, 1 m/s in lateral directions and          ments.
+1.5 rad/s about vertical axis. Therefore, the body velocity
+commands as action outputs from our high-level policies must
+be within these ranges, which cannot be satisfied by Gaussian        D. gRPC Communication framework
+distribution. Inspired by [62] and [63], we replace Gaussian            We implemented a multi-robot communication framework
+distribution with Beta distribution as the stochastic action         in ROS using the gRPC framework [26]. gRPC uses Protocol
+distribution function in our PPO algorithm [64]. The benefits        Buffers [67] to serialize messages between a server and its
+of Beta distribution is that the output action distribution is       clients distributed in different machines. In our case, the server
+bounded between 0 and 1, so it can be linearly scaled to any         collects the most recent messages from all clients periodically
+bounded action range without suffering the loss of sampling          and sends them to any client that makes the request. Each
+accuracy. The policy network outputs parameters α and β for          robot initiates a client at the beginning, which constantly sends
+Beta action distribution:                                            out its own message to the server and requests other robots’
+                                                                                                                                         13
+
+
+
+                                                                            its message gets automatically updated in the message buffer.
+                                                                               It is worth noting that the server host can be any computer
+                                                                            with the same internet connection as the clients, including any
+                                                                            one of the clients. In our real-world experiments, we use a
+                                                                            separated computer as the server host.
+
+
+
+
+Fig. 9. gRPC communication framework
+
+
+                                TABLE III
+                                R EWARDS
+
+                           MRMG Navigation
+  Reward              Description                                   Scale
+  Termination         +1.0 if game success                          10.0
+  Distance to Goal    + exp(−(distance to unreached goals)2 )       5.0
+  Motion bonus        + clip(moving speed, 0.0, 1.0)                1.0
+  Neighbor distance   -1.0 if too close (<1 m)                      1.0
+  Collision           -1.0 if robot collides                        2.0
+
+                               Box Packing
+  Reward              Description                                   Scale
+  Termination         +1.0 if game success                          5.0
+  Progress            +1.0 P(Ncompleted boxes /Ntotal box count )   0.25
+  Box velocity        +1.0 Pboxes (vbox · direction to goal)        0.1
+  Box position        +1.0 boxes exp(−(pbox − pgoal )2 )            0.5
+  Neighbor distance   -1.0 if too close (<1 m)                      1.0
+
+                                  Soccer
+  Reward              Description                                   Scale
+  Termination         +1.0 if wins, -1.0 if loses                   5.0
+  Ball velocity       +1.0 (vball · direction to goal)              1.0
+  Ball position       +1.0 exp(−(pball − goal position)2 )          0.25
+  Neighbor distance   -1.0 if too close (<1 m)                      1.0
+
+
+
+messages when needed by the policy net. The server-client
+communication framework is illustrated in Fig. 9. A gRPC
+server contains a message buffer with robot ID-message pairs.
+A robot ID is a unique number for each robot and a message
+is the agent state information passed to the GEE. Every
+gRPC client subscribes to the server host at the beginning
+and creates gRPC Stubs to call service methods for message
+exchange with other clients. Inside each robot, a gRPC client
+is instantiated by the robot’s ROS communication node, which
+is also responsible for transferring messages between the
+gRPC client and the navigation planner through standard ROS
+communication protocol.
+   The gRPC communication pipeline is simple to use in
+real-world applications and can connect a flexible number of
+robots. When a new robot is activated and subscribed to the
+server host, its unique ID is saved in the message buffer in
+the server. When a robot requires communication with other
+robots, it can request other robots’ messages with their IDs.
+After the robot executes its action and arrives at a new state,
+                                                                                                                                         14
+
+
+
+
+                                                            TABLE IV
+                                                ROBOT O BSERVATION IN ALL POLICIES
+
+Policy                         Type                               Observation                                             Dimension
+
+Locomotion Low-Level           Proprioceptive                     Velocity command                                        3
+                                                                  Projected gravity                                       3
+                                                                  Body linear velocity                                    3
+                                                                  Body angular velocity                                   3
+                                                                  Joint position (excluding 4 wheel joints)               12
+                                                                  Joint position error (excluding 4 wheel joints) for 3   3 * 12
+                                                                  half-LL time steps
+                                                                  Joint velocity for 3 half-LL time steps                 3 * 16
+                                                                  Joint position target for 2 LL time steps               2 * 16
+                               Exteroceptive                      foot height scan around 4 feet                          4 * 52
+
+MRMG Navigation Mid-Level      Proprioceptive                     Same as Low-Level                                       140
+                               Exteroceptive                      Body height scan                                        600
+                               Short Navigation State             Short goal position for 10 ML time steps                10 * 6
+
+MRMG Navigation High-Level     Proprioceptive                     Same as Low-Level                                       140
+                               Exteroceptive                      Same as Mid-Level                                       600
+                               Short Navigation State             Same as Mid-Level                                       60
+                               Common Neighbor States (GEE)       Neighbor velocity command for 20 HL time steps          20 * 3 * #N
+                                                                  Neighbor position for 20 HL time steps                  20 * 3 * #N
+                                                                  Neighbor orientation for 20 HL time steps               20 * 4 * #N
+                                                                  Neighbor linear velocity for 20 HL time steps           20 * 3 * #N
+                                                                  Neighbor angular velocity for 20 HL time steps          20 * 3 * #N
+                                                                  Neighbor projected gravity for 20 HL time steps         20 * 3 * #N
+                               Task Neighbor State (GEE)          Neighbor short goal for 5 HL time steps                 5 * 6 * #N
+                               Long Navigation State (GEE)        Long Goal position for 20 HL time steps                 20 * 3 * #G
+                                                                  Long Goal reach mask (0: not reached; 1: reached)       1 * #G
+
+Box Packing High-Level         Proprioceptive                     Same as Low-Level                                       140
+                               Exteroceptive                      Same as Mid-Level                                       430
+                               Common Neighbor States (GEE)       Same as above                                           20 * 19 * #N
+                               Box State (GEE)                    Box position for 20 HL time steps                       20 * 3 * #B
+                                                                  Box in-range mask (0: outside packing range; 1:         1 * #B
+                                                                  inside packing range)
+
+Soccer High-Level              Proprioceptive                     Same as Low-Level                                       140
+                               Exteroceptive                      Same as Mid-Level                                       430
+                               Teammate State (GEE)               Common neighbor states                                  20 * 19 * #T
+                                                                  team mask: 0: teammate; 1: opponent                     1 * #N
+                               Opponent State (GEE)               Common neighbor states                                  20 * 19 * #O
+                                                                  team mask: 0: teammate; 1: opponent                     1 * #N
+
+
+#N: number of neighbors. #G: number of goals. #B: number of boxes. #T: number of teammates. #O: number of opponents.
+GEE: observation goes through the GEE
+

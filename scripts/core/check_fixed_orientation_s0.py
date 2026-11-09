@@ -29,7 +29,7 @@ def audit(config: dict, *, samples: int, control_trials: int, seed: int) -> dict
     try:
         if not env.fixed_orientation_goal_enabled:
             raise ValueError("enable thesis.fixed_orientation_goal before running this audit")
-        env.configure_episode("none", xi=1.0, strict=False)
+        env.configure_episode("none")
         env._reset_fixed_initial_state()
         initial_position, initial_quaternion = env.robot.end_effector_pose()
         initial_singular_values = np.linalg.svd(
@@ -79,11 +79,7 @@ def audit(config: dict, *, samples: int, control_trials: int, seed: int) -> dict
             had_collision = False
             for step in range(env.horizon):
                 q, _ = env.robot.joint_state_exact()
-                action = np.clip(
-                    env.goal_joint_positions - q,
-                    -env.policy_action_limit,
-                    env.policy_action_limit,
-                )
+                action = env.goal_joint_positions - q
                 _, _, _, terminated, truncated, info = env.step(action)
                 had_collision |= bool(info["collision"])
                 if terminated or truncated:

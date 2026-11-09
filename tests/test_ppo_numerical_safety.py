@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from rl_risk_sac.algorithms.thesis_ppo import PPONumericalError, ThesisPPOAgent
+from rl_risk_sac.tasks.reference_reaching import REFERENCE_PPO_OBSERVATION_DIM
 from rl_risk_sac.utils.config import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +43,7 @@ class PPONumericalSafetyTests(unittest.TestCase):
         config["ppo"].update(
             hidden_dims=[16, 16], epochs=3, minibatch_size=8, target_kl=.02
         )
-        return ThesisPPOAgent(31, 6, config)
+        return ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, config)
 
     def batch(self, agent):
         obs = np.random.default_rng(10).normal(0, .1, (8, agent.obs_dim)).astype(np.float32)
@@ -82,8 +83,9 @@ class PPONumericalSafetyTests(unittest.TestCase):
         config = load_config(ROOT / "configs/experiments/paper_full.yaml")
         config["device"] = "cpu"
         config["ppo"]["hidden_dims"] = [16, 16]
-        agent = ThesisPPOAgent(31, 6, config)
+        agent = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, config)
         self.assertTrue(agent.normalize_advantage)
+        self.assertEqual(agent.advantage_clip, 5.0)
         self.assertIsNone(agent.max_grad_norm)
         self.assertEqual(agent.epochs, 20)
         self.assertIsNone(agent.target_kl)
@@ -105,14 +107,16 @@ class PPONumericalSafetyTests(unittest.TestCase):
         config = load_config(ROOT / "configs/experiments/paper_full.yaml")
         config["device"] = "cpu"
         config["ppo"].update(hidden_dims=[16, 16], actor_std_lr_ema_decay=.95)
-        agent = ThesisPPOAgent(31, 6, config)
+        agent = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, config)
         with torch.no_grad():
             agent.actor_log_std.fill_(np.log(.04))
         agent._update_actor_std_ema()
         actor_lr, critic_lr = agent._apply_learning_rate_schedule(.25)
         expected_ema = .95 * .08 + .05 * .04
         self.assertAlmostEqual(agent.actor_std_ema, expected_ema, places=8)
-        self.assertAlmostEqual(actor_lr, 3e-4 * expected_ema / .08, places=10)
+        self.assertAlmostEqual(
+            actor_lr, 3e-4 * .75 * expected_ema / .08, places=10
+        )
         self.assertAlmostEqual(critic_lr, 3e-4 * .75, places=10)
 
     def test_old_checkpoint_initializes_actor_std_ema_from_learned_std(self):
@@ -224,6 +228,50 @@ class PPONumericalSafetyTests(unittest.TestCase):
         self.assertAlmostEqual(agent.actor_optimizer.param_groups[0]["lr"], 3.0e-4)
         agent.validate_training_state()
 
+    def test_post_step_log_ratio_rejects_only_candidate_actor_step(self):
+        agent = self.agent(); batch = self.batch(agent)
+        agent.target_kl = None
+        original = agent._log_prob
+        calls = 0
+
+        def diverging_log_prob(*args):
+            nonlocal calls
+            calls += 1
+            return original(*args) + (25.0 if calls >= 3 else 0.0)
+
+        actor_before = deepcopy(agent.actor.state_dict())
+        actor_optimizer_before = deepcopy(agent.actor_optimizer.state_dict())
+        value_before = deepcopy(agent.value.state_dict())
+        with patch.object(agent, "_log_prob", side_effect=diverging_log_prob):
+            metrics = self.update(agent, batch)
+        self.assertEqual(calls, 3)
+        self.assertTrue(metrics["kl_early_stopped"])
+        self.assertTrue(metrics["actor_update_rejected"])
+        self.assertEqual(metrics["actor_rejection_reason"], "max_abs_log_ratio")
+        self.assertEqual(metrics["optimizer_steps"], 0)
+        self.assertEqual(metrics["actor_optimizer_attempts"], 1)
+        self.assertEqual(metrics["rejected_actor_steps"], 1)
+        self.assertGreater(metrics["max_abs_log_ratio"], 20.0)
+        self.same_state(agent.actor.state_dict(), actor_before)
+        self.same_state(agent.actor_optimizer.state_dict(), actor_optimizer_before)
+        self.assertTrue(any(
+            not torch.equal(value, value_before[key])
+            for key, value in agent.value.state_dict().items()
+        ))
+        agent.validate_training_state()
+
+    def test_advantage_clip_only_caps_normalized_tails(self):
+        agent = self.agent(); batch = self.batch(agent)
+        batch = {
+            key: np.concatenate([value] * 8, axis=0)
+            for key, value in batch.items()
+        }
+        batch["advantages"].fill(0.0)
+        batch["advantages"][0] = 1000.0
+        metrics = self.update(agent, batch)
+        self.assertGreater(metrics["advantage_clip_fraction"], 0.0)
+        self.assertLess(metrics["advantage_clip_fraction"], 1.0)
+
     def test_nonfinite_initial_parameter_and_optimizer_state_are_rejected(self):
         for corrupt_optimizer in (False, True):
             agent = self.agent()
@@ -274,7 +322,9 @@ class PPONumericalSafetyTests(unittest.TestCase):
     def test_nonfinite_gradients_are_preserved_without_an_optimizer_step(self):
         agent = self.agent(); batch = self.batch(agent)
         before = deepcopy(agent.state_dict())
-        hook = agent.actor[-1].weight.register_hook(lambda grad: grad * float("nan"))
+        hook = agent.actor[-1].weight.register_hook(
+            lambda grad: grad * float("nan")
+        )
         self.addCleanup(hook.remove)
         with self.assertRaises(PPONumericalError) as caught:
             self.update(agent, batch)
@@ -322,11 +372,13 @@ class PPONumericalSafetyTests(unittest.TestCase):
         info = dict(reference_point_distances=[.1, .1, .1], goal_error_norm=.1,
                     orientation_error_norm=.2, next_rho_position=.1,
                     next_rho_orientation=.2, success_hold_count=0,
-                    reference_error=.2)
+                    reference_error=.2, d_min=.2)
 
         class FakeTemplate:
             def __init__(self, config):
-                self.observation_space = SimpleNamespace(shape=(31,))
+                self.observation_space = SimpleNamespace(
+                    shape=(REFERENCE_PPO_OBSERVATION_DIM,)
+                )
                 self.action_space = SimpleNamespace(shape=(6,))
 
             def close(self):
@@ -335,14 +387,24 @@ class PPONumericalSafetyTests(unittest.TestCase):
         class FakePool:
             closed = False
 
-            def __init__(self, config, seeds):
+            def __init__(self, config, seeds, **kwargs):
+                del kwargs
                 torch.save({"known_good": True}, checkpoint)
 
             def reset_many(self, contracts):
-                return {i: (np.zeros(31, dtype=np.float32), info) for i in contracts}
+                return {
+                    i: (np.zeros(REFERENCE_PPO_OBSERVATION_DIM, dtype=np.float32), info)
+                    for i in contracts
+                }
 
             def step_many(self, actions):
-                return {i: (np.zeros(31, dtype=np.float32), -1., 0., False, False, info) for i in actions}
+                return {
+                    i: (
+                        np.zeros(REFERENCE_PPO_OBSERVATION_DIM, dtype=np.float32),
+                        -1., 0., False, False, info,
+                    )
+                    for i in actions
+                }
 
             def close(self):
                 FakePool.closed = True
@@ -366,7 +428,10 @@ class PPONumericalSafetyTests(unittest.TestCase):
         self.assertEqual(len(diagnostics), 1)
         artifact = torch.load(diagnostics[0], weights_only=False)
         self.assertEqual(artifact["context"]["step"], 8)
-        self.assertEqual(artifact["batch"]["obs"].shape, (8, 31))
+        self.assertEqual(
+            artifact["batch"]["obs"].shape,
+            (8, REFERENCE_PPO_OBSERVATION_DIM),
+        )
 
 
 if __name__ == "__main__":

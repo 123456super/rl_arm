@@ -9,6 +9,7 @@ import numpy as np
 import torch
 
 from rl_risk_sac.algorithms.thesis_ppo import ThesisPPOAgent, _cpu_copy
+from rl_risk_sac.tasks.reference_reaching import REFERENCE_PPO_OBSERVATION_DIM
 from rl_risk_sac.utils.config import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,8 +36,10 @@ class PPOUpdateEffectsTests(unittest.TestCase):
         self.config["thesis"]["reward"]["reward_mode"] = "reference_ppo"
         self.config["ppo"].update(hidden_dims=[16, 16], epochs=1, minibatch_size=8)
         EFFECTS.seed_all(42)
-        self.agent = ThesisPPOAgent(31, 6, self.config)
-        obs = np.random.default_rng(42).normal(0, .1, (8, 31)).astype(np.float32)
+        self.agent = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, self.config)
+        obs = np.random.default_rng(42).normal(
+            0, .1, (8, REFERENCE_PPO_OBSERVATION_DIM)
+        ).astype(np.float32)
         _, logp, _, policy = self.agent.act(obs)
         self.batch = dict(obs=obs, actions=policy["raw_actions"], std_scale=policy["std_scale"],
                           logp=logp, advantages=np.linspace(-10, -1, 8, dtype=np.float32),

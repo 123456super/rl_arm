@@ -49,15 +49,10 @@ def _worker(
                         observation, reward, cost, terminated, truncated, info,
                     )
                 connection.send(result)
-            elif command == "state":
-                connection.send(env.episode_state_dict())
+            elif command == "rng_state":
+                connection.send(env.rng.bit_generator.state)
             elif command == "pose_crossing_diagnostics":
                 connection.send(env.pose_crossing_diagnostics())
-            elif command == "restore":
-                connection.send(env.restore_episode_state(payload))
-            elif command == "reset_bad_state":
-                center, contract = payload
-                connection.send(env.reset_bad_state(center, contract))
             elif command == "set_rng":
                 env.rng.bit_generator.state = payload
                 connection.send(None)
@@ -178,21 +173,13 @@ class ParallelThesisEnvPool:
         finally:
             self._pending_step_indices = None
 
-    def states(self, indices: list[int] | None = None) -> dict[int, dict[str, Any]]:
+    def rng_states(
+        self, indices: list[int] | None = None,
+    ) -> dict[int, dict[str, Any]]:
         selected = list(range(len(self))) if indices is None else list(indices)
         for index in selected:
-            self.connections[index].send(("state", None))
+            self.connections[index].send(("rng_state", None))
         return {index: self.connections[index].recv() for index in selected}
-
-    def restore_many(self, states: dict[int, dict[str, Any]]) -> dict[int, np.ndarray]:
-        for index, state in states.items():
-            self.connections[index].send(("restore", state))
-        return {index: self.connections[index].recv() for index in states}
-
-    def reset_bad_states_many(self, requests: dict[int, tuple[dict, dict]]):
-        for index, request in requests.items():
-            self.connections[index].send(("reset_bad_state", request))
-        return {index: self.connections[index].recv() for index in requests}
 
     def set_rng_states(self, states: dict[int, dict[str, Any]]) -> None:
         for index, state in states.items():

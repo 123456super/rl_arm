@@ -1,0 +1,41 @@
+# S2: one dynamic obstacle represented by one LSTM-predicted swept OBB.
+# Static S1 scenes remain in the 1:1 mixture to retain learned layout handling.
+includes:
+  - paper_s1_shape_strong_1_5.yaml
+
+thesis:
+  stage: s2
+  simple_reaching_mode: false
+  blocking_obstacle_mode: true
+  scene_mixture:
+    s0: {none: 1.0}
+    s1: {static: 1.0}
+    s2: {static: 0.5, dynamic: 0.5}
+
+  dynamic_motion:
+    mode: smooth_linear_oscillation
+    half_extents_m: [0.075, 0.075, 0.075]
+
+  dynamic_prediction:
+    enabled: true
+    mode: lstm
+    checkpoint: outputs/prediction/s2_obstacle_lstm_v1/best.pt
+    device: cpu
+    margin_m: 0.005
+    history_sample_hz: 30.0
+    history_length: 10
+    horizon_fractions: [0.3333333333333333, 0.6666666666666666, 1.0]
+    training:
+      output_dir: outputs/prediction/s2_obstacle_lstm_v1
+      train_samples: 100000
+      validation_samples: 10000
+      test_samples: 10000
+      epochs: 60
+      batch_size: 1024
+      learning_rate: 0.001
+      hidden_size: 128
+      num_layers: 2
+      device: cuda
+
+  reward:
+    reference_residual_penalty_weight: 0.0

@@ -9,15 +9,20 @@ robot:
   tool_link_name: wrist_3_link
 
 thesis:
-  protocol: reference_ppo_reaching
   simple_reaching_mode: true
   blocking_obstacle_mode: false
   stage: s0
   physics_dt: 0.004166666666666667
   control_dt: 0.4166666666666667
+  # Bullet/contact detection remains at 240 Hz.  The policy observation and
+  # reward use the exact geometry at the end of each 2.4 Hz control action;
+  # avoid recomputing unused intermediate diagnostic geometry.
+  obstacle_geometry_check_interval_substeps: 100
   horizon: 100
   action_mode: joint_delta
   action_limit_rad: 3.14
+  # Frozen S0 actor output scale. S1/S2 residual output is unscaled and the
+  # two policy means are added directly without a policy-action clip.
   joint_delta_limit_rad: 0.25
   joint_target_margin_rad: 0.02
   joint_limit_tolerance_rad: 0.001
@@ -25,10 +30,28 @@ thesis:
   success_hold_steps: 1
   ee_linear_velocity_scale: 0.55
   ee_angular_velocity_scale: 1.5
-  joint_motor_force: 90.0
-  obstacle_radius: 0.075
+  # S1-A starts with one fixed 0.15 m cube.  Position and horizontal
+  # orientation remain randomized; size/aspect-ratio randomization is deferred
+  # until basic single-obstacle avoidance has been learned.
+  obstacle_half_extents_min_m: [0.075, 0.075, 0.075]
+  obstacle_half_extents_max_m: [0.075, 0.075, 0.075]
   obstacle_speed: 0.1
+  dynamic_motion:
+    mode: smooth_linear_oscillation
+    half_extents_m: [0.075, 0.075, 0.075]
+  dynamic_prediction:
+    enabled: false
+    mode: lstm
+    checkpoint: null
+    device: cpu
+    margin_m: 0.005
+    history_sample_hz: 30.0
+    history_length: 10
+    horizon_fractions: [0.3333333333333333, 0.6666666666666666, 1.0]
   d_safe: 0.05
+  # Disabled for the residual-regularization-only ablation. Contact keeps the
+  # reference PPO nonterminal semantics in every stage.
+  terminate_on_collision: false
   position_tolerance: 0.01
   orientation_tolerance: 0.1
   goal_sample_max_attempts: 10000
@@ -55,39 +78,55 @@ thesis:
     approach_velocity_scale: 0.7
     ttc_tau_s: 1.0
 
-  self_safety_projection:
-    enabled: false
-    activation_distance_m: 0.05
-    gain: 5.0
-    fd_epsilon: 0.001
-    max_iterations: 16
-    eps: 1.0e-08
-    violation_tolerance: 1.0e-06
-
-  joint_pose_curriculum:
-    task_space_sampling:
-      balanced_bins: false
-      position_bins: 10
-      orientation_bins: 10
-      reset_max_attempts: 32
-
   reward:
     reward_mode: reference_ppo
     reference_obstacle_threshold_m: 0.08
-    reference_collision_penalty: 10.0
+    reference_obstacle_clearance_weight: 1.0
+    reference_obstacle_collision_penalty: 20.0
+    reference_self_collision_penalty: 10.0
+    reference_environment_collision_penalty: 10.0
+    # Near-goal residual regularization derived from the S1 failure traces.
+    # It does not gate, rescale, or clip actions. Residual authority remains
+    # unrestricted outside 30 mm and whenever obstacle clearance is <= 80 mm.
+    reference_residual_penalty_weight: 50.0
+    reference_residual_penalty_goal_start_m: 0.03
+    reference_residual_penalty_goal_full_m: 0.02
+    reference_residual_penalty_clearance_start_m: 0.08
+    reference_residual_penalty_clearance_full_m: 0.12
 
   observation:
     reference_point_offset_m: 0.001
+    obstacle_set:
+      max_obstacles: 8
+      embedding_dim: 32
+      output_dim: 32
+
+  static_obstacle_count_probabilities: {1: 1.0}
+  static_obstacle_layout_probabilities: {legacy_blocking: 1.0}
+  path_offset_min_m: 0.03
+  path_offset_max_m: 0.15
+  obstacle_surface_clearance_min_m: 0.05
+  structured_offset_min_m: 0.06
+  structured_offset_max_m: 0.14
+
+  scene_mixture:
+    s0: {none: 1.0}
+    # Empty obstacle sets bypass the residual actor exactly, so S1 does not
+    # spend on-policy samples relearning the already frozen S0 behavior.
+    s1: {static: 1.0}
+    # S2 still rehearses S1 static avoidance while learning dynamic avoidance.
+    s2: {static: 0.375, dynamic: 0.625}
 
 train:
-  cpu_affinity: false
+  cpu_affinity: true
+  # Two physical cores from each Threadripper NUMA node; no SMT siblings.
+  cpu_ids: [0, 6, 12, 18, 1, 7, 13, 19]
   total_steps: 1500000
-  max_stage_steps: 1500000
   num_envs: 8
+  rollout_length: 512
   save_interval: 25000
-  progress_interval: 1000
-  log_flush_interval: 100
   update_log_interval: 10
+  stage_transfer_action_std: 0.03
   output_dir: outputs/ppo
 
 ppo:
@@ -101,6 +140,9 @@ ppo:
   entropy_coef: 0.01
   value_coef: 1.0
   normalize_advantage: true
+  # Only the rare normalized-advantage tails are capped; ordinary samples are
+  # unchanged. This prevents joint-limit failure clusters dominating S1 PPO.
+  advantage_clip: 5.0
   max_grad_norm: null
   target_kl: null
   max_abs_log_ratio: 20.0
@@ -116,4 +158,8 @@ ppo:
   actor_std_lr_ema_decay: 0.95
   actor_lr_min: 1.0e-5
   adaptive_kl_lr: false
+  kl_lr_decrease_factor: 0.5
+  kl_lr_increase_factor: 1.05
+  kl_lr_low_threshold: 0.01
+  kl_lr_low_patience: 10
   hidden_dims: [256, 256]

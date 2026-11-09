@@ -20,6 +20,7 @@ from torch.distributions import Normal, kl_divergence
 
 from rl_risk_sac.algorithms.thesis_ppo import PPONumericalError, ThesisPPOAgent, _cpu_copy
 from rl_risk_sac.envs.parallel_thesis_env import ParallelThesisEnvPool
+from rl_risk_sac.tasks.reference_reaching import REFERENCE_PPO_OBSERVATION_DIM
 from rl_risk_sac.utils.config import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -103,7 +104,7 @@ def initial_gradient_probe(agent, batch, shuffle_seed):
     old = torch.as_tensor(batch["logp"], device=agent.device)[idx]
     advantages = torch.as_tensor(batch["advantages"], device=agent.device)
     normalized = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
-    parameters = list(agent.actor.parameters()) + [agent.actor_log_std]
+    parameters = agent._actor_parameters()
 
     def gradient(loss):
         gradients = torch.autograd.grad(loss, parameters, allow_unused=True)
@@ -133,7 +134,11 @@ def distribution_and_value(agent, batch):
     obs = torch.as_tensor(batch["obs"], device=agent.device)
     scale = torch.as_tensor(batch["std_scale"], device=agent.device)
     dist = agent._dist(obs)
-    return dist.mean.clone(), (dist.stddev*scale).clone(), agent.value(obs).squeeze(-1).clone()
+    return (
+        dist.mean.clone(),
+        (dist.stddev * scale).clone(),
+        agent._value_output(obs).squeeze(-1).clone(),
+    )
 
 
 def paired_update(config, state, batch, normalize, clip, shuffle_seed, directory):
@@ -146,8 +151,10 @@ def paired_update(config, state, batch, normalize, clip, shuffle_seed, directory
     agent.max_grad_norm = clip if clip is not None else float("inf")
     seed_all(shuffle_seed)
     before_mean, before_std, before_values = distribution_and_value(agent, batch)
-    actors = list(agent.actor.parameters()) + [agent.actor_log_std]
-    critics = list(agent.value.parameters())
+    actors = agent._actor_parameters()
+    critics = list(agent.value.parameters()) + list(
+        agent.value_obstacle_encoder.parameters()
+    )
     before_actor = flat_parameters(actors).clone()
     before_critic = flat_parameters(critics).clone()
     gradient_records = {"actor": [], "critic": []}
@@ -226,7 +233,7 @@ def main():
         config["thesis"].update(simple_reaching_mode=True, blocking_obstacle_mode=False, stage="s0")
         config["thesis"]["reward"]["reward_mode"] = "reference_ppo"
         config["ppo"].update(epochs=10, minibatch_size=1024, target_kl=.02)
-        agent = ThesisPPOAgent(31, 6, config)
+        agent = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, config)
         source = "fresh initialization"
         if case == "reference_narrow_std_stress":
             source = "fresh mean/value weights with std forced to .035 rad; stress test, NOT a trained reference checkpoint"

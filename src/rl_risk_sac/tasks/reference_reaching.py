@@ -5,10 +5,26 @@ from dataclasses import dataclass
 import numpy as np
 
 from rl_risk_sac.robots.ur5_capsules import CapsuleState
-from rl_risk_sac.utils.risk import closest_point_on_segment
 
 
-REFERENCE_PPO_OBSERVATION_DIM = 31
+REFERENCE_BASE_OBSERVATION_DIM = 28
+OBSTACLE_FEATURE_DIM = 9
+DEFAULT_MAX_OBSTACLES = 8
+OBSTACLE_CLEARANCE_SCALE_M = 0.20
+
+
+def reference_ppo_observation_dim(
+    max_obstacles: int = DEFAULT_MAX_OBSTACLES,
+) -> int:
+    """Flat transport size for base state, padded obstacle set, and mask."""
+    if max_obstacles < 1:
+        raise ValueError("max_obstacles must be positive")
+    return REFERENCE_BASE_OBSERVATION_DIM + max_obstacles * (
+        OBSTACLE_FEATURE_DIM + 1
+    )
+
+
+REFERENCE_PPO_OBSERVATION_DIM = reference_ppo_observation_dim()
 SELF_DISTANCE_UPPER = 0.25
 
 
@@ -107,8 +123,19 @@ def build_reference_observation(
     position_error: np.ndarray,
     orientation_error: np.ndarray,
     reference_point_offset_m: float = 0.001,
+    obstacle_features: np.ndarray | None = None,
+    obstacle_mask: np.ndarray | None = None,
+    max_obstacles: int = DEFAULT_MAX_OBSTACLES,
 ) -> np.ndarray:
-    """Build the 25-D FTP4RM observation plus signed 6-D pose error."""
+    """Build base state plus a padded, masked obstacle-set transport tensor.
+
+    Each active obstacle row is ``[six capsule clearances, nearest direction]``.
+    The direction is the unit vector from the closest robot-capsule centreline
+    point towards the closest point on that obstacle's OBB.  OBB pose and size
+    remain in the geometry layer and are not exposed to the policy.  Padding is
+    only a batching representation; the PPO network consumes rows through a
+    permutation-invariant set encoder and uses the mask for presence.
+    """
     point_errors = reference_point_errors(
         goal_position,
         goal_quaternion,
@@ -123,9 +150,7 @@ def build_reference_observation(
         ],
         dtype=np.float32,
     )
-    # S0 has no obstacle. Three zero slots are the explicit absence sentinel.
-    obstacle_slots = np.zeros(3, dtype=np.float32)
-    observation = np.concatenate(
+    base_observation = np.concatenate(
         [
             np.asarray(q, dtype=np.float32),
             np.asarray(ee_position, dtype=np.float32),
@@ -133,14 +158,48 @@ def build_reference_observation(
             np.asarray(goal_position, dtype=np.float32),
             np.asarray(goal_quaternion, dtype=np.float32),
             scalar_errors,
-            obstacle_slots,
             np.asarray(position_error, dtype=np.float32),
             np.asarray(orientation_error, dtype=np.float32),
         ]
     ).astype(np.float32)
-    if observation.shape != (REFERENCE_PPO_OBSERVATION_DIM,):
+    if base_observation.shape != (REFERENCE_BASE_OBSERVATION_DIM,):
         raise RuntimeError(
-            f"reference PPO observation must have shape ({REFERENCE_PPO_OBSERVATION_DIM},), "
+            f"reference PPO base observation must have shape "
+            f"({REFERENCE_BASE_OBSERVATION_DIM},), got {base_observation.shape}"
+        )
+    features = np.zeros(
+        (max_obstacles, OBSTACLE_FEATURE_DIM), dtype=np.float32
+    )
+    mask = np.zeros(max_obstacles, dtype=np.float32)
+    if obstacle_features is not None:
+        supplied = np.asarray(obstacle_features, dtype=np.float32)
+        if supplied.ndim != 2 or supplied.shape[1] != OBSTACLE_FEATURE_DIM:
+            raise ValueError(
+                f"obstacle_features must have shape (N, {OBSTACLE_FEATURE_DIM})"
+            )
+        if supplied.shape[0] > max_obstacles:
+            raise ValueError(
+                f"received {supplied.shape[0]} obstacles, maximum is {max_obstacles}"
+            )
+        features[: supplied.shape[0]] = supplied
+        if obstacle_mask is None:
+            mask[: supplied.shape[0]] = 1.0
+        else:
+            supplied_mask = np.asarray(obstacle_mask, dtype=np.float32)
+            if supplied_mask.shape != (supplied.shape[0],):
+                raise ValueError("obstacle_mask must have shape (N,)")
+            if not np.logical_or(supplied_mask == 0.0, supplied_mask == 1.0).all():
+                raise ValueError("obstacle_mask values must be 0 or 1")
+            mask[: supplied.shape[0]] = supplied_mask
+    elif obstacle_mask is not None:
+        raise ValueError("obstacle_mask requires obstacle_features")
+    observation = np.concatenate(
+        [base_observation, features.reshape(-1), mask]
+    ).astype(np.float32)
+    expected_dim = reference_ppo_observation_dim(max_obstacles)
+    if observation.shape != (expected_dim,):
+        raise RuntimeError(
+            f"reference PPO observation must have shape ({expected_dim},), "
             f"got {observation.shape}"
         )
     if not np.isfinite(observation).all():
@@ -151,28 +210,55 @@ def build_reference_observation(
 def reference_ppo_reward(
     *,
     reference_error: float,
-    collision: bool,
+    obstacle_collision: bool = False,
+    self_collision: bool = False,
+    environment_collision: bool = False,
     obstacle_clearances: tuple[float, ...] = (),
     obstacle_threshold: float = 0.08,
-    collision_penalty: float = 1.0,
+    obstacle_clearance_weight: float = 1.0,
+    obstacle_collision_penalty: float = 20.0,
+    self_collision_penalty: float = 10.0,
+    environment_collision_penalty: float = 10.0,
 ) -> tuple[float, dict[str, float]]:
-    """Exact dense reward used by the FTP4RM PPO main experiment."""
+    """Reference reaching reward plus literature-based avoidance penalties.
+
+    ``obstacle_clearances`` contains one minimum clearance for each ordered
+    robot collision capsule.  Signed penetrations are clamped to zero in the
+    proximity term because physical contact is penalized separately.
+    """
     errors = max(float(reference_error), 0.0)
     threshold = float(obstacle_threshold)
     if threshold <= 0.0:
         raise ValueError("reference obstacle threshold must be positive")
+    penalties = (
+        obstacle_clearance_weight,
+        obstacle_collision_penalty,
+        self_collision_penalty,
+        environment_collision_penalty,
+    )
+    if not all(np.isfinite(value) and value >= 0.0 for value in penalties):
+        raise ValueError("reward penalty weights must be finite and non-negative")
     proximity = sum(
-        max(0.0, 1.0 - float(distance) / threshold)
+        max(0.0, 1.0 - max(0.0, float(distance)) / threshold)
         for distance in obstacle_clearances
     )
-    dense_reward = -0.001 * errors**2 - float(np.log(errors**2 + 1.0e-4)) - 0.1 * proximity
-    collision_cost = float(collision_penalty) * float(collision)
-    reward = dense_reward - collision_cost
+    goal_reward = -0.001 * errors**2 - float(np.log(errors**2 + 1.0e-4))
+    clearance_cost = float(obstacle_clearance_weight) * proximity
+    obstacle_collision_cost = float(obstacle_collision_penalty) * float(obstacle_collision)
+    self_collision_cost = float(self_collision_penalty) * float(self_collision)
+    environment_collision_cost = float(environment_collision_penalty) * float(environment_collision)
+    collision_cost = (
+        obstacle_collision_cost + self_collision_cost + environment_collision_cost
+    )
+    reward = goal_reward - clearance_cost - collision_cost
     return float(reward), {
-        "r_goal": float(dense_reward),
+        "r_goal": float(goal_reward),
         "c_proximity": float(proximity),
         "reference_error": float(errors),
-        "reference_obstacle_penalty": float(0.1 * proximity),
+        "reference_obstacle_penalty": float(clearance_cost),
+        "reference_obstacle_collision_penalty": obstacle_collision_cost,
+        "reference_self_collision_penalty": self_collision_cost,
+        "reference_environment_collision_penalty": environment_collision_cost,
         "reference_collision_penalty": collision_cost,
         "hard_penalty": 0.0,
         "safety_penalty": 0.0,
@@ -185,10 +271,71 @@ def reference_ppo_reward(
     }
 
 
+def residual_action_penalty(
+    residual_action: np.ndarray,
+    goal_distance: float,
+    obstacle_clearance: float,
+    *,
+    penalty_weight: float = 50.0,
+    goal_start_m: float = 0.03,
+    goal_full_m: float = 0.02,
+    clearance_start_m: float = 0.08,
+    clearance_full_m: float = 0.12,
+) -> tuple[float, float]:
+    """Penalize residual action only near a safely reachable goal.
+
+    The goal weight rises smoothly from zero at ``goal_start_m`` to one at
+    ``goal_full_m``.  The clearance weight independently rises from zero to
+    one between ``clearance_start_m`` and ``clearance_full_m``.  Their product
+    preserves full residual authority while the robot is still detouring or
+    while any link remains inside the obstacle-avoidance working distance.
+    """
+    action = np.asarray(residual_action, dtype=np.float64)
+    values = (
+        float(goal_distance), float(obstacle_clearance), float(penalty_weight),
+        float(goal_start_m), float(goal_full_m),
+        float(clearance_start_m), float(clearance_full_m),
+    )
+    if action.ndim != 1 or not np.isfinite(action).all():
+        raise ValueError("residual_action must be a finite vector")
+    if not all(np.isfinite(value) for value in values):
+        raise ValueError("residual penalty parameters must be finite")
+    if penalty_weight < 0.0:
+        raise ValueError("residual penalty weight must be non-negative")
+    if goal_full_m < 0.0 or goal_start_m <= goal_full_m:
+        raise ValueError(
+            "goal residual penalty distances must satisfy 0 <= full < start"
+        )
+    if clearance_start_m < 0.0 or clearance_full_m <= clearance_start_m:
+        raise ValueError(
+            "clearance residual penalty distances must satisfy 0 <= start < full"
+        )
+
+    goal_phase = float(np.clip(
+        (goal_start_m - goal_distance) / (goal_start_m - goal_full_m),
+        0.0,
+        1.0,
+    ))
+    clearance_phase = float(np.clip(
+        (obstacle_clearance - clearance_start_m)
+        / (clearance_full_m - clearance_start_m),
+        0.0,
+        1.0,
+    ))
+    goal_weight = goal_phase * goal_phase * (3.0 - 2.0 * goal_phase)
+    clearance_weight = (
+        clearance_phase * clearance_phase * (3.0 - 2.0 * clearance_phase)
+    )
+    combined_weight = float(goal_weight * clearance_weight)
+    penalty = float(penalty_weight * combined_weight * np.dot(action, action))
+    return penalty, combined_weight
+
+
 @dataclass(frozen=True)
 class ThesisGeometry:
     relative_vectors: np.ndarray
     distances: np.ndarray
+    nearest_direction: np.ndarray
     ttc: np.ndarray
     approach_velocities: np.ndarray
     risk_per_link: np.ndarray
@@ -293,54 +440,175 @@ def compute_self_collision_geometry(
     )
 
 
+def closest_points_segment_obb(
+    start: np.ndarray,
+    end: np.ndarray,
+    box_center: np.ndarray,
+    box_half_extents: np.ndarray,
+    box_rotation: np.ndarray,
+    *,
+    eps: float = 1.0e-10,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
+    """Return closest segment/OBB points, direction, distance, and segment fraction.
+
+    The segment is transformed into the OBB frame.  Squared distance to an
+    axis-aligned box is a convex piecewise quadratic in the segment fraction;
+    its breakpoints occur when a segment coordinate crosses a box face.  We
+    minimize each interval exactly instead of approximating the link by samples.
+    """
+    start = np.asarray(start, dtype=np.float64)
+    end = np.asarray(end, dtype=np.float64)
+    center = np.asarray(box_center, dtype=np.float64)
+    half = np.asarray(box_half_extents, dtype=np.float64)
+    rotation = np.asarray(box_rotation, dtype=np.float64)
+    if start.shape != (3,) or end.shape != (3,) or center.shape != (3,):
+        raise ValueError("segment and OBB points must have shape (3,)")
+    if half.shape != (3,) or not np.isfinite(half).all() or np.any(half <= 0.0):
+        raise ValueError("OBB half extents must contain three positive finite values")
+    if rotation.shape != (3, 3) or not np.isfinite(rotation).all():
+        raise ValueError("OBB rotation must have shape (3, 3) and be finite")
+
+    local_start = rotation.T @ (start - center)
+    local_end = rotation.T @ (end - center)
+    delta = local_end - local_start
+    breakpoints = [0.0, 1.0]
+    for axis in range(3):
+        if abs(float(delta[axis])) <= eps:
+            continue
+        for face in (-half[axis], half[axis]):
+            fraction = float((face - local_start[axis]) / delta[axis])
+            if 0.0 < fraction < 1.0:
+                breakpoints.append(fraction)
+    breakpoints = sorted(set(breakpoints))
+
+    def evaluate(fraction: float) -> tuple[float, np.ndarray, np.ndarray]:
+        segment_point = local_start + fraction * delta
+        box_point = np.clip(segment_point, -half, half)
+        squared = float(np.dot(segment_point - box_point, segment_point - box_point))
+        return squared, segment_point, box_point
+
+    candidates = set(breakpoints)
+    for lower, upper in zip(breakpoints[:-1], breakpoints[1:], strict=True):
+        midpoint = 0.5 * (lower + upper)
+        point = local_start + midpoint * delta
+        active = np.logical_or(point < -half, point > half)
+        if not np.any(active):
+            candidates.add(midpoint)
+            continue
+        target = np.where(point < -half, -half, half)
+        denom = float(np.dot(delta[active], delta[active]))
+        if denom > eps:
+            numerator = float(
+                np.dot(delta[active], local_start[active] - target[active])
+            )
+            candidates.add(float(np.clip(-numerator / denom, lower, upper)))
+
+    best_fraction = 0.0
+    best_squared = float("inf")
+    best_segment_local = local_start.copy()
+    best_box_local = np.clip(local_start, -half, half)
+    for fraction in sorted(candidates):
+        squared, segment_local, box_local = evaluate(float(fraction))
+        if squared < best_squared:
+            best_squared = squared
+            best_fraction = float(fraction)
+            best_segment_local = segment_local
+            best_box_local = box_local
+
+    centerline_distance = float(np.sqrt(max(best_squared, 0.0)))
+    if centerline_distance > eps:
+        normal_local = (best_box_local - best_segment_local) / centerline_distance
+    else:
+        # The capsule centreline intersects the OBB.  The nearest-face normal
+        # remains well defined for learning even though the closest points
+        # coincide and the geometric separation is zero.
+        margins = half - np.abs(best_segment_local)
+        axis = int(np.argmin(margins))
+        normal_local = np.zeros(3, dtype=np.float64)
+        normal_local[axis] = 1.0 if best_segment_local[axis] >= 0.0 else -1.0
+        best_box_local = best_segment_local.copy()
+        best_box_local[axis] = normal_local[axis] * half[axis]
+
+    segment_world = center + rotation @ best_segment_local
+    box_world = center + rotation @ best_box_local
+    normal_world = rotation @ normal_local
+    normal_world /= max(float(np.linalg.norm(normal_world)), eps)
+    return (
+        segment_world.astype(np.float32),
+        box_world.astype(np.float32),
+        normal_world.astype(np.float32),
+        centerline_distance,
+        best_fraction,
+    )
+
+
 def compute_thesis_geometry(
     capsules: list[CapsuleState],
     obstacle_position: np.ndarray,
     obstacle_velocity: np.ndarray,
     closest_point_velocities: np.ndarray,
     *,
-    obstacle_radius: float = 0.075,
+    obstacle_half_extents: np.ndarray,
+    obstacle_rotation: np.ndarray,
     d_safe: float = 0.05,
     ttc_max: float = 3.0,
-    eps_norm: float = 1.0e-8,
     eps_v: float = 1.0e-4,
 ) -> ThesisGeometry:
-    relative, distances, ttc_values, approaches, risks = [], [], [], [], []
+    relative, directions, distances = [], [], []
+    ttc_values, approaches, risks = [], [], []
     obstacle_position = np.asarray(obstacle_position, dtype=np.float32)
     obstacle_velocity = np.asarray(obstacle_velocity, dtype=np.float32)
     for index, capsule in enumerate(capsules):
-        closest, _ = closest_point_on_segment(obstacle_position, capsule.start, capsule.end)
-        vector = obstacle_position - closest
-        norm = float(np.linalg.norm(vector))
-        distance = norm - float(capsule.radius) - obstacle_radius
-        if norm <= eps_norm:
-            approach, ttc = 0.0, 0.0
+        closest, obstacle_closest, normal, centerline_distance, _ = (
+            closest_points_segment_obb(
+                capsule.start,
+                capsule.end,
+                obstacle_position,
+                obstacle_half_extents,
+                obstacle_rotation,
+            )
+        )
+        vector = obstacle_closest - closest
+        distance = centerline_distance - float(capsule.radius)
+        distance_rate = float(
+            np.dot(normal, obstacle_velocity - closest_point_velocities[index])
+        )
+        approach = max(-distance_rate, 0.0)
+        if distance <= d_safe:
+            ttc = 0.0
+        elif approach > eps_v:
+            ttc = (distance - d_safe) / approach
         else:
-            normal = vector / norm
-            distance_rate = float(np.dot(normal, obstacle_velocity - closest_point_velocities[index]))
-            approach = max(-distance_rate, 0.0)
-            if distance <= d_safe:
-                ttc = 0.0
-            elif approach > eps_v:
-                ttc = (distance - d_safe) / approach
-            else:
-                ttc = ttc_max
+            ttc = ttc_max
         ttc_clipped = float(np.clip(ttc, 0.0, ttc_max))
-        risk_distance = float(np.clip(np.exp(-(distance - d_safe) / 0.12), 0.0, 1.0))
+        risk_distance = float(
+            np.clip(np.exp(-(distance - d_safe) / 0.12), 0.0, 1.0)
+        )
         risk_velocity = float(np.clip(approach / 0.7, 0.0, 1.0))
         risk_ttc = float(np.exp(-ttc_clipped))
-        risk = float(np.clip(0.5 * risk_distance + 0.2 * risk_velocity + 0.3 * risk_ttc, 0.0, 1.0))
+        risk = float(
+            np.clip(
+                0.5 * risk_distance + 0.2 * risk_velocity + 0.3 * risk_ttc,
+                0.0,
+                1.0,
+            )
+        )
         relative.append(vector)
+        directions.append(normal)
         distances.append(distance)
         ttc_values.append(ttc_clipped)
         approaches.append(approach)
         risks.append(risk)
+    distances_array = np.asarray(distances, dtype=np.float32)
+    directions_array = np.asarray(directions, dtype=np.float32)
+    closest_link = int(np.argmin(distances_array))
     return ThesisGeometry(
         relative_vectors=np.asarray(relative, dtype=np.float32),
-        distances=np.asarray(distances, dtype=np.float32),
+        distances=distances_array,
+        nearest_direction=directions_array[closest_link].copy(),
         ttc=np.asarray(ttc_values, dtype=np.float32),
         approach_velocities=np.asarray(approaches, dtype=np.float32),
         risk_per_link=np.asarray(risks, dtype=np.float32),
         risk_max=float(np.max(risks)),
-        distance_min=float(np.min(distances)),
+        distance_min=float(distances_array[closest_link]),
     )
