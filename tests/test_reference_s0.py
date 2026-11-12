@@ -15,6 +15,7 @@ from rl_risk_sac.algorithms.thesis_ppo import ThesisPPOAgent
 from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import (
     ThesisHomotopyEnv,
 )
+from rl_risk_sac.envs.joint_motion_controller import BoundedJointMotionController
 from rl_risk_sac.envs.thesis_obstacles import _swept_obb_envelope
 from rl_risk_sac.envs.thesis_static_obstacles import ObstacleSamplingError
 from rl_risk_sac.prediction.obstacle_lstm import CHECKPOINT_FORMAT, ObstacleMotionLSTM
@@ -27,6 +28,8 @@ from rl_risk_sac.tasks.reference_reaching import (
     closest_points_segment_obb,
     reference_ppo_reward,
     residual_action_penalty,
+    compose_base_residual_action,
+    residual_handoff_authority,
 )
 from rl_risk_sac.utils.config import load_config
 
@@ -64,6 +67,7 @@ class ReferenceS0Tests(unittest.TestCase):
         np.testing.assert_allclose(
             observation[25:28], info["orientation_error_vector"], atol=1.0e-7
         )
+        np.testing.assert_array_equal(observation[28:34], 0.0)
         np.testing.assert_allclose(
             np.linalg.norm(observation[22:25]), info["goal_error_norm"], atol=1.0e-7
         )
@@ -93,6 +97,64 @@ class ReferenceS0Tests(unittest.TestCase):
         )
         np.testing.assert_allclose(info["policy_joint_delta"], delta, atol=1.0e-7)
         np.testing.assert_allclose(info["target_joint_positions"], expected, atol=1.0e-7)
+        # The restored reference-PPO route intentionally uses Bullet
+        # POSITION_CONTROL and therefore does not apply the bounded CB31
+        # bounded velocity controller.
+        self.assertFalse(self.env.bounded_joint_motion_enabled)
+        self.assertEqual(info["executed_substeps"], 100)
+        np.testing.assert_array_equal(info["commanded_joint_velocity"], 0.0)
+        self.assertEqual(info["joint_velocity_limiter_fraction"], 0.0)
+        self.assertEqual(info["joint_acceleration_limiter_fraction"], 0.0)
+        self.assertEqual(info["tcp_velocity_limiter_fraction"], 0.0)
+        self.assertLess(
+            float(np.max(np.abs(info["commanded_joint_delta"]))),
+            float(np.max(np.abs(delta))),
+        )
+
+    def test_motion_controller_accelerates_and_stops_without_overshoot(self):
+        controller = BoundedJointMotionController(
+            joint_velocity_limits=np.full(6, 0.25),
+            joint_acceleration_limits=np.full(6, 0.5),
+            position_gain=4.0,
+            position_tolerance=5.0e-4,
+        )
+        q = np.zeros(6)
+        goal = np.full(6, 0.1)
+        previous = np.zeros(6)
+        for _ in range(500):
+            command = controller.command(q, goal, 1.0 / 240.0)
+            self.assertTrue(np.all(np.abs(command.velocity) <= 0.25 + 1.0e-12))
+            self.assertTrue(np.all(
+                np.abs(command.velocity - previous) <= 0.5 / 240.0 + 1.0e-7
+            ))
+            q = q + command.velocity / 240.0
+            previous = command.velocity
+        self.assertTrue(np.all(q <= goal + 5.0e-4))
+        self.assertTrue(np.all(np.abs(goal - q) <= 5.0e-4))
+
+    def test_cb31_scheduler_updates_at_125hz_and_holds_at_240hz(self):
+        config = load_config(
+            ROOT / "configs/experiments/paper_s0_cb31_10deg_horizon150.yaml"
+        )
+        config["device"] = "cpu"
+        config["device_selection"]["print_summary"] = False
+        env = ThesisHomotopyEnv(config)
+        try:
+            env.configure_episode("none")
+            env.reset(seed=11001)
+            _, _, _, _, _, info = env.step(
+                np.full(6, 0.02, dtype=np.float32)
+            )
+            self.assertEqual(info["executed_substeps"], 96)
+            self.assertEqual(info["controller_updates"], 50)
+            self.assertEqual(info["controller_updates_expected"], 50)
+            self.assertAlmostEqual(info["real_control_frequency_hz"], 125.0)
+            self.assertAlmostEqual(info["physics_frequency_hz"], 240.0)
+            self.assertLessEqual(
+                info["joint_speed_peak_rad_s"], np.deg2rad(10.0) + 2.0e-3
+            )
+        finally:
+            env.close()
 
     def test_static_obstacle_uses_six_clearances_and_nearest_direction(self):
         self.env.configure_episode("static")
@@ -214,7 +276,7 @@ class ReferenceS0Tests(unittest.TestCase):
                 "model_state_dict": model.state_dict(),
                 "history_length": 10,
                 "history_hz": 30.0,
-                "horizon_times_s": [100.0 / 720.0, 100.0 / 360.0, 100.0 / 240.0],
+                "horizon_times_s": [0.4 / 3.0, 0.8 / 3.0, 0.4],
                 "input_scale": [1.0] * 7,
                 "output_scale": 1.0,
             }, checkpoint)
@@ -341,6 +403,51 @@ class ReferenceS0Tests(unittest.TestCase):
         self.assertFalse(any(p.grad is not None for p in agent.actor.parameters()))
         self.assertGreater(float(agent.residual_actor[-1].bias.grad.norm()), 0.0)
 
+    def test_s0_base_override_preserves_avoidance_modules(self):
+        s0_config = deepcopy(self.config)
+        s0_config["thesis"]["stage"] = "s0"
+        s0_agent = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, s0_config)
+        with torch.no_grad():
+            for parameter in s0_agent.actor.parameters():
+                parameter.fill_(0.0123)
+
+        s2_config = deepcopy(self.config)
+        s2_config["thesis"]["stage"] = "s2"
+        s2_agent = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, s2_config)
+        residual_before = {
+            key: value.detach().clone()
+            for key, value in s2_agent.residual_actor.state_dict().items()
+        }
+        encoder_before = {
+            key: value.detach().clone()
+            for key, value in s2_agent.actor_obstacle_encoder.state_dict().items()
+        }
+        value_before = {
+            key: value.detach().clone()
+            for key, value in s2_agent.value.state_dict().items()
+        }
+
+        s2_agent.replace_base_actor_from_s0_checkpoint(s0_agent.state_dict())
+
+        for key, value in s0_agent.actor.state_dict().items():
+            torch.testing.assert_close(s2_agent.actor.state_dict()[key], value)
+        for key, value in residual_before.items():
+            torch.testing.assert_close(
+                s2_agent.residual_actor.state_dict()[key], value
+            )
+        for key, value in encoder_before.items():
+            torch.testing.assert_close(
+                s2_agent.actor_obstacle_encoder.state_dict()[key], value
+            )
+        for key, value in value_before.items():
+            torch.testing.assert_close(s2_agent.value.state_dict()[key], value)
+        self.assertFalse(any(
+            parameter.requires_grad for parameter in s2_agent.actor.parameters()
+        ))
+
+        with self.assertRaisesRegex(ValueError, "S0 checkpoint"):
+            s2_agent.replace_base_actor_from_s0_checkpoint(s2_agent.state_dict())
+
     def test_residual_has_no_clearance_gate_or_output_saturation(self):
         config = deepcopy(self.config)
         config["thesis"]["stage"] = "s1"
@@ -360,13 +467,14 @@ class ReferenceS0Tests(unittest.TestCase):
         torch.testing.assert_close(residual, torch.full_like(residual, 1.25))
         torch.testing.assert_close(mean, base + residual)
 
-    def test_blocking_static_obstacle_intersects_nominal_joint_path(self):
+    def test_blocking_static_obstacle_intersects_nominal_tcp_path(self):
         self.env.simple_reaching_mode = False
         self.env.blocking_obstacle_mode = True
         self.env.configure_episode("static")
         self.env.reset(seed=11001)
         initial_q, initial_qdot = self.env.robot.joint_state_exact()
-        minimum = float("inf")
+        minimum_robot_clearance = float("inf")
+        minimum_tcp_center_error = float("inf")
         try:
             for fraction in np.linspace(0.20, 0.80, 13):
                 self.env._set_joint_state(
@@ -374,10 +482,20 @@ class ReferenceS0Tests(unittest.TestCase):
                     + float(fraction)
                     * (self.env.goal_joint_positions - initial_q)
                 )
-                minimum = min(minimum, self.env._geometry().distance_min)
+                minimum_robot_clearance = min(
+                    minimum_robot_clearance, self.env._geometry().distance_min
+                )
+                tcp_position, _ = self.env.robot.end_effector_pose()
+                minimum_tcp_center_error = min(
+                    minimum_tcp_center_error,
+                    float(np.linalg.norm(
+                        tcp_position - self.env.obstacle_position
+                    )),
+                )
         finally:
             self.env._set_joint_state(initial_q, initial_qdot)
-        self.assertLessEqual(minimum, 0.0)
+        self.assertLessEqual(minimum_robot_clearance, 0.0)
+        self.assertLessEqual(minimum_tcp_center_error, 1.0e-6)
 
     def test_fast_reset_clearance_matches_full_obstacle_geometry(self):
         self.env.simple_reaching_mode = False
@@ -488,6 +606,43 @@ class ReferenceS0Tests(unittest.TestCase):
         self.assertAlmostEqual(middle_cost, 0.625)
         self.assertAlmostEqual(near_safe_weight, 1.0)
         self.assertAlmostEqual(near_safe_cost, 2.5)
+
+    def test_residual_handoff_requires_both_near_goal_and_safe_clearance(self):
+        self.assertEqual(residual_handoff_authority(0.025, 0.10), 0.0)
+        self.assertEqual(residual_handoff_authority(0.035, 0.10), 1.0)
+        self.assertEqual(residual_handoff_authority(0.025, 0.08), 1.0)
+        self.assertAlmostEqual(
+            residual_handoff_authority(0.030, 0.09), 0.5
+        )
+
+    def test_deployment_action_hands_control_to_base_inside_25_mm(self):
+        base = np.asarray([[0.1, -0.2], [0.3, -0.4]], dtype=np.float32)
+        residual = np.asarray([[0.5, 0.6], [-0.1, 0.2]], dtype=np.float32)
+        action, authority = compose_base_residual_action(
+            base, residual, np.asarray([0.025, 0.025001])
+        )
+        np.testing.assert_allclose(authority, [0.0, 1.0])
+        np.testing.assert_allclose(action[0], base[0])
+        np.testing.assert_allclose(action[1], base[1] + residual[1])
+
+    def test_deployment_agent_uses_shared_handoff_composer(self):
+        config = deepcopy(self.config)
+        config["thesis"]["stage"] = "s1"
+        agent = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, config)
+        observation = np.zeros((2, REFERENCE_PPO_OBSERVATION_DIM), dtype=np.float32)
+        with patch.object(agent, "act") as act:
+            total = np.full((2, 6), 0.3, dtype=np.float32)
+            residual = np.full((2, 6), 0.2, dtype=np.float32)
+            act.return_value = (
+                total, np.zeros(2), np.zeros(2),
+                {"residual_actions": residual},
+            )
+            executed, _logp, _values, policy = agent.act_for_deployment(
+                observation, np.asarray([0.01, 0.10], dtype=np.float32)
+            )
+        np.testing.assert_allclose(executed[0], 0.1)
+        np.testing.assert_allclose(executed[1], 0.3)
+        np.testing.assert_allclose(policy["residual_authority"], [0.0, 1.0])
 
     def test_s1_obstacle_collision_terminates_immediately(self):
         self.env.simple_reaching_mode = False

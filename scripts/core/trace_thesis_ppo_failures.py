@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay selected deterministic S1 episodes and record every policy decision."""
+"""Replay selected deterministic static-scene episodes and record every decision."""
 from __future__ import annotations
 
 import argparse
@@ -30,6 +30,10 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--seeds", type=int, nargs="+", required=True)
     parser.add_argument("--device")
+    parser.add_argument(
+        "--base-only", action="store_true",
+        help="Execute the frozen Base action while still recording the residual proposal.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if len(set(args.seeds)) != len(args.seeds):
@@ -40,10 +44,13 @@ def main() -> None:
     config = deepcopy(payload["config"])
     if args.device:
         config["device"] = args.device
-    config["thesis"]["stage"] = "s1"
+    stage = str(payload.get("stage", config["thesis"].get("stage", ""))).lower()
+    if stage not in {"s1", "s2"}:
+        raise ValueError(f"static obstacle traces require an S1/S2 checkpoint, got {stage!r}")
+    config["thesis"]["stage"] = stage
     config["thesis"]["simple_reaching_mode"] = False
     config["thesis"]["blocking_obstacle_mode"] = True
-    config["thesis"].setdefault("scene_mixture", {})["s1"] = {"static": 1.0}
+    config["thesis"].setdefault("scene_mixture", {})[stage] = {"static": 1.0}
     env = ThesisHomotopyEnv(config)
     agent = ThesisPPOAgent(
         int(env.observation_space.shape[0]), int(env.action_space.shape[0]), config
@@ -66,9 +73,13 @@ def main() -> None:
                 )
                 with torch.no_grad():
                     total, base, residual = agent._policy_components(obs_tensor)
-                action = total[0].cpu().numpy().astype(np.float32)
+                policy_action = total[0].cpu().numpy().astype(np.float32)
                 base_action = base[0].cpu().numpy()
                 residual_action = residual[0].cpu().numpy()
+                action = (
+                    base_action.astype(np.float32, copy=True)
+                    if args.base_only else policy_action
+                )
                 next_observation, reward, _cost, terminated, truncated, info = env.step(action)
                 q_after, qdot_after = env.robot.joint_state_exact()
                 cumulative_return += float(reward)
@@ -98,6 +109,13 @@ def main() -> None:
                         np.linalg.norm(residual_action)
                         / max(np.linalg.norm(base_action), 1.0e-12)
                     ),
+                    "joint_speed_peak_rad_s": float(info["joint_speed_peak_rad_s"]),
+                    "joint_velocity_limiter_fraction": float(
+                        info["joint_velocity_limiter_fraction"]
+                    ),
+                    "joint_acceleration_limiter_fraction": float(
+                        info["joint_acceleration_limiter_fraction"]
+                    ),
                     "terminated": bool(terminated),
                     "truncated": bool(truncated),
                     **vector_fields("goal", goal_position),
@@ -108,7 +126,8 @@ def main() -> None:
                     **vector_fields("qdot_after", qdot_after),
                     **vector_fields("base_action", base_action),
                     **vector_fields("residual_action", residual_action),
-                    **vector_fields("total_action", action),
+                    **vector_fields("policy_total_action", policy_action),
+                    **vector_fields("executed_action", action),
                     **vector_fields("commanded_delta", info["commanded_joint_delta"]),
                     **vector_fields("link_clearance", info["distance_body"]),
                 }

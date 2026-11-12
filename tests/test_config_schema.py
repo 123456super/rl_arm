@@ -16,6 +16,85 @@ def test_resolved_config_contains_only_active_pipeline_sections():
     }
 
 
+def test_restored_reference_ppo_training_contract():
+    config = load_config(
+        ROOT / "configs/experiments/paper_s1_mixed_1_2_3_4_5.yaml"
+    )
+    thesis = config["thesis"]
+    reward = thesis["reward"]
+    assert thesis["control_dt"] == pytest.approx(100.0 / 240.0)
+    assert thesis["horizon"] == 100
+    assert thesis["joint_delta_limit_rad"] == pytest.approx(0.25)
+    assert not thesis["joint_motion_controller"]["enabled"]
+    assert reward["reference_obstacle_threshold_m"] == pytest.approx(0.08)
+    assert reward["reference_obstacle_clearance_weight"] == pytest.approx(1.0)
+    assert reward["reference_obstacle_clearance_power"] == pytest.approx(1.0)
+    assert reward["reference_obstacle_collision_penalty"] == pytest.approx(20.0)
+    assert reward["reference_self_collision_penalty"] == pytest.approx(10.0)
+    assert reward["reference_environment_collision_penalty"] == pytest.approx(10.0)
+    assert reward["reference_residual_penalty_weight"] == pytest.approx(0.0)
+    assert config["train"]["num_envs"] == 8
+    assert config["train"]["rollout_length"] == 512
+    assert config["ppo"]["action_std_init"] == pytest.approx(0.08)
+
+
+def test_cb31_10deg_training_contract_is_self_consistent():
+    config = load_config(
+        ROOT / "configs/experiments/paper_s0_cb31_10deg_horizon150.yaml"
+    )
+    thesis = config["thesis"]
+    motion = thesis["joint_motion_controller"]
+    assert motion["enabled"]
+    assert motion["joint_velocity_limits_rad_s"] == pytest.approx(
+        [0.17453292519943295] * 6
+    )
+    assert motion["joint_acceleration_limits_rad_s2"] == pytest.approx(
+        [0.3490658503988659] * 6
+    )
+    assert thesis["joint_delta_limit_rad"] == pytest.approx(
+        0.17453292519943295 * thesis["control_dt"]
+    )
+    assert thesis["qdot_observation_scale"] == pytest.approx(
+        0.17453292519943295
+    )
+    assert thesis["horizon"] == 150
+    assert motion["real_control_frequency_hz"] == pytest.approx(125.0)
+    assert thesis["control_dt"] * motion["real_control_frequency_hz"] == pytest.approx(50.0)
+    assert config["train"]["num_envs"] == 16
+    assert config["train"]["rollout_length"] == 256
+    assert config["train"]["total_steps"] == 1000000
+    assert config["ppo"]["actor_lr"] == pytest.approx(3.0e-5)
+    assert config["ppo"]["critic_lr"] == pytest.approx(1.0e-4)
+    assert thesis["reward"]["reference_self_collision_penalty"] == pytest.approx(10.0)
+
+
+def test_s1_single_obstacle_inherits_10deg_s0_contract():
+    config = load_config(
+        ROOT / "configs/experiments/paper_s1_single_10deg_horizon150.yaml"
+    )
+    thesis = config["thesis"]
+    assert thesis["stage"] == "s1"
+    assert not thesis["simple_reaching_mode"]
+    assert thesis["blocking_obstacle_mode"]
+    assert thesis["static_obstacle_count_probabilities"] == {1: 1.0}
+    assert thesis["static_obstacle_layout_probabilities"] == {
+        "legacy_blocking": 0.5,
+        "workspace_random": 0.5,
+    }
+    assert thesis["scene_sample_max_attempts"] == 64
+    assert thesis["obstacle_surface_clearance_min_m"] == pytest.approx(0.10)
+    assert thesis["scene_mixture"]["s1"] == {"static": 1.0}
+    assert thesis["joint_motion_controller"]["enabled"]
+    assert thesis["joint_motion_controller"]["joint_velocity_limits_rad_s"] == pytest.approx(
+        [0.17453292519943295] * 6
+    )
+    assert thesis["joint_delta_limit_rad"] == pytest.approx(
+        0.17453292519943295 * thesis["control_dt"]
+    )
+    assert thesis["horizon"] == 150
+    assert thesis["reward"]["reference_residual_penalty_weight"] == 0.0
+
+
 def test_obsolete_top_level_section_is_rejected():
     config = load_config(ROOT / "configs/experiments/paper_full.yaml")
     invalid = deepcopy(config)

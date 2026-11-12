@@ -39,6 +39,7 @@ def compute_step_reward(
         obstacle_clearances=tuple(float(value) for value in obstacle_clearances),
         obstacle_threshold=parameters["reference_obstacle_threshold"],
         obstacle_clearance_weight=parameters["reference_obstacle_clearance_weight"],
+        obstacle_clearance_power=parameters["reference_obstacle_clearance_power"],
         obstacle_collision_penalty=parameters["reference_obstacle_collision_penalty"],
         self_collision_penalty=parameters["reference_self_collision_penalty"],
         environment_collision_penalty=parameters[

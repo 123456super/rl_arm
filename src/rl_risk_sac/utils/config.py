@@ -74,6 +74,7 @@ def validate_config(config: dict[str, Any]) -> None:
         ("thesis", "horizon"), ("thesis", "action_mode"),
         ("thesis", "action_limit_rad"), ("thesis", "joint_delta_limit_rad"),
         ("thesis", "reference_ppo"), ("thesis", "reward"),
+        ("thesis", "joint_motion_controller"),
         ("thesis", "observation", "obstacle_set"), ("thesis", "scene_mixture"),
         ("thesis", "simple_reaching_mode"), ("thesis", "blocking_obstacle_mode"),
         ("thesis", "stage"), ("thesis", "terminate_on_collision"),
@@ -153,6 +154,67 @@ def validate_config(config: dict[str, Any]) -> None:
     ratio = control_dt / physics_dt
     if not np.isclose(ratio, round(ratio), rtol=0.0, atol=1.0e-6):
         raise ValueError("thesis.control_dt must be an integer multiple of physics_dt")
+    motion = thesis["joint_motion_controller"]
+    required_motion_fields = {
+        "robot_generation", "real_control_frequency_hz",
+        "joint_velocity_limits_rad_s", "joint_acceleration_limits_rad_s2",
+        "position_gain_s_inv", "position_tolerance_rad",
+    }
+    missing_motion_fields = required_motion_fields - set(motion)
+    if missing_motion_fields:
+        raise KeyError(
+            "missing thesis.joint_motion_controller fields: "
+            f"{sorted(missing_motion_fields)}"
+        )
+    bounded_motion_enabled = bool(motion.get("enabled", True))
+    if str(motion["robot_generation"]) != "ur5_cb3_1":
+        raise ValueError("joint motion controller must target ur5_cb3_1")
+    real_frequency = _positive(
+        motion["real_control_frequency_hz"],
+        "joint_motion_controller.real_control_frequency_hz",
+    )
+    if bounded_motion_enabled:
+        if not np.isclose(real_frequency, 125.0, rtol=0.0, atol=1.0e-9):
+            raise ValueError("UR5 CB3.1 real control frequency must be 125 Hz")
+        physics_frequency = 1.0 / physics_dt
+        if real_frequency > physics_frequency + 1.0e-9:
+            raise ValueError(
+                "real controller frequency cannot exceed the physics frequency"
+            )
+        real_ticks = control_dt * real_frequency
+        if not np.isclose(real_ticks, round(real_ticks), rtol=0.0, atol=1.0e-9):
+            raise ValueError("each policy period must contain an integer CB3.1 control tick count")
+    for field in ("joint_velocity_limits_rad_s", "joint_acceleration_limits_rad_s2"):
+        values = np.asarray(motion[field], dtype=np.float64)
+        if values.shape != (6,) or not np.isfinite(values).all() or np.any(values <= 0.0):
+            raise ValueError(f"joint_motion_controller.{field} must contain six positive values")
+    joint_velocity_limits = np.asarray(
+        motion["joint_velocity_limits_rad_s"], dtype=np.float64
+    )
+    if bounded_motion_enabled and np.any(
+        joint_velocity_limits > np.deg2rad(10.0) + 1.0e-9
+    ):
+        raise ValueError("UR5 training joint speed must not exceed 10 deg/s")
+    for field in (
+        "position_gain_s_inv", "position_tolerance_rad",
+    ):
+        _positive(motion[field], f"joint_motion_controller.{field}")
+    if bounded_motion_enabled:
+        maximum_executable_delta = float(np.min(joint_velocity_limits)) * control_dt
+        if float(thesis["joint_delta_limit_rad"]) > maximum_executable_delta + 1.0e-9:
+            raise ValueError(
+                "joint_delta_limit_rad must fit within one policy period at the "
+                "configured joint speed"
+            )
+        if not np.isclose(
+            float(thesis["qdot_observation_scale"]),
+            float(np.max(joint_velocity_limits)),
+            rtol=0.0,
+            atol=1.0e-9,
+        ):
+            raise ValueError(
+                "qdot_observation_scale must equal the configured joint speed limit"
+            )
     if str(thesis["action_mode"]) != "joint_delta":
         raise ValueError("only thesis.action_mode=joint_delta is supported")
     for name in ("action_limit_rad", "joint_delta_limit_rad", "horizon"):

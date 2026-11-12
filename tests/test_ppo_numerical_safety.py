@@ -108,16 +108,38 @@ class PPONumericalSafetyTests(unittest.TestCase):
         config["device"] = "cpu"
         config["ppo"].update(hidden_dims=[16, 16], actor_std_lr_ema_decay=.95)
         agent = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, config)
+        initial_std = float(config["ppo"]["action_std_init"])
+        learned_std = 0.5 * initial_std
         with torch.no_grad():
-            agent.actor_log_std.fill_(np.log(.04))
+            agent.actor_log_std.fill_(np.log(learned_std))
         agent._update_actor_std_ema()
         actor_lr, critic_lr = agent._apply_learning_rate_schedule(.25)
-        expected_ema = .95 * .08 + .05 * .04
+        expected_ema = .95 * initial_std + .05 * learned_std
         self.assertAlmostEqual(agent.actor_std_ema, expected_ema, places=8)
         self.assertAlmostEqual(
-            actor_lr, 3e-4 * .75 * expected_ema / .08, places=10
+            actor_lr, 3e-4 * .75 * expected_ema / initial_std, places=10
         )
         self.assertAlmostEqual(critic_lr, 3e-4 * .75, places=10)
+
+    def test_resume_budget_extension_cannot_raise_checkpoint_learning_rates(self):
+        config = load_config(ROOT / "configs/experiments/paper_full.yaml")
+        config["device"] = "cpu"
+        config["ppo"]["hidden_dims"] = [16, 16]
+        source = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, config)
+        source._apply_learning_rate_schedule(.70)
+        checkpoint_actor_lr = source.actor_optimizer.param_groups[0]["lr"]
+        checkpoint_critic_lr = source.value_optimizer.param_groups[0]["lr"]
+
+        resumed = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, config)
+        resumed.load_state_dict(source.state_dict())
+        resumed.configure_continuation_schedule()
+        actor_start, critic_start = resumed._apply_learning_rate_schedule(0.0)
+        self.assertLessEqual(actor_start, checkpoint_actor_lr)
+        self.assertLessEqual(critic_start, checkpoint_critic_lr)
+
+        actor_middle, critic_middle = resumed._apply_learning_rate_schedule(.50)
+        self.assertLessEqual(actor_middle, actor_start)
+        self.assertLessEqual(critic_middle, critic_start)
 
     def test_old_checkpoint_initializes_actor_std_ema_from_learned_std(self):
         agent = self.agent()

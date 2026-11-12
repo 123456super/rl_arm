@@ -7,10 +7,20 @@ import numpy as np
 from rl_risk_sac.robots.ur5_capsules import CapsuleState
 
 
-REFERENCE_BASE_OBSERVATION_DIM = 28
+REFERENCE_LEGACY_BASE_OBSERVATION_DIM = 28
+REFERENCE_BASE_OBSERVATION_DIM = 34
 OBSTACLE_FEATURE_DIM = 9
 DEFAULT_MAX_OBSTACLES = 8
 OBSTACLE_CLEARANCE_SCALE_M = 0.20
+
+# Evaluation/deployment handoff defaults.  The Residual keeps full authority
+# outside the near-goal region or whenever any arm capsule remains close to an
+# obstacle.  It relinquishes control to the frozen Base only when both the
+# target is near and the whole arm is clear.
+RESIDUAL_HANDOFF_GOAL_BASE_M = 0.025
+RESIDUAL_HANDOFF_GOAL_FULL_M = 0.035
+RESIDUAL_HANDOFF_CLEARANCE_FULL_M = 0.080
+RESIDUAL_HANDOFF_CLEARANCE_BASE_M = 0.100
 
 
 def reference_ppo_observation_dim(
@@ -122,6 +132,7 @@ def build_reference_observation(
     goal_quaternion: np.ndarray,
     position_error: np.ndarray,
     orientation_error: np.ndarray,
+    normalized_joint_velocity: np.ndarray | None = None,
     reference_point_offset_m: float = 0.001,
     obstacle_features: np.ndarray | None = None,
     obstacle_mask: np.ndarray | None = None,
@@ -150,6 +161,13 @@ def build_reference_observation(
         ],
         dtype=np.float32,
     )
+    normalized_joint_velocity = (
+        np.zeros(6, dtype=np.float32)
+        if normalized_joint_velocity is None
+        else np.asarray(normalized_joint_velocity, dtype=np.float32)
+    )
+    if normalized_joint_velocity.shape != (6,):
+        raise ValueError("normalized_joint_velocity must have shape (6,)")
     base_observation = np.concatenate(
         [
             np.asarray(q, dtype=np.float32),
@@ -160,6 +178,7 @@ def build_reference_observation(
             scalar_errors,
             np.asarray(position_error, dtype=np.float32),
             np.asarray(orientation_error, dtype=np.float32),
+            normalized_joint_velocity,
         ]
     ).astype(np.float32)
     if base_observation.shape != (REFERENCE_BASE_OBSERVATION_DIM,):
@@ -216,6 +235,7 @@ def reference_ppo_reward(
     obstacle_clearances: tuple[float, ...] = (),
     obstacle_threshold: float = 0.08,
     obstacle_clearance_weight: float = 1.0,
+    obstacle_clearance_power: float = 1.0,
     obstacle_collision_penalty: float = 20.0,
     self_collision_penalty: float = 10.0,
     environment_collision_penalty: float = 10.0,
@@ -238,8 +258,14 @@ def reference_ppo_reward(
     )
     if not all(np.isfinite(value) and value >= 0.0 for value in penalties):
         raise ValueError("reward penalty weights must be finite and non-negative")
+    if not np.isfinite(obstacle_clearance_power) or obstacle_clearance_power <= 0.0:
+        raise ValueError("obstacle clearance power must be finite and positive")
+    # The archived 8M S1 policy used the original linear normalized clearance
+    # deficit.  Keep the exponent configurable for explicit ablations, while
+    # retaining 1.0 as the reference-PPO default.
     proximity = sum(
         max(0.0, 1.0 - max(0.0, float(distance)) / threshold)
+        ** obstacle_clearance_power
         for distance in obstacle_clearances
     )
     goal_reward = -0.001 * errors**2 - float(np.log(errors**2 + 1.0e-4))
@@ -329,6 +355,92 @@ def residual_action_penalty(
     combined_weight = float(goal_weight * clearance_weight)
     penalty = float(penalty_weight * combined_weight * np.dot(action, action))
     return penalty, combined_weight
+
+
+def residual_handoff_authority(
+    goal_distance: float,
+    obstacle_clearance: float,
+    *,
+    goal_base_m: float = RESIDUAL_HANDOFF_GOAL_BASE_M,
+    goal_full_m: float = RESIDUAL_HANDOFF_GOAL_FULL_M,
+    clearance_full_m: float = RESIDUAL_HANDOFF_CLEARANCE_FULL_M,
+    clearance_base_m: float = RESIDUAL_HANDOFF_CLEARANCE_BASE_M,
+) -> float:
+    """Return the Residual action authority in ``[0, 1]``.
+
+    Authority is zero only in the near-goal, obstacle-clear region.  Either a
+    distant goal or a nearby obstacle restores Residual authority.  Smoothstep
+    transitions avoid a discontinuous action command at either boundary.
+    """
+    values = (
+        float(goal_distance), float(obstacle_clearance), float(goal_base_m),
+        float(goal_full_m), float(clearance_full_m), float(clearance_base_m),
+    )
+    if not all(np.isfinite(value) for value in values):
+        raise ValueError("residual handoff inputs and thresholds must be finite")
+    if goal_base_m < 0.0 or goal_full_m <= goal_base_m:
+        raise ValueError("goal handoff distances must satisfy 0 <= base < full")
+    if clearance_full_m < 0.0 or clearance_base_m <= clearance_full_m:
+        raise ValueError(
+            "clearance handoff distances must satisfy 0 <= full < base"
+        )
+
+    goal_phase = float(np.clip(
+        (goal_distance - goal_base_m) / (goal_full_m - goal_base_m),
+        0.0,
+        1.0,
+    ))
+    clearance_phase = float(np.clip(
+        (obstacle_clearance - clearance_full_m)
+        / (clearance_base_m - clearance_full_m),
+        0.0,
+        1.0,
+    ))
+    goal_authority = goal_phase * goal_phase * (3.0 - 2.0 * goal_phase)
+    risk_authority = 1.0 - (
+        clearance_phase * clearance_phase * (3.0 - 2.0 * clearance_phase)
+    )
+    return float(max(goal_authority, risk_authority))
+
+
+def compose_base_residual_action(
+    base_action: np.ndarray,
+    residual_action: np.ndarray,
+    goal_distance: float | np.ndarray,
+    *,
+    residual_cutoff_position_m: float | None = RESIDUAL_HANDOFF_GOAL_BASE_M,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compose the final inference action with the 25 mm Base handoff.
+
+    This is the authoritative action-composition rule for evaluation,
+    visualization, and robot deployment.  Training deliberately continues to
+    optimize the original full ``Base + Residual`` policy.  Passing ``None``
+    is reserved for the full-Residual ablation.
+    """
+    base = np.asarray(base_action)
+    residual = np.asarray(residual_action)
+    distance = np.asarray(goal_distance, dtype=np.float64)
+    if base.ndim < 1 or base.shape != residual.shape:
+        raise ValueError("base_action and residual_action must have equal shapes")
+    if not np.isfinite(base).all() or not np.isfinite(residual).all():
+        raise ValueError("base and residual actions must be finite")
+    try:
+        distance = np.broadcast_to(distance, base.shape[:-1])
+    except ValueError as error:
+        raise ValueError(
+            "goal_distance must broadcast to the action batch shape"
+        ) from error
+    if not np.isfinite(distance).all() or np.any(distance < 0.0):
+        raise ValueError("goal_distance must be finite and non-negative")
+    if residual_cutoff_position_m is None:
+        authority = np.ones(base.shape[:-1], dtype=np.float32)
+    else:
+        cutoff = float(residual_cutoff_position_m)
+        if not np.isfinite(cutoff) or cutoff <= 0.0:
+            raise ValueError("residual cutoff must be finite and positive")
+        authority = (distance > cutoff).astype(np.float32)
+    composed = base + authority[..., None] * residual
+    return composed.astype(base.dtype, copy=False), authority
 
 
 @dataclass(frozen=True)

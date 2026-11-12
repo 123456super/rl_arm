@@ -66,25 +66,29 @@ class StaticObstacleMixin:
             obstacle_count = 1 + static_obstacle_count
         else:
             raise ValueError(f"unsupported obstacle scene {self.contract.scene!r}")
-        layout = (
-            str(self.rng.choice(
+        if (
+            self.contract.scene in {"static", "hybrid"}
+            and self.blocking_obstacle_mode
+        ):
+            layout = self._requested_obstacle_layout or str(self.rng.choice(
                 self.static_obstacle_layouts,
                 p=self.static_obstacle_layout_probabilities,
             ))
-            if self.contract.scene in {"static", "hybrid"}
-            and self.blocking_obstacle_mode
-            else "legacy_blocking"
-        )
+        else:
+            layout = "legacy_blocking"
         self.obstacle_layout = layout
         blocking_candidates: list[np.ndarray] = []
+        secondary_link_candidates: list[np.ndarray] = []
         blocking_candidates_by_state: list[list[np.ndarray]] = []
         if (
             self.contract.scene in {"static", "hybrid"}
             and self.blocking_obstacle_mode
         ):
-            # Build witnesses on the straight joint-space path from reset to
-            # the sampled goal.  An OBB centered on an intermediate capsule
-            # blocks that nominal path while remaining clear of both endpoints.
+            # The target pose has already been converted to an IK-valid goal
+            # configuration.  Interpolate from reset to that configuration,
+            # use FK to trace the tool centre, and place path-critical boxes
+            # only on this nominal end-effector trajectory.  Link capsules are
+            # retained separately for clearance checks and offset layouts.
             initial_q, initial_qdot = self.robot.joint_state_exact()
             path_states: list[list[Any]] = []
             for fraction in np.linspace(0.20, 0.80, 13):
@@ -92,19 +96,22 @@ class StaticObstacleMixin:
                     initial_q + float(fraction) * (self.goal_joint_positions - initial_q)
                 )
                 path_states.append(self.robot.capsules())
+                end_effector_position, _ = self.robot.end_effector_pose()
+                candidate = np.asarray(
+                    end_effector_position, dtype=np.float32
+                ).copy()
+                blocking_candidates.append(candidate)
+                blocking_candidates_by_state.append([candidate])
+                for capsule in path_states[-1]:
+                    secondary_link_candidates.extend((
+                        np.asarray(capsule.start, dtype=np.float32).copy(),
+                        np.asarray(capsule.end, dtype=np.float32).copy(),
+                        np.asarray(
+                            0.5 * (capsule.start + capsule.end),
+                            dtype=np.float32,
+                        ).copy(),
+                    ))
             self._set_joint_state(initial_q, initial_qdot)
-            for capsules in path_states:
-                state_candidates: list[np.ndarray] = []
-                for capsule in capsules:
-                    for candidate in (capsule.start, capsule.end,
-                                      0.5 * (capsule.start + capsule.end)):
-                        candidate = np.asarray(candidate, dtype=np.float32)
-                        # The candidate is a point on this capsule's
-                        # centreline and is also the OBB centre, so that
-                        # capsule necessarily intersects the candidate OBB.
-                        blocking_candidates.append(candidate)
-                        state_candidates.append(candidate)
-                blocking_candidates_by_state.append(state_candidates)
         initial_q, initial_qdot = self.robot.joint_state_exact()
         initial_capsules = self.robot.capsules()
         self._set_joint_state(self.goal_joint_positions)
@@ -131,6 +138,13 @@ class StaticObstacleMixin:
                 blocking_candidates[int(index)].copy()
                 for index in self.rng.permutation(len(blocking_candidates))
             ]
+            secondary_candidates = [
+                secondary_link_candidates[int(index)].copy()
+                for index in self.rng.permutation(
+                    len(secondary_link_candidates)
+                )
+            ]
+            tcp_blocker_placed = False
             # A mixed scene contains one broad-workspace random obstacle and
             # keeps the remaining obstacles path-critical.  The random box is
             # sampled first so later blocking boxes can satisfy set clearance.
@@ -173,9 +187,61 @@ class StaticObstacleMixin:
                 accepted = False
                 for _ in range(500):
                     self.obstacle_sampling_proposals += 1
+                    candidate_is_tcp_blocker = False
                     if not is_dynamic:
-                        if layout == "legacy_blocking" and legacy_candidates:
+                        requires_path_candidate = bool(
+                            self.blocking_obstacle_mode
+                            and (
+                                layout == "legacy_blocking"
+                                or (layout == "mixed" and not mixed_is_random)
+                            )
+                        )
+                        if (
+                            requires_path_candidate
+                            and not tcp_blocker_placed
+                            and legacy_candidates
+                        ):
                             position = legacy_candidates.pop()
+                            candidate_is_tcp_blocker = True
+                        elif (
+                            requires_path_candidate
+                            and not tcp_blocker_placed
+                        ):
+                            # The mandatory TCP blocker could not satisfy the
+                            # endpoint/plane constraints for this box sample.
+                            break
+                        elif requires_path_candidate and secondary_candidates:
+                            # Once the direct TCP route is blocked, additional
+                            # boxes may occupy other link swept volumes. This
+                            # keeps dense 2--5 obstacle scenes geometrically
+                            # feasible without weakening the primary blocker.
+                            position = secondary_candidates.pop()
+                        elif requires_path_candidate:
+                            # The direct route is already blocked. If all
+                            # secondary link-sweep candidates conflict with the
+                            # existing set, use the broad reachable workspace
+                            # for the remaining context obstacles only.
+                            position = np.asarray(
+                                [
+                                    self.rng.uniform(-0.70, 0.78),
+                                    self.rng.uniform(-0.70, 0.70),
+                                    self.rng.uniform(0.18, 0.78),
+                                ],
+                                dtype=np.float32,
+                            )
+                        elif layout == "workspace_random":
+                            # Broad workspace sampling for non-path-critical
+                            # scenes. The common endpoint capsule checks below
+                            # guarantee clearance from both the initial and
+                            # target robot configurations.
+                            position = np.asarray(
+                                [
+                                    self.rng.uniform(-0.70, 0.78),
+                                    self.rng.uniform(-0.70, 0.70),
+                                    self.rng.uniform(0.18, 0.78),
+                                ],
+                                dtype=np.float32,
+                            )
                         elif layout == "path_offset":
                             position = np.asarray(
                                 [
@@ -185,12 +251,6 @@ class StaticObstacleMixin:
                                 ],
                                 dtype=np.float32,
                             )
-                        elif (
-                            layout == "mixed"
-                            and not mixed_is_random
-                            and legacy_candidates
-                        ):
-                            position = legacy_candidates.pop()
                         elif (
                             layout == "structured"
                             and blocking_candidates_by_state
@@ -336,7 +396,7 @@ class StaticObstacleMixin:
                         query_half_extents,
                         quaternion,
                     )
-                    if initial_distance < self.d_safe:
+                    if initial_distance < self.obstacle_surface_clearance_min:
                         continue
                     goal_distance = self._minimum_obstacle_clearance_for(
                         goal_capsules,
@@ -344,7 +404,7 @@ class StaticObstacleMixin:
                         query_half_extents,
                         quaternion,
                     )
-                    if goal_distance < self.d_safe:
+                    if goal_distance < self.obstacle_surface_clearance_min:
                         continue
                     if (
                         layout == "path_offset"
@@ -357,7 +417,10 @@ class StaticObstacleMixin:
                         ) <= self.path_offset_max
                     ):
                         continue
-                    if initial_distance >= self.d_safe and goal_distance >= self.d_safe:
+                    if (
+                        initial_distance >= self.obstacle_surface_clearance_min
+                        and goal_distance >= self.obstacle_surface_clearance_min
+                    ):
                         positions.append(position.copy())
                         velocities.append(velocity.copy())
                         half_extents_all.append(half_extents.copy())
@@ -365,6 +428,8 @@ class StaticObstacleMixin:
                         sampling_positions.append(query_position.copy())
                         sampling_half_extents.append(query_half_extents.copy())
                         dynamic_mask.append(is_dynamic)
+                        if candidate_is_tcp_blocker:
+                            tcp_blocker_placed = True
                         if is_dynamic:
                             motion_centers.append(motion_center.copy())
                             motion_directions.append(motion_direction.copy())

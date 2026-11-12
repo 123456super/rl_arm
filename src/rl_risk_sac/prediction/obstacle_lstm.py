@@ -170,9 +170,20 @@ def load_lstm_predictor(
             f"LSTM history frequency mismatch: checkpoint={history_hz}, "
             f"environment={expected_history_hz}"
         )
-    if horizon_times.shape != expected_times.shape or not np.allclose(
-        horizon_times, expected_times, rtol=0.0, atol=1.0e-6
-    ):
+    exact_horizons = (
+        horizon_times.shape == expected_times.shape
+        and np.allclose(horizon_times, expected_times, rtol=0.0, atol=1.0e-6)
+    )
+    # A predictor reaching slightly beyond the next policy decision remains a
+    # conservative swept-volume estimate.  This preserves the validated 2.4 Hz
+    # model after moving the CB3.1 actuator contract to 2.5 Hz.  Shorter or
+    # materially different horizons are rejected.
+    conservative_compatible = (
+        horizon_times.shape == expected_times.shape
+        and np.all(horizon_times >= expected_times - 1.0e-6)
+        and np.all(horizon_times <= expected_times * 1.05 + 1.0e-6)
+    )
+    if not exact_horizons and not conservative_compatible:
         raise ValueError(
             "LSTM prediction horizons do not match the environment control period"
         )

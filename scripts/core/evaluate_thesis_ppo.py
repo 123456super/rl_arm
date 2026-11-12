@@ -15,7 +15,14 @@ import torch
 
 from rl_risk_sac.algorithms.thesis_ppo import ThesisPPOAgent
 from rl_risk_sac.envs.parallel_thesis_env import ParallelThesisEnvPool
-from rl_risk_sac.tasks.reference_reaching import residual_action_penalty
+from rl_risk_sac.tasks.reference_reaching import (
+    RESIDUAL_HANDOFF_CLEARANCE_BASE_M,
+    RESIDUAL_HANDOFF_CLEARANCE_FULL_M,
+    RESIDUAL_HANDOFF_GOAL_BASE_M,
+    RESIDUAL_HANDOFF_GOAL_FULL_M,
+    residual_action_penalty,
+    residual_handoff_authority,
+)
 from rl_risk_sac.utils.config import deep_update, load_config
 
 
@@ -68,6 +75,16 @@ def new_stats(info: dict) -> dict[str, object]:
         "action_abs_max": 0.0,
         "residual_penalty_sum": 0.0,
         "executed_substeps_min": 10**9,
+        "joint_speed_peak_rad_s": 0.0,
+        "joint_acceleration_peak_rad_s2": 0.0,
+        "tcp_linear_speed_peak_m_s": 0.0,
+        "tcp_angular_speed_peak_rad_s": 0.0,
+        "joint_velocity_limiter_fraction_sum": 0.0,
+        "joint_acceleration_limiter_fraction_sum": 0.0,
+        "tcp_velocity_limiter_fraction_sum": 0.0,
+        "residual_disabled_steps": 0,
+        "residual_partial_steps": 0,
+        "residual_authority_sum": 0.0,
     }
 
 
@@ -146,10 +163,41 @@ def main() -> None:
         default="mixture",
     )
     parser.add_argument("--device")
+    parser.add_argument(
+        "--residual-handoff-mode",
+        choices=("full", "cutoff25", "smooth"),
+        default="cutoff25",
+        help=(
+            "Residual control rule: full authority, hard position cutoff, or "
+            "the smooth goal-distance plus whole-arm-clearance handoff."
+        ),
+    )
+    parser.add_argument(
+        "--residual-cutoff-position-m",
+        type=float,
+        default=0.025,
+        help=(
+            "Evaluation-only handoff to the frozen Base action whenever the "
+            "current end-effector position error is at or below this distance "
+            "(default: 0.025 m)."
+        ),
+    )
+    parser.add_argument(
+        "--no-residual-cutoff",
+        action="store_const",
+        const="full",
+        dest="residual_handoff_mode",
+        help="Disable the default 25 mm residual cutoff for an ablation run.",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.episodes < 1 or args.num_envs < 1:
         parser.error("episodes and num-envs must be positive")
+    if (
+        args.residual_cutoff_position_m is not None
+        and args.residual_cutoff_position_m <= 0.0
+    ):
+        parser.error("residual-cutoff-position-m must be positive")
 
     checkpoint = args.checkpoint.resolve()
     payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
@@ -212,11 +260,18 @@ def main() -> None:
         "obstacle_count", "obstacle_layout", "reference_error",
         "next_rho_position", "next_rho_orientation", "timeout",
         "termination_reason", "d_min", "goal_error_norm", "executed_substeps",
+        "joint_speed_peak_rad_s", "joint_acceleration_peak_rad_s2",
+        "tcp_linear_speed_peak_m_s", "tcp_angular_speed_peak_rad_s",
+        "joint_velocity_limiter_fraction",
+        "joint_acceleration_limiter_fraction",
+        "tcp_velocity_limiter_fraction",
     )
     rows: list[dict[str, object]] = []
     next_episode_id = 0
     active_episode_ids: dict[int, int] = {}
     observations = np.zeros((args.num_envs, obs_dim), dtype=np.float32)
+    current_position_errors = np.full(args.num_envs, np.inf, dtype=np.float32)
+    current_obstacle_clearances = np.full(args.num_envs, np.inf, dtype=np.float32)
     stats: dict[int, dict[str, object]] = {}
     reward_config = config["thesis"]["reward"]
     started = perf_counter()
@@ -234,14 +289,47 @@ def main() -> None:
         resets = pool.reset_many(requests, seeds=reset_seeds)
         for worker, (observation, info) in resets.items():
             observations[worker] = observation
+            current_position_errors[worker] = float(info["goal_error_norm"])
+            current_obstacle_clearances[worker] = float(info["d_min"])
             stats[worker] = new_stats(info)
 
         while len(rows) < args.episodes:
             workers = tuple(active_episode_ids)
             batch_observations = observations[list(workers)]
-            actions, _logp, _values, policy = agent.act(
-                batch_observations, deterministic=True
+            if args.residual_handoff_mode == "cutoff25":
+                actions, _logp, _values, policy = agent.act_for_deployment(
+                    batch_observations,
+                    current_position_errors[list(workers)],
+                    residual_cutoff_position_m=args.residual_cutoff_position_m,
+                )
+                residual_authority = policy["residual_authority"]
+            else:
+                actions, _logp, _values, policy = agent.act(
+                    batch_observations, deterministic=True
+                )
+            if args.residual_handoff_mode == "full":
+                residual_authority = np.ones(len(workers), dtype=np.float32)
+            elif args.residual_handoff_mode == "smooth":
+                residual_authority = np.asarray([
+                    residual_handoff_authority(
+                        current_position_errors[worker],
+                        current_obstacle_clearances[worker],
+                    )
+                    for worker in workers
+                ], dtype=np.float32)
+            residual_disabled = residual_authority <= 1.0e-7
+            residual_partial = (
+                (residual_authority > 1.0e-7)
+                & (residual_authority < 1.0 - 1.0e-7)
             )
+            if args.residual_handoff_mode != "cutoff25":
+                # Full and smooth are research ablations.  The deployment
+                # contract above already composed the hard-cutoff actions.
+                actions = actions.copy()
+                actions -= (
+                    (1.0 - residual_authority[:, None])
+                    * policy["residual_actions"]
+                )
             results = pool.step_many({
                 worker: actions[index] for index, worker in enumerate(workers)
             })
@@ -250,6 +338,8 @@ def main() -> None:
             for index, worker in enumerate(workers):
                 observation, reward, _cost, terminated, truncated, info = results[worker]
                 observations[worker] = observation
+                current_position_errors[worker] = float(info["goal_error_norm"])
+                current_obstacle_clearances[worker] = float(info["d_min"])
                 residual_penalty, _ = residual_action_penalty(
                     policy["residual_actions"][index],
                     float(info["goal_error_norm"]),
@@ -264,12 +354,37 @@ def main() -> None:
                 stat = stats[worker]
                 stat["return"] = float(stat["return"]) + adjusted_reward
                 stat["length"] = int(stat["length"]) + 1
+                stat["residual_disabled_steps"] = (
+                    int(stat["residual_disabled_steps"])
+                    + int(residual_disabled[index])
+                )
+                stat["residual_partial_steps"] = (
+                    int(stat["residual_partial_steps"])
+                    + int(residual_partial[index])
+                )
+                stat["residual_authority_sum"] = (
+                    float(stat["residual_authority_sum"])
+                    + float(residual_authority[index])
+                )
                 stat["residual_penalty_sum"] = (
                     float(stat["residual_penalty_sum"]) + residual_penalty
                 )
                 stat["executed_substeps_min"] = min(
                     int(stat["executed_substeps_min"]), int(info["executed_substeps"])
                 )
+                for key in (
+                    "joint_speed_peak_rad_s",
+                    "joint_acceleration_peak_rad_s2",
+                    "tcp_linear_speed_peak_m_s",
+                    "tcp_angular_speed_peak_rad_s",
+                ):
+                    stat[key] = max(float(stat[key]), float(info[key]))
+                for key in (
+                    "joint_velocity_limiter_fraction",
+                    "joint_acceleration_limiter_fraction",
+                    "tcp_velocity_limiter_fraction",
+                ):
+                    stat[f"{key}_sum"] = float(stat[f"{key}_sum"]) + float(info[key])
                 for key in (
                     "collision", "obstacle_collision", "self_collision",
                     "environment_collision", "joint_limit", "success",
@@ -295,6 +410,24 @@ def main() -> None:
                 )
                 if terminated or truncated:
                     episode_id = active_episode_ids.pop(worker)
+                    for key in (
+                        "joint_velocity_limiter_fraction",
+                        "joint_acceleration_limiter_fraction",
+                        "tcp_velocity_limiter_fraction",
+                    ):
+                        stat[key] = float(stat.pop(f"{key}_sum")) / int(stat["length"])
+                    stat["residual_disabled_fraction"] = (
+                        int(stat.pop("residual_disabled_steps"))
+                        / int(stat["length"])
+                    )
+                    stat["residual_partial_fraction"] = (
+                        int(stat.pop("residual_partial_steps"))
+                        / int(stat["length"])
+                    )
+                    stat["residual_authority_mean"] = (
+                        float(stat.pop("residual_authority_sum"))
+                        / int(stat["length"])
+                    )
                     rows.append({
                         "episode": episode_id + 1,
                         "seed": args.seed + episode_id,
@@ -317,6 +450,8 @@ def main() -> None:
                 resets = pool.reset_many(reset_requests, seeds=reset_seeds)
                 for worker, (observation, info) in resets.items():
                     observations[worker] = observation
+                    current_position_errors[worker] = float(info["goal_error_norm"])
+                    current_obstacle_clearances[worker] = float(info["d_min"])
                     stats[worker] = new_stats(info)
 
     rows.sort(key=lambda row: int(row["episode"]))
@@ -327,6 +462,13 @@ def main() -> None:
         "final_position_m", "final_orientation_rad", "final_reference_error",
         "mean_abs_action", "action_abs_max", "residual_penalty_sum",
         "executed_substeps_min",
+        "joint_speed_peak_rad_s", "joint_acceleration_peak_rad_s2",
+        "tcp_linear_speed_peak_m_s", "tcp_angular_speed_peak_rad_s",
+        "joint_velocity_limiter_fraction",
+        "joint_acceleration_limiter_fraction",
+        "tcp_velocity_limiter_fraction",
+        "residual_disabled_fraction",
+        "residual_partial_fraction", "residual_authority_mean",
     )
     report = {
         "kind": "deterministic_thesis_ppo_evaluation",
@@ -337,6 +479,14 @@ def main() -> None:
         "seed_base": args.seed,
         "checkpoint": str(checkpoint),
         "checkpoint_step": int(payload.get("global_step", payload.get("step", 0))),
+        "residual_handoff_mode": args.residual_handoff_mode,
+        "residual_cutoff_position_m": args.residual_cutoff_position_m,
+        "residual_handoff_thresholds_m": {
+            "goal_base": RESIDUAL_HANDOFF_GOAL_BASE_M,
+            "goal_full": RESIDUAL_HANDOFF_GOAL_FULL_M,
+            "clearance_full": RESIDUAL_HANDOFF_CLEARANCE_FULL_M,
+            "clearance_base": RESIDUAL_HANDOFF_CLEARANCE_BASE_M,
+        },
         "scene_mixture": config["thesis"]["scene_mixture"][stage],
         "metrics": {
             name: metric([float(row[name]) for row in rows])

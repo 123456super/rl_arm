@@ -107,6 +107,13 @@ def episode_stats(info):
         "self_collision_penalty_sum": 0.0,
         "residual_penalty_sum": 0.0,
         "joint_limit_violation_max_rad": 0.0,
+        "joint_speed_peak_rad_s": 0.0,
+        "joint_acceleration_peak_rad_s2": 0.0,
+        "tcp_linear_speed_peak_m_s": 0.0,
+        "tcp_angular_speed_peak_rad_s": 0.0,
+        "joint_velocity_limiter_fraction_sum": 0.0,
+        "joint_acceleration_limiter_fraction_sum": 0.0,
+        "tcp_velocity_limiter_fraction_sum": 0.0,
     }
 
 
@@ -161,6 +168,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--base-actor-checkpoint",
+        help=(
+            "After stage initialization, replace only the frozen Base Actor "
+            "with the Actor from this S0 checkpoint. Residual, encoders, "
+            "value function, exploration state, and optimizers are unchanged."
+        ),
+    )
+    parser.add_argument(
         "--initial-action-std", type=float,
         help="Gaussian action standard deviation used for fresh stage initialization.",
     )
@@ -185,6 +200,10 @@ def main() -> None:
         parser.error(
             "--resume and --initialize-from-stage-checkpoint are mutually exclusive"
         )
+    if args.base_actor_checkpoint and not args.initialize_from_stage_checkpoint:
+        parser.error(
+            "--base-actor-checkpoint requires --initialize-from-stage-checkpoint"
+        )
     if args.initial_action_std is not None and args.initial_action_std <= 0.0:
         parser.error("--initial-action-std must be positive")
     if args.actor_lr is not None and args.actor_lr <= 0.0:
@@ -198,6 +217,8 @@ def main() -> None:
 
     config = load_config(ROOT / args.config)
     args.stage = str(config["thesis"]["stage"]) if args.stage is None else args.stage
+    if args.base_actor_checkpoint and args.stage == "s0":
+        parser.error("--base-actor-checkpoint is only valid for S1/S2 training")
     args.steps = int(config["train"]["total_steps"]) if args.steps is None else args.steps
     args.seed = int(config["seed"]) if args.seed is None else args.seed
     args.output_dir = str(config["train"]["output_dir"]) if args.output_dir is None else args.output_dir
@@ -238,6 +259,7 @@ def main() -> None:
     if args.resume:
         resume_payload = torch.load(args.resume, map_location=agent.device, weights_only=False)
         agent.load_state_dict(resume_payload["agent"] if "agent" in resume_payload else resume_payload)
+        resumed_actor_lr, resumed_critic_lr = agent.configure_continuation_schedule()
         if args.initial_global_step is not None:
             initial_global_step = args.initial_global_step
         elif isinstance(resume_payload, dict):
@@ -257,6 +279,17 @@ def main() -> None:
         agent.initialize_from_stage_checkpoint(
             initialization_state, action_std=args.initial_action_std
         )
+    if args.base_actor_checkpoint:
+        base_actor_payload = torch.load(
+            args.base_actor_checkpoint,
+            map_location=agent.device,
+            weights_only=False,
+        )
+        base_actor_state = (
+            base_actor_payload["agent"]
+            if "agent" in base_actor_payload else base_actor_payload
+        )
+        agent.replace_base_actor_from_s0_checkpoint(base_actor_state)
     if initial_global_step < 0:
         parser.error("initial global step must be non-negative")
     global_target_steps = initial_global_step + args.steps
@@ -266,6 +299,8 @@ def main() -> None:
         initial_global_step=initial_global_step,
         num_envs=args.num_envs,
         rollout_length=args.rollout_length,
+        initialization_checkpoint=args.initialize_from_stage_checkpoint,
+        base_actor_checkpoint=args.base_actor_checkpoint,
     )
     output.mkdir(parents=True, exist_ok=False)
     (output / "checkpoints").mkdir()
@@ -306,6 +341,13 @@ def main() -> None:
             "goal_error_norm",
             "obstacle_count",
             "obstacle_layout",
+            "joint_speed_peak_rad_s",
+            "joint_acceleration_peak_rad_s2",
+            "tcp_linear_speed_peak_m_s",
+            "tcp_angular_speed_peak_rad_s",
+            "joint_velocity_limiter_fraction",
+            "joint_acceleration_limiter_fraction",
+            "tcp_velocity_limiter_fraction",
         ),
     )
     if resume_payload is not None and "random_state" in resume_payload:
@@ -326,7 +368,7 @@ def main() -> None:
     if resume_payload:
         recent.extend(resume_payload.get("recent_episodes", []))
     episodes_csv = (output / "episodes.csv").open("w", newline="", encoding="utf-8")
-    fields = ["episode", "step", "run_step", "scene", "obstacle_count", "dynamic_obstacle_count", "static_obstacle_count", "obstacle_layout", "return", "length", "success", "collision", "obstacle_collision", "self_collision", "environment_collision", "terminal_collision", "timeout", "joint_limit", "termination_reason", "best_position_m", "best_orientation_rad", "best_reference_error", "final_position_m", "final_orientation_rad", "final_reference_error", "max_hold", "action_abs_mean", "action_abs_max", "dense_reward_sum", "terminal_reward_sum", "self_collision_penalty_sum", "residual_penalty_sum", "joint_limit_violation_max_rad"]
+    fields = ["episode", "step", "run_step", "scene", "obstacle_count", "dynamic_obstacle_count", "static_obstacle_count", "obstacle_layout", "return", "length", "success", "collision", "obstacle_collision", "self_collision", "environment_collision", "terminal_collision", "timeout", "joint_limit", "termination_reason", "best_position_m", "best_orientation_rad", "best_reference_error", "final_position_m", "final_orientation_rad", "final_reference_error", "max_hold", "action_abs_mean", "action_abs_max", "dense_reward_sum", "terminal_reward_sum", "self_collision_penalty_sum", "residual_penalty_sum", "joint_limit_violation_max_rad", "joint_speed_peak_rad_s", "joint_acceleration_peak_rad_s2", "tcp_linear_speed_peak_m_s", "tcp_angular_speed_peak_rad_s", "joint_velocity_limiter_fraction", "joint_acceleration_limiter_fraction", "tcp_velocity_limiter_fraction"]
     writer = csv.DictWriter(episodes_csv, fieldnames=fields)
     writer.writeheader()
     updates_file = (output / "updates.jsonl").open("w", encoding="utf-8")
@@ -338,7 +380,10 @@ def main() -> None:
           f"max_grad_norm={agent.max_grad_norm} "
           f"target_kl={agent.target_kl} kl_stop={kl_stop} "
           f"max_abs_log_ratio={agent.max_abs_log_ratio} "
-          f"global_steps={initial_global_step}->{global_target_steps}", flush=True)
+          f"global_steps={initial_global_step}->{global_target_steps} "
+          f"continuation_lr_anchor=("
+          f"{agent._continuation_actor_lr_start if agent.continuation_schedule_active else None},"
+          f"{agent._continuation_critic_lr_start if agent.continuation_schedule_active else None})", flush=True)
 
     def save_checkpoint():
         agent.validate_training_state()
@@ -439,9 +484,28 @@ def main() -> None:
                     stat["residual_penalty_sum"] += residual_penalty
                     stat["terminal_reward_sum" if dones[i] else "dense_reward_sum"] += reward - self_penalty
                     stat["joint_limit_violation_max_rad"] = max(stat["joint_limit_violation_max_rad"], info.get("joint_limit_violation_max_rad", 0.0))
+                    for key in (
+                        "joint_speed_peak_rad_s",
+                        "joint_acceleration_peak_rad_s2",
+                        "tcp_linear_speed_peak_m_s",
+                        "tcp_angular_speed_peak_rad_s",
+                    ):
+                        stat[key] = max(stat[key], float(info.get(key, 0.0)))
+                    for key in (
+                        "joint_velocity_limiter_fraction",
+                        "joint_acceleration_limiter_fraction",
+                        "tcp_velocity_limiter_fraction",
+                    ):
+                        stat[f"{key}_sum"] += float(info.get(key, 0.0))
                     if dones[i]:
                         episodes += 1
                         stat["action_abs_mean"] /= stat["length"]
+                        for key in (
+                            "joint_velocity_limiter_fraction",
+                            "joint_acceleration_limiter_fraction",
+                            "tcp_velocity_limiter_fraction",
+                        ):
+                            stat[key] = stat.pop(f"{key}_sum") / stat["length"]
                         run_step = completed_steps + args.num_envs
                         episode_success = bool(stat["success"])
                         horizon_after_success = bool(
@@ -478,11 +542,17 @@ def main() -> None:
             # The reference implementation applies its linear schedule after
             # an update.  Scheduling this update from the rollout's starting
             # step is equivalent and preserves the full initial learning rate.
-            rollout_start_step = initial_global_step + completed_steps - len(batch["obs"])
+            rollout_start_run_step = completed_steps - len(batch["obs"])
+            rollout_start_step = initial_global_step + rollout_start_run_step
+            schedule_progress = (
+                rollout_start_run_step / max(1.0, float(args.steps))
+                if agent.continuation_schedule_active
+                else rollout_start_step / max(1.0, float(global_target_steps))
+            )
             update_started = time.perf_counter()
             metrics = agent.update(
                 batch,
-                progress=rollout_start_step / max(1.0, float(global_target_steps)),
+                progress=schedule_progress,
                 diagnostic_dir=output / "diagnostics",
                 diagnostic_context={"step": initial_global_step + completed_steps,
                                     "run_step": completed_steps, "update": update + 1,

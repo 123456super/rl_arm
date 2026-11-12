@@ -14,15 +14,13 @@ thesis:
   stage: s0
   physics_dt: 0.004166666666666667
   control_dt: 0.4166666666666667
-  # Bullet/contact detection remains at 240 Hz.  The policy observation and
-  # reward use the exact geometry at the end of each 2.4 Hz control action;
-  # avoid recomputing unused intermediate diagnostic geometry.
+  # Restored legacy reference-PPO semantics: one policy decision drives 100
+  # Bullet steps at 240 Hz (2.4 Hz policy frequency).
   obstacle_geometry_check_interval_substeps: 100
   horizon: 100
   action_mode: joint_delta
   action_limit_rad: 3.14
-  # Frozen S0 actor output scale. S1/S2 residual output is unscaled and the
-  # two policy means are added directly without a policy-action clip.
+  # Exact action scale used by the archived 8M S1 checkpoint.
   joint_delta_limit_rad: 0.25
   joint_target_margin_rad: 0.02
   joint_limit_tolerance_rad: 0.001
@@ -75,6 +73,19 @@ thesis:
       height_m: 0.0
       ignored_link_names: [base_link, base_link_inertia]
 
+  # The archived 8M model used Bullet POSITION_CONTROL directly.  Keep the
+  # bounded controller parameters available for later real-robot experiments,
+  # but disable that newer execution route for the restored training line.
+  joint_motion_controller:
+    enabled: false
+    robot_generation: ur5_cb3_1
+    real_control_frequency_hz: 125.0
+    # 10 deg/s joint speed; acceleration reaches that speed in 0.5 s.
+    joint_velocity_limits_rad_s: [0.17453292519943295, 0.17453292519943295, 0.17453292519943295, 0.17453292519943295, 0.17453292519943295, 0.17453292519943295]
+    joint_acceleration_limits_rad_s2: [0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659]
+    position_gain_s_inv: 4.0
+    position_tolerance_rad: 0.0005
+
   self_collision:
     safe_distance_m: 0.005
     query_distance_m: 0.25
@@ -86,13 +97,12 @@ thesis:
     reward_mode: reference_ppo
     reference_obstacle_threshold_m: 0.08
     reference_obstacle_clearance_weight: 1.0
+    # Power 1.0 is the original linear clearance hinge.
+    reference_obstacle_clearance_power: 1.0
     reference_obstacle_collision_penalty: 20.0
     reference_self_collision_penalty: 10.0
     reference_environment_collision_penalty: 10.0
-    # Near-goal residual regularization derived from the S1 failure traces.
-    # It does not gate, rescale, or clip actions. Residual authority remains
-    # unrestricted outside 30 mm and whenever obstacle clearance is <= 80 mm.
-    reference_residual_penalty_weight: 50.0
+    reference_residual_penalty_weight: 0.0
     reference_residual_penalty_goal_start_m: 0.03
     reference_residual_penalty_goal_full_m: 0.02
     reference_residual_penalty_clearance_start_m: 0.08
@@ -126,12 +136,10 @@ thesis:
 
 train:
   cpu_affinity: true
-  # Four physical cores from each Threadripper NUMA node; no SMT siblings.
-  # 16 x 256 preserves the previous 4096-transition PPO update batch.
-  cpu_ids: [0, 6, 12, 18, 1, 7, 13, 19, 2, 8, 14, 20, 3, 9, 15, 21]
+  cpu_ids: [0, 6, 12, 18, 1, 7, 13, 19]
   total_steps: 1500000
-  num_envs: 16
-  rollout_length: 256
+  num_envs: 8
+  rollout_length: 512
   save_interval: 25000
   update_log_interval: 10
   stage_transfer_action_std: 0.03
@@ -154,8 +162,6 @@ ppo:
   max_grad_norm: null
   target_kl: null
   max_abs_log_ratio: 20.0
-  # 0.08 / 0.25 preserves approximately the same initial normalized
-  # exploration scale as 1.0 / 3.14 in the former absolute-angle policy.
   action_std_init: 0.08
   lr_decay: true
   actor_lr_final: 0.0

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+import time
+from typing import Any, Callable
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -10,6 +11,7 @@ import numpy as np
 import pybullet as p
 
 from rl_risk_sac.envs.thesis_goal_sampling import GoalSamplingMixin
+from rl_risk_sac.envs.joint_motion_controller import BoundedJointMotionController
 from rl_risk_sac.envs.thesis_dynamic_obstacles import DynamicObstacleMixin
 from rl_risk_sac.envs.thesis_static_obstacles import (
     ObstacleSamplingError,
@@ -56,6 +58,12 @@ class ThesisHomotopyEnv(
         if render_mode not in {None, "human", "rgb_array"}:
             raise ValueError("render_mode must be None, 'human', or 'rgb_array'")
         self.render_mode = render_mode
+        # Visualization-only wall-clock pacing.  Normal training/evaluation
+        # leaves this at zero, so it cannot change simulation semantics or
+        # throughput.  Human replay may set it to physics_dt / playback_speed
+        # to make all 240 Hz substeps visible in the PyBullet GUI.
+        self._visualization_substep_delay_s = 0.0
+        self._visualization_input_callback: Callable[[], None] | None = None
         self.config = config
         self.runtime = RuntimeConfig.from_mapping(config)
         thesis = config["thesis"]
@@ -71,12 +79,8 @@ class ThesisHomotopyEnv(
         self.physics_dt = float(thesis["physics_dt"])
         self.control_dt = float(thesis["control_dt"])
         self.substeps = int(round(self.control_dt / self.physics_dt))
-        if self.substeps != 100 or not np.isclose(
-            self.substeps * self.physics_dt, self.control_dt
-        ):
-            raise ValueError(
-                "thesis protocol requires 100 physics substeps per control period"
-            )
+        if not np.isclose(self.substeps * self.physics_dt, self.control_dt):
+            raise ValueError("control_dt must be an integer multiple of physics_dt")
         self.obstacle_geometry_check_interval = int(
             thesis["obstacle_geometry_check_interval_substeps"]
         )
@@ -124,6 +128,27 @@ class ThesisHomotopyEnv(
         self.motor_forces = np.asarray(configured_motor_forces, dtype=np.float64)
         if self.motor_forces.shape != (6,) or np.any(self.motor_forces <= 0.0):
             raise ValueError("reference_ppo.motor_forces must contain six positive values")
+        motion = thesis["joint_motion_controller"]
+        self.bounded_joint_motion_enabled = bool(motion.get("enabled", True))
+        self.real_control_frequency_hz = float(motion["real_control_frequency_hz"])
+        self.real_control_dt = 1.0 / self.real_control_frequency_hz
+        self.controller_updates_per_policy_step = int(round(
+            self.control_dt * self.real_control_frequency_hz
+        ))
+        self.motion_controller = (
+            BoundedJointMotionController(
+                joint_velocity_limits=np.asarray(
+                    motion["joint_velocity_limits_rad_s"], dtype=np.float64
+                ),
+                joint_acceleration_limits=np.asarray(
+                    motion["joint_acceleration_limits_rad_s2"], dtype=np.float64
+                ),
+                position_gain=float(motion["position_gain_s_inv"]),
+                position_tolerance=float(motion["position_tolerance_rad"]),
+            )
+            if self.bounded_joint_motion_enabled
+            else None
+        )
         plane_settings = reference_settings["mounting_plane"]
         self.mounting_plane_enabled = bool(plane_settings["enabled"])
         self.mounting_plane_height = float(plane_settings["height_m"])
@@ -262,6 +287,12 @@ class ThesisHomotopyEnv(
                 expected_horizon_times=self.dynamic_prediction_times,
                 device=str(dynamic_prediction["device"]),
             )
+            # Use the checkpoint's exact timestamps in the swept-volume
+            # metadata.  A legacy horizon may extend at most 5% beyond the
+            # 0.4 s action period and is therefore conservative.
+            self.dynamic_prediction_times = (
+                self.dynamic_predictor.horizon_times.copy()
+            )
         self.blocking_obstacle_mode = bool(thesis["blocking_obstacle_mode"])
         self.d_safe = float(thesis["d_safe"])
         self_collision_config = thesis["self_collision"]
@@ -287,6 +318,9 @@ class ThesisHomotopyEnv(
             "reference_obstacle_clearance_weight": float(
                 reward["reference_obstacle_clearance_weight"]
             ),
+            "reference_obstacle_clearance_power": float(
+                reward["reference_obstacle_clearance_power"]
+            ),
             "reference_obstacle_collision_penalty": float(
                 reward["reference_obstacle_collision_penalty"]
             ),
@@ -300,6 +334,8 @@ class ThesisHomotopyEnv(
         for name, value in self.reward_parameters.items():
             if not np.isfinite(value) or value < 0.0:
                 raise ValueError(f"{name} must be finite and non-negative")
+        if self.reward_parameters["reference_obstacle_clearance_power"] <= 0.0:
+            raise ValueError("reference_obstacle_clearance_power must be positive")
         self.goal_sample_max_attempts = int(thesis["goal_sample_max_attempts"])
         if self.goal_sample_max_attempts < 1:
             raise ValueError("goal_sample_max_attempts must be positive")
@@ -374,6 +410,8 @@ class ThesisHomotopyEnv(
         self.step_count = 0
         self.success_hold_count = 0
         self.obstacle_contact_seen = False
+        if self.motion_controller is not None:
+            self.motion_controller.reset()
         self.previous_rho_position = 0.0
         self.previous_rho_orientation = 0.0
         observation_config = thesis["observation"]
@@ -427,7 +465,8 @@ class ThesisHomotopyEnv(
                 "dynamic obstacle"
             )
         allowed_layouts = {
-            "legacy_blocking", "path_offset", "mixed", "structured",
+            "legacy_blocking", "workspace_random", "path_offset", "mixed",
+            "structured",
         }
         raw_layout_probabilities = thesis["static_obstacle_layout_probabilities"]
         if not isinstance(raw_layout_probabilities, dict) or not raw_layout_probabilities:
@@ -483,6 +522,11 @@ class ThesisHomotopyEnv(
         ):
             raise ValueError("invalid static obstacle layout distance settings")
         self.obstacle_layout = "none"
+        # Reset selects one requested layout per episode. It remains fixed
+        # while infeasible goals are rejected, so accepted episodes preserve
+        # the configured layout mixture instead of biasing toward layouts
+        # that are easier to sample.
+        self._requested_obstacle_layout: str | None = None
         if self.reference_point_offset_m <= 0.0:
             raise ValueError("observation.reference_point_offset_m must be positive")
         self._link_name_to_id: dict[str, int] = {}
@@ -522,6 +566,21 @@ class ThesisHomotopyEnv(
             terminate_on_success=bool(terminate_on_success),
         )
 
+    def configure_human_playback(
+        self,
+        playback_speed: float,
+        *,
+        input_callback: Callable[[], None] | None = None,
+    ) -> None:
+        """Pace GUI physics substeps without changing simulated time."""
+        if self.render_mode != "human":
+            raise RuntimeError("human playback requires render_mode='human'")
+        speed = float(playback_speed)
+        if not np.isfinite(speed) or speed <= 0.0:
+            raise ValueError("playback_speed must be finite and positive")
+        self._visualization_substep_delay_s = self.physics_dt / speed
+        self._visualization_input_callback = input_callback
+
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         del options
         if seed is not None:
@@ -529,9 +588,25 @@ class ThesisHomotopyEnv(
         total_obstacle_proposals = 0
         total_obstacle_sampling_time = 0.0
         last_sampling_error: ObstacleSamplingError | None = None
+        self._requested_obstacle_layout = None
+        if (
+            self.contract.scene in {"static", "hybrid"}
+            and self.blocking_obstacle_mode
+        ):
+            self._requested_obstacle_layout = str(self.rng.choice(
+                self.static_obstacle_layouts,
+                p=self.static_obstacle_layout_probabilities,
+            ))
         for scene_sample_attempt in range(1, self.scene_sample_max_attempts + 1):
             self._disable_obstacle()
             self._reset_fixed_initial_state()
+            # A real controller starts a new episode from the measured, static
+            # initial state.  Carrying the previous episode's final velocity
+            # into the acceleration limiter would create a command that cannot
+            # occur after the robot has been reset.
+            if self.motion_controller is not None:
+                _, initial_velocity = self.robot.joint_state()
+                self.motion_controller.reset(initial_velocity)
             self._sample_fixed_orientation_goal_pose()
             try:
                 self._create_obstacle()
@@ -547,11 +622,13 @@ class ThesisHomotopyEnv(
             self.scene_sampling_attempts = scene_sample_attempt
             break
         else:
+            self._requested_obstacle_layout = None
             raise ObstacleSamplingError(
                 "failed to sample a feasible goal and obstacle scene after "
                 f"{self.scene_sample_max_attempts} goal attempts; "
                 f"last error: {last_sampling_error}"
             ) from last_sampling_error
+        self._requested_obstacle_layout = None
         self.step_count = 0
         self.success_hold_count = 0
         self.obstacle_contact_seen = False
@@ -630,26 +707,98 @@ class ThesisHomotopyEnv(
         executed_substeps = 0
         max_joint_limit_violation = 0.0
 
-        # POSITION_CONTROL targets persist in Bullet until they are replaced.
-        # Sending the same command before every one of the 100 physics steps
-        # adds Python/C-API overhead without changing the simulated control.
-        p.setJointMotorControlArray(
-            self.robot_id,
-            self.robot.joint_ids,
-            p.POSITION_CONTROL,
-            targetPositions=target_positions.tolist(),
-            targetVelocities=[0.0] * 6,
-            positionGains=[0.05] * 6,
-            forces=self.motor_forces.tolist(),
-            physicsClientId=self.client_id,
-        )
+        peak_joint_speed = 0.0
+        peak_joint_acceleration = 0.0
+        peak_tcp_linear_speed = 0.0
+        peak_tcp_angular_speed = 0.0
+        velocity_limited_substeps = 0
+        acceleration_limited_substeps = 0
+        tcp_limited_substeps = 0
+        controller_updates = 0
+        last_measured_velocity = qdot_before.astype(np.float64)
+        last_commanded_velocity = np.zeros(6, dtype=np.float32)
+        if not self.bounded_joint_motion_enabled:
+            # Exact execution route used by the archived S0/S1 reference-PPO
+            # experiments: a joint-position target persists for all physics
+            # substeps in one policy period.
+            p.setJointMotorControlArray(
+                self.robot_id,
+                self.robot.joint_ids,
+                p.POSITION_CONTROL,
+                targetPositions=target_positions.tolist(),
+                targetVelocities=[0.0] * 6,
+                positionGains=[0.05] * 6,
+                forces=self.motor_forces.tolist(),
+                physicsClientId=self.client_id,
+            )
         for substep_index in range(self.substeps):
+            if self.bounded_joint_motion_enabled:
+                if self.motion_controller is None:
+                    raise RuntimeError("bounded joint controller was not initialized")
+                # Bullet integrates at 240 Hz, whereas CB3.1 accepts commands
+                # at 125 Hz.  Update at the first physics instant at or after
+                # each real-controller tick, then hold the command until the
+                # next tick.  For a 0.4 s policy period this produces exactly
+                # 50 controller updates across 96 physics substeps.
+                physics_time = substep_index * self.physics_dt
+                next_control_time = controller_updates * self.real_control_dt
+                if physics_time + 1.0e-12 >= next_control_time:
+                    q_control, _ = self.robot.joint_state()
+                    motion_command = self.motion_controller.command(
+                        q_control,
+                        target_positions,
+                        self.real_control_dt,
+                    )
+                    last_commanded_velocity = motion_command.velocity
+                    controller_updates += 1
+                    velocity_limited_substeps += int(
+                        motion_command.joint_velocity_limited
+                    )
+                    acceleration_limited_substeps += int(
+                        motion_command.joint_acceleration_limited
+                    )
+                    tcp_limited_substeps += int(
+                        motion_command.tcp_velocity_limited
+                    )
+                    p.setJointMotorControlArray(
+                        self.robot_id,
+                        self.robot.joint_ids,
+                        p.VELOCITY_CONTROL,
+                        targetVelocities=motion_command.velocity.tolist(),
+                        forces=self.motor_forces.tolist(),
+                        physicsClientId=self.client_id,
+                    )
             # Move kinematic obstacles to the same physical timestamp before
             # Bullet resolves robot contacts for this substep. Moving them
             # afterwards would leave contact queries one 240 Hz step behind.
             self._advance_obstacle()
             p.stepSimulation(physicsClientId=self.client_id)
+            if self._visualization_input_callback is not None:
+                self._visualization_input_callback()
+            if self._visualization_substep_delay_s > 0.0:
+                time.sleep(self._visualization_substep_delay_s)
             executed_substeps += 1
+            _, measured_velocity = self.robot.joint_state()
+            measured_acceleration = (
+                measured_velocity.astype(np.float64) - last_measured_velocity
+            ) / self.physics_dt
+            last_measured_velocity = measured_velocity.astype(np.float64)
+            _, _, tcp_linear_velocity, tcp_angular_velocity = (
+                self.robot.end_effector_kinematics()
+            )
+            peak_joint_speed = max(
+                peak_joint_speed, float(np.max(np.abs(measured_velocity)))
+            )
+            peak_joint_acceleration = max(
+                peak_joint_acceleration,
+                float(np.max(np.abs(measured_acceleration))),
+            )
+            peak_tcp_linear_speed = max(
+                peak_tcp_linear_speed, float(np.linalg.norm(tcp_linear_velocity))
+            )
+            peak_tcp_angular_speed = max(
+                peak_tcp_angular_speed, float(np.linalg.norm(tcp_angular_velocity))
+            )
             if self.simple_reaching_mode:
                 events = self._collision_events()
                 self_collision = self_collision or events["self_collision"]
@@ -737,7 +886,7 @@ class ThesisHomotopyEnv(
         )
         timeout = bool(self.step_count >= self.horizon and not terminated)
         truncated = bool(timeout)
-        _, qdot_after = self.robot.joint_state()
+        q_after, qdot_after = self.robot.joint_state()
         # Average across joints before the bounded reward mapping. Summing six
         # normalized squared changes made the smoothness term saturate on
         # nearly every transition.
@@ -805,12 +954,29 @@ class ThesisHomotopyEnv(
                 "cost": cost,
                 "policy_joint_delta": action.copy(),
                 "policy_joint_target": target_positions.copy(),
-                "policy_joint_velocity": np.zeros(6, dtype=np.float32),
-                "commanded_joint_delta": (target_positions - q_before).copy(),
+                "policy_joint_velocity": last_commanded_velocity.copy(),
+                "commanded_joint_delta": (q_after - q_before).copy(),
                 "target_joint_positions": target_positions.copy(),
-                "scaled_policy_joint_velocity": np.zeros(6, dtype=np.float32),
-                "commanded_joint_velocity": np.zeros(6, dtype=np.float32),
+                "scaled_policy_joint_velocity": last_commanded_velocity.copy(),
+                "commanded_joint_velocity": last_commanded_velocity.copy(),
                 "joint_velocity": qdot_after.copy(),
+                "joint_speed_peak_rad_s": peak_joint_speed,
+                "joint_acceleration_peak_rad_s2": peak_joint_acceleration,
+                "tcp_linear_speed_peak_m_s": peak_tcp_linear_speed,
+                "tcp_angular_speed_peak_rad_s": peak_tcp_angular_speed,
+                "controller_updates": controller_updates,
+                "controller_updates_expected": self.controller_updates_per_policy_step,
+                "real_control_frequency_hz": self.real_control_frequency_hz,
+                "physics_frequency_hz": 1.0 / self.physics_dt,
+                "joint_velocity_limiter_fraction": (
+                    velocity_limited_substeps / max(1, controller_updates)
+                ),
+                "joint_acceleration_limiter_fraction": (
+                    acceleration_limited_substeps / max(1, controller_updates)
+                ),
+                "tcp_velocity_limiter_fraction": (
+                    tcp_limited_substeps / max(1, controller_updates)
+                ),
                 **projection_info,
                 "task_reached": task_reached,
                 "strict_pose_reached": strict_pose_reached,
@@ -849,7 +1015,7 @@ class ThesisHomotopyEnv(
                     self_min_distance < self.d_self_safe
                 ),
                 "executed_substeps": executed_substeps,
-                "qdot_cmd": np.zeros(6, dtype=np.float32),
+                "qdot_cmd": last_commanded_velocity.copy(),
                 "qdot_measured": qdot_after.copy(),
                 "smooth_velocity": smooth_velocity,
                 "velocity_magnitude": velocity_magnitude,
@@ -926,6 +1092,7 @@ class ThesisHomotopyEnv(
             goal_quaternion=self.goal_quaternion,
             position_error=position_error,
             orientation_error=orientation_error,
+            normalized_joint_velocity=qdot / self.qdot_observation_scale,
             reference_point_offset_m=self.reference_point_offset_m,
             obstacle_features=obstacle_features,
             max_obstacles=self.max_obstacles,

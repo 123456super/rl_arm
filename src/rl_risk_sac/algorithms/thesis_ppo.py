@@ -16,6 +16,9 @@ from rl_risk_sac.algorithms.networks import ObstacleSetEncoder, mlp
 from rl_risk_sac.tasks.reference_reaching import (
     OBSTACLE_FEATURE_DIM,
     REFERENCE_BASE_OBSERVATION_DIM,
+    REFERENCE_LEGACY_BASE_OBSERVATION_DIM,
+    RESIDUAL_HANDOFF_GOAL_BASE_M,
+    compose_base_residual_action,
     reference_ppo_observation_dim,
 )
 from rl_risk_sac.utils.device import resolve_device
@@ -95,10 +98,11 @@ class PPONumericalError(RuntimeError):
 class ThesisPPOAgent:
     """On-policy PPO actor-critic used by the thesis reaching trainer.
 
-    Actions are joint-angle increments in radians.  In S1/S2 the frozen S0
-    mean and the learned residual mean are added without gating, scaling, or
-    clipping; the physical environment remains responsible only for enforcing
-    the robot's absolute joint-position limits.
+    Actions are joint-angle increments in radians.  S1/S2 training optimizes
+    the directly added frozen-S0 and Residual means.  Final deterministic
+    inference goes through :meth:`act_for_deployment`, which hands control to
+    the Base inside 25 mm.  The physical environment remains responsible for
+    enforcing the robot's motion limits.
     """
 
     def __init__(self, obs_dim: int, action_dim: int, config: dict[str, Any]) -> None:
@@ -126,7 +130,7 @@ class ThesisPPOAgent:
         self.freeze_base_actor = self.stage != "s0"
         ppo = config["ppo"]
         self.policy_contract = (
-            "ppo_joint_delta_residual_obb_clearance_direction_set_v10"
+            "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_v11"
         )
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -257,6 +261,37 @@ class ThesisPPOAgent:
             + list(self.value_obstacle_encoder.parameters()),
             lr=self.critic_lr,
         )
+        self._continuation_schedule_active = False
+        self._continuation_actor_lr_start = 0.0
+        self._continuation_critic_lr_start = 0.0
+        self._continuation_actor_std_reference = self.actor_std_ema
+        self._continuation_actor_lr_last = float("inf")
+
+    @property
+    def continuation_schedule_active(self) -> bool:
+        return self._continuation_schedule_active
+
+    def configure_continuation_schedule(self) -> tuple[float, float]:
+        """Anchor a resumed run to checkpoint LRs so a larger budget cannot raise them."""
+        actor_effective = float(self.actor_optimizer.param_groups[0]["lr"])
+        critic = float(self.value_optimizer.param_groups[0]["lr"])
+        scale = max(float(self.actor_lr_scale), 1.0e-12)
+        actor_scheduled = actor_effective / scale
+        if (
+            not np.isfinite(actor_scheduled)
+            or not np.isfinite(critic)
+            or actor_scheduled <= 0.0
+            or critic <= 0.0
+        ):
+            raise ValueError("checkpoint optimizer learning rates must be finite and positive")
+        self._continuation_schedule_active = True
+        self._continuation_actor_lr_start = actor_scheduled
+        self._continuation_critic_lr_start = critic
+        self._continuation_actor_std_reference = max(
+            float(self.actor_std_ema), 1.0e-12
+        )
+        self._continuation_actor_lr_last = actor_scheduled
+        return actor_effective, critic
 
     def _actor_parameters(self) -> list[nn.Parameter]:
         if self.freeze_base_actor:
@@ -370,6 +405,39 @@ class ThesisPPOAgent:
             "residual_actions": residual_mean.cpu().numpy().astype(np.float32),
         }
 
+    @torch.no_grad()
+    def act_for_deployment(
+        self,
+        observations: np.ndarray,
+        goal_position_errors: np.ndarray,
+        *,
+        residual_cutoff_position_m: float | None = RESIDUAL_HANDOFF_GOAL_BASE_M,
+    ):
+        """Return deterministic actions using the final Base handoff contract.
+
+        Robot-facing inference, deterministic evaluation, and visualization
+        must use this method instead of directly adding Base and Residual.
+        ``None`` disables handoff only for an explicit full-Residual ablation.
+        """
+        policy_actions, log_prob, values, policy = self.act(
+            observations, deterministic=True
+        )
+        residual_actions = policy["residual_actions"]
+        base_actions = policy_actions - residual_actions
+        executed_actions, residual_authority = compose_base_residual_action(
+            base_actions,
+            residual_actions,
+            goal_position_errors,
+            residual_cutoff_position_m=residual_cutoff_position_m,
+        )
+        policy = dict(policy)
+        policy.update({
+            "base_actions": base_actions,
+            "policy_actions": policy_actions,
+            "residual_authority": residual_authority,
+        })
+        return executed_actions, log_prob, values, policy
+
     def validate_training_state(self) -> None:
         """Validate weights, log std, Adam moments/step and optimizer settings."""
         _require_finite(self.state_dict(), "training_state")
@@ -380,7 +448,28 @@ class ThesisPPOAgent:
         return final + (initial - final) * (1.0 - fraction)
 
     def _apply_learning_rate_schedule(self, progress: float | None) -> tuple[float, float]:
-        if self.actor_std_lr_adaptation:
+        if self._continuation_schedule_active:
+            fraction = float(np.clip(0.0 if progress is None else progress, 0.0, 1.0))
+            continuation_base = self._linear_learning_rate(
+                self._continuation_actor_lr_start,
+                self.actor_lr_final,
+                fraction,
+            )
+            if self.actor_std_lr_adaptation:
+                continuation_base *= (
+                    self.actor_std_ema / self._continuation_actor_std_reference
+                )
+            scheduled_actor = max(
+                self.actor_lr_min,
+                min(continuation_base, self._continuation_actor_lr_last),
+            )
+            self._continuation_actor_lr_last = scheduled_actor
+            scheduled_critic = self._linear_learning_rate(
+                self._continuation_critic_lr_start,
+                self.critic_lr_final,
+                fraction,
+            )
+        elif self.actor_std_lr_adaptation:
             # For a Gaussian policy, the same absolute mean displacement is a
             # much larger policy change after its standard deviation narrows.
             # Combine distribution-width adaptation with the ordinary
@@ -404,7 +493,9 @@ class ThesisPPOAgent:
             )
         else:
             scheduled_actor = self.actor_lr
-        if self.lr_decay_enabled and progress is not None:
+        if self._continuation_schedule_active:
+            pass
+        elif self.lr_decay_enabled and progress is not None:
             scheduled_critic = self._linear_learning_rate(self.critic_lr, self.critic_lr_final, progress)
         else:
             scheduled_critic = self.critic_lr
@@ -834,13 +925,58 @@ class ThesisPPOAgent:
                 target = torch.zeros_like(migrated[key])
                 # Legacy columns 22:25 were constant obstacle sentinels.
                 target[:, :22] = legacy_value[:, :22]
-                target[:, 22:REFERENCE_BASE_OBSERVATION_DIM] = legacy_value[:, 25:31]
+                target[:, 22:REFERENCE_LEGACY_BASE_OBSERVATION_DIM] = (
+                    legacy_value[:, 25:31]
+                )
                 migrated[key] = target
             elif key in migrated and migrated[key].shape == legacy_value.shape:
                 migrated[key] = legacy_value
             else:
                 raise ValueError(f"cannot migrate legacy PPO parameter {key}")
         module.load_state_dict(migrated)
+
+    @staticmethod
+    def _migrate_qdot_network(
+        module: nn.Module, old_state: dict[str, torch.Tensor]
+    ) -> None:
+        """Insert zero qdot columns without changing the old network output."""
+        migrated = module.state_dict()
+        for key, old_value in old_state.items():
+            if key == "0.weight":
+                target = torch.zeros_like(migrated[key])
+                old_input_dim = old_value.shape[1]
+                expected_old = (
+                    REFERENCE_LEGACY_BASE_OBSERVATION_DIM
+                    + target.shape[1] - REFERENCE_BASE_OBSERVATION_DIM
+                )
+                if old_input_dim != expected_old:
+                    raise ValueError(
+                        "pre-qdot PPO first layer has an unexpected input width"
+                    )
+                target[:, :REFERENCE_LEGACY_BASE_OBSERVATION_DIM] = old_value[
+                    :, :REFERENCE_LEGACY_BASE_OBSERVATION_DIM
+                ]
+                target[:, REFERENCE_BASE_OBSERVATION_DIM:] = old_value[
+                    :, REFERENCE_LEGACY_BASE_OBSERVATION_DIM:
+                ]
+                migrated[key] = target
+            elif key in migrated and migrated[key].shape == old_value.shape:
+                migrated[key] = old_value
+            else:
+                raise ValueError(f"cannot migrate pre-qdot PPO parameter {key}")
+        module.load_state_dict(migrated)
+
+    def _load_pre_qdot_modules(self, state: dict[str, Any]) -> None:
+        self._migrate_qdot_network(self.actor, state["actor"])
+        self._migrate_qdot_network(self.residual_actor, state["residual_actor"])
+        self._migrate_qdot_network(self.value, state["value"])
+        self.actor_obstacle_encoder.load_state_dict(
+            state["actor_obstacle_encoder"]
+        )
+        self.value_obstacle_encoder.load_state_dict(
+            state["value_obstacle_encoder"]
+        )
+        self.actor_log_std.data.copy_(state["actor_log_std"].to(self.device))
 
     def _load_legacy_s0_state(self, state: dict[str, Any]) -> None:
         """Load a trained 31-D S0 policy without changing its empty-set output."""
@@ -876,6 +1012,15 @@ class ThesisPPOAgent:
             and state.get("max_obstacles") == self.max_obstacles
             and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
         )
+        pre_qdot_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_v10"
+            and state.get("obs_dim")
+            == self.obs_dim - (REFERENCE_BASE_OBSERVATION_DIM - REFERENCE_LEGACY_BASE_OBSERVATION_DIM)
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
         previous_obstacle_set_contract = (
             state.get("policy_contract") in {
                 "ppo_joint_delta_risk_gated_residual_obstacle_set_v7",
@@ -895,6 +1040,8 @@ class ThesisPPOAgent:
         if legacy_contract:
             self._migrate_legacy_network(self.actor, state["actor"])
             self._migrate_legacy_network(self.value, state["value"])
+        elif pre_qdot_contract:
+            self._load_pre_qdot_modules(state)
         elif current_contract or previous_obstacle_set_contract:
             self.actor.load_state_dict(state["actor"])
             self.residual_actor.load_state_dict(state["residual_actor"])
@@ -920,6 +1067,62 @@ class ThesisPPOAgent:
         self.actor_std_ema = float(action_std)
         self.validate_training_state()
 
+    def replace_base_actor_from_s0_checkpoint(
+        self, state: dict[str, Any]
+    ) -> None:
+        """Replace only the frozen reaching Actor with a compatible S0 Actor.
+
+        This supports controlled ablations that retain a trained S1/S2
+        residual policy, obstacle encoder, and value function while evaluating
+        them on top of a newly deployment-aligned S0 reaching controller.
+        No optimizer, residual, encoder, value, or exploration state is read
+        from the S0 checkpoint.
+        """
+        if not self.freeze_base_actor or self.stage == "s0":
+            raise ValueError("base Actor replacement requires an S1/S2 agent")
+        if state.get("stage") != "s0":
+            raise ValueError("base Actor checkpoint must be an S0 checkpoint")
+        _require_finite(state, "base_actor_checkpoint")
+        legacy_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_raw_gaussian_signed_pose_v4"
+            and state.get("obs_dim") == 31
+            and state.get("reference_ppo") is True
+        )
+        current_contract = (
+            state.get("policy_contract") == self.policy_contract
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim")
+            == self.obstacle_encoding_dim
+        )
+        pre_qdot_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_v10"
+            and state.get("obs_dim")
+            == self.obs_dim
+            - (
+                REFERENCE_BASE_OBSERVATION_DIM
+                - REFERENCE_LEGACY_BASE_OBSERVATION_DIM
+            )
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim")
+            == self.obstacle_encoding_dim
+        )
+        if legacy_contract:
+            self._migrate_legacy_network(self.actor, state["actor"])
+        elif pre_qdot_contract:
+            self._migrate_qdot_network(self.actor, state["actor"])
+        elif current_contract:
+            self.actor.load_state_dict(state["actor"])
+        else:
+            raise ValueError("incompatible S0 base Actor checkpoint")
+        for parameter in self.actor.parameters():
+            parameter.requires_grad_(False)
+        self.validate_training_state()
+
     def load_state_dict(self, state: dict[str, Any]) -> None:
         legacy_contract = (
             state.get("policy_contract")
@@ -929,6 +1132,32 @@ class ThesisPPOAgent:
         )
         if legacy_contract:
             self._load_legacy_s0_state(state)
+            self.validate_training_state()
+            return
+        pre_qdot_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_v10"
+            and state.get("stage", self.stage) == self.stage
+            and state.get("obs_dim")
+            == self.obs_dim - (REFERENCE_BASE_OBSERVATION_DIM - REFERENCE_LEGACY_BASE_OBSERVATION_DIM)
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        if pre_qdot_contract:
+            _require_finite(state, "checkpoint")
+            self._load_pre_qdot_modules(state)
+            # First-layer optimizer moments have the old width.  Preserve the
+            # learned functions and scheduler history, but start fresh moments.
+            self.actor_lr_scale = float(state.get("actor_lr_scale", 1.0))
+            self.low_kl_streak = int(state.get("low_kl_streak", 0))
+            # The deployment-aligned action range is smaller than v10's.
+            # Keep the new configuration as the LR/std reference while
+            # retaining the learned current standard deviation itself.
+            self.actor_std_ema = float(state.get(
+                "actor_std_ema",
+                self.actor_log_std.clamp(-5.0, 1.0).exp().mean().detach().cpu(),
+            ))
             self.validate_training_state()
             return
         if (
