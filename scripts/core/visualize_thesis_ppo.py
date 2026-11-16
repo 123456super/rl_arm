@@ -291,7 +291,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--static-obstacle-layout",
-        choices=("legacy_blocking", "path_offset", "mixed", "structured"),
+        choices=(
+            "legacy_blocking", "path_offset", "mixed", "structured",
+            "low_overpass",
+        ),
         help="Override the checkpoint's static obstacle layout distribution.",
     )
     parser.add_argument(
@@ -382,9 +385,23 @@ def main() -> None:
             raise ValueError(
                 "--static-obstacle-layout requires --scene static or hybrid"
             )
+        if args.static_obstacle_layout == "low_overpass":
+            if args.scene != "static":
+                raise ValueError("low_overpass is a static single-obstacle evaluation")
+            if args.static_obstacle_count not in {None, 1}:
+                raise ValueError("low_overpass requires --static-obstacle-count 1")
+            config["thesis"]["static_obstacle_count_probabilities"] = {1: 1.0}
         config["thesis"]["blocking_obstacle_mode"] = True
+        # low_overpass is deliberately not a training-layout schema value.
+        # Keep configuration validation on a normal layout, then enable the
+        # evaluation-only placement explicitly on the constructed environment.
+        configured_layout = (
+            "legacy_blocking"
+            if args.static_obstacle_layout == "low_overpass"
+            else args.static_obstacle_layout
+        )
         config["thesis"]["static_obstacle_layout_probabilities"] = {
-            args.static_obstacle_layout: 1.0,
+            configured_layout: 1.0,
         }
     if args.scene in {"dynamic", "hybrid"}:
         prediction = config["thesis"]["dynamic_prediction"]
@@ -397,6 +414,8 @@ def main() -> None:
 
     render_mode = None if args.headless else "human"
     env = ThesisHomotopyEnv(config, render_mode=render_mode)
+    if args.static_obstacle_layout == "low_overpass":
+        env.configure_evaluation_low_overpass()
     camera_input = CameraInputState()
     trace: list[dict[str, object]] = []
     try:
@@ -465,10 +484,15 @@ def main() -> None:
 
         terminated = truncated = False
         while not (terminated or truncated):
+            base_action_query = agent.predict_base_actions(observation[None, :])[0]
+            residual_safety_context = env.residual_safety_context(
+                base_action_query
+            )[None, :]
             actions, _logp, _values, policy = agent.act_for_deployment(
                 observation[None, :],
                 np.asarray([current_position_error], dtype=np.float32),
                 residual_cutoff_position_m=args.residual_cutoff_position_m,
+                residual_safety_context=residual_safety_context,
             )
             executed_action = actions[0].copy()
             total_action = policy["policy_actions"][0].copy()

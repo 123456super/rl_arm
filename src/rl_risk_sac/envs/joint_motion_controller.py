@@ -117,3 +117,54 @@ class BoundedJointMotionController:
             tcp_linear_speed=0.0,
             tcp_angular_speed=0.0,
         )
+
+    def predict_reachable_position(
+        self,
+        q: np.ndarray,
+        goal: np.ndarray,
+        dt: float,
+        updates: int,
+    ) -> np.ndarray:
+        """Predict one policy period without mutating controller state.
+
+        The prediction applies the same velocity, acceleration, proportional,
+        stopping-speed and tolerance rules as :meth:`command` at every real
+        controller tick.  Integrating the commanded velocity gives the ideal
+        joint position reachable during the requested number of updates.  The
+        rollout keeps its velocity history local so a Residual-policy feature
+        query cannot change the command subsequently sent to the simulated or
+        real robot.
+        """
+        position = np.asarray(q, dtype=np.float64).copy()
+        target = np.asarray(goal, dtype=np.float64)
+        dt = self._positive_scalar(dt, "dt")
+        if position.shape != (6,) or target.shape != (6,):
+            raise ValueError("q and goal must have shape (6,)")
+        if not np.isfinite(position).all() or not np.isfinite(target).all():
+            raise ValueError("q and goal must contain finite values")
+        if not isinstance(updates, (int, np.integer)) or int(updates) < 1:
+            raise ValueError("updates must be a positive integer")
+
+        previous_velocity = self.previous_velocity.copy()
+        maximum_change = self.acceleration_limits * dt
+        for _ in range(int(updates)):
+            error = target - position
+            stopping_speed = np.sqrt(
+                np.maximum(
+                    0.0,
+                    2.0 * self.acceleration_limits * np.abs(error),
+                )
+            )
+            raw = np.sign(error) * np.minimum(
+                self.position_gain * np.abs(error), stopping_speed
+            )
+            raw[np.abs(error) <= self.position_tolerance] = 0.0
+            velocity = np.clip(raw, -self.velocity_limits, self.velocity_limits)
+            velocity = np.clip(
+                velocity,
+                previous_velocity - maximum_change,
+                previous_velocity + maximum_change,
+            )
+            position += velocity * dt
+            previous_velocity = velocity
+        return position

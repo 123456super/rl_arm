@@ -61,8 +61,8 @@ class PyBulletRobot:
     def _read_joint_limits(self) -> None:
         """Cache the per-joint hard limits reported by PyBullet.
 
-        Non-finite or degenerate bounds fall back to +/-pi so that downstream
-        limit-aware diagnostics never divide by zero or compare against NaN.
+        A known real robot must never silently fall back to an invented range:
+        invalid URDF limits are a configuration error.
         """
         infos = [
             p.getJointInfo(self._require_loaded(), joint_id, physicsClientId=self.physics_client_id)
@@ -71,7 +71,12 @@ class PyBulletRobot:
         lower = np.asarray([float(info[8]) for info in infos], dtype=np.float64)
         upper = np.asarray([float(info[9]) for info in infos], dtype=np.float64)
         invalid = ~np.isfinite(lower) | ~np.isfinite(upper) | (upper <= lower)
-        lower[invalid], upper[invalid] = -np.pi, np.pi
+        if np.any(invalid):
+            names = [
+                self.config.joint_names[index]
+                for index in np.flatnonzero(invalid)
+            ]
+            raise ValueError(f"invalid URDF joint limits for {names}")
         self._joint_lower = lower
         self._joint_upper = upper
 
@@ -171,7 +176,8 @@ class PyBulletRobot:
         lower = np.asarray([float(info[8]) for info in joint_info], dtype=np.float64)
         upper = np.asarray([float(info[9]) for info in joint_info], dtype=np.float64)
         invalid = ~np.isfinite(lower) | ~np.isfinite(upper) | (upper <= lower)
-        lower[invalid], upper[invalid] = -np.pi, np.pi
+        if np.any(invalid):
+            raise ValueError("position IK requires finite non-degenerate URDF limits")
         current_q, current_qdot = self.joint_state()
         solution = p.calculateInverseKinematics(
             robot_id,

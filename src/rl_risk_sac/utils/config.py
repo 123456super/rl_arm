@@ -72,7 +72,9 @@ def validate_config(config: dict[str, Any]) -> None:
         ("robot", "reset", "default_joint_positions"), ("robot", "capsules"),
         ("thesis", "physics_dt"), ("thesis", "control_dt"),
         ("thesis", "horizon"), ("thesis", "action_mode"),
-        ("thesis", "action_limit_rad"), ("thesis", "joint_delta_limit_rad"),
+        ("thesis", "joint_position_lower_limits_rad"),
+        ("thesis", "joint_position_upper_limits_rad"),
+        ("thesis", "joint_delta_limit_rad"),
         ("thesis", "reference_ppo"), ("thesis", "reward"),
         ("thesis", "joint_motion_controller"),
         ("thesis", "observation", "obstacle_set"), ("thesis", "scene_mixture"),
@@ -131,8 +133,40 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("device selection weights cannot both be zero")
 
     thesis = config["thesis"]
+    reward = thesis["reward"]
+    entry_collision_penalty = _positive(
+        reward["reference_obstacle_collision_entry_penalty"],
+        "thesis.reward.reference_obstacle_collision_entry_penalty",
+        allow_zero=True,
+    )
+    continuation_collision_penalty = _positive(
+        reward["reference_obstacle_collision_penalty"],
+        "thesis.reward.reference_obstacle_collision_penalty",
+        allow_zero=True,
+    )
+    if entry_collision_penalty < continuation_collision_penalty:
+        raise ValueError(
+            "obstacle first-contact penalty must not be smaller than the "
+            "continuation penalty"
+        )
+    environment_entry_penalty = _positive(
+        reward["reference_environment_collision_entry_penalty"],
+        "thesis.reward.reference_environment_collision_entry_penalty",
+        allow_zero=True,
+    )
+    environment_continuation_penalty = _positive(
+        reward["reference_environment_collision_penalty"],
+        "thesis.reward.reference_environment_collision_penalty",
+        allow_zero=True,
+    )
+    if environment_entry_penalty < environment_continuation_penalty:
+        raise ValueError(
+            "environment first-contact penalty must not be smaller than the "
+            "continuation penalty"
+        )
     obsolete_thesis = {
         "protocol", "self_safety_projection", "joint_pose_curriculum",
+        "action_limit_rad",
     } & set(thesis)
     if obsolete_thesis:
         raise KeyError(
@@ -192,9 +226,9 @@ def validate_config(config: dict[str, Any]) -> None:
         motion["joint_velocity_limits_rad_s"], dtype=np.float64
     )
     if bounded_motion_enabled and np.any(
-        joint_velocity_limits > np.deg2rad(10.0) + 1.0e-9
+        joint_velocity_limits > np.deg2rad(20.0) + 1.0e-9
     ):
-        raise ValueError("UR5 training joint speed must not exceed 10 deg/s")
+        raise ValueError("UR5 training joint speed must not exceed 20 deg/s")
     for field in (
         "position_gain_s_inv", "position_tolerance_rad",
     ):
@@ -217,7 +251,21 @@ def validate_config(config: dict[str, Any]) -> None:
             )
     if str(thesis["action_mode"]) != "joint_delta":
         raise ValueError("only thesis.action_mode=joint_delta is supported")
-    for name in ("action_limit_rad", "joint_delta_limit_rad", "horizon"):
+    lower = np.asarray(thesis["joint_position_lower_limits_rad"], dtype=np.float64)
+    upper = np.asarray(thesis["joint_position_upper_limits_rad"], dtype=np.float64)
+    if (
+        lower.shape != (6,) or upper.shape != (6,)
+        or not np.isfinite(lower).all() or not np.isfinite(upper).all()
+        or np.any(upper <= lower)
+    ):
+        raise ValueError(
+            "joint position limits must contain six finite lower/upper pairs"
+        )
+    if np.any(lower < -2.0 * np.pi - 1.0e-9) or np.any(
+        upper > 2.0 * np.pi + 1.0e-9
+    ):
+        raise ValueError("UR5 CB3.1 joint position limits must stay within +/-360 deg")
+    for name in ("joint_delta_limit_rad", "horizon"):
         _positive(thesis[name], f"thesis.{name}")
     for stage in ("s0", "s1", "s2"):
         values = thesis["scene_mixture"].get(stage)

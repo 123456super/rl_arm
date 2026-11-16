@@ -15,9 +15,13 @@ from rl_risk_sac.algorithms.thesis_ppo import ThesisPPOAgent
 from rl_risk_sac.envs.thesis_homotopy_env_reduced_observation import (
     ThesisHomotopyEnv,
 )
+from rl_risk_sac.envs.thesis_reward import compute_step_reward
 from rl_risk_sac.envs.joint_motion_controller import BoundedJointMotionController
 from rl_risk_sac.envs.thesis_obstacles import _swept_obb_envelope
 from rl_risk_sac.envs.thesis_static_obstacles import ObstacleSamplingError
+from rl_risk_sac.envs.thesis_goal_sampling import (
+    nearest_equivalent_joint_configuration,
+)
 from rl_risk_sac.prediction.obstacle_lstm import CHECKPOINT_FORMAT, ObstacleMotionLSTM
 from rl_risk_sac.tasks.reference_reaching import (
     DEFAULT_MAX_OBSTACLES,
@@ -25,6 +29,7 @@ from rl_risk_sac.tasks.reference_reaching import (
     OBSTACLE_FEATURE_DIM,
     REFERENCE_BASE_OBSERVATION_DIM,
     REFERENCE_PPO_OBSERVATION_DIM,
+    RESIDUAL_BASE_OBSERVATION_DIM,
     closest_points_segment_obb,
     reference_ppo_reward,
     residual_action_penalty,
@@ -48,7 +53,7 @@ class ReferenceS0Tests(unittest.TestCase):
     def tearDown(self):
         self.env.close()
 
-    def test_reset_uses_fixed_orientation_and_empty_obstacle_set(self):
+    def test_reset_uses_fixed_orientation_and_plane_only_safety_set(self):
         observation, info = self.env.reset(seed=11001)
         self.assertEqual(observation.shape, (REFERENCE_PPO_OBSERVATION_DIM,))
         self.assertTrue(self.env.observation_space.contains(observation))
@@ -78,10 +83,14 @@ class ReferenceS0Tests(unittest.TestCase):
             REFERENCE_BASE_OBSERVATION_DIM
             + DEFAULT_MAX_OBSTACLES * OBSTACLE_FEATURE_DIM
         )
+        rows = observation[
+            REFERENCE_BASE_OBSERVATION_DIM:feature_end
+        ].reshape(DEFAULT_MAX_OBSTACLES, OBSTACLE_FEATURE_DIM)
+        np.testing.assert_allclose(rows[0, 6:], [0.0, 0.0, -1.0])
+        np.testing.assert_array_equal(rows[1:], 0.0)
         np.testing.assert_array_equal(
-            observation[REFERENCE_BASE_OBSERVATION_DIM:feature_end], 0.0
+            observation[feature_end:], [1.0] + [0.0] * 7
         )
-        np.testing.assert_array_equal(observation[feature_end:], 0.0)
 
     def test_action_is_a_joint_angle_increment(self):
         self.env.reset(seed=11001)
@@ -92,8 +101,7 @@ class ReferenceS0Tests(unittest.TestCase):
         _, _, _, _, _, info = self.env.step(delta)
         expected = np.clip(
             q_before + delta,
-            np.maximum(self.env.robot.joint_lower_limits, -self.env.action_limit),
-            np.minimum(self.env.robot.joint_upper_limits, self.env.action_limit),
+            *self.env.effective_joint_position_limits(),
         )
         np.testing.assert_allclose(info["policy_joint_delta"], delta, atol=1.0e-7)
         np.testing.assert_allclose(info["target_joint_positions"], expected, atol=1.0e-7)
@@ -110,6 +118,45 @@ class ReferenceS0Tests(unittest.TestCase):
             float(np.max(np.abs(info["commanded_joint_delta"]))),
             float(np.max(np.abs(delta))),
         )
+
+    def test_cb31_joint_ranges_are_plus_minus_360_degrees(self):
+        self.env.reset(seed=11001)
+        expected = np.full(6, 2.0 * np.pi)
+        np.testing.assert_allclose(
+            self.env.robot.joint_lower_limits, -expected, atol=1.0e-12
+        )
+        np.testing.assert_allclose(
+            self.env.robot.joint_upper_limits, expected, atol=1.0e-12
+        )
+        lower, upper = self.env.effective_joint_position_limits()
+        np.testing.assert_allclose(lower, -expected, atol=1.0e-12)
+        np.testing.assert_allclose(upper, expected, atol=1.0e-12)
+
+    def test_ik_equivalent_angle_preserves_continuity_across_minus_pi(self):
+        configuration = np.deg2rad(
+            [10.0, -90.0, 80.0, -60.0, -120.0, 167.8]
+        )
+        reference = np.deg2rad(
+            [10.0, -90.0, 80.0, -60.0, -120.0, -120.0]
+        )
+        lower = np.full(6, -2.0 * np.pi + 0.02)
+        upper = np.full(6, 2.0 * np.pi - 0.02)
+        selected = nearest_equivalent_joint_configuration(
+            configuration, reference, lower, upper
+        )
+        self.assertAlmostEqual(np.rad2deg(selected[5]), -192.2, places=6)
+
+    def test_wrist_three_command_can_cross_minus_180_degrees(self):
+        self.env.reset(seed=11001)
+        q, qdot = self.env.robot.joint_state_exact()
+        q[5] = np.deg2rad(-179.88)
+        self.env._set_joint_state(q, qdot)
+        action = np.zeros(6, dtype=np.float32)
+        action[5] = np.deg2rad(-4.0)
+        _, _, _, _, _, info = self.env.step(action)
+        self.assertLess(info["target_joint_positions"][5], -np.pi)
+        self.assertEqual(info["joint_position_clip_fraction"], 0.0)
+        self.assertEqual(info["joint_position_clip_max_rad"], 0.0)
 
     def test_motion_controller_accelerates_and_stops_without_overshoot(self):
         controller = BoundedJointMotionController(
@@ -131,6 +178,93 @@ class ReferenceS0Tests(unittest.TestCase):
             previous = command.velocity
         self.assertTrue(np.all(q <= goal + 5.0e-4))
         self.assertTrue(np.all(np.abs(goal - q) <= 5.0e-4))
+
+    def test_motion_controller_reachable_prediction_is_bounded_and_pure(self):
+        controller = BoundedJointMotionController(
+            joint_velocity_limits=np.full(6, np.deg2rad(10.0)),
+            joint_acceleration_limits=np.full(6, np.deg2rad(45.0)),
+            position_gain=4.0,
+            position_tolerance=5.0e-4,
+        )
+        controller.reset(np.full(6, 0.01))
+        previous_velocity = controller.previous_velocity.copy()
+        q = np.zeros(6)
+        goal = np.full(6, 0.5)
+        predicted = controller.predict_reachable_position(
+            q, goal, 1.0 / 125.0, 50
+        )
+        reference = BoundedJointMotionController(
+            joint_velocity_limits=np.full(6, np.deg2rad(10.0)),
+            joint_acceleration_limits=np.full(6, np.deg2rad(45.0)),
+            position_gain=4.0,
+            position_tolerance=5.0e-4,
+        )
+        reference.reset(previous_velocity)
+        expected = q.copy()
+        for _ in range(50):
+            expected += reference.command(
+                expected, goal, 1.0 / 125.0
+            ).velocity / 125.0
+
+        # A 0.4 s prediction cannot realize the requested 0.5 rad increment
+        # under a 10 deg/s joint-speed contract.
+        np.testing.assert_allclose(predicted, expected, atol=1.0e-10)
+        self.assertTrue(np.all(predicted > q))
+        self.assertTrue(np.all(predicted <= np.deg2rad(10.0) * 0.4 + 1.0e-9))
+        self.assertTrue(np.all(predicted < goal))
+        # Feature queries must not consume acceleration-controller history.
+        np.testing.assert_array_equal(
+            controller.previous_velocity, previous_velocity
+        )
+
+    def test_base_clearance_prediction_uses_reachable_cb31_position(self):
+        config = load_config(
+            ROOT / "configs/experiments/"
+            "paper_s1_single_mix80_plane_clearance5_balanced_10deg_horizon150.yaml"
+        )
+        config["device"] = "cpu"
+        config["device_selection"]["print_summary"] = False
+        env = ThesisHomotopyEnv(config)
+        try:
+            env.configure_episode("static")
+            env.reset(seed=11001)
+            q, _ = env.robot.joint_state_exact()
+            action = np.full(6, 0.5, dtype=np.float64)
+            lower, upper = env.effective_joint_position_limits()
+            target = np.clip(q + action, lower, upper)
+            predicted = env.motion_controller.predict_reachable_position(
+                q,
+                target,
+                env.real_control_dt,
+                env.controller_updates_per_policy_step,
+            )
+
+            self.assertTrue(env.bounded_joint_motion_enabled)
+            self.assertLess(
+                float(np.max(np.abs(predicted - q))),
+                float(np.max(np.abs(target - q))),
+            )
+            self.assertLessEqual(
+                float(np.max(np.abs(predicted - q))),
+                np.deg2rad(10.0) * env.control_dt + 1.0e-8,
+            )
+            # The public feature query must preserve both Bullet state and
+            # the live controller's acceleration history.
+            controller_velocity = env.motion_controller.previous_velocity.copy()
+            with patch.object(
+                env, "_plane_geometry", wraps=env._plane_geometry
+            ) as plane_geometry:
+                env.base_clearance_changes(action)
+            # Current and controller-reachable future clearances both include
+            # the mounting plane in the unified safety set.
+            self.assertEqual(plane_geometry.call_count, 2)
+            q_after, _ = env.robot.joint_state_exact()
+            np.testing.assert_allclose(q_after, q, atol=1.0e-12)
+            np.testing.assert_array_equal(
+                env.motion_controller.previous_velocity, controller_velocity
+            )
+        finally:
+            env.close()
 
     def test_cb31_scheduler_updates_at_125hz_and_holds_at_240hz(self):
         config = load_config(
@@ -169,8 +303,8 @@ class ReferenceS0Tests(unittest.TestCase):
             start:start + DEFAULT_MAX_OBSTACLES * OBSTACLE_FEATURE_DIM
         ].reshape(DEFAULT_MAX_OBSTACLES, OBSTACLE_FEATURE_DIM)
         mask = observation[-DEFAULT_MAX_OBSTACLES:]
-        np.testing.assert_array_equal(mask, [1.0] + [0.0] * 7)
-        geometry = self.env._geometry()
+        np.testing.assert_array_equal(mask, [1.0, 1.0] + [0.0] * 6)
+        geometry = self.env._obstacle_geometries()[0]
         np.testing.assert_allclose(
             rows[0, :6],
             geometry.distances / OBSTACLE_CLEARANCE_SCALE_M,
@@ -180,7 +314,8 @@ class ReferenceS0Tests(unittest.TestCase):
             rows[0, 6:], geometry.nearest_direction, atol=1.0e-6
         )
         self.assertAlmostEqual(float(np.linalg.norm(rows[0, 6:])), 1.0, places=6)
-        np.testing.assert_array_equal(rows[1:], 0.0)
+        np.testing.assert_allclose(rows[1, 6:], [0.0, 0.0, -1.0])
+        np.testing.assert_array_equal(rows[2:], 0.0)
 
         collision_data = p.getCollisionShapeData(
             self.env.obstacle_id,
@@ -380,6 +515,8 @@ class ReferenceS0Tests(unittest.TestCase):
         agent = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, config)
         observation = torch.randn(4, REFERENCE_PPO_OBSERVATION_DIM)
         observation[:, -DEFAULT_MAX_OBSTACLES:] = 0.0
+        # The fixed mounting plane is present but must not activate Residual.
+        observation[:, -DEFAULT_MAX_OBSTACLES] = 1.0
         with torch.no_grad():
             agent.residual_actor[-1].weight.zero_()
             agent.residual_actor[-1].bias.fill_(0.40)
@@ -390,7 +527,7 @@ class ReferenceS0Tests(unittest.TestCase):
         torch.testing.assert_close(empty_mean, empty_base, rtol=0, atol=0)
 
         obstacle_observation = observation.clone()
-        obstacle_observation[:, -DEFAULT_MAX_OBSTACLES] = 1.0
+        obstacle_observation[:, -DEFAULT_MAX_OBSTACLES + 1] = 1.0
         mean, base, residual = agent._policy_components(obstacle_observation)
         torch.testing.assert_close(residual, torch.full_like(residual, 0.40))
         torch.testing.assert_close(mean, base + residual)
@@ -402,6 +539,76 @@ class ReferenceS0Tests(unittest.TestCase):
         mean.square().mean().backward()
         self.assertFalse(any(p.grad is not None for p in agent.actor.parameters()))
         self.assertGreater(float(agent.residual_actor[-1].bias.grad.norm()), 0.0)
+
+    def test_residual_explicitly_receives_normalized_base_action(self):
+        config = deepcopy(self.config)
+        config["thesis"]["stage"] = "s1"
+        agent = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, config)
+        observations = torch.randn(3, REFERENCE_PPO_OBSERVATION_DIM)
+        observations[:, -DEFAULT_MAX_OBSTACLES:] = 0.0
+        observations[:, -DEFAULT_MAX_OBSTACLES] = 1.0
+        observations[:, -DEFAULT_MAX_OBSTACLES + 1] = 1.0
+        captured = []
+        handle = agent.residual_actor.register_forward_pre_hook(
+            lambda _module, inputs: captured.append(inputs[0].detach().clone())
+        )
+        try:
+            _, base, _ = agent._policy_components(observations)
+        finally:
+            handle.remove()
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0].shape, (3, 70))
+        torch.testing.assert_close(
+            captured[0][:, :RESIDUAL_BASE_OBSERVATION_DIM],
+            torch.cat(
+                [
+                    observations[:, :13],
+                    observations[:, 20:REFERENCE_BASE_OBSERVATION_DIM],
+                ],
+                dim=-1,
+            ),
+        )
+        torch.testing.assert_close(
+            captured[0][:, -6:], base / agent.action_limit
+        )
+        self.assertFalse(captured[0][:, -6:].requires_grad)
+
+    def test_v11_stage_initialization_preserves_policy_with_zero_new_columns(self):
+        config = deepcopy(self.config)
+        config["thesis"]["stage"] = "s1"
+        source = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, config)
+        with torch.no_grad():
+            # A genuine v11 Residual had full 34-D base state plus the 32-D
+            # obstacle encoding, but none of the later safety/Base blocks.
+            source.residual_actor[0].weight[:, 59:].zero_()
+        observations = torch.randn(5, REFERENCE_PPO_OBSERVATION_DIM)
+        observations[:, -DEFAULT_MAX_OBSTACLES:] = 0.0
+        observations[:, -DEFAULT_MAX_OBSTACLES] = 1.0
+        expected = source._policy_components(observations)[0].detach().clone()
+
+        old_state = deepcopy(source.state_dict())
+        old_state["policy_contract"] = (
+            "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_v11"
+        )
+        compact_weight = old_state["residual_actor"]["0.weight"]
+        old_weight = torch.zeros(
+            compact_weight.shape[0], 66, dtype=compact_weight.dtype
+        )
+        old_weight[:, :13] = compact_weight[:, :13]
+        old_weight[:, 20:34] = compact_weight[:, 13:27]
+        old_weight[:, 34:66] = compact_weight[:, 27:59]
+        old_state["residual_actor"]["0.weight"] = old_weight
+
+        restored = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, config)
+        restored.initialize_from_stage_checkpoint(old_state, action_std=0.02)
+        actual = restored._policy_components(observations)[0].detach()
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        torch.testing.assert_close(
+            restored.residual_actor[0].weight[:, 59:],
+            torch.zeros_like(restored.residual_actor[0].weight[:, 59:]),
+            rtol=0,
+            atol=0,
+        )
 
     def test_s0_base_override_preserves_avoidance_modules(self):
         s0_config = deepcopy(self.config)
@@ -456,6 +663,7 @@ class ReferenceS0Tests(unittest.TestCase):
         feature_start = REFERENCE_BASE_OBSERVATION_DIM
         mask_start = feature_start + DEFAULT_MAX_OBSTACLES * OBSTACLE_FEATURE_DIM
         observations[:, mask_start] = 1.0
+        observations[:, mask_start + 1] = 1.0
         observations[0, feature_start:feature_start + 6] = 10.0
         observations[1, feature_start:feature_start + 6] = 0.12
         observations[2, feature_start:feature_start + 6] = 0.05
@@ -585,6 +793,49 @@ class ReferenceS0Tests(unittest.TestCase):
         self.assertAlmostEqual(fields["reference_obstacle_collision_penalty"], 20.0)
         self.assertAlmostEqual(fields["reference_self_collision_penalty"], 10.0)
         self.assertAlmostEqual(reward, expected_goal - expected_proximity - 30.0)
+
+    def test_obstacle_first_contact_has_one_time_entry_cost(self):
+        parameters = {
+            "reference_obstacle_threshold": 0.08,
+            "reference_obstacle_clearance_weight": 1.0,
+            "reference_obstacle_clearance_power": 1.0,
+            "reference_obstacle_collision_entry_penalty": 100.0,
+            "reference_obstacle_collision_penalty": 20.0,
+            "reference_self_collision_penalty": 10.0,
+            "reference_environment_collision_penalty": 10.0,
+        }
+        common = {
+            "reference_error": 0.2,
+            "obstacle_collision": True,
+            "self_collision": False,
+            "environment_collision": False,
+            "obstacle_clearances": (),
+            "parameters": parameters,
+            "obstacle_risk": 0.0,
+            "self_risk": 0.0,
+            "obstacle_distance": 0.0,
+            "self_distance": 0.25,
+            "obstacle_safe_distance": 0.05,
+            "self_safe_distance": 0.005,
+        }
+        first = compute_step_reward(obstacle_first_contact=True, **common)
+        continued = compute_step_reward(obstacle_first_contact=False, **common)
+        self.assertAlmostEqual(first.reward - continued.reward, -80.0)
+        self.assertEqual(
+            first.fields["reference_obstacle_collision_entry_penalty"], 100.0
+        )
+        self.assertEqual(
+            first.fields["reference_obstacle_collision_continuation_penalty"], 0.0
+        )
+        self.assertEqual(
+            continued.fields["reference_obstacle_collision_entry_penalty"], 0.0
+        )
+        self.assertEqual(
+            continued.fields[
+                "reference_obstacle_collision_continuation_penalty"
+            ],
+            20.0,
+        )
 
     def test_residual_penalty_is_goal_and_clearance_conditioned(self):
         residual = np.asarray([0.1, -0.2, 0.0, 0.0, 0.0, 0.0])

@@ -1,0 +1,69 @@
+# Fresh S1 single-obstacle training on the formal pose170_30_95 S0 Base.
+# This preserves the unified-safety-v16 observation/reward contract while
+# matching the Base task geometry and deployment-aligned CB3.1 controller.
+includes:
+  - paper_full.yaml
+
+thesis:
+  stage: s1
+  simple_reaching_mode: false
+  blocking_obstacle_mode: true
+  control_dt: 0.4
+  obstacle_geometry_check_interval_substeps: 96
+  horizon: 150
+  # Preserve the learned 4 deg scale of each Base/Residual output. Their
+  # unclipped sum can request 8 deg, which the 20 deg/s controller can execute
+  # over one 0.4 s policy period.
+  joint_delta_limit_rad: 0.06981317007977318
+  qdot_observation_scale: 0.3490658503988659
+  scene_sample_max_attempts: 64
+
+  fixed_orientation_goal:
+    enabled: true
+    # [-170, 30, 95] degrees.
+    euler_rad: [-2.9670597283903604, 0.5235987755982988, 1.6580627893946132]
+    # [60, -90, 90, -60, -100, -120] degrees.
+    initial_joint_positions_rad:
+      [1.0471975511965976, -1.5707963267948966, 1.5707963267948966, -1.0471975511965976, -1.7453292519943295, -2.0943951023931953]
+
+  joint_motion_controller:
+    enabled: true
+    robot_generation: ur5_cb3_1
+    real_control_frequency_hz: 125.0
+    joint_velocity_limits_rad_s:
+      [0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659]
+    joint_acceleration_limits_rad_s2:
+      [0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659]
+    position_gain_s_inv: 4.0
+    position_tolerance_rad: 0.0005
+
+  # Exactly one fixed-size cube. Eighty percent of episodes block the nominal
+  # TCP path; twenty percent sample a feasible random workspace placement.
+  static_obstacle_count_probabilities: {1: 1.0}
+  static_obstacle_layout_probabilities:
+    legacy_blocking: 0.8
+    workspace_random: 0.2
+  obstacle_surface_clearance_min_m: 0.10
+
+  reward:
+    reference_obstacle_collision_entry_penalty: 100.0
+    reference_obstacle_collision_penalty: 20.0
+    reference_self_collision_penalty: 10.0
+    reference_environment_collision_entry_penalty: 100.0
+    reference_environment_collision_penalty: 20.0
+    reference_residual_penalty_weight: 0.0
+
+train:
+  total_steps: 5000000
+  num_envs: 16
+  rollout_length: 256
+  cpu_ids: [0, 6, 12, 18, 1, 7, 13, 19, 2, 8, 14, 20, 3, 9, 15, 21]
+  # Preserve the established Residual exploration scale for the 20 deg/s study.
+  stage_transfer_action_std: 0.0135
+
+ppo:
+  # Restart the optimizer and decay these rates over the complete 5M budget.
+  actor_lr: 3.0e-05
+  critic_lr: 1.0e-04
+  action_std_init: 0.022857142857142857
+  actor_lr_min: 1.0e-05

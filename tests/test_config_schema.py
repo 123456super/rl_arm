@@ -29,6 +29,7 @@ def test_restored_reference_ppo_training_contract():
     assert reward["reference_obstacle_threshold_m"] == pytest.approx(0.08)
     assert reward["reference_obstacle_clearance_weight"] == pytest.approx(1.0)
     assert reward["reference_obstacle_clearance_power"] == pytest.approx(1.0)
+    assert reward["reference_obstacle_collision_entry_penalty"] == pytest.approx(20.0)
     assert reward["reference_obstacle_collision_penalty"] == pytest.approx(20.0)
     assert reward["reference_self_collision_penalty"] == pytest.approx(10.0)
     assert reward["reference_environment_collision_penalty"] == pytest.approx(10.0)
@@ -93,6 +94,12 @@ def test_s1_single_obstacle_inherits_10deg_s0_contract():
     )
     assert thesis["horizon"] == 150
     assert thesis["reward"]["reference_residual_penalty_weight"] == 0.0
+    assert thesis["reward"]["reference_obstacle_collision_entry_penalty"] == pytest.approx(
+        100.0
+    )
+    assert thesis["reward"]["reference_obstacle_collision_penalty"] == pytest.approx(
+        20.0
+    )
 
 
 def test_obsolete_top_level_section_is_rejected():

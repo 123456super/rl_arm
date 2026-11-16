@@ -19,7 +19,13 @@ thesis:
   obstacle_geometry_check_interval_substeps: 100
   horizon: 100
   action_mode: joint_delta
-  action_limit_rad: 3.14
+  # CB3.1 UR5 hardware working range.  Keep this separate from the much
+  # smaller per-decision joint_delta_limit_rad below: these are absolute
+  # joint positions, not action magnitudes.
+  joint_position_lower_limits_rad:
+    [-6.283185307179586, -6.283185307179586, -6.283185307179586, -6.283185307179586, -6.283185307179586, -6.283185307179586]
+  joint_position_upper_limits_rad:
+    [6.283185307179586, 6.283185307179586, 6.283185307179586, 6.283185307179586, 6.283185307179586, 6.283185307179586]
   # Exact action scale used by the archived 8M S1 checkpoint.
   joint_delta_limit_rad: 0.25
   joint_target_margin_rad: 0.02
@@ -99,8 +105,13 @@ thesis:
     reference_obstacle_clearance_weight: 1.0
     # Power 1.0 is the original linear clearance hinge.
     reference_obstacle_clearance_power: 1.0
+    # By default, the first and subsequent contact steps retain the archived
+    # reference-PPO cost. Safety-focused S1 experiments may override only the
+    # one-time entry cost without changing the continuation semantics.
+    reference_obstacle_collision_entry_penalty: 20.0
     reference_obstacle_collision_penalty: 20.0
     reference_self_collision_penalty: 10.0
+    reference_environment_collision_entry_penalty: 10.0
     reference_environment_collision_penalty: 10.0
     reference_residual_penalty_weight: 0.0
     reference_residual_penalty_goal_start_m: 0.03

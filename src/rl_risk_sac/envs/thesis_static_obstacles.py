@@ -19,6 +19,41 @@ class ObstacleSamplingError(RuntimeError):
 
 
 class StaticObstacleMixin:
+    def configure_evaluation_low_overpass(
+        self,
+        *,
+        top_height_m: float = 0.375,
+        path_half_depth_m: float = 0.075,
+        cross_path_half_width_m: float = 0.28,
+        plane_gap_m: float = 0.012,
+    ) -> None:
+        """Enable a single low wall for deterministic visualization only.
+
+        The wall is centred on the nominal Base TCP path in the horizontal
+        plane, aligned with that path, and widened across it.  Training never
+        calls this method, so the sampled training distribution is unchanged.
+        """
+        values = np.asarray(
+            [
+                top_height_m,
+                path_half_depth_m,
+                cross_path_half_width_m,
+                plane_gap_m,
+            ],
+            dtype=np.float64,
+        )
+        if not np.isfinite(values).all() or np.any(values <= 0.0):
+            raise ValueError("low-overpass dimensions must be finite and positive")
+        bottom_height = float(self.mounting_plane_height + plane_gap_m)
+        if top_height_m <= bottom_height:
+            raise ValueError("low-overpass top must be above its plane clearance")
+        self._evaluation_low_overpass = {
+            "top_height_m": float(top_height_m),
+            "bottom_height_m": bottom_height,
+            "path_half_depth_m": float(path_half_depth_m),
+            "cross_path_half_width_m": float(cross_path_half_width_m),
+        }
+
     def _disable_obstacle(self) -> None:
         self.obstacle_id = None
         self._obstacle_body_id = None
@@ -66,7 +101,16 @@ class StaticObstacleMixin:
             obstacle_count = 1 + static_obstacle_count
         else:
             raise ValueError(f"unsupported obstacle scene {self.contract.scene!r}")
-        if (
+        low_overpass = getattr(self, "_evaluation_low_overpass", None)
+        if low_overpass is not None:
+            if self.contract.scene != "static" or obstacle_count != 1:
+                raise ValueError(
+                    "evaluation low_overpass requires one static obstacle"
+                )
+            if not self.blocking_obstacle_mode:
+                raise ValueError("evaluation low_overpass requires blocking mode")
+            layout = "low_overpass"
+        elif (
             self.contract.scene in {"static", "hybrid"}
             and self.blocking_obstacle_mode
         ):
@@ -80,6 +124,7 @@ class StaticObstacleMixin:
         blocking_candidates: list[np.ndarray] = []
         secondary_link_candidates: list[np.ndarray] = []
         blocking_candidates_by_state: list[list[np.ndarray]] = []
+        low_overpass_candidates: list[tuple[np.ndarray, float]] = []
         if (
             self.contract.scene in {"static", "hybrid"}
             and self.blocking_obstacle_mode
@@ -112,6 +157,35 @@ class StaticObstacleMixin:
                         ).copy(),
                     ))
             self._set_joint_state(initial_q, initial_qdot)
+            if low_overpass is not None:
+                top_height = float(low_overpass["top_height_m"])
+                eligible = [
+                    index for index, candidate in enumerate(blocking_candidates)
+                    if float(candidate[2]) >= top_height + 0.06
+                ]
+                if not eligible:
+                    eligible = list(range(len(blocking_candidates)))
+                for index in self.rng.permutation(eligible):
+                    before = blocking_candidates[max(0, int(index) - 1)]
+                    after = blocking_candidates[
+                        min(len(blocking_candidates) - 1, int(index) + 1)
+                    ]
+                    tangent = np.asarray(after[:2] - before[:2], dtype=np.float64)
+                    if float(np.linalg.norm(tangent)) <= 1.0e-8:
+                        tangent = np.asarray([1.0, 0.0], dtype=np.float64)
+                    yaw = float(np.arctan2(tangent[1], tangent[0]))
+                    position = np.asarray(
+                        [
+                            blocking_candidates[int(index)][0],
+                            blocking_candidates[int(index)][1],
+                            0.5 * (
+                                float(low_overpass["bottom_height_m"])
+                                + top_height
+                            ),
+                        ],
+                        dtype=np.float32,
+                    )
+                    low_overpass_candidates.append((position, yaw))
         initial_q, initial_qdot = self.robot.joint_state_exact()
         initial_capsules = self.robot.capsules()
         self._set_joint_state(self.goal_joint_positions)
@@ -179,6 +253,18 @@ class StaticObstacleMixin:
                         self.obstacle_half_extents_max,
                     ).astype(np.float32)
                 )
+                if low_overpass is not None and not is_dynamic:
+                    half_extents = np.asarray(
+                        [
+                            low_overpass["path_half_depth_m"],
+                            low_overpass["cross_path_half_width_m"],
+                            0.5 * (
+                                low_overpass["top_height_m"]
+                                - low_overpass["bottom_height_m"]
+                            ),
+                        ],
+                        dtype=np.float32,
+                    )
                 obstacle_yaw = float(self.rng.uniform(-np.pi, np.pi))
                 quaternion = np.asarray(
                     p.getQuaternionFromEuler([0.0, 0.0, obstacle_yaw]),
@@ -188,7 +274,19 @@ class StaticObstacleMixin:
                 for _ in range(500):
                     self.obstacle_sampling_proposals += 1
                     candidate_is_tcp_blocker = False
-                    if not is_dynamic:
+                    if low_overpass is not None and not is_dynamic:
+                        if not low_overpass_candidates:
+                            break
+                        position, obstacle_yaw = low_overpass_candidates.pop()
+                        quaternion = np.asarray(
+                            p.getQuaternionFromEuler([0.0, 0.0, obstacle_yaw]),
+                            dtype=np.float32,
+                        )
+                        candidate_is_tcp_blocker = True
+                        velocity = np.zeros(3, dtype=np.float32)
+                        if np.linalg.norm(position - self.goal_position) < 0.15:
+                            continue
+                    elif not is_dynamic:
                         requires_path_candidate = bool(
                             self.blocking_obstacle_mode
                             and (

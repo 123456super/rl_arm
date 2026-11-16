@@ -9,9 +9,13 @@ from rl_risk_sac.robots.ur5_capsules import CapsuleState
 
 REFERENCE_LEGACY_BASE_OBSERVATION_DIM = 28
 REFERENCE_BASE_OBSERVATION_DIM = 34
+RESIDUAL_BASE_OBSERVATION_DIM = 27
 OBSTACLE_FEATURE_DIM = 9
 DEFAULT_MAX_OBSTACLES = 8
 OBSTACLE_CLEARANCE_SCALE_M = 0.20
+BASE_CLEARANCE_DELTA_FEATURE_DIM = 5
+PLANE_CLEARANCE_SCALE_M = 0.20
+PLANE_CLEARANCE_FEATURE_DIM = 5
 
 # Evaluation/deployment handoff defaults.  The Residual keeps full authority
 # outside the near-goal region or whenever any arm capsule remains close to an
@@ -240,11 +244,12 @@ def reference_ppo_reward(
     self_collision_penalty: float = 10.0,
     environment_collision_penalty: float = 10.0,
 ) -> tuple[float, dict[str, float]]:
-    """Reference reaching reward plus literature-based avoidance penalties.
+    """Reference reaching reward plus unified safety-geometry penalties.
 
-    ``obstacle_clearances`` contains one minimum clearance for each ordered
-    robot collision capsule.  Signed penetrations are clamped to zero in the
-    proximity term because physical contact is penalized separately.
+    ``obstacle_clearances`` contains each ordered robot link's minimum
+    clearance over external obstacles and the mounting plane.  Signed
+    penetrations are clamped to zero in the proximity term because physical
+    contact is penalized separately.
     """
     errors = max(float(reference_error), 0.0)
     threshold = float(obstacle_threshold)
@@ -282,6 +287,7 @@ def reference_ppo_reward(
         "c_proximity": float(proximity),
         "reference_error": float(errors),
         "reference_obstacle_penalty": float(clearance_cost),
+        "reference_safety_clearance_penalty": float(clearance_cost),
         "reference_obstacle_collision_penalty": obstacle_collision_cost,
         "reference_self_collision_penalty": self_collision_cost,
         "reference_environment_collision_penalty": environment_collision_cost,

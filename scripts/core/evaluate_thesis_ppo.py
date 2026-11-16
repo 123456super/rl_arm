@@ -82,6 +82,8 @@ def new_stats(info: dict) -> dict[str, object]:
         "joint_velocity_limiter_fraction_sum": 0.0,
         "joint_acceleration_limiter_fraction_sum": 0.0,
         "tcp_velocity_limiter_fraction_sum": 0.0,
+        "joint_position_clip_fraction_sum": 0.0,
+        "joint_position_clip_max_rad": 0.0,
         "residual_disabled_steps": 0,
         "residual_partial_steps": 0,
         "residual_authority_sum": 0.0,
@@ -265,6 +267,7 @@ def main() -> None:
         "joint_velocity_limiter_fraction",
         "joint_acceleration_limiter_fraction",
         "tcp_velocity_limiter_fraction",
+        "joint_position_clip_fraction", "joint_position_clip_max_rad",
     )
     rows: list[dict[str, object]] = []
     next_episode_id = 0
@@ -296,16 +299,27 @@ def main() -> None:
         while len(rows) < args.episodes:
             workers = tuple(active_episode_ids)
             batch_observations = observations[list(workers)]
+            base_actions = agent.predict_base_actions(batch_observations)
+            context_results = pool.residual_safety_context_many({
+                worker: base_actions[index]
+                for index, worker in enumerate(workers)
+            })
+            residual_safety_context = np.stack([
+                context_results[worker] for worker in workers
+            ]).astype(np.float32)
             if args.residual_handoff_mode == "cutoff25":
                 actions, _logp, _values, policy = agent.act_for_deployment(
                     batch_observations,
                     current_position_errors[list(workers)],
                     residual_cutoff_position_m=args.residual_cutoff_position_m,
+                    residual_safety_context=residual_safety_context,
                 )
                 residual_authority = policy["residual_authority"]
             else:
                 actions, _logp, _values, policy = agent.act(
-                    batch_observations, deterministic=True
+                    batch_observations,
+                    deterministic=True,
+                    residual_safety_context=residual_safety_context,
                 )
             if args.residual_handoff_mode == "full":
                 residual_authority = np.ones(len(workers), dtype=np.float32)
@@ -383,8 +397,13 @@ def main() -> None:
                     "joint_velocity_limiter_fraction",
                     "joint_acceleration_limiter_fraction",
                     "tcp_velocity_limiter_fraction",
+                    "joint_position_clip_fraction",
                 ):
                     stat[f"{key}_sum"] = float(stat[f"{key}_sum"]) + float(info[key])
+                stat["joint_position_clip_max_rad"] = max(
+                    float(stat["joint_position_clip_max_rad"]),
+                    float(info["joint_position_clip_max_rad"]),
+                )
                 for key in (
                     "collision", "obstacle_collision", "self_collision",
                     "environment_collision", "joint_limit", "success",
@@ -414,6 +433,7 @@ def main() -> None:
                         "joint_velocity_limiter_fraction",
                         "joint_acceleration_limiter_fraction",
                         "tcp_velocity_limiter_fraction",
+                        "joint_position_clip_fraction",
                     ):
                         stat[key] = float(stat.pop(f"{key}_sum")) / int(stat["length"])
                     stat["residual_disabled_fraction"] = (
@@ -467,6 +487,7 @@ def main() -> None:
         "joint_velocity_limiter_fraction",
         "joint_acceleration_limiter_fraction",
         "tcp_velocity_limiter_fraction",
+        "joint_position_clip_fraction", "joint_position_clip_max_rad",
         "residual_disabled_fraction",
         "residual_partial_fraction", "residual_authority_mean",
     )

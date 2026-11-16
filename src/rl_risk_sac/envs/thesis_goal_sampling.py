@@ -8,6 +8,44 @@ import pybullet as p
 from rl_risk_sac.tasks.reference_reaching import pose_error
 
 
+def nearest_equivalent_joint_configuration(
+    configuration: np.ndarray,
+    reference: np.ndarray,
+    lower: np.ndarray,
+    upper: np.ndarray,
+) -> np.ndarray:
+    """Choose the closest feasible 2*pi-equivalent value for each joint.
+
+    Revolute-joint IK solutions are periodic.  Folding every solution into
+    [-pi, pi) destroys path continuity near +/-pi; instead retain the
+    equivalent representation nearest the current configuration while staying
+    inside the real CB3.1 command range.
+    """
+    q = np.asarray(configuration, dtype=np.float64)
+    reference = np.asarray(reference, dtype=np.float64)
+    lower = np.asarray(lower, dtype=np.float64)
+    upper = np.asarray(upper, dtype=np.float64)
+    if any(value.shape != (6,) for value in (q, reference, lower, upper)):
+        raise ValueError("joint configurations and limits must have shape (6,)")
+    if not all(np.isfinite(value).all() for value in (q, reference, lower, upper)):
+        raise ValueError("joint configurations and limits must be finite")
+    if np.any(upper <= lower):
+        raise ValueError("joint upper limits must exceed lower limits")
+
+    selected = np.empty(6, dtype=np.float64)
+    period = 2.0 * np.pi
+    for index in range(6):
+        first = int(np.ceil((lower[index] - q[index]) / period - 1.0e-12))
+        last = int(np.floor((upper[index] - q[index]) / period + 1.0e-12))
+        if first > last:
+            raise ValueError("IK solution has no equivalent inside joint limits")
+        candidates = q[index] + period * np.arange(first, last + 1)
+        selected[index] = candidates[
+            int(np.argmin(np.abs(candidates - reference[index])))
+        ]
+    return selected
+
+
 class GoalSamplingMixin:
     def _propose_reference_goal_position(self) -> np.ndarray | None:
         """Draw one FTP4RM ``xyztorus`` position proposal."""
@@ -73,14 +111,13 @@ class GoalSamplingMixin:
                 ):
                     continue
                 candidate = np.asarray(validation["q_ik"], dtype=np.float64)
-                candidate = (candidate + np.pi) % (2.0 * np.pi) - np.pi
-                command_lower = np.maximum(
-                    self.robot.joint_lower_limits + self.joint_target_margin,
-                    -self.action_limit,
+                effective_lower, effective_upper = (
+                    self.effective_joint_position_limits()
                 )
-                command_upper = np.minimum(
-                    self.robot.joint_upper_limits - self.joint_target_margin,
-                    self.action_limit,
+                command_lower = effective_lower + self.joint_target_margin
+                command_upper = effective_upper - self.joint_target_margin
+                candidate = nearest_equivalent_joint_configuration(
+                    candidate, initial_q, command_lower, command_upper
                 )
                 if np.any(candidate < command_lower) or np.any(candidate > command_upper):
                     continue

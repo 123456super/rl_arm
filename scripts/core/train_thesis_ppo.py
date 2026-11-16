@@ -21,7 +21,10 @@ import torch
 
 from rl_risk_sac.algorithms.thesis_ppo import PPONumericalError, ThesisPPOAgent
 from rl_risk_sac.envs.parallel_thesis_env import ParallelThesisEnvPool
-from rl_risk_sac.tasks.reference_reaching import residual_action_penalty
+from rl_risk_sac.tasks.reference_reaching import (
+    BASE_CLEARANCE_DELTA_FEATURE_DIM,
+    residual_action_penalty,
+)
 from rl_risk_sac.utils.config import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -114,6 +117,8 @@ def episode_stats(info):
         "joint_velocity_limiter_fraction_sum": 0.0,
         "joint_acceleration_limiter_fraction_sum": 0.0,
         "tcp_velocity_limiter_fraction_sum": 0.0,
+        "joint_position_clip_fraction_sum": 0.0,
+        "joint_position_clip_max_rad": 0.0,
     }
 
 
@@ -348,6 +353,8 @@ def main() -> None:
             "joint_velocity_limiter_fraction",
             "joint_acceleration_limiter_fraction",
             "tcp_velocity_limiter_fraction",
+            "joint_position_clip_fraction",
+            "joint_position_clip_max_rad",
         ),
     )
     if resume_payload is not None and "random_state" in resume_payload:
@@ -368,7 +375,7 @@ def main() -> None:
     if resume_payload:
         recent.extend(resume_payload.get("recent_episodes", []))
     episodes_csv = (output / "episodes.csv").open("w", newline="", encoding="utf-8")
-    fields = ["episode", "step", "run_step", "scene", "obstacle_count", "dynamic_obstacle_count", "static_obstacle_count", "obstacle_layout", "return", "length", "success", "collision", "obstacle_collision", "self_collision", "environment_collision", "terminal_collision", "timeout", "joint_limit", "termination_reason", "best_position_m", "best_orientation_rad", "best_reference_error", "final_position_m", "final_orientation_rad", "final_reference_error", "max_hold", "action_abs_mean", "action_abs_max", "dense_reward_sum", "terminal_reward_sum", "self_collision_penalty_sum", "residual_penalty_sum", "joint_limit_violation_max_rad", "joint_speed_peak_rad_s", "joint_acceleration_peak_rad_s2", "tcp_linear_speed_peak_m_s", "tcp_angular_speed_peak_rad_s", "joint_velocity_limiter_fraction", "joint_acceleration_limiter_fraction", "tcp_velocity_limiter_fraction"]
+    fields = ["episode", "step", "run_step", "scene", "obstacle_count", "dynamic_obstacle_count", "static_obstacle_count", "obstacle_layout", "return", "length", "success", "collision", "obstacle_collision", "self_collision", "environment_collision", "terminal_collision", "timeout", "joint_limit", "termination_reason", "best_position_m", "best_orientation_rad", "best_reference_error", "final_position_m", "final_orientation_rad", "final_reference_error", "max_hold", "action_abs_mean", "action_abs_max", "dense_reward_sum", "terminal_reward_sum", "self_collision_penalty_sum", "residual_penalty_sum", "joint_limit_violation_max_rad", "joint_speed_peak_rad_s", "joint_acceleration_peak_rad_s2", "tcp_linear_speed_peak_m_s", "tcp_angular_speed_peak_rad_s", "joint_velocity_limiter_fraction", "joint_acceleration_limiter_fraction", "tcp_velocity_limiter_fraction", "joint_position_clip_fraction", "joint_position_clip_max_rad"]
     writer = csv.DictWriter(episodes_csv, fieldnames=fields)
     writer.writeheader()
     updates_file = (output / "updates.jsonl").open("w", encoding="utf-8")
@@ -408,10 +415,30 @@ def main() -> None:
         while completed_steps < args.steps:
             rollout_started = time.perf_counter()
             T = min(args.rollout_length, max(1, (args.steps - completed_steps + args.num_envs - 1) // args.num_envs))
-            rollout = {k: [] for k in ("obs", "actions", "std_scale", "logp", "values", "rewards", "residual_penalties", "dones", "terminated", "next_obs")}
+            rollout = {k: [] for k in ("obs", "actions", "std_scale", "logp", "values", "rewards", "residual_penalties", "residual_safety_context", "dones", "terminated", "next_obs")}
             for _ in range(T):
                 episode_fraction = episodes / max(1.0, args.steps / float(config["thesis"]["horizon"]))
-                actions, logp, values, policy_info = agent.act(obs, episode_fraction=episode_fraction)
+                base_actions = agent.predict_base_actions(obs)
+                if hasattr(pool, "residual_safety_context_many"):
+                    context_results = pool.residual_safety_context_many({
+                        i: base_actions[i] for i in range(args.num_envs)
+                    })
+                    residual_safety_context = np.stack([
+                        context_results[i] for i in range(args.num_envs)
+                    ]).astype(np.float32)
+                else:  # Minimal test doubles and obstacle-free legacy pools.
+                    residual_safety_context = np.zeros(
+                        (
+                            args.num_envs,
+                            BASE_CLEARANCE_DELTA_FEATURE_DIM,
+                        ),
+                        dtype=np.float32,
+                    )
+                actions, logp, values, policy_info = agent.act(
+                    obs,
+                    episode_fraction=episode_fraction,
+                    residual_safety_context=residual_safety_context,
+                )
                 result = pool.step_many({i: actions[i] for i in range(args.num_envs)})
                 next_obs = np.empty_like(obs); raw_next_obs = np.empty_like(obs)
                 rewards = np.zeros(args.num_envs); dones = np.zeros(args.num_envs, dtype=np.float32)
@@ -495,8 +522,13 @@ def main() -> None:
                         "joint_velocity_limiter_fraction",
                         "joint_acceleration_limiter_fraction",
                         "tcp_velocity_limiter_fraction",
+                        "joint_position_clip_fraction",
                     ):
                         stat[f"{key}_sum"] += float(info.get(key, 0.0))
+                    stat["joint_position_clip_max_rad"] = max(
+                        stat["joint_position_clip_max_rad"],
+                        float(info.get("joint_position_clip_max_rad", 0.0)),
+                    )
                     if dones[i]:
                         episodes += 1
                         stat["action_abs_mean"] /= stat["length"]
@@ -504,6 +536,7 @@ def main() -> None:
                             "joint_velocity_limiter_fraction",
                             "joint_acceleration_limiter_fraction",
                             "tcp_velocity_limiter_fraction",
+                            "joint_position_clip_fraction",
                         ):
                             stat[key] = stat.pop(f"{key}_sum") / stat["length"]
                         run_step = completed_steps + args.num_envs
@@ -528,7 +561,7 @@ def main() -> None:
                     for i, (reset_observation, reset_info) in reset_results.items():
                         next_obs[i] = reset_observation
                         stats[i] = episode_stats(reset_info)
-                rollout["obs"].append(obs.copy()); rollout["actions"].append(policy_info["raw_actions"]); rollout["std_scale"].append(policy_info["std_scale"]); rollout["logp"].append(logp); rollout["values"].append(values); rollout["rewards"].append(rewards); rollout["residual_penalties"].append(residual_penalties); rollout["dones"].append(dones); rollout["terminated"].append(terminated_flags); rollout["next_obs"].append(raw_next_obs.copy())
+                rollout["obs"].append(obs.copy()); rollout["actions"].append(policy_info["raw_actions"]); rollout["std_scale"].append(policy_info["std_scale"]); rollout["logp"].append(logp); rollout["values"].append(values); rollout["rewards"].append(rewards); rollout["residual_penalties"].append(residual_penalties); rollout["residual_safety_context"].append(residual_safety_context.copy()); rollout["dones"].append(dones); rollout["terminated"].append(terminated_flags); rollout["next_obs"].append(raw_next_obs.copy())
                 obs = next_obs; completed_steps += args.num_envs
                 if completed_steps >= args.steps: break
             rollout_seconds = time.perf_counter() - rollout_started
@@ -538,7 +571,7 @@ def main() -> None:
             rewards = np.asarray(rollout["rewards"], dtype=np.float32); values = np.asarray(rollout["values"], dtype=np.float32); dones = np.asarray(rollout["dones"], dtype=np.float32); terminated = np.asarray(rollout["terminated"], dtype=np.float32)
             gammas = fixed_discount_factors(rewards, agent.gamma)
             adv, value_targets = compute_gae(rewards, values, next_values_rollout, terminated, dones, gammas, agent.gae_lambda)
-            batch = {"obs": np.asarray(rollout["obs"], dtype=np.float32).reshape(-1, obs_dim), "actions": np.asarray(rollout["actions"], dtype=np.float32).reshape(-1, action_dim), "std_scale": np.asarray(rollout["std_scale"], dtype=np.float32).reshape(-1, 1), "logp": np.asarray(rollout["logp"], dtype=np.float32).reshape(-1), "advantages": adv.reshape(-1), "returns": value_targets.reshape(-1)}
+            batch = {"obs": np.asarray(rollout["obs"], dtype=np.float32).reshape(-1, obs_dim), "actions": np.asarray(rollout["actions"], dtype=np.float32).reshape(-1, action_dim), "std_scale": np.asarray(rollout["std_scale"], dtype=np.float32).reshape(-1, 1), "logp": np.asarray(rollout["logp"], dtype=np.float32).reshape(-1), "residual_safety_context": np.asarray(rollout["residual_safety_context"], dtype=np.float32).reshape(-1, BASE_CLEARANCE_DELTA_FEATURE_DIM), "advantages": adv.reshape(-1), "returns": value_targets.reshape(-1)}
             # The reference implementation applies its linear schedule after
             # an update.  Scheduling this update from the rollout's starting
             # step is equivalent and preserves the full initial learning rate.

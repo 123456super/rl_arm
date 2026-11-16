@@ -21,7 +21,9 @@ from rl_risk_sac.envs.thesis_reward import compute_step_reward
 from rl_risk_sac.prediction import LSTMObstaclePredictor, load_lstm_predictor
 from rl_risk_sac.robots.pybullet_robot import PyBulletRobot
 from rl_risk_sac.tasks.reference_reaching import (
+    BASE_CLEARANCE_DELTA_FEATURE_DIM,
     OBSTACLE_CLEARANCE_SCALE_M,
+    PLANE_CLEARANCE_SCALE_M,
     SelfCollisionGeometry,
     ThesisGeometry,
     build_reference_observation,
@@ -92,11 +94,27 @@ class ThesisHomotopyEnv(
         self.action_mode = str(thesis["action_mode"])
         if self.action_mode != "joint_delta":
             raise ValueError("reference PPO requires action_mode=joint_delta")
-        self.action_limit = np.full(
-            6, float(thesis["action_limit_rad"]), dtype=np.float32
+        # Explicit absolute joint-position bounds.  These are intentionally
+        # independent from the Actor's per-decision joint-delta range.
+        self.configured_joint_lower_limits = np.asarray(
+            thesis.get("joint_position_lower_limits_rad", [-2.0 * np.pi] * 6),
+            dtype=np.float64,
         )
-        if np.any(self.action_limit <= 0.0):
-            raise ValueError("action_limit_rad must be positive")
+        self.configured_joint_upper_limits = np.asarray(
+            thesis.get("joint_position_upper_limits_rad", [2.0 * np.pi] * 6),
+            dtype=np.float64,
+        )
+        if (
+            self.configured_joint_lower_limits.shape != (6,)
+            or self.configured_joint_upper_limits.shape != (6,)
+            or not np.isfinite(self.configured_joint_lower_limits).all()
+            or not np.isfinite(self.configured_joint_upper_limits).all()
+            or np.any(
+                self.configured_joint_upper_limits
+                <= self.configured_joint_lower_limits
+            )
+        ):
+            raise ValueError("invalid configured joint-position limits")
         self.joint_target_margin = float(thesis["joint_target_margin_rad"])
         self.joint_limit_tolerance = float(thesis["joint_limit_tolerance_rad"])
         if self.joint_target_margin < 0.0 or self.joint_limit_tolerance <= 0.0:
@@ -324,11 +342,26 @@ class ThesisHomotopyEnv(
             "reference_obstacle_collision_penalty": float(
                 reward["reference_obstacle_collision_penalty"]
             ),
+            # Old checkpoint-embedded configurations predate the separate
+            # first-contact cost. Falling back to the per-step value preserves
+            # their historical evaluation semantics.
+            "reference_obstacle_collision_entry_penalty": float(
+                reward.get(
+                    "reference_obstacle_collision_entry_penalty",
+                    reward["reference_obstacle_collision_penalty"],
+                )
+            ),
             "reference_self_collision_penalty": float(
                 reward["reference_self_collision_penalty"]
             ),
             "reference_environment_collision_penalty": float(
                 reward["reference_environment_collision_penalty"]
+            ),
+            "reference_environment_collision_entry_penalty": float(
+                reward.get(
+                    "reference_environment_collision_entry_penalty",
+                    reward["reference_environment_collision_penalty"],
+                )
             ),
         }
         for name, value in self.reward_parameters.items():
@@ -410,6 +443,7 @@ class ThesisHomotopyEnv(
         self.step_count = 0
         self.success_hold_count = 0
         self.obstacle_contact_seen = False
+        self.environment_contact_seen = False
         if self.motion_controller is not None:
             self.motion_controller.reset()
         self.previous_rho_position = 0.0
@@ -632,6 +666,7 @@ class ThesisHomotopyEnv(
         self.step_count = 0
         self.success_hold_count = 0
         self.obstacle_contact_seen = False
+        self.environment_contact_seen = False
         observation, info, geometry, self_geometry, position_error, orientation_error = self._observe()
         self.previous_rho_position = float(np.linalg.norm(position_error))
         self.previous_rho_orientation = float(np.linalg.norm(orientation_error))
@@ -678,15 +713,201 @@ class ThesisHomotopyEnv(
             strict_pose_reached and self.success_hold_count >= self.success_hold_steps
         )
 
+    def base_clearance_changes(self, base_action: np.ndarray) -> np.ndarray:
+        """Predict five moving-link safety-clearance changes from Base.
+
+        The query is counterfactual.  With the bounded CB3.1 controller it
+        evaluates the robot at the joint position reachable after one policy
+        period under the same 125 Hz velocity/acceleration contract used by
+        :meth:`step`; it must not jump directly to an unreachable ``q +
+        action`` target.  The legacy unbounded route still evaluates its full
+        position target.  Each link uses its minimum signed clearance over
+        external obstacles and the mounting plane before and after the Base
+        command.  Values use the same 0.20 m scale as the set observations.
+
+        PyBullet state is restored exactly before returning, so this query has
+        no effect on the subsequent physical transition.
+        """
+        action = np.asarray(base_action, dtype=np.float64)
+        if action.shape != (6,) or not np.isfinite(action).all():
+            raise ValueError("base_action must contain six finite joint increments")
+        current_geometries = self._safety_geometries()
+        if not current_geometries:
+            return np.zeros(BASE_CLEARANCE_DELTA_FEATURE_DIM, dtype=np.float32)
+        current = self._aggregate_obstacle_geometries(current_geometries)
+        if current is None or current.distances.shape != (6,):
+            raise RuntimeError("invalid current safety clearances")
+
+        q, qdot = self.robot.joint_state_exact()
+        command_lower, command_upper = self.effective_joint_position_limits()
+        target = np.clip(q + action, command_lower, command_upper)
+        if self.bounded_joint_motion_enabled:
+            if self.motion_controller is None:
+                raise RuntimeError("bounded joint controller was not initialized")
+            predicted_q = self.motion_controller.predict_reachable_position(
+                q,
+                target,
+                self.real_control_dt,
+                self.controller_updates_per_policy_step,
+            )
+            predicted_q = np.clip(predicted_q, command_lower, command_upper)
+        else:
+            predicted_q = target
+        state_id = p.saveState(physicsClientId=self.client_id)
+        try:
+            for joint_id, position, velocity in zip(
+                self.robot.joint_ids, predicted_q, qdot, strict=True
+            ):
+                p.resetJointState(
+                    self.robot_id,
+                    joint_id,
+                    float(position),
+                    targetVelocity=float(velocity),
+                    physicsClientId=self.client_id,
+                )
+            predicted_geometries = self._safety_geometries()
+            predicted = self._aggregate_obstacle_geometries(predicted_geometries)
+            if predicted is None or predicted.distances.shape != (6,):
+                raise RuntimeError("invalid predicted safety clearances")
+            changes = (
+                np.asarray(predicted.distances, dtype=np.float64)
+                - np.asarray(current.distances, dtype=np.float64)
+            ) / OBSTACLE_CLEARANCE_SCALE_M
+        finally:
+            p.restoreState(stateId=state_id, physicsClientId=self.client_id)
+            p.removeState(stateUniqueId=state_id, physicsClientId=self.client_id)
+        if not np.isfinite(changes).all():
+            raise RuntimeError("non-finite Base clearance-change prediction")
+        # The first ordered capsule is the shoulder.  Its rotation is about
+        # the vertical base axis, so its counterfactual clearance change is
+        # not a useful avoidance-control feature.  Keep shoulder clearance in
+        # the obstacle set, but omit its Base-induced delta here.
+        result = changes[1:].astype(np.float32)
+        if result.shape != (BASE_CLEARANCE_DELTA_FEATURE_DIM,):
+            raise RuntimeError("invalid moving-link clearance-change vector")
+        return result
+
+    def _plane_link_clearances(self) -> np.ndarray:
+        """Return six ordered signed link clearances to the mounting plane.
+
+        Distances use Bullet's collision geometry rather than capsule AABBs,
+        so a rotated link does not produce a false plane penetration.  The
+        fixed base links are intentionally excluded, matching the physical
+        collision contract.  Values are raw metres; the observation builder
+        applies the shared 0.20 m safety-object scale.
+        """
+        if self.mounting_plane_id is None:
+            return np.full(6, PLANE_CLEARANCE_SCALE_M, dtype=np.float32)
+        names = (
+            "upper_arm_link",
+            "forearm_link",
+            "wrist_1_link",
+            "wrist_2_link",
+            "wrist_3_link",
+        )
+        # Shoulder rotation is about the vertical mounting axis and its low
+        # fixed geometry is not an avoidance degree of freedom.  Preserve the
+        # six-link row contract with a safe sentinel in slot zero.
+        distances: list[float] = [PLANE_CLEARANCE_SCALE_M]
+        query_distance = PLANE_CLEARANCE_SCALE_M
+        for name in names:
+            link_id = self._link_name_to_id[name]
+            points = p.getClosestPoints(
+                bodyA=self.robot_id,
+                bodyB=self.mounting_plane_id,
+                distance=query_distance,
+                linkIndexA=link_id,
+                physicsClientId=self.client_id,
+            )
+            distance = min((float(point[8]) for point in points), default=query_distance)
+            distances.append(distance)
+        result = np.asarray(distances, dtype=np.float32)
+        if (
+            result.shape != (6,)
+            or not np.isfinite(result).all()
+        ):
+            raise RuntimeError("invalid link-to-plane clearance vector")
+        return result
+
+    def _plane_geometry(self) -> ThesisGeometry | None:
+        """Represent the rigid mounting plane as one obstacle-set element."""
+        if self.mounting_plane_id is None:
+            return None
+        distances = self._plane_link_clearances()
+        direction = np.asarray([0.0, 0.0, -1.0], dtype=np.float32)
+        relative_vectors = np.repeat(direction[None, :], 6, axis=0)
+        ttc = np.full(6, self.self_ttc_max, dtype=np.float32)
+        approach = np.zeros(6, dtype=np.float32)
+        risk = np.clip(
+            (self.d_safe - distances) / self.d_safe, 0.0, 1.0
+        ).astype(np.float32)
+        return ThesisGeometry(
+            relative_vectors=relative_vectors,
+            distances=distances,
+            nearest_direction=direction,
+            ttc=ttc,
+            approach_velocities=approach,
+            risk_per_link=risk,
+            risk_max=float(np.max(risk)),
+            distance_min=float(np.min(distances)),
+        )
+
+    def _safety_geometries(self) -> list[ThesisGeometry]:
+        """Return external obstacles and the plane under one geometry contract."""
+        geometries = self._obstacle_geometries()
+        plane = self._plane_geometry()
+        if plane is not None:
+            geometries.append(plane)
+        if len(geometries) > self.max_obstacles:
+            raise RuntimeError(
+                "unified safety set exceeds observation obstacle capacity"
+            )
+        return geometries
+
+    def residual_safety_context(self, base_action: np.ndarray) -> np.ndarray:
+        """Return Base-induced minimum-clearance changes for the safety set."""
+        context = self.base_clearance_changes(base_action).astype(np.float32)
+        if (
+            context.shape != (BASE_CLEARANCE_DELTA_FEATURE_DIM,)
+            or not np.isfinite(context).all()
+        ):
+            raise RuntimeError("invalid Residual safety context")
+        return context
+
+    def effective_joint_position_limits(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return the one authoritative command range for all six joints.
+
+        The configured CB3.1 limits may be narrowed to match an installation's
+        PolyScope safety settings, but can never extend beyond the robot URDF.
+        Execution, prediction, IK filtering and diagnostics all use this same
+        intersection so a policy cannot be silently blocked by a second range.
+        """
+        lower = np.maximum(
+            self.robot.joint_lower_limits.astype(np.float64),
+            self.configured_joint_lower_limits,
+        )
+        upper = np.minimum(
+            self.robot.joint_upper_limits.astype(np.float64),
+            self.configured_joint_upper_limits,
+        )
+        if np.any(upper <= lower):
+            raise RuntimeError("configured and URDF joint-position limits do not overlap")
+        return lower, upper
+
     def step(self, action: np.ndarray):
         action = np.asarray(action, dtype=np.float32)
         if action.shape != (6,) or not np.isfinite(action).all():
             raise ValueError("action must contain six finite joint-angle increments")
         q_before, qdot_before = self.robot.joint_state()
-        lower, upper = self.robot.joint_lower_limits, self.robot.joint_upper_limits
-        command_lower = np.maximum(lower, -self.action_limit)
-        command_upper = np.minimum(upper, self.action_limit)
-        target_positions = np.clip(q_before + action, command_lower, command_upper)
+        command_lower, command_upper = self.effective_joint_position_limits()
+        lower, upper = command_lower, command_upper
+        requested_target_positions = q_before + action
+        target_positions = np.clip(
+            requested_target_positions, command_lower, command_upper
+        )
+        joint_position_clip = np.abs(
+            requested_target_positions - target_positions
+        )
         projection_info = {
             "projection_applied": False,
             "projection_iterations": 0,
@@ -694,6 +915,7 @@ class ThesisHomotopyEnv(
             "projection_max_violation_after": 0.0,
         }
         contact_seen_before = self.obstacle_contact_seen
+        environment_contact_seen_before = self.environment_contact_seen
         obstacle_collision = False
         self_collision = False
         environment_collision = False
@@ -844,6 +1066,9 @@ class ThesisHomotopyEnv(
                 break
 
         self.obstacle_contact_seen = self.obstacle_contact_seen or obstacle_collision
+        self.environment_contact_seen = (
+            self.environment_contact_seen or environment_collision
+        )
         self.step_count += 1
         observation, info, endpoint_geometry, endpoint_self_geometry, position_error, orientation_error = self._observe()
         next_rho_position = float(np.linalg.norm(position_error))
@@ -916,8 +1141,15 @@ class ThesisHomotopyEnv(
         reward_result = compute_step_reward(
             reference_error=reference_error,
             obstacle_collision=raw_obstacle_collision,
+            obstacle_first_contact=bool(
+                raw_obstacle_collision and not contact_seen_before
+            ),
             self_collision=raw_self_collision,
             environment_collision=raw_environment_collision,
+            environment_first_contact=bool(
+                raw_environment_collision
+                and not environment_contact_seen_before
+            ),
             obstacle_clearances=(
                 () if endpoint_geometry is None
                 else tuple(float(value) for value in endpoint_geometry.distances)
@@ -954,6 +1186,7 @@ class ThesisHomotopyEnv(
                 "cost": cost,
                 "policy_joint_delta": action.copy(),
                 "policy_joint_target": target_positions.copy(),
+                "requested_joint_target": requested_target_positions.copy(),
                 "policy_joint_velocity": last_commanded_velocity.copy(),
                 "commanded_joint_delta": (q_after - q_before).copy(),
                 "target_joint_positions": target_positions.copy(),
@@ -976,6 +1209,12 @@ class ThesisHomotopyEnv(
                 ),
                 "tcp_velocity_limiter_fraction": (
                     tcp_limited_substeps / max(1, controller_updates)
+                ),
+                "joint_position_clip_fraction": float(
+                    np.mean(joint_position_clip > 1.0e-12)
+                ),
+                "joint_position_clip_max_rad": float(
+                    np.max(joint_position_clip)
                 ),
                 **projection_info,
                 "task_reached": task_reached,
@@ -1064,7 +1303,7 @@ class ThesisHomotopyEnv(
             offset_m=self.reference_point_offset_m,
         )
         point_distances = np.linalg.norm(point_errors, axis=1).astype(np.float32)
-        obstacle_geometries = self._obstacle_geometries()
+        obstacle_geometries = self._safety_geometries()
         geometry = self._aggregate_obstacle_geometries(obstacle_geometries)
         self_geometry = self._self_geometry()
         obstacle_features = None
@@ -1160,8 +1399,7 @@ class ThesisHomotopyEnv(
         loop.  Crossing-state evaluators call it at most once per episode.
         """
         q, _ = self.robot.joint_state_exact()
-        lower = np.asarray(self.robot.joint_lower_limits, dtype=np.float64)
-        upper = np.asarray(self.robot.joint_upper_limits, dtype=np.float64)
+        lower, upper = self.effective_joint_position_limits()
         margins = np.minimum(q - lower, upper - q)
         normalized_margins = margins / np.maximum(upper - lower, 1.0e-12)
         ee_position, ee_quaternion = self.robot.end_effector_pose()

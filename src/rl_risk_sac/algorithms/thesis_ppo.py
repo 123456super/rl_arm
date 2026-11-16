@@ -14,9 +14,12 @@ from torch.distributions import Normal
 
 from rl_risk_sac.algorithms.networks import ObstacleSetEncoder, mlp
 from rl_risk_sac.tasks.reference_reaching import (
+    BASE_CLEARANCE_DELTA_FEATURE_DIM,
     OBSTACLE_FEATURE_DIM,
+    PLANE_CLEARANCE_FEATURE_DIM,
     REFERENCE_BASE_OBSERVATION_DIM,
     REFERENCE_LEGACY_BASE_OBSERVATION_DIM,
+    RESIDUAL_BASE_OBSERVATION_DIM,
     RESIDUAL_HANDOFF_GOAL_BASE_M,
     compose_base_residual_action,
     reference_ppo_observation_dim,
@@ -88,6 +91,23 @@ def _gradient_norm(parameters) -> torch.Tensor:
     return torch.linalg.vector_norm(per_parameter, ord=2)
 
 
+def _quaternion_from_euler(euler_rad: list[float]) -> np.ndarray:
+    """PyBullet-compatible roll-pitch-yaw to ``[x, y, z, w]``."""
+    roll, pitch, yaw = (float(value) for value in euler_rad)
+    cr, sr = np.cos(roll * 0.5), np.sin(roll * 0.5)
+    cp, sp = np.cos(pitch * 0.5), np.sin(pitch * 0.5)
+    cy, sy = np.cos(yaw * 0.5), np.sin(yaw * 0.5)
+    return np.asarray(
+        [
+            sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - sr * sp * cy,
+            cr * cp * cy + sr * sp * sy,
+        ],
+        dtype=np.float32,
+    )
+
+
 class PPONumericalError(RuntimeError):
     def __init__(self, message: str, diagnostic_path: Path, rolled_back: bool):
         self.diagnostic_path = diagnostic_path
@@ -128,9 +148,13 @@ class ThesisPPOAgent:
         if self.stage not in {"s0", "s1", "s2"}:
             raise ValueError("thesis stage must be s0, s1, or s2")
         self.freeze_base_actor = self.stage != "s0"
+        self.mounting_plane_in_safety_set = bool(
+            thesis["reference_ppo"]["mounting_plane"]["enabled"]
+        )
         ppo = config["ppo"]
         self.policy_contract = (
-            "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_v11"
+            "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
+            "base_action_unified_clearance_delta5_compact_v16"
         )
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -138,6 +162,14 @@ class ThesisPPOAgent:
         hidden = [int(v) for v in ppo["hidden_dims"]]
         obstacle_embedding_dim = int(obstacle_config["embedding_dim"])
         self.obstacle_encoding_dim = int(obstacle_config["output_dim"])
+        fixed_goal = thesis["fixed_orientation_goal"]
+        if not bool(fixed_goal["enabled"]):
+            raise ValueError("compact Residual requires a fixed goal orientation")
+        self.fixed_goal_quaternion = torch.as_tensor(
+            _quaternion_from_euler(fixed_goal["euler_rad"]),
+            dtype=torch.float32,
+            device=self.device,
+        )
         self.gamma = float(ppo["gamma"])
         self.gae_lambda = float(ppo["gae_lambda"])
         self.clip_ratio = float(ppo["clip_ratio"])
@@ -240,14 +272,30 @@ class ThesisPPOAgent:
         with torch.no_grad():
             self.actor[-1].bias.zero_()
         # S1/S2 never rewrite the already learned reaching controller.  The
-        # residual starts at zero and has full authority whenever the obstacle
-        # set is non-empty.  An empty set bypasses it exactly.
+        # Residual starts at zero and has full authority whenever at least one
+        # external obstacle is present.  The fixed plane alone does not turn
+        # Residual on, preserving the obstacle-free Base contract.
         for parameter in self.actor.parameters():
             parameter.requires_grad_(not self.freeze_base_actor)
         self.actor_log_std = nn.Parameter(torch.full((action_dim,), np.log(self.action_std_init), device=self.device))
         self.value = mlp(network_input_dim, hidden, 1, activation="tanh", orthogonal_init=True).to(self.device)
+        # The avoidance policy must know which motion the frozen reaching
+        # controller is asking it to correct.  Supplying the normalized Base
+        # action removes that partial observability while keeping the Base
+        # policy frozen.  Five counterfactual features state how the Base-only
+        # target changes each moving link's minimum clearance to the unified
+        # external-obstacle plus mounting-plane safety set.  The plane itself
+        # is a regular row in the shared set encoder.
+        # These blocks are appended after the encoded scene features.  Older
+        # checkpoints therefore migrate with behavior-preserving zero columns.
+        residual_input_dim = (
+            RESIDUAL_BASE_OBSERVATION_DIM
+            + self.obstacle_encoding_dim
+            + BASE_CLEARANCE_DELTA_FEATURE_DIM
+            + action_dim
+        )
         self.residual_actor = mlp(
-            network_input_dim, hidden, action_dim, activation="tanh",
+            residual_input_dim, hidden, action_dim, activation="tanh",
             orthogonal_init=True, output_gain=0.001,
         ).to(self.device)
         with torch.no_grad():
@@ -316,6 +364,36 @@ class ThesisPPOAgent:
             [obs[..., :REFERENCE_BASE_OBSERVATION_DIM], obstacle_encoding], dim=-1
         )
 
+    @staticmethod
+    def _residual_base_observation(obs: torch.Tensor) -> torch.Tensor:
+        """Remove fixed/reconstructible goal fields from the Residual state."""
+        compact = torch.cat(
+            [
+                # q, TCP position and TCP quaternion.
+                obs[..., :13],
+                # Scalar errors, pose-error vectors and normalized qdot.
+                obs[..., 20:REFERENCE_BASE_OBSERVATION_DIM],
+            ],
+            dim=-1,
+        )
+        if compact.shape[-1] != RESIDUAL_BASE_OBSERVATION_DIM:
+            raise RuntimeError("invalid compact Residual base observation")
+        return compact
+
+    def _encode_residual_observation(
+        self, obs: torch.Tensor, encoder: ObstacleSetEncoder
+    ) -> torch.Tensor:
+        feature_start = REFERENCE_BASE_OBSERVATION_DIM
+        feature_end = feature_start + self.max_obstacles * OBSTACLE_FEATURE_DIM
+        features = obs[..., feature_start:feature_end].reshape(
+            *obs.shape[:-1], self.max_obstacles, OBSTACLE_FEATURE_DIM
+        )
+        mask = obs[..., feature_end:feature_end + self.max_obstacles]
+        obstacle_encoding = encoder(features, mask)
+        return torch.cat(
+            [self._residual_base_observation(obs), obstacle_encoding], dim=-1
+        )
+
     def _base_actor_input(self, obs: torch.Tensor) -> torch.Tensor:
         zeros = torch.zeros(
             (*obs.shape[:-1], self.obstacle_encoding_dim),
@@ -326,20 +404,47 @@ class ThesisPPOAgent:
         )
 
     def _residual_enabled(self, obs: torch.Tensor) -> torch.Tensor:
-        """Binary semantic switch: any obstacle enables the full residual."""
+        """Enable Residual only for external obstacles, not the fixed plane."""
         mask_start = (
             REFERENCE_BASE_OBSERVATION_DIM
             + self.max_obstacles * OBSTACLE_FEATURE_DIM
         )
         mask = obs[..., mask_start:mask_start + self.max_obstacles]
-        return (mask > 0.0).any(dim=-1, keepdim=True).to(obs.dtype)
+        active_count = (mask > 0.0).sum(dim=-1, keepdim=True)
+        fixed_plane_count = int(self.mounting_plane_in_safety_set)
+        return (active_count > fixed_plane_count).to(obs.dtype)
 
     def _policy_components(
-        self, obs: torch.Tensor
+        self,
+        obs: torch.Tensor,
+        residual_safety_context: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         base_mean = torch.tanh(self.actor(self._base_actor_input(obs))) * self.action_limit
+        normalized_base_action = (base_mean / self.action_limit).detach()
+        expected_context_shape = (
+            *base_mean.shape[:-1],
+            BASE_CLEARANCE_DELTA_FEATURE_DIM,
+        )
+        if residual_safety_context is None:
+            residual_safety_context = torch.zeros(
+                expected_context_shape, dtype=base_mean.dtype, device=base_mean.device
+            )
+        if residual_safety_context.shape != expected_context_shape:
+            raise ValueError(
+                "Residual safety context must contain five features"
+            )
+        residual_input = torch.cat(
+            [
+                self._encode_residual_observation(
+                    obs, self.actor_obstacle_encoder
+                ),
+                residual_safety_context.detach(),
+                normalized_base_action,
+            ],
+            dim=-1,
+        )
         residual_raw = self.residual_actor(
-            self._encode_observation(obs, self.actor_obstacle_encoder)
+            residual_input
         )
         residual = residual_raw * self._residual_enabled(obs)
         mean = base_mean + residual
@@ -352,13 +457,23 @@ class ThesisPPOAgent:
     def _value_output(self, obs: torch.Tensor) -> torch.Tensor:
         return self.value(self._encode_observation(obs, self.value_obstacle_encoder))
 
-    def _dist(self, obs: torch.Tensor) -> Normal:
-        mean = self._policy_components(obs)[0]
+    def _dist(
+        self,
+        obs: torch.Tensor,
+        residual_safety_context: torch.Tensor | None = None,
+    ) -> Normal:
+        mean = self._policy_components(obs, residual_safety_context)[0]
         log_std = self.actor_log_std.clamp(-5.0, 1.0).expand_as(mean)
         return Normal(mean, log_std.exp())
 
-    def _log_prob(self, obs: torch.Tensor, action: torch.Tensor, std_scale: torch.Tensor | None = None) -> torch.Tensor:
-        dist = self._dist(obs)
+    def _log_prob(
+        self,
+        obs: torch.Tensor,
+        action: torch.Tensor,
+        std_scale: torch.Tensor | None = None,
+        residual_safety_context: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        dist = self._dist(obs, residual_safety_context)
         if std_scale is not None:
             dist = Normal(dist.mean, dist.stddev * std_scale)
         return dist.log_prob(action).sum(-1)
@@ -369,14 +484,27 @@ class ThesisPPOAgent:
         return self._value_output(obs).squeeze(-1).cpu().numpy()
 
     @torch.no_grad()
+    def predict_base_actions(self, observations: np.ndarray) -> np.ndarray:
+        """Return frozen Base means for counterfactual geometry queries."""
+        obs = torch.as_tensor(observations, dtype=torch.float32, device=self.device)
+        base = torch.tanh(self.actor(self._base_actor_input(obs))) * self.action_limit
+        return base.cpu().numpy().astype(np.float32)
+
+    @torch.no_grad()
     def act(
         self,
         observations: np.ndarray,
         deterministic: bool = False,
         episode_fraction: float = 0.0,
+        residual_safety_context: np.ndarray | None = None,
     ):
         obs = torch.as_tensor(observations, dtype=torch.float32, device=self.device)
-        mean, _base_mean, residual_mean = self._policy_components(obs)
+        safety_context = None if residual_safety_context is None else torch.as_tensor(
+            residual_safety_context, dtype=torch.float32, device=self.device
+        )
+        mean, _base_mean, residual_mean = self._policy_components(
+            obs, safety_context
+        )
         log_std = self.actor_log_std.clamp(-5.0, 1.0).expand_as(mean)
         dist = Normal(mean, log_std.exp())
         sample_count = 1
@@ -412,6 +540,7 @@ class ThesisPPOAgent:
         goal_position_errors: np.ndarray,
         *,
         residual_cutoff_position_m: float | None = RESIDUAL_HANDOFF_GOAL_BASE_M,
+        residual_safety_context: np.ndarray | None = None,
     ):
         """Return deterministic actions using the final Base handoff contract.
 
@@ -420,7 +549,9 @@ class ThesisPPOAgent:
         ``None`` disables handoff only for an explicit full-Residual ablation.
         """
         policy_actions, log_prob, values, policy = self.act(
-            observations, deterministic=True
+            observations,
+            deterministic=True,
+            residual_safety_context=residual_safety_context,
         )
         residual_actions = policy["residual_actions"]
         base_actions = policy_actions - residual_actions
@@ -607,10 +738,34 @@ class ThesisPPOAgent:
         advantages = torch.as_tensor(batch["advantages"], dtype=torch.float32, device=self.device)
         returns = torch.as_tensor(batch["returns"], dtype=torch.float32, device=self.device)
         std_scale = torch.as_tensor(batch["std_scale"], dtype=torch.float32, device=self.device)
-        _require_finite((obs, actions, old_logp, advantages, returns, std_scale), "float32_batch")
+        residual_safety_context = torch.as_tensor(
+            batch.get(
+                "residual_safety_context",
+                np.zeros(
+                    (
+                        len(batch["actions"]),
+                        BASE_CLEARANCE_DELTA_FEATURE_DIM,
+                    ),
+                    dtype=np.float32,
+                ),
+            ),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        _require_finite(
+            (
+                obs, actions, old_logp, advantages, returns, std_scale,
+                residual_safety_context,
+            ),
+            "float32_batch",
+        )
         n = obs.shape[0]
         if (n < 1 or obs.shape != (n, self.obs_dim)
                 or actions.shape != (n, self.action_dim) or std_scale.shape != (n, 1)
+                or residual_safety_context.shape != (
+                    n,
+                    BASE_CLEARANCE_DELTA_FEATURE_DIM,
+                )
                 or any(t.shape != (n,) for t in (old_logp, advantages, returns))):
             raise ValueError("invalid PPO batch shapes")
         if not bool((std_scale > 0.0).all()):
@@ -643,7 +798,9 @@ class ThesisPPOAgent:
         # catches stale or mismatched batches before any Actor mutation.
         self._update_context["phase"] = "before_ratio_exp"
         with torch.no_grad():
-            initial_logp = self._log_prob(obs, actions, std_scale)
+            initial_logp = self._log_prob(
+                obs, actions, std_scale, residual_safety_context
+            )
             initial_log_ratio = initial_logp - old_logp
             self._diagnostic_tensors = {
                 "new_logp": initial_logp, "old_logp": old_logp,
@@ -674,7 +831,10 @@ class ThesisPPOAgent:
                 idx = indices[start:start + self.minibatch_size]
                 self._update_context.update(phase="before_actor_minibatch", epoch=epoch, minibatch_start=start, indices=idx)
                 self.validate_training_state()
-                logp = self._log_prob(obs[idx], actions[idx], std_scale[idx])
+                logp = self._log_prob(
+                    obs[idx], actions[idx], std_scale[idx],
+                    residual_safety_context[idx],
+                )
                 log_ratio = logp - old_logp[idx]
                 self._diagnostic_tensors = {"new_logp": logp, "old_logp": old_logp[idx], "log_ratio": log_ratio}
                 # Crucial: exp(inf) can yield NaN gradients even if PPO's
@@ -691,7 +851,7 @@ class ThesisPPOAgent:
                     clip_fraction = float(((ratio - 1.0).abs() > self.clip_ratio).float().mean())
                 clip_fractions.append(clip_fraction)
                 ratios.append(float(ratio.detach().mean()))
-                dist = self._dist(obs[idx])
+                dist = self._dist(obs[idx], residual_safety_context[idx])
                 entropy = Normal(dist.mean, dist.stddev * std_scale[idx]).entropy().sum(-1).mean()
                 _require_finite(entropy, "entropy")
                 entropies.append(float(entropy.detach()))
@@ -730,7 +890,9 @@ class ThesisPPOAgent:
 
                 self._update_context["phase"] = "post_actor_full_rollout_kl"
                 with torch.no_grad():
-                    full_logp = self._log_prob(obs, actions, std_scale)
+                    full_logp = self._log_prob(
+                        obs, actions, std_scale, residual_safety_context
+                    )
                     full_log_ratio = full_logp - old_logp
                     self._diagnostic_tensors.update(
                         full_new_logp=full_logp, full_old_logp=old_logp,
@@ -937,7 +1099,10 @@ class ThesisPPOAgent:
 
     @staticmethod
     def _migrate_qdot_network(
-        module: nn.Module, old_state: dict[str, torch.Tensor]
+        module: nn.Module,
+        old_state: dict[str, torch.Tensor],
+        *,
+        trailing_zero_columns: int = 0,
     ) -> None:
         """Insert zero qdot columns without changing the old network output."""
         migrated = module.state_dict()
@@ -947,7 +1112,9 @@ class ThesisPPOAgent:
                 old_input_dim = old_value.shape[1]
                 expected_old = (
                     REFERENCE_LEGACY_BASE_OBSERVATION_DIM
-                    + target.shape[1] - REFERENCE_BASE_OBSERVATION_DIM
+                    + target.shape[1]
+                    - REFERENCE_BASE_OBSERVATION_DIM
+                    - trailing_zero_columns
                 )
                 if old_input_dim != expected_old:
                     raise ValueError(
@@ -956,7 +1123,8 @@ class ThesisPPOAgent:
                 target[:, :REFERENCE_LEGACY_BASE_OBSERVATION_DIM] = old_value[
                     :, :REFERENCE_LEGACY_BASE_OBSERVATION_DIM
                 ]
-                target[:, REFERENCE_BASE_OBSERVATION_DIM:] = old_value[
+                feature_end = target.shape[1] - trailing_zero_columns
+                target[:, REFERENCE_BASE_OBSERVATION_DIM:feature_end] = old_value[
                     :, REFERENCE_LEGACY_BASE_OBSERVATION_DIM:
                 ]
                 migrated[key] = target
@@ -966,13 +1134,212 @@ class ThesisPPOAgent:
                 raise ValueError(f"cannot migrate pre-qdot PPO parameter {key}")
         module.load_state_dict(migrated)
 
+    @staticmethod
+    def _migrate_base_action_residual(
+        module: nn.Module,
+        old_state: dict[str, torch.Tensor],
+        *,
+        action_dim: int,
+    ) -> None:
+        """Append zero Base-action columns while preserving v11 outputs."""
+        migrated = module.state_dict()
+        for key, old_value in old_state.items():
+            if key == "0.weight":
+                target = torch.zeros_like(migrated[key])
+                added_columns = target.shape[1] - old_value.shape[1]
+                if (
+                    old_value.shape[0] != target.shape[0]
+                    or added_columns <= 0
+                    or added_columns > action_dim
+                ):
+                    raise ValueError(
+                        "pre-Base-action Residual first layer has an unexpected shape"
+                    )
+                target[:, :old_value.shape[1]] = old_value
+                migrated[key] = target
+            elif key in migrated and migrated[key].shape == old_value.shape:
+                migrated[key] = old_value
+            else:
+                raise ValueError(
+                    f"cannot migrate pre-Base-action Residual parameter {key}"
+                )
+        module.load_state_dict(migrated)
+
     def _load_pre_qdot_modules(self, state: dict[str, Any]) -> None:
         self._migrate_qdot_network(self.actor, state["actor"])
-        self._migrate_qdot_network(self.residual_actor, state["residual_actor"])
+        self._migrate_qdot_network(
+            self.residual_actor,
+            state["residual_actor"],
+            trailing_zero_columns=self.action_dim,
+        )
         self._migrate_qdot_network(self.value, state["value"])
         self.actor_obstacle_encoder.load_state_dict(
             state["actor_obstacle_encoder"]
         )
+        self.value_obstacle_encoder.load_state_dict(
+            state["value_obstacle_encoder"]
+        )
+        self.actor_log_std.data.copy_(state["actor_log_std"].to(self.device))
+
+    def _load_pre_base_action_modules(self, state: dict[str, Any]) -> None:
+        """Load v11 into the compact Residual contract."""
+        self._load_compact_residual_modules(state, source="v11")
+
+    def _load_compact_residual_modules(
+        self, state: dict[str, Any], *, source: str
+    ) -> None:
+        """Map v11-v14 full-state Residual inputs into compact v16.
+
+        The removed goal position is exactly reconstructed by
+        ``goal = ee + position_error`` and folded into the two retained input
+        blocks.  The fixed goal quaternion contributes only a constant, so its
+        first-layer contribution is folded into the bias.  The shoulder Base
+        clearance delta is deliberately discarded.
+        """
+        layouts = {
+            "v11": (False, False, False),
+            "v12": (True, False, False),
+            "v13": (True, True, False),
+            "v14": (True, True, True),
+        }
+        if source not in layouts:
+            raise ValueError(f"unsupported compact Residual migration: {source}")
+        has_base, has_delta, has_plane = layouts[source]
+        self.actor.load_state_dict(state["actor"])
+        migrated = self.residual_actor.state_dict()
+        old_first_weight = state["residual_actor"]["0.weight"]
+        old_scene_start = REFERENCE_BASE_OBSERVATION_DIM
+        old_scene_end = old_scene_start + self.obstacle_encoding_dim
+        expected_old_width = old_scene_end
+        if has_delta:
+            expected_old_width += self.action_dim
+        if has_plane:
+            expected_old_width += PLANE_CLEARANCE_FEATURE_DIM
+        if has_base:
+            expected_old_width += self.action_dim
+        if old_first_weight.shape[1] != expected_old_width:
+            raise ValueError(
+                f"{source} Residual first layer has an unexpected shape"
+            )
+        for key, old_value in state["residual_actor"].items():
+            if key in migrated:
+                old_value = old_value.to(
+                    device=migrated[key].device,
+                    dtype=migrated[key].dtype,
+                )
+            if key == "0.weight":
+                target = torch.zeros_like(migrated[key])
+                if old_value.shape[0] != target.shape[0]:
+                    raise ValueError(
+                        f"{source} Residual first layer has an unexpected shape"
+                    )
+                # q, TCP position and TCP quaternion.
+                target[:, :13] = old_value[:, :13]
+                # scalar errors, pose errors and qdot.
+                target[:, 13:RESIDUAL_BASE_OBSERVATION_DIM] = old_value[
+                    :, 20:REFERENCE_BASE_OBSERVATION_DIM
+                ]
+                # goal_position = ee_position + position_error.
+                target[:, 6:9] += old_value[:, 13:16]
+                target[:, 15:18] += old_value[:, 13:16]
+
+                new_scene_start = RESIDUAL_BASE_OBSERVATION_DIM
+                new_scene_end = new_scene_start + self.obstacle_encoding_dim
+                target[:, new_scene_start:new_scene_end] = old_value[
+                    :, old_scene_start:old_scene_end
+                ]
+                old_cursor = old_scene_end
+                new_cursor = new_scene_end
+                if has_delta:
+                    # Drop ordered capsule 0 (shoulder), retain the five
+                    # moving-link counterfactual changes.
+                    target[
+                        :, new_cursor:new_cursor + BASE_CLEARANCE_DELTA_FEATURE_DIM
+                    ] = old_value[:, old_cursor + 1:old_cursor + self.action_dim]
+                    old_cursor += self.action_dim
+                new_cursor += BASE_CLEARANCE_DELTA_FEATURE_DIM
+                if has_plane:
+                    # Plane clearances now enter through the shared safety-set
+                    # encoder rather than a duplicate direct-input block.
+                    old_cursor += PLANE_CLEARANCE_FEATURE_DIM
+                if has_base:
+                    target[:, new_cursor:new_cursor + self.action_dim] = old_value[
+                        :, old_cursor:old_cursor + self.action_dim
+                    ]
+                migrated[key] = target
+            elif key == "0.bias":
+                quaternion = self.fixed_goal_quaternion.to(
+                    device=old_value.device,
+                    dtype=old_value.dtype,
+                )
+                goal_quaternion_weight = old_first_weight[:, 16:20].to(
+                    device=old_value.device,
+                    dtype=old_value.dtype,
+                )
+                migrated[key] = old_value + goal_quaternion_weight @ quaternion
+            elif key in migrated and migrated[key].shape == old_value.shape:
+                migrated[key] = old_value
+            else:
+                raise ValueError(
+                    f"cannot migrate {source} Residual parameter {key}"
+                )
+        self.residual_actor.load_state_dict(migrated)
+        self.actor_obstacle_encoder.load_state_dict(
+            state["actor_obstacle_encoder"]
+        )
+        self.value.load_state_dict(state["value"])
+        self.value_obstacle_encoder.load_state_dict(
+            state["value_obstacle_encoder"]
+        )
+        self.actor_log_std.data.copy_(state["actor_log_std"].to(self.device))
+
+    def _load_pre_clearance_delta_modules(self, state: dict[str, Any]) -> None:
+        """Load v12 into the compact Residual contract."""
+        self._load_compact_residual_modules(state, source="v12")
+
+    def _load_pre_plane_clearance_modules(self, state: dict[str, Any]) -> None:
+        """Load v13 into the compact Residual contract."""
+        self._load_compact_residual_modules(state, source="v13")
+
+    def _load_pre_compact_modules(self, state: dict[str, Any]) -> None:
+        """Load v14 while removing eight redundant Residual inputs."""
+        self._load_compact_residual_modules(state, source="v14")
+
+    def _load_pre_unified_safety_modules(self, state: dict[str, Any]) -> None:
+        """Load compact v15 while removing its duplicate plane block."""
+        self.actor.load_state_dict(state["actor"])
+        migrated = self.residual_actor.state_dict()
+        scene_end = RESIDUAL_BASE_OBSERVATION_DIM + self.obstacle_encoding_dim
+        delta_end = scene_end + BASE_CLEARANCE_DELTA_FEATURE_DIM
+        old_plane_end = delta_end + PLANE_CLEARANCE_FEATURE_DIM
+        for key, old_value in state["residual_actor"].items():
+            if key in migrated:
+                old_value = old_value.to(
+                    device=migrated[key].device,
+                    dtype=migrated[key].dtype,
+                )
+            if key == "0.weight":
+                target = torch.zeros_like(migrated[key])
+                expected_old_width = old_plane_end + self.action_dim
+                if (
+                    old_value.shape[0] != target.shape[0]
+                    or old_value.shape[1] != expected_old_width
+                ):
+                    raise ValueError("v15 Residual first layer has an unexpected shape")
+                target[:, :delta_end] = old_value[:, :delta_end]
+                target[:, delta_end:delta_end + self.action_dim] = old_value[
+                    :, old_plane_end:old_plane_end + self.action_dim
+                ]
+                migrated[key] = target
+            elif key in migrated and migrated[key].shape == old_value.shape:
+                migrated[key] = old_value
+            else:
+                raise ValueError(f"cannot migrate v15 Residual parameter {key}")
+        self.residual_actor.load_state_dict(migrated)
+        self.actor_obstacle_encoder.load_state_dict(
+            state["actor_obstacle_encoder"]
+        )
+        self.value.load_state_dict(state["value"])
         self.value_obstacle_encoder.load_state_dict(
             state["value_obstacle_encoder"]
         )
@@ -1021,6 +1388,49 @@ class ThesisPPOAgent:
             and state.get("max_obstacles") == self.max_obstacles
             and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
         )
+        pre_base_action_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_v11"
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        pre_clearance_delta_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_base_action_v12"
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        pre_plane_clearance_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
+            "base_action_clearance_delta_v13"
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        pre_compact_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
+            "base_action_clearance_delta_plane_clearance5_v14"
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        pre_unified_safety_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
+            "base_action_clearance_delta5_plane_clearance5_compact_v15"
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
         previous_obstacle_set_contract = (
             state.get("policy_contract") in {
                 "ppo_joint_delta_risk_gated_residual_obstacle_set_v7",
@@ -1042,9 +1452,33 @@ class ThesisPPOAgent:
             self._migrate_legacy_network(self.value, state["value"])
         elif pre_qdot_contract:
             self._load_pre_qdot_modules(state)
-        elif current_contract or previous_obstacle_set_contract:
+        elif pre_base_action_contract:
+            self._load_pre_base_action_modules(state)
+        elif pre_clearance_delta_contract:
+            self._load_pre_clearance_delta_modules(state)
+        elif pre_plane_clearance_contract:
+            self._load_pre_plane_clearance_modules(state)
+        elif pre_compact_contract:
+            self._load_pre_compact_modules(state)
+        elif pre_unified_safety_contract:
+            self._load_pre_unified_safety_modules(state)
+        elif current_contract:
             self.actor.load_state_dict(state["actor"])
             self.residual_actor.load_state_dict(state["residual_actor"])
+            self.actor_obstacle_encoder.load_state_dict(
+                state["actor_obstacle_encoder"]
+            )
+            self.value.load_state_dict(state["value"])
+            self.value_obstacle_encoder.load_state_dict(
+                state["value_obstacle_encoder"]
+            )
+        elif previous_obstacle_set_contract:
+            self.actor.load_state_dict(state["actor"])
+            self._migrate_base_action_residual(
+                self.residual_actor,
+                state["residual_actor"],
+                action_dim=self.action_dim,
+            )
             self.actor_obstacle_encoder.load_state_dict(
                 state["actor_obstacle_encoder"]
             )
@@ -1097,6 +1531,54 @@ class ThesisPPOAgent:
             and state.get("obstacle_encoding_dim")
             == self.obstacle_encoding_dim
         )
+        pre_unified_safety_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
+            "base_action_clearance_delta5_plane_clearance5_compact_v15"
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim")
+            == self.obstacle_encoding_dim
+        )
+        pre_clearance_delta_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_base_action_v12"
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim")
+            == self.obstacle_encoding_dim
+        )
+        pre_plane_clearance_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
+            "base_action_clearance_delta_v13"
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim")
+            == self.obstacle_encoding_dim
+        )
+        pre_compact_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
+            "base_action_clearance_delta_plane_clearance5_v14"
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim")
+            == self.obstacle_encoding_dim
+        )
+        pre_base_action_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_v11"
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim")
+            == self.obstacle_encoding_dim
+        )
         pre_qdot_contract = (
             state.get("policy_contract")
             == "ppo_joint_delta_residual_obb_clearance_direction_set_v10"
@@ -1115,7 +1597,11 @@ class ThesisPPOAgent:
             self._migrate_legacy_network(self.actor, state["actor"])
         elif pre_qdot_contract:
             self._migrate_qdot_network(self.actor, state["actor"])
-        elif current_contract:
+        elif (
+            current_contract or pre_base_action_contract
+            or pre_clearance_delta_contract or pre_plane_clearance_contract
+            or pre_compact_contract or pre_unified_safety_contract
+        ):
             self.actor.load_state_dict(state["actor"])
         else:
             raise ValueError("incompatible S0 base Actor checkpoint")
@@ -1154,6 +1640,135 @@ class ThesisPPOAgent:
             # The deployment-aligned action range is smaller than v10's.
             # Keep the new configuration as the LR/std reference while
             # retaining the learned current standard deviation itself.
+            self.actor_std_ema = float(state.get(
+                "actor_std_ema",
+                self.actor_log_std.clamp(-5.0, 1.0).exp().mean().detach().cpu(),
+            ))
+            self.validate_training_state()
+            return
+        pre_base_action_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_v11"
+            and state.get("stage", self.stage) == self.stage
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        pre_clearance_delta_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_base_action_v12"
+            and state.get("stage", self.stage) == self.stage
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        pre_plane_clearance_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
+            "base_action_clearance_delta_v13"
+            and state.get("stage", self.stage) == self.stage
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        pre_compact_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
+            "base_action_clearance_delta_plane_clearance5_v14"
+            and state.get("stage", self.stage) == self.stage
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        pre_unified_safety_contract = (
+            state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
+            "base_action_clearance_delta5_plane_clearance5_compact_v15"
+            and state.get("stage", self.stage) == self.stage
+            and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        if pre_base_action_contract:
+            _require_finite(state, "checkpoint")
+            self._load_pre_base_action_modules(state)
+            # The Residual first layer gained six parameters per hidden unit,
+            # so v11 Adam moments cannot be restored safely.  Preserve the
+            # learned functions and adaptive history but start fresh moments.
+            self.actor_lr_scale = float(state.get("actor_lr_scale", 1.0))
+            self.low_kl_streak = int(state.get("low_kl_streak", 0))
+            self.action_std_init = float(
+                state.get("action_std_lr_reference", self.action_std_init)
+            )
+            self.actor_std_ema = float(state.get(
+                "actor_std_ema",
+                self.actor_log_std.clamp(-5.0, 1.0).exp().mean().detach().cpu(),
+            ))
+            self.validate_training_state()
+            return
+        if pre_clearance_delta_contract:
+            _require_finite(state, "checkpoint")
+            self._load_pre_clearance_delta_modules(state)
+            # The Residual first layer gained six parameters per hidden unit;
+            # preserve the policy and schedules but reset incompatible Adam
+            # moments exactly as in the v11 -> v12 migration.
+            self.actor_lr_scale = float(state.get("actor_lr_scale", 1.0))
+            self.low_kl_streak = int(state.get("low_kl_streak", 0))
+            self.action_std_init = float(
+                state.get("action_std_lr_reference", self.action_std_init)
+            )
+            self.actor_std_ema = float(state.get(
+                "actor_std_ema",
+                self.actor_log_std.clamp(-5.0, 1.0).exp().mean().detach().cpu(),
+            ))
+            self.validate_training_state()
+            return
+        if pre_plane_clearance_contract:
+            _require_finite(state, "checkpoint")
+            self._load_pre_plane_clearance_modules(state)
+            self.actor_lr_scale = float(state.get("actor_lr_scale", 1.0))
+            self.low_kl_streak = int(state.get("low_kl_streak", 0))
+            self.action_std_init = float(
+                state.get("action_std_lr_reference", self.action_std_init)
+            )
+            self.actor_std_ema = float(state.get(
+                "actor_std_ema",
+                self.actor_log_std.clamp(-5.0, 1.0).exp().mean().detach().cpu(),
+            ))
+            self.validate_training_state()
+            return
+        if pre_compact_contract:
+            _require_finite(state, "checkpoint")
+            self._load_pre_compact_modules(state)
+            # The Residual first layer changed width and semantics.  Preserve
+            # the learned function and schedules but reset incompatible Adam
+            # moments.
+            self.actor_lr_scale = float(state.get("actor_lr_scale", 1.0))
+            self.low_kl_streak = int(state.get("low_kl_streak", 0))
+            self.action_std_init = float(
+                state.get("action_std_lr_reference", self.action_std_init)
+            )
+            self.actor_std_ema = float(state.get(
+                "actor_std_ema",
+                self.actor_log_std.clamp(-5.0, 1.0).exp().mean().detach().cpu(),
+            ))
+            self.validate_training_state()
+            return
+        if pre_unified_safety_contract:
+            _require_finite(state, "checkpoint")
+            self._load_pre_unified_safety_modules(state)
+            # The direct five-value plane block moved into the shared set
+            # encoder, so old Adam moments are not shape/semantics compatible.
+            self.actor_lr_scale = float(state.get("actor_lr_scale", 1.0))
+            self.low_kl_streak = int(state.get("low_kl_streak", 0))
+            self.action_std_init = float(
+                state.get("action_std_lr_reference", self.action_std_init)
+            )
             self.actor_std_ema = float(state.get(
                 "actor_std_ema",
                 self.actor_log_std.clamp(-5.0, 1.0).exp().mean().detach().cpu(),

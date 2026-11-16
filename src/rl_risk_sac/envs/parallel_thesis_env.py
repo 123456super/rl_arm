@@ -84,6 +84,10 @@ def _worker(
                 connection.send(env.rng.bit_generator.state)
             elif command == "pose_crossing_diagnostics":
                 connection.send(env.pose_crossing_diagnostics())
+            elif command == "base_clearance_changes":
+                connection.send(env.base_clearance_changes(payload))
+            elif command == "residual_safety_context":
+                connection.send(env.residual_safety_context(payload))
             elif command == "set_rng":
                 env.rng.bit_generator.state = payload
                 connection.send(None)
@@ -183,6 +187,36 @@ class ParallelThesisEnvPool:
         for index in selected:
             self.connections[index].send(("pose_crossing_diagnostics", None))
         return {index: self.connections[index].recv() for index in selected}
+
+    def base_clearance_changes_many(
+        self, actions: dict[int, np.ndarray]
+    ) -> dict[int, np.ndarray]:
+        """Evaluate Base-only counterfactual link-clearance changes."""
+        if self._pending_step_indices is not None:
+            raise RuntimeError(
+                "cannot request Base clearance changes while a step is pending"
+            )
+        for index, action in actions.items():
+            self.connections[index].send((
+                "base_clearance_changes",
+                np.asarray(action, dtype=np.float32),
+            ))
+        return {index: self.connections[index].recv() for index in actions}
+
+    def residual_safety_context_many(
+        self, actions: dict[int, np.ndarray]
+    ) -> dict[int, np.ndarray]:
+        """Evaluate Base obstacle deltas and current plane clearances."""
+        if self._pending_step_indices is not None:
+            raise RuntimeError(
+                "cannot request Residual safety context while a step is pending"
+            )
+        for index, action in actions.items():
+            self.connections[index].send((
+                "residual_safety_context",
+                np.asarray(action, dtype=np.float32),
+            ))
+        return {index: self.connections[index].recv() for index in actions}
 
     def send_steps(self, actions: dict[int, np.ndarray]) -> None:
         """Start one simulation step on every selected worker without waiting."""
