@@ -20,6 +20,7 @@ from rl_risk_sac.tasks.reference_reaching import (
     RESIDUAL_HANDOFF_CLEARANCE_FULL_M,
     RESIDUAL_HANDOFF_GOAL_BASE_M,
     RESIDUAL_HANDOFF_GOAL_FULL_M,
+    composition_saturation_penalty,
     residual_action_penalty,
     residual_handoff_authority,
 )
@@ -58,6 +59,14 @@ def new_stats(info: dict) -> dict[str, object]:
         "dynamic_obstacle_count": int(info.get("dynamic_obstacle_count", 0)),
         "static_obstacle_count": int(info.get("static_obstacle_count", 0)),
         "obstacle_layout": str(info.get("obstacle_layout", "none")),
+        "grounded_obstacle_count": int(info.get("grounded_obstacle_count", 0)),
+        "suspended_obstacle_count": int(info.get("suspended_obstacle_count", 0)),
+        "path_relevant_obstacle_count": int(
+            info.get("path_relevant_obstacle_count", 0)
+        ),
+        "primary_obstacle_route_shape": str(
+            info.get("primary_obstacle_route_shape", "none")
+        ),
         "success": False,
         "collision": False,
         "obstacle_collision": False,
@@ -69,14 +78,20 @@ def new_stats(info: dict) -> dict[str, object]:
         "best_position_m": float(info["goal_error_norm"]),
         "best_orientation_rad": float(info["orientation_error_norm"]),
         "best_reference_error": reference_error,
+        "first_pose5_step": 0,
         "position_at_best_reference_m": float(info["goal_error_norm"]),
         "orientation_at_best_reference_rad": float(info["orientation_error_norm"]),
         "action_abs_sum": 0.0,
         "action_abs_max": 0.0,
         "residual_penalty_sum": 0.0,
+        "composition_penalty_sum": 0.0,
         "executed_substeps_min": 10**9,
         "joint_speed_peak_rad_s": 0.0,
         "joint_acceleration_peak_rad_s2": 0.0,
+        "joint_jerk_peak_rad_s3": 0.0,
+        "commanded_joint_jerk_peak_rad_s3": 0.0,
+        "joint_jerk_rms_rad_s3_square_sum": 0.0,
+        "commanded_joint_jerk_rms_rad_s3_square_sum": 0.0,
         "tcp_linear_speed_peak_m_s": 0.0,
         "tcp_angular_speed_peak_rad_s": 0.0,
         "joint_velocity_limiter_fraction_sum": 0.0,
@@ -87,6 +102,16 @@ def new_stats(info: dict) -> dict[str, object]:
         "residual_disabled_steps": 0,
         "residual_partial_steps": 0,
         "residual_authority_sum": 0.0,
+        "tcp_path_penalty_sum": 0.0,
+        "tcp_path_length_m": 0.0,
+        "joint_path_length_rad": 0.0,
+        "direct_tcp_distance_m": 0.0,
+        "tcp_path_efficiency_ratio": 0.0,
+        "route_lateral_min_m": 0.0,
+        "route_lateral_max_m": 0.0,
+        "route_vertical_deviation_min_m": 0.0,
+        "route_vertical_deviation_max_m": 0.0,
+        "selected_avoidance_route": "none",
     }
 
 
@@ -148,6 +173,9 @@ def grouped_report(rows: list[dict[str, object]], key: str) -> dict[str, object]
             "best_orientation_rad": metric([
                 float(row["best_orientation_rad"]) for row in selected
             ]),
+            "tcp_path_efficiency_ratio": metric([
+                float(row["tcp_path_efficiency_ratio"]) for row in selected
+            ]),
             "rates": rates(selected),
         }
     return result
@@ -156,6 +184,13 @@ def grouped_report(rows: list[dict[str, object]], key: str) -> dict[str, object]
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument(
+        "--config", type=Path,
+        help=(
+            "Optional evaluation configuration applied after the checkpoint "
+            "configuration; intended for controlled execution-layer ablations."
+        ),
+    )
     parser.add_argument("--episodes", type=int, default=1000)
     parser.add_argument("--num-envs", type=int, default=8)
     parser.add_argument("--seed", type=int, default=41001)
@@ -221,6 +256,8 @@ def main() -> None:
     )
     config = load_config(ROOT / base_path)
     deep_update(config, saved_config)
+    if args.config is not None:
+        deep_update(config, load_config(args.config.resolve()))
     if args.device:
         config["device"] = args.device
     config["seed"] = args.seed
@@ -263,11 +300,19 @@ def main() -> None:
         "next_rho_position", "next_rho_orientation", "timeout",
         "termination_reason", "d_min", "goal_error_norm", "executed_substeps",
         "joint_speed_peak_rad_s", "joint_acceleration_peak_rad_s2",
+        "joint_jerk_peak_rad_s3", "commanded_joint_jerk_peak_rad_s3",
+        "joint_jerk_rms_rad_s3", "commanded_joint_jerk_rms_rad_s3",
         "tcp_linear_speed_peak_m_s", "tcp_angular_speed_peak_rad_s",
         "joint_velocity_limiter_fraction",
         "joint_acceleration_limiter_fraction",
         "tcp_velocity_limiter_fraction",
         "joint_position_clip_fraction", "joint_position_clip_max_rad",
+        "reference_tcp_path_penalty", "tcp_path_length_m",
+        "joint_path_length_rad", "direct_tcp_distance_m",
+        "tcp_path_efficiency_ratio",
+        "route_lateral_min_m", "route_lateral_max_m",
+        "route_vertical_deviation_min_m",
+        "route_vertical_deviation_max_m", "selected_avoidance_route",
     )
     rows: list[dict[str, object]] = []
     next_episode_id = 0
@@ -344,9 +389,16 @@ def main() -> None:
                     (1.0 - residual_authority[:, None])
                     * policy["residual_actions"]
                 )
-            results = pool.step_many({
-                worker: actions[index] for index, worker in enumerate(workers)
-            })
+            results = pool.step_many(
+                {
+                    worker: actions[index]
+                    for index, worker in enumerate(workers)
+                },
+                base_clearance_changes={
+                    worker: residual_safety_context[index]
+                    for index, worker in enumerate(workers)
+                },
+            )
             reset_requests = {}
             reset_seeds = {}
             for index, worker in enumerate(workers):
@@ -364,7 +416,16 @@ def main() -> None:
                     clearance_start_m=float(reward_config["reference_residual_penalty_clearance_start_m"]),
                     clearance_full_m=float(reward_config["reference_residual_penalty_clearance_full_m"]),
                 )
-                adjusted_reward = float(reward) - residual_penalty
+                composition_penalty, _ = composition_saturation_penalty(
+                    actions[index],
+                    float(config["thesis"]["joint_delta_limit_rad"]),
+                    penalty_weight=float(reward_config.get(
+                        "reference_composition_saturation_weight", 0.0
+                    )),
+                )
+                adjusted_reward = (
+                    float(reward) - residual_penalty - composition_penalty
+                )
                 stat = stats[worker]
                 stat["return"] = float(stat["return"]) + adjusted_reward
                 stat["length"] = int(stat["length"]) + 1
@@ -383,16 +444,46 @@ def main() -> None:
                 stat["residual_penalty_sum"] = (
                     float(stat["residual_penalty_sum"]) + residual_penalty
                 )
+                stat["composition_penalty_sum"] = (
+                    float(stat["composition_penalty_sum"])
+                    + composition_penalty
+                )
+                stat["tcp_path_penalty_sum"] = (
+                    float(stat["tcp_path_penalty_sum"])
+                    + float(info.get("reference_tcp_path_penalty", 0.0))
+                )
+                for key in (
+                    "tcp_path_length_m", "joint_path_length_rad",
+                    "direct_tcp_distance_m", "tcp_path_efficiency_ratio",
+                    "route_lateral_min_m", "route_lateral_max_m",
+                    "route_vertical_deviation_min_m",
+                    "route_vertical_deviation_max_m",
+                ):
+                    stat[key] = float(info.get(key, stat[key]))
+                stat["selected_avoidance_route"] = str(info.get(
+                    "selected_avoidance_route",
+                    stat["selected_avoidance_route"],
+                ))
                 stat["executed_substeps_min"] = min(
                     int(stat["executed_substeps_min"]), int(info["executed_substeps"])
                 )
                 for key in (
                     "joint_speed_peak_rad_s",
                     "joint_acceleration_peak_rad_s2",
+                    "joint_jerk_peak_rad_s3",
+                    "commanded_joint_jerk_peak_rad_s3",
                     "tcp_linear_speed_peak_m_s",
                     "tcp_angular_speed_peak_rad_s",
                 ):
                     stat[key] = max(float(stat[key]), float(info[key]))
+                for key in (
+                    "joint_jerk_rms_rad_s3",
+                    "commanded_joint_jerk_rms_rad_s3",
+                ):
+                    stat[f"{key}_square_sum"] = (
+                        float(stat[f"{key}_square_sum"])
+                        + float(info[key]) ** 2
+                    )
                 for key in (
                     "joint_velocity_limiter_fraction",
                     "joint_acceleration_limiter_fraction",
@@ -412,6 +503,12 @@ def main() -> None:
                 position = float(info["next_rho_position"])
                 orientation = float(info["next_rho_orientation"])
                 reference = float(info["reference_error"])
+                if (
+                    int(stat["first_pose5_step"]) == 0
+                    and position <= 0.005
+                    and orientation <= 0.05
+                ):
+                    stat["first_pose5_step"] = int(stat["length"])
                 stat["best_position_m"] = min(float(stat["best_position_m"]), position)
                 stat["best_orientation_rad"] = min(
                     float(stat["best_orientation_rad"]), orientation
@@ -429,6 +526,19 @@ def main() -> None:
                 )
                 if terminated or truncated:
                     episode_id = active_episode_ids.pop(worker)
+                    for key in (
+                        "joint_jerk_rms_rad_s3",
+                        "commanded_joint_jerk_rms_rad_s3",
+                    ):
+                        stat[key] = float(np.sqrt(
+                            float(stat.pop(f"{key}_square_sum"))
+                            / int(stat["length"])
+                        ))
+                    first_pose5_step = int(stat["first_pose5_step"])
+                    stat["first_pose5_time_s"] = (
+                        first_pose5_step * float(config["thesis"]["control_dt"])
+                        if first_pose5_step > 0 else ""
+                    )
                     for key in (
                         "joint_velocity_limiter_fraction",
                         "joint_acceleration_limiter_fraction",
@@ -481,8 +591,17 @@ def main() -> None:
         "position_at_best_reference_m", "orientation_at_best_reference_rad",
         "final_position_m", "final_orientation_rad", "final_reference_error",
         "mean_abs_action", "action_abs_max", "residual_penalty_sum",
+        "composition_penalty_sum",
+        "tcp_path_penalty_sum", "tcp_path_length_m",
+        "joint_path_length_rad", "direct_tcp_distance_m",
+        "tcp_path_efficiency_ratio",
+        "route_lateral_min_m", "route_lateral_max_m",
+        "route_vertical_deviation_min_m",
+        "route_vertical_deviation_max_m",
         "executed_substeps_min",
         "joint_speed_peak_rad_s", "joint_acceleration_peak_rad_s2",
+        "joint_jerk_peak_rad_s3", "commanded_joint_jerk_peak_rad_s3",
+        "joint_jerk_rms_rad_s3", "commanded_joint_jerk_rms_rad_s3",
         "tcp_linear_speed_peak_m_s", "tcp_angular_speed_peak_rad_s",
         "joint_velocity_limiter_fraction",
         "joint_acceleration_limiter_fraction",
@@ -491,6 +610,10 @@ def main() -> None:
         "residual_disabled_fraction",
         "residual_partial_fraction", "residual_authority_mean",
     )
+    pose5_arrival_times = [
+        float(row["first_pose5_time_s"])
+        for row in rows if int(row["first_pose5_step"]) > 0
+    ]
     report = {
         "kind": "deterministic_thesis_ppo_evaluation",
         "stage": stage,
@@ -513,6 +636,12 @@ def main() -> None:
             name: metric([float(row[name]) for row in rows])
             for name in numeric_columns
         },
+        "pose5_arrival": {
+            "reached_episodes": len(pose5_arrival_times),
+            "reached_rate": len(pose5_arrival_times) / len(rows),
+            "time_s": metric(pose5_arrival_times)
+            if pose5_arrival_times else None,
+        },
         "rates": rates(rows),
         "by_scene": grouped_report(rows, "scene"),
         "by_obstacle_count": grouped_report(rows, "obstacle_count"),
@@ -520,7 +649,22 @@ def main() -> None:
             rows, "dynamic_obstacle_count"
         ),
         "by_static_obstacle_count": grouped_report(rows, "static_obstacle_count"),
+        "by_grounded_obstacle_count": grouped_report(
+            rows, "grounded_obstacle_count"
+        ),
+        "by_suspended_obstacle_count": grouped_report(
+            rows, "suspended_obstacle_count"
+        ),
+        "by_path_relevant_obstacle_count": grouped_report(
+            rows, "path_relevant_obstacle_count"
+        ),
         "by_obstacle_layout": grouped_report(rows, "obstacle_layout"),
+        "by_primary_obstacle_route_shape": grouped_report(
+            rows, "primary_obstacle_route_shape"
+        ),
+        "by_selected_avoidance_route": grouped_report(
+            rows, "selected_avoidance_route"
+        ),
     }
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

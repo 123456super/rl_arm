@@ -16,7 +16,10 @@ import pybullet as p
 import torch
 
 from rl_risk_sac.algorithms.thesis_ppo import ThesisPPOAgent
-from rl_risk_sac.tasks.reference_reaching import residual_action_penalty
+from rl_risk_sac.tasks.reference_reaching import (
+    composition_saturation_penalty,
+    residual_action_penalty,
+)
 from rl_risk_sac.utils.config import deep_update, load_config
 
 
@@ -283,6 +286,13 @@ def parse_args() -> argparse.Namespace:
         required=True,
     )
     parser.add_argument("--seed", type=int, default=41001)
+    parser.add_argument(
+        "--goal-seed", type=int,
+        help=(
+            "Evaluation-only goal lock: sample the goal in an obstacle-free "
+            "environment with this seed, then reuse it in the requested scene."
+        ),
+    )
     parser.add_argument("--stage", choices=("s0", "s1", "s2"))
     parser.add_argument("--device")
     parser.add_argument(
@@ -293,9 +303,31 @@ def parse_args() -> argparse.Namespace:
         "--static-obstacle-layout",
         choices=(
             "legacy_blocking", "path_offset", "mixed", "structured",
+            "workspace_random", "grounded_path", "grounded_random",
+            "suspended_path", "suspended_random", "physical_mixed",
             "low_overpass",
         ),
         help="Override the checkpoint's static obstacle layout distribution.",
+    )
+    parser.add_argument(
+        "--counterfactual-variant",
+        choices=("low_wide", "tall_narrow", "offset_left", "offset_right"),
+        help=(
+            "Evaluation-only paired obstacle geometry. Reusing the same seed "
+            "across variants locks the initial state and target."
+        ),
+    )
+    parser.add_argument(
+        "--low-overpass-top-height-m", type=float, default=0.24,
+        help="Absolute top height of the evaluation-only low wall.",
+    )
+    parser.add_argument(
+        "--low-overpass-half-width-m", type=float, default=0.35,
+        help="Low-wall half width across the direct TCP path.",
+    )
+    parser.add_argument(
+        "--low-overpass-half-depth-m", type=float, default=0.05,
+        help="Low-wall half depth along the direct TCP path.",
     )
     parser.add_argument(
         "--playback-speed", type=float, default=1.0,
@@ -348,6 +380,13 @@ def parse_args() -> argparse.Namespace:
         parser.error("--log-every must be positive")
     if not np.isfinite(args.hold_seconds) or args.hold_seconds < 0.0:
         parser.error("--hold-seconds must be finite and non-negative")
+    for name in (
+        "low_overpass_top_height_m", "low_overpass_half_width_m",
+        "low_overpass_half_depth_m",
+    ):
+        value = float(getattr(args, name))
+        if not np.isfinite(value) or value <= 0.0:
+            parser.error(f"--{name.replace('_', '-')} must be finite and positive")
     return args
 
 
@@ -372,6 +411,17 @@ def main() -> None:
     config = load_evaluation_config(
         payload, stage, args.seed, args.device, args.config
     )
+    if args.counterfactual_variant is not None:
+        if args.scene != "static" or stage != "s1":
+            raise ValueError(
+                "--counterfactual-variant requires an S1 --scene static replay"
+            )
+        if args.static_obstacle_layout is not None:
+            raise ValueError(
+                "--counterfactual-variant and --static-obstacle-layout are exclusive"
+            )
+        config["thesis"]["static_obstacle_count_probabilities"] = {1: 1.0}
+        config["thesis"]["blocking_obstacle_mode"] = True
     if args.static_obstacle_count is not None:
         if args.scene != "static":
             raise ValueError(
@@ -412,10 +462,28 @@ def main() -> None:
         ThesisHomotopyEnv,
     )
 
+    forced_goal: dict[str, np.ndarray] = {}
+    if args.goal_seed is not None:
+        goal_env = ThesisHomotopyEnv(config)
+        try:
+            goal_env.configure_episode("none", terminate_on_success=False)
+            _goal_observation, goal_info = goal_env.reset(seed=args.goal_seed)
+            forced_goal = {
+                "forced_goal_position": goal_info["goal_position"],
+                "forced_goal_quaternion": goal_info["goal_quaternion"],
+                "forced_goal_joint_positions": goal_info["goal_joint_positions"],
+            }
+        finally:
+            goal_env.close()
+
     render_mode = None if args.headless else "human"
     env = ThesisHomotopyEnv(config, render_mode=render_mode)
     if args.static_obstacle_layout == "low_overpass":
-        env.configure_evaluation_low_overpass()
+        env.configure_evaluation_low_overpass(
+            top_height_m=args.low_overpass_top_height_m,
+            path_half_depth_m=args.low_overpass_half_depth_m,
+            cross_path_half_width_m=args.low_overpass_half_width_m,
+        )
     camera_input = CameraInputState()
     trace: list[dict[str, object]] = []
     try:
@@ -441,7 +509,12 @@ def main() -> None:
                     initial_target=tuple(args.camera_target),
                 ),
             )
-        env.configure_episode(args.scene, terminate_on_success=False)
+        env.configure_episode(
+            args.scene,
+            terminate_on_success=False,
+            counterfactual_variant=args.counterfactual_variant,
+            **forced_goal,
+        )
         observation, reset_info = env.reset(seed=args.seed)
         if not args.headless:
             draw_goal(
@@ -470,10 +543,13 @@ def main() -> None:
         print(
             f"checkpoint={checkpoint}\n"
             f"stage={stage} scene={args.scene} seed={args.seed} "
+            f"goal_seed={args.goal_seed} "
             f"playback_speed={args.playback_speed} "
-            f"residual_cutoff={args.residual_cutoff_position_m}\n"
+            f"residual_cutoff={args.residual_cutoff_position_m} "
+            f"counterfactual={args.counterfactual_variant}\n"
             f"obstacles={reset_info.get('obstacle_count', 0)} "
             f"layout={reset_info.get('obstacle_layout', 'none')} "
+            f"layouts={reset_info.get('obstacle_layouts', ())} "
             f"initial_position={1000.0 * current_position_error:.2f}mm "
             f"initial_orientation={float(reset_info['orientation_error_norm']):.5f}rad\n"
             "camera: middle-drag=rotate, right-drag=pan, arrows=rotate, "
@@ -507,7 +583,10 @@ def main() -> None:
                 terminated,
                 truncated,
                 info,
-            ) = env.step(executed_action)
+            ) = env.step(
+                executed_action,
+                base_clearance_changes=residual_safety_context[0],
+            )
             residual_penalty, _ = residual_action_penalty(
                 residual_action,
                 float(info["goal_error_norm"]),
@@ -528,7 +607,18 @@ def main() -> None:
                     reward_config["reference_residual_penalty_clearance_full_m"]
                 ),
             )
-            reward = float(environment_reward) - residual_penalty
+            composition_penalty, _ = composition_saturation_penalty(
+                executed_action,
+                float(config["thesis"]["joint_delta_limit_rad"]),
+                penalty_weight=float(reward_config.get(
+                    "reference_composition_saturation_weight", 0.0
+                )),
+            )
+            reward = (
+                float(environment_reward)
+                - residual_penalty
+                - composition_penalty
+            )
             episode_return += reward
             current_position_error = float(info["goal_error_norm"])
             ee_position = np.asarray(info["ee_position"], dtype=np.float64)
@@ -556,11 +646,21 @@ def main() -> None:
                     np.asarray(info["position_error_vector"], dtype=np.float64)
                 ),
                 "orientation_error_rad": float(info["orientation_error_norm"]),
+                "ee_position": vector_json(ee_position),
                 "reference_error": float(info["reference_error"]),
                 "r_goal": float(info["r_goal"]),
                 "c_proximity": float(info["c_proximity"]),
                 "obstacle_penalty": float(info["reference_obstacle_penalty"]),
                 "d_min_m": float(info["d_min"]),
+                "route_lateral_min_m": float(info["route_lateral_min_m"]),
+                "route_lateral_max_m": float(info["route_lateral_max_m"]),
+                "route_vertical_deviation_min_m": float(
+                    info["route_vertical_deviation_min_m"]
+                ),
+                "route_vertical_deviation_max_m": float(
+                    info["route_vertical_deviation_max_m"]
+                ),
+                "selected_avoidance_route": str(info["selected_avoidance_route"]),
                 "collision": int(bool(info["collision"])),
                 "obstacle_collision": int(bool(info["obstacle_collision"])),
                 "self_collision": int(bool(info["self_collision"])),

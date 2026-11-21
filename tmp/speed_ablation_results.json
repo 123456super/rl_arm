@@ -1,0 +1,308 @@
+{
+  "summaries": {
+    "baseline_20deg": {
+      "variant": "baseline_20deg",
+      "episodes": 39,
+      "collision_count": 39,
+      "obstacle_collision_count": 39,
+      "self_collision_count": 0,
+      "plane_collision_count": 0,
+      "pose5_count": 37,
+      "best_position_mean_m": 0.007698502342324131,
+      "best_position_median_m": 0.0009906033519655466,
+      "return_mean": 751.1917187208082,
+      "peak_speed_mean_deg_s": 68.22526744184005,
+      "velocity_limiter_mean": 0.03287521367521367,
+      "acceleration_limiter_mean": 0.22409572649572654,
+      "collision_seeds": [
+        41006,
+        41026,
+        41042,
+        41138,
+        41143,
+        41164,
+        41186,
+        41213,
+        41247,
+        41287,
+        41327,
+        41333,
+        41343,
+        41387,
+        41412,
+        41434,
+        41511,
+        41543,
+        41560,
+        41565,
+        41587,
+        41596,
+        41613,
+        41628,
+        41643,
+        41666,
+        41679,
+        41708,
+        41731,
+        41785,
+        41803,
+        41833,
+        41869,
+        41921,
+        41928,
+        41940,
+        41961,
+        41974,
+        41978
+      ]
+    },
+    "velocity_unlimited_accel20": {
+      "variant": "velocity_unlimited_accel20",
+      "episodes": 39,
+      "collision_count": 38,
+      "obstacle_collision_count": 38,
+      "self_collision_count": 0,
+      "plane_collision_count": 0,
+      "pose5_count": 37,
+      "best_position_mean_m": 0.010875020203037331,
+      "best_position_median_m": 0.0010102870874106884,
+      "return_mean": 718.958249022656,
+      "peak_speed_mean_deg_s": 64.0712410042716,
+      "velocity_limiter_mean": 0.0,
+      "acceleration_limiter_mean": 0.22500854700854703,
+      "collision_seeds": [
+        41006,
+        41026,
+        41042,
+        41138,
+        41143,
+        41164,
+        41186,
+        41213,
+        41247,
+        41287,
+        41327,
+        41333,
+        41343,
+        41387,
+        41412,
+        41434,
+        41511,
+        41543,
+        41560,
+        41565,
+        41587,
+        41596,
+        41628,
+        41643,
+        41666,
+        41679,
+        41708,
+        41731,
+        41785,
+        41803,
+        41833,
+        41869,
+        41921,
+        41928,
+        41940,
+        41961,
+        41974,
+        41978
+      ]
+    },
+    "velocity_accel_unlimited": {
+      "variant": "velocity_accel_unlimited",
+      "episodes": 39,
+      "collision_count": 13,
+      "obstacle_collision_count": 13,
+      "self_collision_count": 0,
+      "plane_collision_count": 0,
+      "pose5_count": 36,
+      "best_position_mean_m": 0.008928788980343737,
+      "best_position_median_m": 0.0010031196288764477,
+      "return_mean": 900.4316023774821,
+      "peak_speed_mean_deg_s": 63.357510579499994,
+      "velocity_limiter_mean": 0.0,
+      "acceleration_limiter_mean": 0.0,
+      "collision_seeds": [
+        41138,
+        41143,
+        41164,
+        41247,
+        41287,
+        41412,
+        41511,
+        41643,
+        41679,
+        41921,
+        41928,
+        41940,
+        41961
+      ]
+    },
+    "controller_disabled": {
+      "variant": "controller_disabled",
+      "episodes": 39,
+      "collision_count": 9,
+      "obstacle_collision_count": 9,
+      "self_collision_count": 0,
+      "plane_collision_count": 0,
+      "pose5_count": 33,
+      "best_position_mean_m": 0.009678737792852096,
+      "best_position_median_m": 0.0006657721824012697,
+      "return_mean": 883.5814371753542,
+      "peak_speed_mean_deg_s": 151.76921161233145,
+      "velocity_limiter_mean": 0.0,
+      "acceleration_limiter_mean": 0.0,
+      "collision_seeds": [
+        41143,
+        41247,
+        41412,
+        41434,
+        41511,
+        41643,
+        41921,
+        41928,
+        41940
+      ]
+    }
+  },
+  "selected": [
+    {
+      "seed": 41596,
+      "baseline_20deg": {
+        "collision": true,
+        "best_position_m": 0.22694231569766998,
+        "return": -2234.4621629533513,
+        "peak_speed_deg_s": 88.91546408692852
+      },
+      "velocity_unlimited_accel20": {
+        "collision": true,
+        "best_position_m": 0.35115864872932434,
+        "return": -3634.816859820715,
+        "peak_speed_deg_s": 83.40303014367551
+      },
+      "velocity_accel_unlimited": {
+        "collision": false,
+        "best_position_m": 0.0011175868567079306,
+        "return": 1163.4052876711323,
+        "peak_speed_deg_s": 71.39399346947316
+      },
+      "controller_disabled": {
+        "collision": false,
+        "best_position_m": 0.0007165452698245645,
+        "return": 1178.9049009317189,
+        "peak_speed_deg_s": 166.1185607662542
+      }
+    },
+    {
+      "seed": 41679,
+      "baseline_20deg": {
+        "collision": true,
+        "best_position_m": 0.0009906033519655466,
+        "return": 342.9445907086465,
+        "peak_speed_deg_s": 273.6093185274902
+      },
+      "velocity_unlimited_accel20": {
+        "collision": true,
+        "best_position_m": 0.0010753140086308122,
+        "return": 343.0565608243143,
+        "peak_speed_deg_s": 151.88489732843286
+      },
+      "velocity_accel_unlimited": {
+        "collision": true,
+        "best_position_m": 0.0010031196288764477,
+        "return": 857.2506743677011,
+        "peak_speed_deg_s": 89.63956659178743
+      },
+      "controller_disabled": {
+        "collision": false,
+        "best_position_m": 0.02417261153459549,
+        "return": 673.4854368299008,
+        "peak_speed_deg_s": 162.61900406197145
+      }
+    },
+    {
+      "seed": 41961,
+      "baseline_20deg": {
+        "collision": true,
+        "best_position_m": 0.03469598665833473,
+        "return": 312.0520174792117,
+        "peak_speed_deg_s": 93.8309258363441
+      },
+      "velocity_unlimited_accel20": {
+        "collision": true,
+        "best_position_m": 0.03380492702126503,
+        "return": 313.5708302369259,
+        "peak_speed_deg_s": 93.8309258363441
+      },
+      "velocity_accel_unlimited": {
+        "collision": true,
+        "best_position_m": 0.05314294993877411,
+        "return": 451.1908202934564,
+        "peak_speed_deg_s": 63.26653964021071
+      },
+      "controller_disabled": {
+        "collision": false,
+        "best_position_m": 0.06133446842432022,
+        "return": 532.6162366507333,
+        "peak_speed_deg_s": 149.9616390015623
+      }
+    },
+    {
+      "seed": 41006,
+      "baseline_20deg": {
+        "collision": true,
+        "best_position_m": 0.001265150960534811,
+        "return": 946.1582784790816,
+        "peak_speed_deg_s": 38.786967485061176
+      },
+      "velocity_unlimited_accel20": {
+        "collision": true,
+        "best_position_m": 0.0010928782867267728,
+        "return": 945.8314053134366,
+        "peak_speed_deg_s": 40.15631796081118
+      },
+      "velocity_accel_unlimited": {
+        "collision": false,
+        "best_position_m": 0.0011069892207160592,
+        "return": 1108.097136043882,
+        "peak_speed_deg_s": 88.02051123017092
+      },
+      "controller_disabled": {
+        "collision": false,
+        "best_position_m": 0.001407630043104291,
+        "return": 1033.0702201395038,
+        "peak_speed_deg_s": 196.76389836443056
+      }
+    },
+    {
+      "seed": 41213,
+      "baseline_20deg": {
+        "collision": true,
+        "best_position_m": 0.0006181740318425,
+        "return": 972.5035544372333,
+        "peak_speed_deg_s": 17.721472216731684
+      },
+      "velocity_unlimited_accel20": {
+        "collision": true,
+        "best_position_m": 0.0006181740318425,
+        "return": 972.5035544372333,
+        "peak_speed_deg_s": 17.721472216731684
+      },
+      "velocity_accel_unlimited": {
+        "collision": false,
+        "best_position_m": 0.0006279557710513473,
+        "return": 1101.8490493097518,
+        "peak_speed_deg_s": 44.86401218586413
+      },
+      "controller_disabled": {
+        "collision": false,
+        "best_position_m": 0.0003773881180677563,
+        "return": 1117.2326806926842,
+        "peak_speed_deg_s": 117.95326885261821
+      }
+    }
+  ]
+}

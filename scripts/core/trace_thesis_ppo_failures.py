@@ -48,10 +48,20 @@ def main() -> None:
         dest="residual_cutoff_position_m",
         help="Trace the full-Residual ablation instead of deployment control.",
     )
+    parser.add_argument(
+        "--policy-batch-size", type=int, default=1,
+        help=(
+            "Repeat the current observation for deterministic policy inference. "
+            "Use the evaluation environment count to reproduce GPU batched "
+            "inference at numerically sensitive closed-loop trajectories."
+        ),
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if len(set(args.seeds)) != len(args.seeds):
         parser.error("seeds must be unique")
+    if args.policy_batch_size < 1:
+        parser.error("--policy-batch-size must be positive")
     if (
         args.joint_velocity_limit_deg_s is not None
         and args.joint_velocity_limit_deg_s <= 0.0
@@ -122,17 +132,29 @@ def main() -> None:
                     obstacle_links=set(), plane_links=set(), plane_z=[]
                 )
                 q_before, qdot_before = env.robot.joint_state_exact()
+                policy_observations = np.repeat(
+                    observation[None, :], args.policy_batch_size, axis=0
+                )
                 base_action_query = agent.predict_base_actions(
-                    observation[None, :]
+                    policy_observations
                 )[0]
                 residual_safety_context = env.residual_safety_context(
                     base_action_query
-                )[None, :]
+                )
+                policy_safety_context = np.repeat(
+                    residual_safety_context[None, :],
+                    args.policy_batch_size,
+                    axis=0,
+                )
                 actions, _logp, _values, policy = agent.act_for_deployment(
-                    observation[None, :],
-                    np.asarray([current_position_error], dtype=np.float32),
+                    policy_observations,
+                    np.full(
+                        args.policy_batch_size,
+                        current_position_error,
+                        dtype=np.float32,
+                    ),
                     residual_cutoff_position_m=args.residual_cutoff_position_m,
-                    residual_safety_context=residual_safety_context,
+                    residual_safety_context=policy_safety_context,
                 )
                 policy_action = policy["policy_actions"][0].copy()
                 base_action = policy["base_actions"][0].copy()
@@ -142,7 +164,10 @@ def main() -> None:
                     action = base_action.astype(np.float32, copy=True)
                 else:
                     action = actions[0].copy()
-                next_observation, reward, _cost, terminated, truncated, info = env.step(action)
+                next_observation, reward, _cost, terminated, truncated, info = env.step(
+                    action,
+                    base_clearance_changes=residual_safety_context,
+                )
                 q_after, qdot_after = env.robot.joint_state_exact()
                 capsules = env.robot.capsule_model.states(
                     env.robot_id, env.client_id

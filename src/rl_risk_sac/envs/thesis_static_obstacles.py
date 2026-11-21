@@ -18,7 +18,72 @@ class ObstacleSamplingError(RuntimeError):
     """Raised when no valid obstacle set exists for the sampled goal."""
 
 
+_PHYSICAL_STATIC_LAYOUTS = {
+    "grounded_path",
+    "grounded_random",
+    "suspended_path",
+    "suspended_random",
+}
+
+
+def _sample_physical_layout_plan(
+    obstacle_count: int,
+    *,
+    challenging_probability: float,
+    grounded_probability: float,
+    extra_path_probability: float,
+    max_path_obstacles: int,
+    rng: np.random.Generator,
+) -> tuple[str, ...]:
+    """Sample independent support and placement labels for one obstacle set.
+
+    A challenging episode always starts with one path-relevant object. Extra
+    objects may add at most one further path constraint under the formal
+    configuration; all remaining objects provide random scene context.
+    """
+    if obstacle_count < 0:
+        raise ValueError("obstacle_count must be non-negative")
+    if obstacle_count == 0:
+        return ()
+    path_flags = np.zeros(obstacle_count, dtype=bool)
+    if rng.random() < challenging_probability:
+        path_flags[0] = True
+        path_count = 1
+        for index in range(1, obstacle_count):
+            if (
+                path_count < max_path_obstacles
+                and rng.random() < extra_path_probability
+            ):
+                path_flags[index] = True
+                path_count += 1
+    grounded_flags = rng.random(obstacle_count) < grounded_probability
+    return tuple(
+        f"{'grounded' if grounded else 'suspended'}_"
+        f"{'path' if path_relevant else 'random'}"
+        for grounded, path_relevant in zip(
+            grounded_flags, path_flags, strict=True
+        )
+    )
+
+
+def _obb_vertical_half_extent(
+    half_extents: np.ndarray, quaternion: np.ndarray
+) -> float:
+    """Return the world-Z half extent of an arbitrarily oriented OBB."""
+    rotation = np.asarray(
+        p.getMatrixFromQuaternion(np.asarray(quaternion, dtype=np.float64)),
+        dtype=np.float64,
+    ).reshape(3, 3)
+    return float(
+        np.abs(rotation[2]) @ np.asarray(half_extents, dtype=np.float64)
+    )
+
+
 class StaticObstacleMixin:
+    _COUNTERFACTUAL_VARIANTS = (
+        "low_wide", "tall_narrow", "offset_left", "offset_right"
+    )
+
     def configure_evaluation_low_overpass(
         self,
         *,
@@ -58,6 +123,7 @@ class StaticObstacleMixin:
         self.obstacle_id = None
         self._obstacle_body_id = None
         self.obstacle_layout = "none"
+        self.obstacle_layouts: tuple[str, ...] = ()
         self.obstacle_positions = np.empty((0, 3), dtype=np.float32)
         self.obstacle_velocities = np.empty((0, 3), dtype=np.float32)
         self.obstacle_half_extents_all = np.empty((0, 3), dtype=np.float32)
@@ -88,10 +154,14 @@ class StaticObstacleMixin:
         self.obstacle_sampling_proposals = 0
         self.obstacle_sampling_time_s = 0.0
         if self.contract.scene == "static":
-            static_obstacle_count = int(self.rng.choice(
-                self.static_obstacle_counts,
-                p=self.static_obstacle_count_probabilities,
-            ))
+            static_obstacle_count = (
+                self._requested_static_obstacle_count
+                if self._requested_static_obstacle_count is not None
+                else int(self.rng.choice(
+                    self.static_obstacle_counts,
+                    p=self.static_obstacle_count_probabilities,
+                ))
+            )
             obstacle_count = static_obstacle_count
         elif self.contract.scene == "dynamic":
             static_obstacle_count = 0
@@ -102,6 +172,13 @@ class StaticObstacleMixin:
         else:
             raise ValueError(f"unsupported obstacle scene {self.contract.scene!r}")
         low_overpass = getattr(self, "_evaluation_low_overpass", None)
+        counterfactual_variant = getattr(
+            self, "_evaluation_counterfactual_variant", None
+        )
+        if counterfactual_variant is not None and (
+            self.contract.scene != "static" or obstacle_count != 1
+        ):
+            raise ValueError("counterfactual evaluation requires one static obstacle")
         if low_overpass is not None:
             if self.contract.scene != "static" or obstacle_count != 1:
                 raise ValueError(
@@ -121,6 +198,21 @@ class StaticObstacleMixin:
         else:
             layout = "legacy_blocking"
         self.obstacle_layout = layout
+        physical_layout_plan = (
+            self._requested_physical_layout_plan
+            or _sample_physical_layout_plan(
+                    static_obstacle_count,
+                    challenging_probability=(
+                        self.physical_challenging_episode_probability
+                    ),
+                    grounded_probability=self.physical_grounded_probability,
+                    extra_path_probability=self.physical_extra_path_probability,
+                    max_path_obstacles=self.physical_max_path_obstacles,
+                    rng=self.rng,
+                )
+            if layout == "physical_mixed"
+            else ()
+        )
         blocking_candidates: list[np.ndarray] = []
         secondary_link_candidates: list[np.ndarray] = []
         blocking_candidates_by_state: list[list[np.ndarray]] = []
@@ -159,25 +251,25 @@ class StaticObstacleMixin:
             self._set_joint_state(initial_q, initial_qdot)
             if low_overpass is not None:
                 top_height = float(low_overpass["top_height_m"])
-                eligible = [
-                    index for index, candidate in enumerate(blocking_candidates)
-                    if float(candidate[2]) >= top_height + 0.06
-                ]
-                if not eligible:
-                    eligible = list(range(len(blocking_candidates)))
-                for index in self.rng.permutation(eligible):
-                    before = blocking_candidates[max(0, int(index) - 1)]
-                    after = blocking_candidates[
-                        min(len(blocking_candidates) - 1, int(index) + 1)
-                    ]
-                    tangent = np.asarray(after[:2] - before[:2], dtype=np.float64)
-                    if float(np.linalg.norm(tangent)) <= 1.0e-8:
-                        tangent = np.asarray([1.0, 0.0], dtype=np.float64)
-                    yaw = float(np.arctan2(tangent[1], tangent[0]))
+                start = np.asarray(
+                    self.episode_start_ee_position, dtype=np.float64
+                )
+                goal = np.asarray(self.goal_position, dtype=np.float64)
+                tangent = goal[:2] - start[:2]
+                if float(np.linalg.norm(tangent)) <= 1.0e-8:
+                    tangent = np.asarray([1.0, 0.0], dtype=np.float64)
+                yaw = float(np.arctan2(tangent[1], tangent[0]))
+                # The wall is centred on the actual straight start--goal
+                # route, not on a joint-interpolation TCP trace.  This makes
+                # its finite width symmetric about the route and prevents an
+                # accidentally easy side exit caused by an offset target.
+                # Reverse the preference because candidates are consumed via
+                # pop() below: try the midpoint first, then nearby anchors.
+                for fraction in (0.70, 0.30, 0.60, 0.40, 0.50):
                     position = np.asarray(
                         [
-                            blocking_candidates[int(index)][0],
-                            blocking_candidates[int(index)][1],
+                            start[0] + fraction * (goal[0] - start[0]),
+                            start[1] + fraction * (goal[1] - start[1]),
                             0.5 * (
                                 float(low_overpass["bottom_height_m"])
                                 + top_height
@@ -191,11 +283,29 @@ class StaticObstacleMixin:
         self._set_joint_state(self.goal_joint_positions)
         goal_capsules = self.robot.capsules()
         self._set_joint_state(initial_q, initial_qdot)
+
+        if counterfactual_variant is not None:
+            self._create_counterfactual_obstacle(
+                counterfactual_variant,
+                blocking_candidates,
+                initial_capsules,
+                goal_capsules,
+                sampling_started,
+            )
+            return
     
-        # Dense five-obstacle layouts occasionally need several complete-set
-        # retries even though every individual proposal is valid.  Retrying
-        # the set is preferable to silently falling back to an easier layout.
-        for _ in range(32):
+        # Dense multi-obstacle layouts occasionally need several complete-set
+        # retries even though every individual proposal is valid.
+        # Physical single-obstacle layouts already contain a large, shuffled
+        # set of swept-link anchors. Rebuilding that same set 32 times only
+        # repeats expensive capsule queries; reset() can instead sample a new
+        # feasible goal when the current geometry admits no valid object.
+        set_attempts = (
+            (4 if static_obstacle_count > 1 else 1)
+            if layout == "physical_mixed"
+            else (1 if layout in _PHYSICAL_STATIC_LAYOUTS else 32)
+        )
+        for _ in range(set_attempts):
             positions: list[np.ndarray] = []
             velocities: list[np.ndarray] = []
             half_extents_all: list[np.ndarray] = []
@@ -206,6 +316,7 @@ class StaticObstacleMixin:
             motion_angular_frequencies: list[float] = []
             motion_phases: list[float] = []
             dynamic_mask: list[bool] = []
+            obstacle_layouts: list[str] = []
             sampling_positions: list[np.ndarray] = []
             sampling_half_extents: list[np.ndarray] = []
             legacy_candidates = [
@@ -244,6 +355,16 @@ class StaticObstacleMixin:
                     and static_obstacle_count > 1
                     and obstacle_index == (1 if self.contract.scene == "hybrid" else 0)
                 )
+                static_index = (
+                    obstacle_index - 1
+                    if self.contract.scene == "hybrid"
+                    else obstacle_index
+                )
+                obstacle_layout = (
+                    physical_layout_plan[static_index]
+                    if layout == "physical_mixed" and not is_dynamic
+                    else ("dynamic" if is_dynamic else layout)
+                )
                 half_extents = (
                     self.dynamic_obstacle_half_extents.copy()
                     if is_dynamic
@@ -265,13 +386,48 @@ class StaticObstacleMixin:
                         ],
                         dtype=np.float32,
                     )
-                obstacle_yaw = float(self.rng.uniform(-np.pi, np.pi))
+                physical_layout = bool(
+                    not is_dynamic
+                    and obstacle_layout in _PHYSICAL_STATIC_LAYOUTS
+                )
+                grounded_layout = bool(
+                    physical_layout and obstacle_layout.startswith("grounded_")
+                )
+                path_relevant_layout = bool(
+                    physical_layout and obstacle_layout.endswith("_path")
+                )
+                if physical_layout and not grounded_layout:
+                    obstacle_euler = self.rng.uniform(-np.pi, np.pi, size=3)
+                else:
+                    obstacle_euler = np.asarray(
+                        [0.0, 0.0, self.rng.uniform(-np.pi, np.pi)]
+                    )
+                obstacle_yaw = float(obstacle_euler[2])
                 quaternion = np.asarray(
-                    p.getQuaternionFromEuler([0.0, 0.0, obstacle_yaw]),
+                    p.getQuaternionFromEuler(obstacle_euler.tolist()),
                     dtype=np.float32,
                 )
+                vertical_half_extent = (
+                    _obb_vertical_half_extent(half_extents, quaternion)
+                    if physical_layout else 0.0
+                )
+                if grounded_layout and path_relevant_layout:
+                    # Only swept-link points low enough to intersect this
+                    # ground-supported box can possibly satisfy the path test.
+                    # Filtering them before capsule--OBB queries removes many
+                    # guaranteed rejections without changing accepted scenes.
+                    candidate_height_limit = (
+                        self.mounting_plane_height
+                        + 2.0 * vertical_half_extent
+                        + 0.11
+                    )
+                    secondary_candidates = [
+                        candidate for candidate in secondary_candidates
+                        if float(candidate[2]) <= candidate_height_limit
+                    ]
                 accepted = False
-                for _ in range(500):
+                proposal_attempts = 500
+                for _ in range(proposal_attempts):
                     self.obstacle_sampling_proposals += 1
                     candidate_is_tcp_blocker = False
                     if low_overpass is not None and not is_dynamic:
@@ -292,14 +448,24 @@ class StaticObstacleMixin:
                             and (
                                 layout == "legacy_blocking"
                                 or (layout == "mixed" and not mixed_is_random)
+                                or path_relevant_layout
                             )
+                        )
+                        primary_path_candidates = (
+                            secondary_candidates
+                            if grounded_layout
+                            else legacy_candidates
                         )
                         if (
                             requires_path_candidate
                             and not tcp_blocker_placed
-                            and legacy_candidates
+                            and primary_path_candidates
                         ):
-                            position = legacy_candidates.pop()
+                            # Ground-supported boxes cannot be translated to a
+                            # high TCP waypoint without ceasing to be grounded.
+                            # Anchor their XY coordinates to the swept robot
+                            # links instead. Suspended boxes use the TCP trace.
+                            position = primary_path_candidates.pop()
                             candidate_is_tcp_blocker = True
                         elif (
                             requires_path_candidate
@@ -327,7 +493,10 @@ class StaticObstacleMixin:
                                 ],
                                 dtype=np.float32,
                             )
-                        elif layout == "workspace_random":
+                        elif (
+                            layout == "workspace_random"
+                            or (physical_layout and not path_relevant_layout)
+                        ):
                             # Broad workspace sampling for non-path-critical
                             # scenes. The common endpoint capsule checks below
                             # guarantee clearance from both the initial and
@@ -398,6 +567,31 @@ class StaticObstacleMixin:
                                 ],
                                 dtype=np.float32,
                             )
+                        if physical_layout:
+                            if grounded_layout:
+                                # A supported obstacle rests exactly on the
+                                # mounting plane. The validation below exempts
+                                # only this intentional obstacle--plane contact;
+                                # robot--plane collision handling is unchanged.
+                                position[2] = (
+                                    self.mounting_plane_height
+                                    + vertical_half_extent
+                                )
+                            elif not path_relevant_layout:
+                                min_center_z = (
+                                    self.mounting_plane_height
+                                    + self.physical_suspended_bottom_min
+                                    + vertical_half_extent
+                                )
+                                max_center_z = (
+                                    self.physical_obstacle_top_max
+                                    - vertical_half_extent
+                                )
+                                if min_center_z >= max_center_z:
+                                    continue
+                                position[2] = float(
+                                    self.rng.uniform(min_center_z, max_center_z)
+                                )
                         velocity = np.zeros(3, dtype=np.float32)
                         if np.linalg.norm(position - self.goal_position) < 0.15:
                             continue
@@ -443,15 +637,36 @@ class StaticObstacleMixin:
                                 quaternion,
                             )
                         )
+                    obstacle_bottom = (
+                        float(position[2])
+                        - _obb_vertical_half_extent(half_extents, quaternion)
+                    ) if not is_dynamic else (
+                        float(path_envelope_position[2])
+                        - float(path_envelope_half_extents[2])
+                    )
+                    obstacle_top = (
+                        float(position[2])
+                        + _obb_vertical_half_extent(half_extents, quaternion)
+                    ) if not is_dynamic else (
+                        float(path_envelope_position[2])
+                        + float(path_envelope_half_extents[2])
+                    )
                     if (
                         self.mounting_plane_enabled
-                        and (
-                            position[2] - half_extents[2]
-                            if not is_dynamic
-                            else path_envelope_position[2]
-                            - path_envelope_half_extents[2]
-                        )
+                        and not grounded_layout
+                        and obstacle_bottom
                         < self.mounting_plane_height + 0.01
+                    ):
+                        continue
+                    if (
+                        physical_layout
+                        and not grounded_layout
+                        and (
+                            obstacle_bottom
+                            < self.mounting_plane_height
+                            + self.physical_suspended_bottom_min
+                            or obstacle_top > self.physical_obstacle_top_max
+                        )
                     ):
                         continue
                     # Reject overlapping obstacle sets before the much more
@@ -494,7 +709,14 @@ class StaticObstacleMixin:
                         query_half_extents,
                         quaternion,
                     )
-                    if initial_distance < self.obstacle_surface_clearance_min:
+                    endpoint_surface_clearance = (
+                        0.01 if low_overpass is not None
+                        else (
+                            0.01 if path_relevant_layout
+                            else self.obstacle_surface_clearance_min
+                        )
+                    )
+                    if initial_distance < endpoint_surface_clearance:
                         continue
                     goal_distance = self._minimum_obstacle_clearance_for(
                         goal_capsules,
@@ -502,8 +724,19 @@ class StaticObstacleMixin:
                         query_half_extents,
                         quaternion,
                     )
-                    if goal_distance < self.obstacle_surface_clearance_min:
+                    if goal_distance < endpoint_surface_clearance:
                         continue
+                    if path_relevant_layout and not is_dynamic:
+                        # This only states where the object is placed. It does
+                        # not label or prescribe an over/side avoidance route.
+                        nominal_path_clearance = min(
+                            self._minimum_obstacle_clearance_for(
+                                capsules, position, half_extents, quaternion
+                            )
+                            for capsules in path_states
+                        )
+                        if nominal_path_clearance > self.physical_path_clearance_max:
+                            continue
                     if (
                         layout == "path_offset"
                         and not is_dynamic
@@ -516,8 +749,8 @@ class StaticObstacleMixin:
                     ):
                         continue
                     if (
-                        initial_distance >= self.obstacle_surface_clearance_min
-                        and goal_distance >= self.obstacle_surface_clearance_min
+                        initial_distance >= endpoint_surface_clearance
+                        and goal_distance >= endpoint_surface_clearance
                     ):
                         positions.append(position.copy())
                         velocities.append(velocity.copy())
@@ -526,6 +759,7 @@ class StaticObstacleMixin:
                         sampling_positions.append(query_position.copy())
                         sampling_half_extents.append(query_half_extents.copy())
                         dynamic_mask.append(is_dynamic)
+                        obstacle_layouts.append(obstacle_layout)
                         if candidate_is_tcp_blocker:
                             tcp_blocker_placed = True
                         if is_dynamic:
@@ -556,6 +790,7 @@ class StaticObstacleMixin:
             )
             self.obstacle_quaternions = np.asarray(quaternions, dtype=np.float32)
             self.obstacle_dynamic_mask = np.asarray(dynamic_mask, dtype=bool)
+            self.obstacle_layouts = tuple(obstacle_layouts)
             if np.any(self.obstacle_dynamic_mask):
                 self.dynamic_motion_centers = np.asarray(
                     motion_centers, dtype=np.float32
@@ -615,6 +850,112 @@ class StaticObstacleMixin:
             f"failed to sample a valid set of {obstacle_count} obstacles "
             f"after {self.obstacle_sampling_proposals} proposals"
         )
+
+    def _create_counterfactual_obstacle(
+        self,
+        variant: str,
+        path: list[np.ndarray],
+        initial_capsules: list[Any],
+        goal_capsules: list[Any],
+        sampling_started: float,
+    ) -> None:
+        """Place one of four paired, evaluation-only obstacle variants.
+
+        Every environment evaluates all four geometries while selecting the
+        anchor.  Consequently the chosen TCP-path anchor is identical across
+        a quartet; only the requested shape or lateral offset changes.
+        """
+        if variant not in self._COUNTERFACTUAL_VARIANTS:
+            raise ValueError(f"unknown counterfactual variant {variant!r}")
+        if len(path) < 3:
+            raise ObstacleSamplingError("counterfactual TCP path is unavailable")
+
+        # Local dimensions are [along path, across path, vertical].  The
+        # low-wide/tall-narrow pair shares a centre.  The offset pair shares a
+        # balanced shape and moves equally to either side of the path.
+        local_geometry = {
+            "low_wide": (np.asarray([0.045, 0.120, 0.050]), 0.0),
+            "tall_narrow": (np.asarray([0.045, 0.050, 0.120]), 0.0),
+            "offset_left": (np.asarray([0.045, 0.075, 0.085]), 0.045),
+            "offset_right": (np.asarray([0.045, 0.075, 0.085]), -0.045),
+        }
+        centre = (len(path) - 1) // 2
+        anchor_order = sorted(range(1, len(path) - 1), key=lambda i: abs(i - centre))
+        selected: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] | None = None
+        # Counterfactual endpoints must be collision-free, but they need not
+        # inherit the training sampler's large scene-generation buffer.  That
+        # buffer would reject many valid tests and bias the retained goals.
+        endpoint_clearance = 0.01
+        for index in anchor_order:
+            before = np.asarray(path[index - 1], dtype=np.float64)
+            after = np.asarray(path[index + 1], dtype=np.float64)
+            tangent = after[:2] - before[:2]
+            tangent_norm = float(np.linalg.norm(tangent))
+            if tangent_norm <= 1.0e-8:
+                continue
+            tangent /= tangent_norm
+            normal = np.asarray([-tangent[1], tangent[0]], dtype=np.float64)
+            yaw = float(np.arctan2(tangent[1], tangent[0]))
+            quaternion = np.asarray(
+                p.getQuaternionFromEuler([0.0, 0.0, yaw]), dtype=np.float32
+            )
+            quartet: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+            all_valid = True
+            for name, (local_half_extents, lateral_offset) in local_geometry.items():
+                position = np.asarray(path[index], dtype=np.float32).copy()
+                position[:2] += (normal * lateral_offset).astype(np.float32)
+                half_extents = np.asarray(local_half_extents, dtype=np.float32)
+                self.obstacle_sampling_proposals += 1
+                if np.linalg.norm(position - self.goal_position) < 0.15:
+                    all_valid = False
+                    break
+                if (
+                    self.mounting_plane_enabled
+                    and position[2] - half_extents[2]
+                    < self.mounting_plane_height + 0.01
+                ):
+                    all_valid = False
+                    break
+                if self._minimum_obstacle_clearance_for(
+                    initial_capsules, position, half_extents, quaternion
+                ) < endpoint_clearance:
+                    all_valid = False
+                    break
+                if self._minimum_obstacle_clearance_for(
+                    goal_capsules, position, half_extents, quaternion
+                ) < endpoint_clearance:
+                    all_valid = False
+                    break
+                quartet[name] = (position, half_extents, quaternion)
+            if all_valid and len(quartet) == len(local_geometry):
+                selected = quartet
+                break
+        if selected is None:
+            self.obstacle_sampling_time_s = perf_counter() - sampling_started
+            raise ObstacleSamplingError(
+                "no TCP-path anchor is feasible for all counterfactual variants"
+            )
+
+        position, half_extents, quaternion = selected[variant]
+        self.obstacle_positions = position.reshape(1, 3).astype(np.float32)
+        self.obstacle_velocities = np.zeros((1, 3), dtype=np.float32)
+        self.obstacle_half_extents_all = half_extents.reshape(1, 3).astype(np.float32)
+        self.obstacle_quaternions = quaternion.reshape(1, 4).astype(np.float32)
+        self.obstacle_dynamic_mask = np.zeros(1, dtype=bool)
+        self.obstacle_layouts = (f"counterfactual_{variant}",)
+        self.dynamic_motion_centers = self.obstacle_positions.copy()
+        self.dynamic_motion_directions = np.zeros((1, 3), dtype=np.float32)
+        self.dynamic_motion_amplitudes = np.zeros(1, dtype=np.float32)
+        self.dynamic_motion_angular_frequencies = np.zeros(1, dtype=np.float32)
+        self.dynamic_motion_phases = np.zeros(1, dtype=np.float32)
+        self._sync_primary_obstacle()
+        self.obstacle_layout = f"counterfactual_{variant}"
+        self._create_obstacle_bodies()
+        p.performCollisionDetection(physicsClientId=self.client_id)
+        if self._collision_events()["obstacle_collision"]:
+            self._disable_obstacle()
+            raise ObstacleSamplingError("counterfactual obstacle collides at reset")
+        self.obstacle_sampling_time_s = perf_counter() - sampling_started
 
     def _sync_primary_obstacle(self) -> None:
         if len(self.obstacle_positions) == 0:

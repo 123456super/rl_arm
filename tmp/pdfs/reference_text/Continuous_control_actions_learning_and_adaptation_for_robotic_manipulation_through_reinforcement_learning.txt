@@ -1,0 +1,992 @@
+Autonomous Robots (2022) 46:483–498
+https://doi.org/10.1007/s10514-022-10034-z
+
+
+
+
+Continuous control actions learning and adaptation for robotic
+manipulation through reinforcement learning
+Asad Ali Shahid1,2 · Dario Piga1 · Francesco Braghin2 · Loris Roveda1
+
+Received: 23 November 2020 / Accepted: 20 January 2022 / Published online: 9 February 2022
+© The Author(s) 2022
+
+
+Abstract
+This paper presents a learning-based method that uses simulation data to learn an object manipulation task using two model-free
+reinforcement learning (RL) algorithms. The learning performance is compared across on-policy and off-policy algorithms:
+Proximal Policy Optimization (PPO) and Soft Actor-Critic (SAC). In order to accelerate the learning process, the fine-tuning
+procedure is proposed that demonstrates the continuous adaptation of on-policy RL to new environments, allowing the learned
+policy to adapt and execute the (partially) modified task. A dense reward function is designed for the task to enable an efficient
+learning of the agent. A grasping task involving a Franka Emika Panda manipulator is considered as the reference task
+to be learned. The learned control policy is demonstrated to be generalizable across multiple object geometries and initial
+robot/parts configurations. The approach is finally tested on a real Franka Emika Panda robot, showing the possibility to
+transfer the learned behavior from simulation. Experimental results show 100% of successful grasping tasks, making the
+proposed approach applicable to real applications.
+
+Keywords Reinforcement learning · Continuous control · Robotic grasping · Policy optimization
+
+
+1 Introduction                                                             cation areas, such as autonomous driving, industrial robots,
+                                                                           assistive robots (Seif and Hu 2016; Tsarouchi et al. 2016;
+1.1 Context                                                                Kearney et al. 2018). Focusing on the industrial field, the new
+                                                                           paradigm of Industry 4.0 (Lasi et al. 2014) requires robots
+Robots are being increasingly used in different applications,              to achieve smart behaviors in dynamic and flexible environ-
+where the operating scene is not anymore fixed, pre-defined                ments. In fact, production plants are going to be transformed
+and well-known, and such need is demanded by all appli-                    into digital work-places, interconnecting machine systems,
+                                                                           humans, products, etc., to re-configure the production on the
+The work has been developed within the project ASSASSINN, funded           basis of the current needs. This new paradigm creates the
+from H2020 CleanSky 2 under Grant Agreement No. 886977.                    necessity for the robot manipulator to self-adapt its behav-
+                                                                           ior for the assigned ever-changing tasks. It is, therefore, not
+B Loris Roveda                                                             anymore possible to pre-program all the possible scenarios.
+    loris.roveda@idsia.ch
+                                                                           Thus, intelligence has to be embedded into the robotic sys-
+    Asad Ali Shahid                                                        tem, to sense and analyze the working-scene and to take
+    asadali.shahid@idsia.ch
+                                                                           decisions for the correct task execution, facing safety, per-
+    Dario Piga                                                             formance and production issues. Artificial intelligence and
+    dario.piga@idsia.ch
+                                                                           machine learning approaches find, therefore, a huge space in
+    Francesco Braghin                                                      the robotics domain to achieve such ambitious goals (Rajan
+    francesco.braghin@polimi.it
+                                                                           and Saffiotti 2017; Van Roy et al. 2020). The main contribu-
+1   Istituto Dalle Molle di studi sull’Intelligenza Artificiale            tion of the paper is to propose an efficient learning approach
+    (IDSIA), Scuola Universitaria Professionale della Svizzera             for the robot to learn a target task in a simulation environ-
+    Italiana (SUPSI), Università della Svizzera italiana (USI), via        ment, and transferring such knowledge to the real robot for
+    Cantonale 2C, 6928 Manno, Switzerland
+                                                                           the real task execution. In this way, the robot is able to safely
+2   Department of Mechanical Engineering, Politecnico di                   learn and execute a specific application, being able to gen-
+    Milano, Milano, Italy
+
+
+                                                                                                                                 123
+484                                                                                             Autonomous Robots (2022) 46:483–498
+
+
+eralize and rapidly adapt its behavior to new tasks. In the        jectories to subsequently aid policy learning (Deisenroth
+following, the state of the art related to the proposed context,   et al. 2013). They aim to learn either a smooth global model
+together with the objectives of the current study are detailed.    (Deisenroth and Rasmussen 2011) or local time varying lin-
+                                                                   ear dynamics models (Levine and Abbeel 2014; Levine et al.
+1.2 Related works                                                  2015). In both cases, these methods struggle to learn poli-
+                                                                   cies in tasks that have inherently discontinuous dynamics and
+In literature, there are mainly two learning approaches for        rewards as demonstrated by Chebotar et al. (2017). Another
+robots to accomplish tasks: (i) Learning from Demonstration        idea is to use large-scale data collection to learn control in a
+(LfD) or Imitation Learning, and (ii) Reinforcement Learn-         self-supervised manner (Levine et al. 2018), or through RL
+ing (RL). The main distinction between these approaches lies       (Kalashnikov et al. 2018). However, such kind of data collec-
+around the fact that whether or not human demonstrations in        tion is not economically feasible, requiring multiple robots
+any form are exploited for learning behaviors. LfD aims to         and months to collect. Some other recent works exploit sim-
+learn tasks based on demonstrated trajectories, whereas RL         ulation data to learn RL-based visuomotor policies (Quillen
+discovers the optimal behavior for a task through trial and        et al. 2018; Martín-Martín et al. 2019; Gu et al. 2017). Due
+error, employing a reward function that encourages desired         to unrealistic rendering capabilities of simulation engines,
+behavior. Another approach involves the combination of both        visuomotor policies learned in simulation demand additional
+approaches to learn a task from human provided demonstra-          sim-to-real techniques (Tobin et al. 2017) to perform in real
+tions and improve the behavior with RL. In Silver et al.           world settings. However, state space without a vision compo-
+(2016), an algorithm was able to master the game of Go             nent serves as sufficient representation of common industrial
+by first learning the competitive Go policy from an expert’s       tasks where part locations are generally pre-defined. There-
+demonstrations, and then improving that policy through rein-       fore, RL policies trained on kinematic state information
+forcement learning. Considering (i), LfD methods have been         alleviate the problem of transfer to the real world in such con-
+used to learn control commands for a robot from raw sen-           ditions, since the simulated environment can roughly match
+sory signals (Rahmatizadeh et al. 2018), extracting a reward       the real robot kinematics and part positions.
+function from demonstrations (Boularias et al. 2011), also            Besides RL, other successful approaches for grasping
+known as inverse reinforcement learning. Considering (ii),         involve modular pipelines and open-loop control of a planned
+RL methods have been successfully applied in a wide variety        grasp, e.g., first detecting grasping candidates (Lenz et al.
+of contexts, ranging from playing games (Mnih et al. 2015),        2015) to predict the best grasping contact points and then
+natural language processing (Cui et al. 2020), to robotic loco-    using motion planning to reach the location (ten Pas et al.
+motion (Heess et al. 2017). In robotics, RL has enabled robots     2017; Mahler et al. 2017). These approaches, however
+to learn tasks, such as playing table tennis (Mülling et al.       require precise calibration between sensing and control
+2013), flipping a pancake (Kormushev et al. 2010), aero-           (Morrison et al. 2018). Some other techniques focus on
+batic helicopter maneuvers (Abbeel et al. 2007), and general       closed-loop grasp execution through visual servoing mod-
+manipulation skills (Kalakrishnan et al. 2011). Earlier RL         els trained using synthetic data in simulation (Viereck et al.
+methods used low dimensional representation techniques,            2017). However, these approaches constrain the state and/or
+such as movement primitives, to solve control problems (Kor-       action space to make the learning problem tractable resulting
+mushev et al. 2010; Pastor et al. 2011). Recently, RL has been     in policies that learn simple strategies and fail to generalize
+used by exploiting the function approximation power of deep        to significant variations of the environment without exten-
+neural networks (Lillicrap et al. 2015; Schulman et al. 2015b;     sive retraining. Another idea to speed-up the learning process
+Duan et al. 2016). Such techniques, named as deep reinforce-       and handle novel configurations is to include human pro-
+ment learning, leverage the capabilities of neural networks        vided demonstrations (Song et al. 2020) but this requires
+in learning representations from high dimensional input data,      specialized hardware to collect demonstrations. In contrast,
+thus making it possible to learn control in end-to-end manner.     RL provides a general framework for dynamic closed loop
+    Recent works have seen emerging use of deep reinforce-         control with long horizon reasoning during the task exe-
+ment learning techniques for robot manipulation (Gu et al.         cution. This allows RL methods to autonomously acquire
+2017; Rajeswaran et al. 2017). Notably, guided policy search,      generalizable strategies for completing the task and adapt to
+a model-based approach, is used to train visuomotor (coor-         different environment conditions in very few iterations.
+dination between vision and control) policies directly from           The main challenge with the current RL methods is that
+raw images (Levine et al. 2016). While this method achieves        typically each task is learned in isolation from scratch result-
+impressive results on real world manipulation tasks, sig-          ing in a poor sample efficiency, while, the common approach
+nificant human involvement is required for data collection         in other machine learning domains is to fine-tune the model
+process (Levine et al. 2015). Model-based RL approaches            previously trained on a similar task resulting in a much better
+generally learn dynamic models from data that generate tra-        sample efficiency (Kornblith et al. 2019). Adapting policies
+
+
+123
+Autonomous Robots (2022) 46:483–498                                                                                            485
+
+
+in robotics remains largely unexplored area. Some recent            the position of the object to be manipulated, and across multi-
+works have studied the problem of adapting RL policies in           ple initial configurations of the robot. The proposed approach
+robotics focusing on off-policy settings (Smith et al. 2021;        is finally tested on a real Franka Emika Panda robot, showing
+Julian et al. 2020). Unlike these works, this paper aims to         the possibility to transfer the learned behavior from simula-
+address the problem of adapting policies in on-policy RL            tion (zero-shot transfer). Experimental results show 100%
+setting based purely on simulated data.                             of successful grasping tasks, making the proposed approach
+                                                                    applicable to real applications. The developed software and a
+1.3 Paper contribution                                              video for the evaluation of the proposed approach (in which
+                                                                    both learning in simulation and knowledge transfer to the
+In this paper, model-free RL algorithms are used that lever-        real robot are shown) are available at the GitHub repository
+age simulation data and proprioceptive state information to         (Shahid 2020).
+learn robot manipulation tasks. An on-policy RL algorithm—
+Proximal Policy Optimization (PPO)—is elected first to train
+the robot controller. The task is then also learned using an off-   2 Problem formulation
+policy RL algorithm—Soft Actor-Critic (SAC)—to compare
+the learning performance. In both cases, the control actions        The primary objective of this contribution is twofold: (1) to
+(i.e., joint command signals and gripper command signal) are        autonomously learn the robot control actions for new tasks
+learned in continuous space on the basis of a designed reward       execution without requiring any real data, and (2) to improve
+function. To improve the sample efficiency in (partially) new       the training efficiency in modified task conditions by re-using
+task settings, a fine-tuning procedure is proposed to initial-      the learned policy. The acquired knowledge can then be trans-
+ize the target task policy with the learned base policy, thus,      ferred to the real robot, to execute the target task and to
+reducing the required number of episodes, i.e., speeding up         quickly adapt the learned behavior when operating conditions
+the training. In particular, the base policy is first pre-trained   change. To address the first objective, large data is generated
+by taking into account the success of the task. The base policy     in simulation, learning to map observed states directly to
+is then used to initialize the new task’s policy that includes      commanded joint velocities. As real-world robotics problems
+additional performance objectives. The main objectives of           are best represented as continuous state and action spaces, the
+the proposed reward function are: success in grasping and           learning of the control actions is performed in continuous
+lifting of the target object, robot’s redundancy management         spaces. Two model-free reinforcement learning algorithms
+to avoid reaching the joint limits, avoiding collisions with        are employed and learning performance is compared. On-
+the obstacles in the scene and smoothing control actions for        policy algorithm, Proximal Policy Optimization (PPO), and
+an implementation of the learned controller on a real robot.        off-policy algorithm, Soft Actor-Critic (SAC), are proposed
+The learned behavior is then transferred to the real robot, to      to train the robot controller. Both these algorithms aim to
+execute the target task.                                            learn the stochastic policies. To address the second objec-
+    In summary, the main contributions of this work are:            tive, the learned base task is modified by including additional
+                                                                    performance objectives and the target task policy is initial-
+ – A fine-tuning method for the learned skill adaptation to         ized with the pre-trained policy during the fine-tuning phase.
+   (partially) modified task settings;                              The reward function is designed to guide the learning, tak-
+ – Simultaneous learning of a source task along with the            ing into account the task success/failure, performance, and
+   sequence of secondary sub-tasks;                                 safety issues. The block-diagram describing the proposed
+ – Demonstrating that a robot with non-constrained action           approaches is shown in Fig. 1, and highlighting the imple-
+   space can learn a target task in simulation and transfer to      mented PPO and SAC algorithms and their connection with
+   reality making the proposed approach more general w.r.t.         the simulation environment for learning purposes.
+   other works that constrain the robot’s action space.
+
+   The proposed approach is evaluated on a grasping task            3 Methodology
+involving a Franka Emika Panda manipulator. The task
+requires the robot to reach the part (nominal part: cube of 6 cm    3.1 Preliminaries
+length), grasp it, and lift it off the contact surface. The pro-
+posed approach is demonstrated to be generalizable across           In this paper, a RL framework is considered, where an agent
+multiple object geometries and initial robot/parts configura-       interacts with the environment in discrete time steps. The
+tions. Despite the training performed only on a single cube         RL problem is modeled as discrete time continuous Markov
+with no prior knowledge, the learning is able to generalize         decision process (MDP) (Sutton and Barto 2018), consisting
+across different geometric shapes and sizes, minor changes in       of (S, A, P, R, ), where S is continuous state space, A is
+
+
+                                                                                                                        123
+486                                                                                                 Autonomous Robots (2022) 46:483–498
+
+
+
+
+Fig. 1 The proposed learning schema exploiting PPO/SAC algorithm
+
+
+continuous action space, P is environment transition dynam-               Considering the reaching phase, the reward given at time
+ics defining the state transition probabilities for a given action     step t is composed of three contributions:
+p(st+1 |st , at ), R is a reward function R(st , at ) = rt ∈ R,
+γ ∈ [0, 1] is a discount factor determining the importance             rt,reach = wd rd + wv rv + wg r g ,                         (1)
+of future rewards relative to immediate reward. A policy π
+is a stochastic map from states to distribution over actions           where rd is the distance reward computed using relative posi-
+S → A. The objective of an agent is to learn    a policy π(at |st )   tion of gripper site and object (the gripper site is the ref.
+                                           H
+that maximizes expected returns E[ t=0         γ rt ], where H is      frame located between the fingers of the gripper to define
+the target horizon. In deep reinforcement learning, the policy         the gripping area), rv is the velocity reward computed using
+is represented by a non-linear function approximator, a neu-           end-effector velocity vector, and r g is gripper open reward
+ral network parameterized by θ . The main goal then reduces            depending upon the action of gripper. In particular, rv and
+to optimizing θ , such that the optimal behavior is achieved.          r g encourage the robot end-effector to approach cube with
+                                                                       small velocity and open gripper. All the three contributions
+                                                                       rd , rv , r g are weighted with respective weights wd = 0.6,
+3.2 Task description                                                   wv = 0.3, wg = 0.1 and defined as:
+
+The aim of this paper is to implement the approach proposed            rd = 1 − tanh(| pgrip − pcube |),
+in Fig. 1 to autonomously learn a grasping task. The task                   ⎧            n                
+                                                                            ⎨1 − tanh       i=1 | vee (i) |
+consists of a robot interacting with a cube of nominal size 6                                                    if rd < 8 cm
+                                                                       rv =                      n
+cm placed on a table. The goal of the robot is to successfully              ⎩                                                      (2)
+                                                                              0                                  otherwise,
+position its grip site around the cube, grasp it, and then finally          
+lift it off the contact surface. In order to evaluate the proposed            | agrip |  if agrip < 0
+                                                                       rg =
+approach on a grasping task learning, Franka Emika Panda, a                   0          otherwise,
+7-DoF torque-controlled robot, is used as a robotic platform.
+                                                                       where pgrip and pcube denote the position vectors of gripper
+                                                                       site and cube in world reference frame each containing 3 ele-
+3.3 Baseline reward shaping                                            ments specifying the spatial positions, vee is the end effector
+                                                                       velocity vector containing both linear and angular compo-
+In order to guide policy learning and provide frequent feed-           nents with n equal to 6 (i.e., the number of Cartesian degrees
+back to the agent on appropriate behaviors, the proposed               of freedom), i selects the ith Cartesian degree of freedom,
+approach exploits the dense reward function. The task is split         and agrip specifies the action of gripper with negative values
+into two main phases of reaching and lifting, with distinct            indicating that gripper is opening.
+reward for each phase. The robot learns both of these phases              When the robot’s grip site is in close proximity to the
+simultaneously (i.e., in a single iteration of a simulated task).      cube, the lifting phase is initiated. The distance threshold
+
+
+123
+Autonomous Robots (2022) 46:483–498                                                                                                   487
+
+
+                                                                    fine-tuned considering additional performance objectives in
+                                                                    a modified environment. For fine-tuning, the target task pol-
+                                                                    icy is initialized with the parameters of the base policy. In
+                                                                    order to test the adaptation capability of control policy to
+                                                                    new modified task conditions, the following performance
+                                                                    specifications are successively included into the reward rt
+                                                                    in re-training conditions:
+
+                                                                     – Robot redundancy management: a penalty pred is added
+                                                                       to the reward function rt in the case that joint positions
+                                                                       come close to the joint limits. In such a way, the robot
+                                                                       needs to manage its redundancy in order to avoid (if pos-
+                                                                       sible) reaching the joint limits. pred is defined as:
+
+                                                                                     nj
+                                                                           pred =            pred (i)
+                                                                                     i=1
+Fig. 2 Franka Emika Panda Robot grasping the cube while avoiding                                                                     (5)
+collision with the obstacles in the modified scene                                       −1       if | eq (i) |< tol | qlim (i) |
+                                                                        pred (i) =
+                                                                                         0        otherwise,
+for switching is set to 2.5 cm. This is because nominal cube
+measures as 6 cm and the robot should be able to grasp the             where eq (i) = qlim (i) − q(i), n j = 7 is the number of
+cube when it’s grip site is within cube’s boundary. Consid-            robot joints, qlim is the joint limits vector, i selects the ith
+ering the lifting phase, the reward is computed considering            joint, and tol specifies the tolerance and it is set to 15%;
+five contributions:                                                  – Smoothing the control actions: a penalty psm is added to
+                                                                       the reward function rt in the case that joint accelerations
+rt,lift = rd + rv + wg r g + rc + rs ,                       (3)       exceed a specified threshold. In such a way, the learned
+                                                                       controller is capable to achieve smooth control signals
+where rd and rv are the same as in (1). r g is reversed now            avoiding jerky behaviors. psm is defined as:
+to provide reward for closing the gripper and it is weighted
+by wg = 0.1. In addition, rc is given if both fingers of the                                   n j
+                                                                                                  i=1 | q̈(i) |
+gripper are in contact with cube. rs rewards for successful             psm = −tanh                               ,                   (6)
+                                                                                                        nj
+completion of the task. Success is determined by examining
+if the gripper holds the cube above certain height. r g , rc , rs
+                                                                       where q̈ is the joint acceleration vector and i selects the
+in lifting case are defined as:
+                                                                       ith joint;
+                                                                    – Avoiding collisions with obstacles in the operating scene:
+           | agrip |    if agrip > 0
+rg =                                                                   a penalty poa is added to the reward function rt in the
+           0            otherwise,                                     case that the robot collides with obstacles. In such a way,
+       
+           0.5     if fingers in contact                               the learned behavior is capable to avoid collisions in the
+rc =                                                         (4)       operating scene while reaching its target. poa is defined
+           0       otherwise,
+                                                                      as:
+           2     if z cube > 0.1 + z cubeinitial                               
+rs =                                                                             −5     if collision occurs
+           0     otherwise.                                            poa =                                                   (7)
+                                                                                 0      otherwise.
+The final reward rt is then computed as the accumulated sum
+of rt,reach in (1) and rt,lift in (3).                                 In this case, the contact collision is checked between the
+                                                                       robot, the cube and the cylindrical objects. If the robot
+3.4 Embedded performance specifications for the                        comes in contact with the cylinders, the penalty is given.
+    learned task adaptation                                            The agent is also penalized if the robot lifts the cube and
+                                                                       then touches the cylinder with the cube. In this way, the
+Because the RL methods are data intensive, the policy is first         agent needs to learn the appropriate actions to grasp and
+trained taking into account only the success of the task. In           lift the cube while avoiding the contact with the cylin-
+the second phase, the pre-trained grasping policy is further           ders simultaneously. This performance objective is more
+
+
+                                                                                                                                    123
+488                                                                                                    Autonomous Robots (2022) 46:483–498
+
+
+                                       Grasping
+                                        πbase
+              Pre-training
+
+                                       initialize
+
+
+                                     Redundancy
+                                     Management
+
+
+
+                                       initialize
+               Fine-tuning
+
+                                      Smoothing
+                                       Control                           Fig. 4 Franka Emika Panda Robot in MuJoCo simulation environment
+
+
+                                       initialize                        4.1.1 States and actions
+
+                                                                         Both the state space and the action space used in the pro-
+                                      Obstacle                           posed evaluation are continuous. State of the system consists
+                                      Avoidance
+                                                                         of two main input modalities: robot proprioception informa-
+                                                                         tion and object information. The proprioceptive data contains
+Fig. 3 Schematic of Adaptation framework. The base policy πbase is       joint positions, velocities, gripper joint position and end-
+pre-trained on a grasping task and then fine-tuned on sequence of mod-
+ified tasks by successively introducing new performance objectives
+                                                                         effector pose and velocity, thus making a 36-dimensional
+                                                                         vector. Object information is 10-dimensional and includes
+                                                                         cube’s pose and a relative position vector of cube and grip
+      difficult because of the narrow space between the two              site. The state of the environment is:
+      cylinders, leaving just enough room for the hand to posi-
+                                                                             S = Sprop Sobj ∈ R46
+      tion itself and lift the cube without coming in contact with
+      the cylinders. The modified scene is shown in Fig. 2.                        q qgrip pee qee vee !ee ∈ R36
+                                                                         Sprop = q P                                                    (8)
+                                                                          Sobj = ppart qpart prel ∈ R10
+   It is important to note that the adaptation process is per-
+                                                                            Actions are 8-dimensional and correspond to reference
+formed in a continual-learning manner, as it is shown in
+                                                                         joint velocities and gripper position. The robot is consid-
+Fig. 3. First, the pre-trained base grasping policy is fine-
+                                                                         ered to be equipped with torque control compensating for
+tuned to satisfy the redundancy management objective, then
+                                                                         the manipulator dynamics (Siciliano and Villani 2000):
+this adapted policy is fine-tuned on smoothing control actions
+objective not the previous base policy. Finally, the newly
+                                                                         τ = B(q)τ learn + τ f (q̇) + C(q, q̇) + g(q),                  (9)
+adapted policy is further fine-tuned on collision avoidance
+objective. The final policy successfully completes the target
+                                                                         where B(q) is the robot inertia matrix, C(q, q̇) is the robot
+task while satisfying all 3 performance objectives.
+                                                                         Coriolis vector, g(q) is the robot gravitational vector, τ f (q̇)
+                                                                         is the robot joint friction vector, q is the current joint position
+                                                                         vector, and τ is the control torque vector. τ learn is the learned
+4 Implementation settings                                                task-related control torque vector mapping the reference joint
+                                                                         velocities to joint torques for the target task execution:
+4.1 Learning environment
+                                                                         τ learn = kv (q̇d − q̇),                                      (10)
+The proposed learning environment is developed based
+on Fan et al. (2018), exploiting MuJoCo physics engine                   where q̇d and q̇ are the reference (i.e., the objective of the
+(Todorov et al. 2012) to simulate the physical system.                   learning) and current joint velocities respectively, and
+MuJoCo enables fast and accurate simulation with contacts.
+The simulation environment is shown in Fig. 4.                           kv = diag(8, 7, 6, 4, 2, 0.5, 0.1)
+
+
+123
+Autonomous Robots (2022) 46:483–498                                                                                                      489
+
+
+
+
+Fig. 5 PPO training results. The plot depicts the progression of mean   Fig. 6 PPO training results. The plot depicts the number of episode
+accumulated reward for episodes                                         steps with success
+
+                                                                        Table 1 Evaluation trials for fixed positions
+is a diagonal matrix of fixed proportional gains for joint
+                                                                        Test             Object                         Success rate
+trajectory-tracking purposes. Such control gains have to be
+tuned to allow the robot to track the reference joint velocities        1.               Nominal cube                   10/10
+q̇d . The here defined values have been selected on the basis           2.               Smaller cube                   10/10
+of Martín-Martín et al. (2019), resulting in accurate trajectory        3.               Cylinder                       10/10
+tracking performance. If needed, such control gains can be              4.               Screw-driver                   10/10
+either learned or experimentally tuned to improve trajectory
+tracking performance Roveda et al. (2020).
+                                                                        baseline reward function. The policy is trained for a total of
+4.1.2 Control parameters                                                10 million time steps where each episode lasts for 600 steps,
+                                                                        giving an agent approximately 2.5 s to accomplish the task.
+An important parameter that affects the trade-off between               At the beginning of each episode, initial configuration of the
+computational time and accuracy of the simulated task in                robot and the cube is reset to the fixed position. The simu-
+MuJoCo is the simulation time step. The default value of                lation has been roughly sped-up 2000 x faster than real-time
+2 ms is used, ensuring a good trade-off between simulation              in order to train faster (requiring approximately 4 and a half
+accuracy and stability. The controller of the Franka Robot              hours of wall-clock time). The results of training are shown
+operates at 500 Hz. Different values of the policy frequency            in Figs. 5 and 6 (depicting the evolution of the mean accu-
+(the rate at which policy outputs actions) have been tested             mulated reward and the evolution of the mean episode steps
+(500 Hz, 250 Hz, 100 Hz), resulting in the best setting of              with success, respectively during the training), suggesting
+250 Hz. Since the robot controller generates commands at                that the agent has learned to perform the task successfully
+higher frequency than the policy, a linear interpolation is             after 5 million steps.
+performed between each successive policy action.                            The generalisation capabilities and robustness of the
+                                                                        learned neural network policy have been tested, considering
+                                                                        the nominal cube and different geometries to be grasped:
+5 Evaluation
+                                                                         – Nominal cube with size 6 cm;
+In this Section, the PPO algorithm for the training of the tar-          – Smaller cube with size 4 cm;
+get task is evaluated. Results related to training performance           – Cylinder with size 3 cm radius and 3 cm height;
+considering the baseline reward, to fine-tuning with an addi-            – Screw-driver.
+tional performance specifications, and to knowledge transfer
+from simulation to real application are given.                              10 test trials have been run and results are summarised
+                                                                        w.r.t. successful completion of the task in Table 1. The pro-
+5.1 Training results: baseline reward function                          posed model shows the success rate of 100% in all four cases.
+                                                                        In the last two tests, the policy’s ability to grasp new shapes
+The proposed approach is applied to the grasping and lift-              is assessed by replacing the cube with a cylinder and a screw-
+ing task of the cube above a certain height, considering the            driver placed nearly at the cube’s original position.
+
+
+                                                                                                                                       123
+490                                                                                               Autonomous Robots (2022) 46:483–498
+
+
+Table 2 Evaluation trials for varied positions                       of the proposed fine-tuning approach in improving the pre-
+Variable                 Amount             Success rate (%)         viously learned behavior with less data requirements, and
+                                                                     to test additional scenarios with higher difficulty level of
+Robot position           Max 2%             80                       the task. The fine-tuning procedure involves initializing the
+Cube position            ±8 cm              70                       parameters of the target task networks (policy network and
+                                                                     value network) with the pre-trained baseline networks. For
+                                                                     all three specifications, the state space, the action space and
+                                                                     the hypermarameters remain unchanged and only additional
+    Table 2 shows the results in which the original position
+                                                                     performance objectives are included successively.
+of the robot and/or of the cube have been changed. In the
+first case, a small random noise is added to the initial robot
+                                                                     5.2.1 Redundancy management specification
+joint positions at the beginning of each episode. The robot
+can still grasp and lift the cube in most cases, while 2 failures
+                                                                     Under the baseline policy, the robot took actions that resulted
+have been registered due to the impossibility to position the
+                                                                     in one or more joints reaching the limits. In order to encour-
+gripper around the cube. For the second case, the nominal
+                                                                     age the robot to not take actions near joint limits, redundancy
+position of the cube has been modified by ±8 cm in order to
+                                                                     management objective in (5) is included in the reward func-
+test the policy’s robustness to variation in part’s position. This
+                                                                     tion and the task is trained for half a million steps (roughly
+test is required to verify the robustness of grasping policies in
+                                                                     corresponding to 30 min of training). Figure 7 shows the per-
+the real manipulation tasks, where the position of the part is
+                                                                     formance comparison of an adapted policy with the baseline
+identified by a vision system (exploiting object localization
+                                                                     policy for 10 test trials. The results are reported as percent-
+algorithms) with some uncertainty in the measurement (and
+                                                                     age of episode steps where the robot configuration exceeds
+in the computation related to the used algorithms). Gener-
+                                                                     the set threshold of joint limits. As hypothesized for the case
+ally the vision systems have measurement uncertainty in the
+                                                                     of joint limits penalty, the robot joint configurations satisfy
+range of few millimeters (Roveda et al. 2021). Therefore, the
+                                                                     the set tolerance of 15% in all episode steps, confirming the
+considered variability in position of the target part makes the
+                                                                     quick behavior adaptation.
+proposed approach robust in real conditions. For this specific
+case, 20 trials are performed, 10 for each direction. The task
+                                                                     5.2.2 Smoothing control action specification
+is completed successfully in most of the test runs. In failures
+situations, the robot either grasped the cube at the edges,
+                                                                     The goal of smoothing performance objective is to limit the
+resulting in an unstable grasping, or collided its gripper with
+                                                                     change in acceleration of the robot’s joints in order to min-
+the cube, not being able to grasp it successfully.
+                                                                     imize the jerky movements. To achieve this, the agent is
+    In Table 3, the policy adaptation results on the modified
+                                                                     penalized for taking actions that generate excessive joint’s
+task conditions are presented. In the first two tests, the nomi-
+                                                                     accelerations with the penalty defined in (6), and the results
+nal position of the cube has been modified by 10 cm and 20 cm
+                                                                     are compared against the baseline model. The velocities of
+respectively and the learned task’s policy is evaluated on its
+                                                                     all joints are plotted against time for the baseline case and
+adaptation capability. Re-training the learned policy for an
+                                                                     the case with acceleration penalty in Fig. 9. It is evident that
+additional 30 min, the resulting performance achieves 100%
+                                                                     the behavior is improved with the addition of acceleration
+success. The last test considers the dynamic environment
+                                                                     penalty, yielding a smooth change in velocities throughout
+where the cube is moving with some velocity (to simulate
+                                                                     the episode, particularly for joints 1 and 3. The commanded
+the real industrial settings where the robot might be required
+                                                                     joint torques for both cases are plotted in Fig. 8. The differ-
+to grasp objects placed on a moving conveyor belt). In this
+                                                                     ence is more evident for the torque commands sent to the
+dynamic setting, the static grasping policy is not able to grasp
+                                                                     robot joints with much smoother torque commands for the
+the moving cube. However, when this pre-trained policy is
+                                                                     penalized case (Fig. 8).
+fine-tuned for an additional hour, the robot learns to adapt
+its performance and lift the moving cube with 100% suc-
+                                                                     5.2.3 Obstacles avoidance specification
+cess, indicating the quick adaptation of learned behavior to
+perform in modified task settings.
+                                                                     Considering the collision avoidance objective, the working
+                                                                     scene is modified by adding other objects in the working
+5.2 Performance specifications-based fine-tuning                     space of the robot. Specifically, two cylindrical objects of
+                                                                     2 cm radius and 8 cm height are placed on the left and right
+In this section, the baseline reward function is modified with       side of the cube to be grasped. In the modified scene, the base-
+additional objectives (i.e., considering all the three speci-        line policy successfully lifts the cube, but at the expense of
+fied objectives in Sect. 3.4) in order to test the potential         colliding with cylinders. The aim of this performance spec-
+
+
+123
+Autonomous Robots (2022) 46:483–498                                                                                                        491
+
+
+Table 3 Evaluation trials for
+                                      Variable              Amount           Re-train time         Success rate
+policy adaptation
+                                                                                                   Base policy (%)         Adapted policy (%)
+
+                                      Cube position         +10 cm           30 min                20                      100
+                                      Cube position         +20 cm           30 min                 0                      100
+                                      Cube velocity         100 mm/s         60 min                 0                      100
+
+
+
+
+Fig. 7 Adaptation results—Percentage of episode steps with joint limits
+reached for baseline and q-limits penalty scenarios
+
+
+
+
+                                                                          Fig. 9 Adaptation results—Joint velocities for baseline and accelera-
+                                                                          tion penalty scenarios
+
+
+                                                                          ification is to significantly penalize the robot actions that
+                                                                          result in collisions with the cylinders. By adding the objec-
+                                                                          tive defined in (7) into the reward function and training for
+                                                                          half a million steps, the resulting behavior has been adapted
+                                                                          and the robot successfully navigates the cylindrical obstacles
+                                                                          to lift the cube.
+
+                                                                          5.3 One-shot learning
+
+                                                                          In the last experiment, the base task has been trained from
+                                                                          scratch by including all 3 performance specifications speci-
+                                                                          fied in the Sect. 3.4 in order to evaluate the performance of
+Fig. 8 Adaptation results—Commanded joint torques for baseline and        one-shot learning. The policy is trained for a total of 11.5
+acceleration penalty scenarios
+                                                                          million steps (equivalent duration as the combined training
+                                                                          of base task and adaptation process). The final learned pol-
+                                                                          icy, however, failed to accomplish the complete task while
+
+
+                                                                                                                                   123
+492                                                                                             Autonomous Robots (2022) 46:483–498
+
+
+
+
+Fig. 10 Training comparison—Mean accumulated reward for first 2M   Fig. 11 Training comparison—Number of episode steps with success
+time steps                                                         for first 2M time steps
+
+
+satisfying all the performance objectives. After training for
+11.5 million steps, the robot only learned to reach the cube       makes use of past transitions data stored in a replay buffer, it
+and command smooth joint velocities proving the difficulty         should learn the task faster in terms of required episodes.
+of learning in the presence of multiple objectives.                In order to validate this hypothesis, training performance
+                                                                   achieved by the SAC algorithm is compared against the one
+                                                                   achieved by the PPO algorithm for the analyzed grasping
+5.4 Experimental results                                           task. The mean reward and number of episode steps with
+                                                                   success is plotted for the first 2M time steps for the two
+The learned behaviors (from the training including the per-        algorithms and comparison is shown in Figs. 10 and 11.
+formance specifications into the reward function) have been        Confirming the hypothesis, the SAC algorithm learns to accu-
+transferred to the real Franka Emika Panda robot in order          mulate much higher average reward than PPO, and also learns
+to evaluate the effectiveness of the proposed approach.            to achieve the task success in just 2M time steps (about
+Two scenarios have been considered: (i) no obstacles in            3300 episodes), whereas PPO shows no success in terms
+the operating scene, (ii) obstacles in the operating scene         of task completion for the same number of episodes. How-
+(same scenario as in obstacles avoidance performance spec-         ever, analyzing the mean reward and number of episode steps
+ifications in Sect. 5.2.3). Each scenario has been tested 10       with success plotted against wall time in Figs. 12 and 13,
+times. The learned reference joint velocities q̇d have been        the results are quite opposite for both algorithms. Because
+re-sampled from 250 Hz to 1000 Hz (i.e., to the robot con-         SAC has to process large amount of past data stored in a
+trol frequency). Exploiting the performed learning, the real       replay buffer, it needs higher computation power to perform
+Franka Emika Panda robot has been able to complete the             each update iteration of networks. Considering computation
+target tasks with a success rate of 100%, highlighting the         power, SAC is less efficient than PPO and learns to accu-
+feasibility of the proposed approach to be transferred from        mulate lower average reward than PPO (800 vs. 1200) in
+simulation to real applications. Videos showing the results        the same time as evident from Fig. 12. Off-policy updates
+achieved by the proposed PPO-based approach is also avail-         of SAC accumulate lower reward on each update iteration
+able at the GitHub repository (Shahid 2020). The repository is     than the on-policy updates of PPO as shown in Fig. 14 (for
+updated on the basis of the work-in-progress software devel-       the reward) and in Fig. 15 (for the number of episodes steps
+opment, new achieved results and experiments.                      with success). Although each update of networks in PPO
+                                                                   is performed after collecting 3 episodes vs. 1 episode for
+                                                                   SAC, the reward and the number of episode success steps in
+6 The comparison of PPO and SAC                                    each of the update for SAC is lower than the ones of PPO.
+                                                                   Thus, when trained on the same hardware configuration for
+   In order to compare the performance of the on-policy            roughly 2 and a half hours of wall-clock time, the accumu-
+based PPO algorithm with the performance of an off-policy          lated mean reward and the success achieved by SAC are lower
+algorithm, the baseline scenario is further trained using the      than the one achieved by PPO. Moreover, the SAC training
+SAC algorithm described in Sect. 1. An off-policy algorithm        curve shows more significant non-monotonic behavior with
+could improve the sample efficiency during the training,           high variance in results. The resulting behavior of two algo-
+speeding up (i.e., reducing the required episodes) the learn-      rithms can be explained considering the general nature of
+ing process. In fact, since SAC is an off-policy algorithm that    on-policy algorithms in requiring more experience to explore
+
+
+123
+Autonomous Robots (2022) 46:483–498                                                                                             493
+
+
+
+
+Fig. 12 Training comparison—Mean accumulated reward vs. wall time   Fig. 14 Training comparison—Mean accumulated reward against
+                                                                    update iterations of networks
+
+
+
+
+Fig. 13 Training comparison—Number of episode steps with success
+against wall time
+                                                                    Fig. 15 Training comparison—Number of episode steps with success
+                                                                    against update iterations of networks
+
+the environment than off-policy algorithms. In the analyzed
+task, the work space of the robot is unconstrained, demanding       shown that the on-policy fine-tuning procedure substantially
+appropriate exploration to learn the target task. Therefore, the    improves sample efficiency and allows the learned policy
+trade-off between on-policy and off-policy algorithms is not        to adapt and execute partially modified task. The perfor-
+so straightforward, but instead is dependant on the specific        mance specifications have been embedded into the learning
+situation. Off-policy methods like SAC might be preferred           in order to manage the redundancy of the robot, to smooth the
+if the new experience is costly to obtain and computation           learned control actions, and to avoid obstacles in the operat-
+power is not an issue. On the other hand, on-policy methods         ing scene. Achieved results highlight that the learned policy
+like PPO could achieve better results in situations with less-      performs well to new situations, and it can also adapt its
+costly data collection, e.g., in simulation. On-policy methods,     learning (retraining the robot behavior on the basis of previ-
+due to the exploratory nature of learned ultimate policy, can       ous training) to significant variations of the environment with
+also adapt the learned behavior quite quickly as demonstrated       slight amount of additional training, exploiting the previ-
+in Sect. 5.2                                                        ously learned network models. In contrast, one-shot learning,
+                                                                    struggled to achieve the same performance and learn the
+                                                                    complete task. The rigorous comparison of one-shot learn-
+7 Discussion and current/future works                               ing with fine-tuning based adaptation should, however, be
+                                                                    treated in the future. An on-policy algorithm (PPO) and an
+In this paper, an intelligent task learning has been for-           off-policy algorithm (SAC) have been compared in terms of
+mulated in the form of a RL problem, demonstrating the              learning performance, highlighting the faster learning pro-
+possibility of learning low-level continuous control actions        cess by exploiting the SAC algorithm in terms of required
+purely from gathered experience in a simulated environment.         episodes, while being slower in terms of wall time (consid-
+Results show that it is possible to train continuous con-           ering the same adopted hardware). The learned task has been
+trol actions based only on the kinematic state information,         successfully transferred to a real robot, making it able to
+and in a reasonable amount of interaction time. It has been         execute the target grasping task. Although, the fine-tuning
+
+
+                                                                                                                         123
+494                                                                                                      Autonomous Robots (2022) 46:483–498
+
+
+process has shown to improve sample efficiency by allow-                    ods have been used in control tasks for learning deterministic
+ing the policy to adapt in less iterations, there exist a gap to            policies (Yang et al. 2018) and stochastic policies (Peters and
+apply such methods for direct learning in real world without                Schaal 2008; Wei et al. 2020). In this paper, the proposed
+the use of simulators. Some of the techniques for addressing                approach follows the actor-critic style and learns both the
+the sample efficiency issue could be to use fine-tuning on                  parameters of stochastic policy and value function approxi-
+model-based methods for first learning the dynamics model                   mator.
+and then adapting that model through some online interaction                   RL algorithms can further be classified into on-policy and
+on a different performance objective. Model-based methods                   off-policy methods, based on how they generate and use expe-
+are generally more efficient than model-free counterparts.                  rience data. On-policy methods evaluate the same policy that
+Another idea could be to consider Meta-RL setting to learn                  is used to select actions, whereas, off-policy methods learn
+variety of tasks in order to efficiently learn new tasks.                   the target policy that is different from the behavioral pol-
+    In the future work, more dynamic environments will                      icy used to generate experience. Because on-policy methods
+be considered. In fact, having the robot able to behave                     use the most updated policy to take decisions, they have
+in the presence of moving obstacles/targets while avoiding                  better online performance (Sutton and Barto 2018). The on-
+dynamic obstacles is a challenging application. In addition,                policy agent learns not the optimal policy but instead the
+safety rules for the robot motion-adaptation in the presence                best exploratory policy, i.e., the policy that still explores.
+of humans will be considered. Another interesting direction                 Off-policy methods, on the other hand, make efficient use of
+is to extend the approach to modular configurations and use                 data and are not restricted to learning from data generated by
+multi-agent framework to learn the task in decentralised man-               execution of a specific policy, instead, data can be generated
+ner as done in Shahid et al. (2021), in which, however, the                 from any arbitrary policy. In off-policy algorithms, the tem-
+coordination between the agents is still a challenging prob-                poral difference (TD) error (Sutton 1988) is computed using
+lem that needs to be further investigated. Furthermore, the                 the policy that may act more greedily. The general scheme
+ability to adapt to more novel environments can be consid-                  of on-policy and off-policy approaches for actor-critic algo-
+ered, including the usage of vision systems to model/update                 rithms is shown in Fig. 16.
+the operating environment in the training environment.
+
+Funding Open access funding provided by SUPSI - University of
+Applied Sciences and Arts of Southern Switzerland                           A.1 Algorithms
+
+Open Access This article is licensed under a Creative Commons               A.1.1 Proximal policy optimization (PPO)
+Attribution 4.0 International License, which permits use, sharing, adap-
+tation, distribution and reproduction in any medium or format, as
+long as you give appropriate credit to the original author(s) and the       In this paper, a model-free RL approach has been used as it
+source, provide a link to the Creative Commons licence, and indi-           eliminates the need for accurate dynamics model, which is
+cate if changes were made. The images or other third party material         often difficult to learn for discontinuous problems. Primar-
+in this article are included in the article’s Creative Commons licence,
+                                                                            ily, the policy is trained with Proximal Policy Optimization
+unless indicated otherwise in a credit line to the material. If material
+is not included in the article’s Creative Commons licence and your          (PPO) (Schulman et al. 2017). PPO is one of the most suc-
+intended use is not permitted by statutory regulation or exceeds the        cessful on-policy RL algorithms. It requires training two
+permitted use, you will need to obtain permission directly from the copy-   neural networks to simultaneously optimize stochastic pol-
+right holder. To view a copy of this licence, visit http://creativecomm
+                                                                            icy and approximation of value function. The policy network
+ons.org/licenses/by/4.0/.
+                                                                            maps states to Gaussian distribution over actions, while the
+                                                                            value network estimates the discounted sum of future rewards
+                                                                            expected in a given state. The PPO algorithm is an approx-
+Appendix A: Method implementation details                                   imate version of trust-region policy optimization (TRPO)
+                                                                            (Schulman et al. 2015a) with first order gradients. The opti-
+RL methods fall in to 3 main categories: value-based, policy                mization objective in PPO is performed on the surrogate loss
+search and actor-critic (Konda and Tsitsiklis 2000). Value-                 function L PPO :
+based methods learn a value function that implicitly derives
+a policy. Policy search methods, instead, use parameterized
+policy and directly search for optimal policy parameters. The                                               
+key idea of actor-critic approaches is to learn both the value              L PPO = E min arg1 , arg2 ,
+function and the policy. The role of critic is, on the basis                         πθ (at |st ) GAE
+                                                                             arg1 =                Â      ,
+of the learned value function, to critique the actions taken                        πθold (at |st ) t                                  (11)
+                                                                                                                        
+by an actor, which then updates it’s policy parameters based                                πθ (at |st )
+                                                                             arg2 = clip                   , 1 − , 1 +  ÂGAE
+                                                                                                                            t   ,
+on critic’s feedback (Lazaric et al. 2008). Actor-critic meth-                             πθold (at |st )
+
+123
+Autonomous Robots (2022) 46:483–498                                                                                                               495
+
+
+                                                                             plete the task while also acting as randomly as possible. The
+                                                                             SAC optimization objective is described as:
+
+                                                                                                                               
+                                                                             E(st ,at )∼π           γ R(st , at ) + αH(π(.|st ))              (12)
+                                                                                                t
+
+
+                                                                             where H(P) = Ex∼P [− log P(x)] denotes the entropy of
+                                                                             a random variable x computed from its distribution P(x)
+                                                                             and α is a temperature parameter. In this paper, the auto-
+                                                                             matic adjustment of α is used to match a target entropy set
+                                                                             to −dim(A). Since SAC is an off-policy algorithm, it stores
+                                                                             the past experience data in to a replay buffer and reuses it for
+                                                                             sample-efficient training.
+
+
+                                                                             Algorithm 1 Proximal Policy Optimization (PPO) (adapted
+                                                                             from Schulman et al. 2017).
+                                                                             1: Randomly initialize policy parameters θ
+                                                                             2: Initialize replay buffer B
+                                                                             3: for iteration = 1, . . . , N do
+                                                                             4:    for episode = 1, . . . , M do
+                                                                             5:        Generate a rollout following policy πθ until H timesteps
+                                                                             6:        Store transitions(st , at , rt ) in B
+                                                                             7:        Compute advantages ÂtG AE with GAE
+                                                                             8:    end for
+                                                                             9:    for epochs = 1, . . . , K do
+                                                                             10:        Sample mini-batch of Nb transitions from B
+                                                                             11:        Optimize surrogate loss L P P O w.r.t. θ
+Fig. 16 Two different classes of RL methods. a On-policy. b Off-policy       12:        θold ← θ
+                                                                             13:    end for
+                                                                             14:    clear B
+where ππθ θ (a(at |st |st )t ) is an importance sampling term that denotes   15: end for
+         old
+the probability ratio between the given action under cur-
+rent policy πθ and the same action under old behavioral
+policy πθold that was used to generate trajectory. ÂGAE             t  is
+the advantage estimate computed using generalized advan-
+tage estimation (GAE) (Schulman et al. 2015b), and  is                      Table 4 Hyperparameters used for PPO and SAC
+a clipping hyperparameter. With importance sampling, the                     Hyperparameter                          Value
+PPO algorithm tries to improve the sample efficiency of on-
+                                                                             Hardware configuration                  1 NVIDIA GPU + 12 CPU cores
+policy learning by performing multiple steps of optimization
+                                                                             Discount factor γ                       0.99
+using the same trajectory. A small entropy bonus S[πθ ](st ),
+                                                                             Generalized Advantages Estimation λ0.95
+weighted by a coefficient c2 , is further added to the PPO loss
+in order to ensure sufficient exploration of the environment.                PPO clipping parameter                 0.2
+The pseudo-code of selected PPO algorithm is shown in 1.                     Optimizer                               Adam Kingma and Ba (2014)
+                                                                             Actor’s learning rate                   3 × 10−4
+A.1.2 Soft actor-critic (SAC)                                                Critic’s learning rate                  3 × 10−4
+                                                                             Mini-batch size                         512
+Soft Actor-Critic Haarnoja et al. (2018b, a) is a model-free                 Number of epochs                        60
+RL algorithm based on maximum entropy RL framework.                          Value loss weight                       0.5
+SAC follows an off-policy way to optimize a stochastic pol-                  Entropy loss coefficient c2             1 ×10−4
+icy. The optimization objective in SAC considers an expected                 Replay buffer size PPO (episodes n.) 3
+return and the entropy to encourage exploration. This objec-                 Replay buffer size SAC (episodes n.) 1 × 105
+tive is equivalent to adding a bonus reward at each time step                SAC reward scale                        1
+proportional to the entropy of the policy at that step Achiam                SAC entropy target                      −8
+(2018), i.e., the agent is incentivized to successfully com-
+
+
+                                                                                                                                       123
+496                                                                                                       Autonomous Robots (2022) 46:483–498
+
+
+A.2 Training details                                                     2019). More detailed training parameters for both algorithms
+                                                                         are given in Table 4 with some hyperparameters settings taken
+Both the policy and value networks are encoded by multi-                 from Lee et al. (2019) (Fig. 17).
+layer perceptron (MLP). The policy network is a 3-layer
+MLP with hidden layer size of 64 and Rectified Linear Unit
+(ReLU) non-linearity. The output layer of a policy network
+produces the mean and the standard deviation for each action             References
+dimension. After sampling each action from the Gaussian
+distribution, tanh activation function is applied to enforce             Abbeel, P., Coates, A., Quigley, M., & Ng, A. Y. (2007). An appli-
+action bounds in range of [−1, 1]. The value network is repre-                cation of reinforcement learning to aerobatic helicopter flight. In
+                                                                              Advances in neural information processing systems (pp. 1–8).
+sented as a 3-layer MLP that outputs a scalar value specifying
+                                                                         Achiam, J. (2018). Spinning up in deep reinforcement learning. https://
+the corresponding value of a state. The value network uses a                  spinningup.openai.com/en/latest/algorithms/sac.html
+hidden layer size of 128 units with ReLU non-linearity. All              Boularias, A., Kober, J., & Peters, J. (2011). Relative entropy inverse
+inputs fed to the policy and value network are normalized                     reinforcement learning. In Proceedings of the fourteenth inter-
+                                                                              national conference on artificial intelligence and statistics (pp.
+with running estimates of mean and variance. The library
+                                                                              182–189).
+employed for training the agents is Pytorch (Paszke et al.               Chebotar, Y., Kalakrishnan, M., Yahya, A., Li, A., Schaal, S., & Levine,
+                                                                              S. (2017). Path integral guided policy search. In 2017 IEEE
+                                                                              international conference on robotics and automation (ICRA) (pp.
+                                                                              3381–3388). IEEE.
+                                                                         Cui, F., Cui, Q., & Song, Y. (2020). A survey on learning-based
+                                                                              approaches for modeling and classification of human-machine dia-
+                                                                              log systems. IEEE Transactions on Neural Networks and Learning
+                                                                              Systems
+                                                                         Deisenroth, M., & Rasmussen, C. E. (2011). Pilco: A model-based
+                                                                              and data-efficient approach to policy search. In Proceedings of
+                                                                              the 28th international conference on machine learning (ICML-11)
+                                                                              (pp. 465–472).
+                                                                         Deisenroth, M. P., Neumann, G., & Peters, J. (2013). A survey on policy
+                                                                              search for robotics. Now publishers.
+                                                                         Duan, Y., Chen, X., Houthooft, R., Schulman, J., & Abbeel, P.
+                                                                              (2016). Benchmarking deep reinforcement learning for continu-
+                                                                              ous control. In International conference on machine learning (pp.
+                                                                              1329–1338).
+                                                                         Fan, L., Zhu, Y., Zhu, J., Liu, Z., Zeng, O., Gupta, A., Creus-Costa, J.,
+                                                                              Savarese, S., & Fei-Fei, L. (2018). Surreal: Open-source reinforce-
+                       (a)                                                    ment learning framework and robot manipulation benchmark. In
+                                                                              Conference on robot learning (pp. 767–782).
+                                                                         Gu, S., Holly, E., Lillicrap, T., & Levine, S. (2017). Deep reinforcement
+                                                                              learning for robotic manipulation with asynchronous off-policy
+                                                                              updates. In 2017 IEEE international conference on robotics and
+                                                                              automation (ICRA) (pp. 3389–3396). IEEE.
+                                                                         Haarnoja, T., Zhou, A., Abbeel, P., & Levine, S. (2018a). Soft actor-
+                                                                              critic: Off-policy maximum entropy deep reinforcement learning
+                                                                              with a stochastic actor. arXiv preprint arXiv:180101290.
+                                                                         Haarnoja, T., Zhou, A., Hartikainen, K., Tucker, G., Ha, S., Tan,
+                                                                              J., Kumar, V., Zhu, H., Gupta, A., Abbeel, P., et al. (2018b).
+                                                                              Soft actor-critic algorithms and applications. arXiv preprint
+                                                                              arXiv:181205905
+                                                                         Heess, N., TB, D., Sriram, S., Lemmon, J., Merel, J., Wayne, G.,
+                                                                              Tassa, Y., Erez, T., Wang, Z., Eslami, S., et al. (2017). Emergence
+                                                                              of locomotion behaviours in rich environments. arXiv preprint
+                                                                              arXiv:170702286
+                                                                         Julian, R., Swanson, B., Sukhatme, G. S., Levine, S., Finn, C., &
+                                                                              Hausman, K. (2020). Never stop learning: The effectiveness
+                                                                              of fine-tuning in robotic reinforcement learning. arXiv preprint
+                                                                              arXiv:200410190.
+                        (b)                                              Kalakrishnan, M., Righetti, L., Pastor, P., & Schaal, S. (2011). Learn-
+                                                                              ing force control policies for compliant manipulation. In 2011
+Fig. 17 Neural Networks architecture. a the policy network with con-          IEEE/RSJ international conference on intelligent robots and sys-
+sidered 46-dim input (states), 64-dim hidden layers and 16-dim output,        tems (pp. 4639–4644). IEEE.
+and b the value network with considered 46-dim input (states), 128-dim   Kalashnikov, D., Irpan, A., Pastor, P., Ibarz, J., Herzog, A., Jang, E.,
+hidden layers and 1-dim output                                                Quillen, D., Holly, E., Kalakrishnan, M., Vanhoucke, V., et al.
+
+
+123
+Autonomous Robots (2022) 46:483–498                                                                                                                497
+
+
+      (2018). Qt-opt: Scalable deep reinforcement learning for vision-        Mülling, K., Kober, J., Kroemer, O., & Peters, J. (2013). Learning to
+      based robotic manipulation. arXiv preprint arXiv:180610293                    select and generalize striking movements in robot table tennis. The
+Kearney, K. T., Presenza, D., Saccà, F., & Wright, P. (2018). Key chal-             International Journal of Robotics Research, 32(3), 263–279.
+      lenges for developing a socially assistive robotic (SAR) solution       Pastor, P., Kalakrishnan, M., Chitta, S., Theodorou, E., & Schaal, S.
+      for the health sector. In 2018 IEEE 23rd international workshop               (2011). Skill learning and task outcome prediction for manipu-
+      on computer aided modeling and design of communication links                  lation. In 2011 IEEE international conference on robotics and
+      and networks (CAMAD) (pp. 1–7). IEEE                                          automation (pp. 3828–3834). IEEE.
+Kingma, D. P., & Ba, J. (2014). Adam: A method for stochastic opti-           Paszke, A., Gross, S., Massa, F., Lerer, A., Bradbury, J., Chanan, G.,
+      mization. arXiv preprint arXiv:14126980.                                      Killeen, T., Lin, Z., Gimelshein, N., Antiga, L., et al. (2019).
+Konda, V. R., & Tsitsiklis, J. N. (2000). Actor-critic algorithms. In               Pytorch: An imperative style, high-performance deep learning
+      Advances in neural information processing systems (pp. 1008–                  library. Advances in Neural Information Processing Systems, 32,
+      1014).                                                                        8026–8037.
+Kormushev, P., Calinon, S., & Caldwell, D. G. (2010). Robot motor             Peters, J., & Schaal, S. (2008). Natural actor-critic. Neurocomputing,
+      skill coordination with em-based reinforcement learning. In 2010              71(7–9), 1180–1190.
+      IEEE/RSJ international conference on intelligent robots and sys-        Quillen, D., Jang, E., Nachum, O., Finn, C., Ibarz, J., & Levine,
+      tems (pp. 3232–3237). IEEE.                                                   S. (2018). Deep reinforcement learning for vision-based robotic
+Kornblith, S., Shlens, J., & Le, Q. V. (2019). Do better imagenet models            grasping: A simulated comparative evaluation of off-policy meth-
+      transfer better? In Proceedings of the IEEE/CVF conference on                 ods. In 2018 IEEE international conference on robotics and
+      computer vision and pattern recognition (pp. 2661–2671).                      automation (ICRA) (pp. 6284–6291). IEEE.
+Lasi, H., Fettke, P., Kemper, H. G., Feld, T., & Hoffmann, M. (2014).         Rahmatizadeh, R., Abolghasemi, P., Bölöni, L., & Levine, S. (2018).
+      Industry 4.0. Business & Information Systems Engineering, 6(4),               Vision-based multi-task manipulation for inexpensive robots using
+      239–242.                                                                      end-to-end learning from demonstration. In 2018 IEEE inter-
+Lazaric, A., Restelli, M., & Bonarini, A. (2008). Reinforcement learn-              national conference on robotics and automation (ICRA). (pp.
+      ing in continuous action spaces through sequential monte carlo                3758–3765). IEEE.
+      methods. In Advances in neural information processing systems           Rajan, K., & Saffiotti, A. (2017). Towards a science of integrated ai and
+      (pp. 833–840).                                                                robotics
+Lee, Y., Yang, J., & Lim, J. J. (2019). Learning to coordinate manip-         Rajeswaran, A., Kumar, V., Gupta, A., Vezzani, G., Schulman, J.,
+      ulation skills via skill behavior diversification. In International           Todorov, E., & Levine, S. (2017). Learning complex dexterous
+      conference on learning representations.                                       manipulation with deep reinforcement learning and demonstra-
+Lenz, I., Lee, H., & Saxena, A. (2015). Deep learning for detecting                 tions. arXiv preprint arXiv:170910087.
+      robotic grasps. The International Journal of Robotics Research,         Roveda, L., Forgione, M., & Piga, D. (2020). Robot control parameters
+      34(4–5), 705–724.                                                             auto-tuning in trajectory tracking applications. Control Engineer-
+Levine, S., & Abbeel, P. (2014). Learning neural network policies with              ing Practice, 101, 104488.
+      guided policy search under unknown dynamics. In Advances in             Roveda, L., Maroni, M., Mazzuchelli, L., Praolini, L., Bucca, G., & Piga,
+      neural information processing systems (pp. 1071–1079).                        D. (2021). Enhancing object detection performance through sensor
+Levine, S., Finn, C., Darrell, T., & Abbeel, P. (2016). End-to-end training         pose definition with bayesian optimization. In 2021 IEEE interna-
+      of deep visuomotor policies. The Journal of Machine Learning                  tional workshop on metrology for Industry 4.0 & IoT (MetroInd4.
+      Research, 17(1), 1334–1373.                                                   0&IoT) (pp. 699–703). IEEE.
+Levine, S., Pastor, P., Krizhevsky, A., Ibarz, J., & Quillen, D. (2018).      Schulman, J., Levine, S., Abbeel, P., Jordan, M., & Moritz, P. (2015a).
+      Learning hand-eye coordination for robotic grasping with deep                 Trust region policy optimization. In International conference on
+      learning and large-scale data collection. The International Journal           machine learning (pp. 1889–1897).
+      of Robotics Research, 37(4–5), 421–436.                                 Schulman, J., Moritz, P., Levine, S., Jordan, M., & Abbeel, P. (2015b).
+Levine, S., Wagener, N., & Abbeel, P. (2015). Learning contact-rich                 High-dimensional continuous control using generalized advantage
+      manipulation skills with guided policy search. In Proceedings—                estimation. arXiv preprint arXiv:150602438.
+      IEEE international conference on robotics and automation, 2015.         Schulman, J., Wolski, F., Dhariwal, P., Radford, A., & Klimov, O.
+      https://doi.org/10.1109/ICRA.2015.7138994                                     (2017). Proximal policy optimization algorithms. arXiv preprint
+Lillicrap, T. P., Hunt, J. J., Pritzel, A., Heess, N., Erez, T., Tassa, Y.,         arXiv:170706347.
+      Silver, D., & Wierstra, D. (2015). Continuous control with deep         Seif, H. G., & Hu, X. (2016). Autonomous driving in the icity-hd maps
+      reinforcement learning. arXiv preprint arXiv:150902971                        as a key challenge of the automotive industry. Engineering, 2(2),
+Mahler, J., Matl, M., Liu, X., Li, A., Gealy, D., & Goldberg, K. (2017).            159–162.
+      Dex-net 3.0: Computing robust robot vacuum suction grasp targets        Shahid, A. A. (2020). Github repository: Intelligent-task-learning.
+      in point clouds using a new analytic model and deep learning. arXiv           https://github.com/Asad-Shahid/Intelligent-Task-Learning
+      preprint arXiv:170906670.                                               Shahid, A. A., Sesin, J. S. V., Pecioski, D., Braghin, F., Piga, D., &
+Martín-Martín, R., Lee, M. A., Gardner, R., Savarese, S., Bohg, J., &               Roveda, L. (2021). Decentralized multi-agent control of a manipu-
+      Garg, A. (2019). Variable impedance control in end-effector space:            lator in continuous task learning. Applied Sciences, 11(21), 10227.
+      An action space for reinforcement learning in contact-rich tasks.       Siciliano, B., & Villani, L. (2000). Robot Force Control (1st ed.). Nor-
+      arXiv preprint arXiv:190608880                                                well: Kluwer Academic Publishers.
+Mnih, V., Kavukcuoglu, K., Silver, D., Rusu, A. A., Veness, J.,               Silver, D., Huang, A., Maddison, C. J., Guez, A., Sifre, L., Van Den
+      Bellemare, M. G., Graves, A., Riedmiller, M., Fidjeland, A. K.,               Driessche, G., Schrittwieser, J., Antonoglou, I., Panneershelvam,
+      Ostrovski, G., et al. (2015). Human-level control through deep                V., Lanctot, M., et al. (2016). Mastering the game of go with deep
+      reinforcement learning. Nature, 518(7540), 529–533.                           neural networks and tree search. Nature, 529(7587), 484.
+Morrison, D., Corke, P., & Leitner, J. (2018). Closing the loop for robotic   Smith, L., Kew, J. C., Peng, X. B., Ha, S., Tan, J., & Levine, S. (2021).
+      grasping: A real-time, generative grasp synthesis approach. arXiv             Legged robots that keep on learning: Fine-tuning locomotion poli-
+      preprint arXiv:180405172                                                      cies in the real world. arXiv preprint arXiv:211005457.
+                                                                              Song, S., Zeng, A., Lee, J., & Funkhouser, T. (2020). Grasping
+                                                                                    in the wild: Learning 6dof closed-loop grasping from low-cost
+
+
+                                                                                                                                          123
+498                                                                                                        Autonomous Robots (2022) 46:483–498
+
+
+     demonstrations. IEEE Robotics and Automation Letters, 5(3),                                              Dario Piga received his Ph.D.
+     4978–4985.                                                                                               in Systems Engineering from the
+Sutton, R. S. (1988). Learning to predict by the methods of temporal                                          Politecnico di Torino (Italy) in
+     differences. Machine learning, 3(1), 9–44.                                                               2012. He was a Postdoctoral
+Sutton, R. S., & Barto, A. G. (2018). Reinforcement learning: An intro-                                       Researcher at the Delft Univer-
+     duction. MIT press.                                                                                      sity of Technology (The Nether-
+ten Pas, A., Gualtieri, M., Saenko, K., & Platt, R. (2017). Grasp pose                                        lands) in 2012 and at the Eind-
+     detection in point clouds. The International Journal of Robotics                                         hoven University of Technology
+     Research, 36(13–14), 1455–1473.                                                                          (The Netherlands) in 2013. From
+Tobin, J., Fong, R., Ray, A., Schneider, J., Zaremba, W., & Abbeel,                                           2014 to early 2017 he was Assis-
+     P. (2017). Domain randomization for transferring deep neural                                             tant Professorat the IMT School
+     networks from simulation to the real world. In 2017 IEEE/RSJ                                             for Advanced Studies Lucca (Italy)
+     international conference on intelligent robots and systems (IROS)                                        and since March 2017 he has been
+     (pp. 23–30). IEEE.                                                                                       Senior Researcher at the IDSIA
+Todorov, E., Erez, T., & Tassa, Y. (2012). Mujoco: A physics engine for                                       Dalle Molle Institute for Artificial
+     model-based control. In 2012 IEEE/RSJ international conference        Intelligence in Lugano (Switzerland) and Lecturer at the SUPSI Uni-
+     on intelligent robots and systems (pp. 5026–5033). IEEE.              versity of Applied Sciences and Arts of Southern Switzerland. His
+Tsarouchi, P., Makris, S., & Chryssolouris, G. (2016). Human-robot         main research interests include system identification, robust control,
+     interaction review and challenges on task planning and program-       Bayesian filtering and non-convex optimization, with applications to
+     ming. International Journal of Computer Integrated Manufactur-        process control and smart manufacturing.
+     ing, 29(8), 916–931.
+Van Roy, V., Vertesy, D., & Damioli, G. (2020). Ai and robotics inno-
+     vation (pp. 1–35). Human Resources and Population Economics:                                              Francesco Braghin holds a M.Sc.
+     Handbook of Labor.                                                                                        in Mechanical Engineering (1997)
+Viereck, U., Pas, A., Saenko, K., & Platt, R. (2017). Learning a visuo-                                        and Ph.D. in Applied Mechanics
+     motor controller for real world robotic grasping using simulated                                          (2001) at Politecnico di Milano.
+     depth images. In Conference on robot learning (pp. 291–300).                                              In 2001 he became Researcher
+     PMLR.                                                                                                     and in 2011 Associate Professor
+Wei, Q., Wang, L., Liu, Y., & Polycarpou, M. M. (2020). Optimal ele-                                           at the Department of Mechani-
+     vator group control via deep asynchronous actor-critic learning.                                          cal Engineering of Politecnico di
+     IEEE Transactions on Neural Networks and Learning Systems.                                                Milano. Since 2015 he is Full Pro-
+Yang, Z., Merrick, K., Jin, L., & Abbass, H. A. (2018). Hierarchical                                           fessor in Applied Mechanics in
+     deep reinforcement learning for continuous action control. IEEE                                           the same department.
+     Transactions on Neural Networks and Learning Systems, 29(11),
+     5174–5184.
+
+
+Publisher’s Note Springer Nature remains neutral with regard to juris-
+dictional claims in published maps and institutional affiliations.                                             Loris Roveda received the M.Sc.
+                                                                                                               (2011) and the Ph.D. (2015) in
+                                                                                                               Mechanical Engineering at Politec-
+                                                                                                               nico di Milano. Currently, he is
+                                    Asad Ali Shahid received the M.Sc.                                         a senior researcher at SUPSI-
+                                    degree in Mechanical Engineering                                           IDSIA, working on AI and ML
+                                    from Politecnico di Milano. Dur-                                           techniques applied to industrial
+                                    ing his masters degree, he also                                            robotics (such as robot control,
+                                    studied at ETH Zurich for one                                              human-robot collaboration, dynam-
+                                    semester. His research interests lie                                       ics identification). He has been
+                                    around robotics and machine learn-                                         involved in many national and
+                                    ing. In particular, he is interested                                       European projects, and he is now
+                                    in endowing industrial robots with                                         coordinating the EUROBENCH
+                                    capabilities to learn skills from                                          STEPbySTEP project and he is
+                                    people (imitation learning) and on                                         the P.I. of the H2020 CS2 ASSAS-
+                                    their own (reinforcement learn-        SINN project.
+                                    ing).
+
+
+
+
+123
+

@@ -31,7 +31,10 @@ from rl_risk_sac.tasks.reference_reaching import (
     REFERENCE_PPO_OBSERVATION_DIM,
     RESIDUAL_BASE_OBSERVATION_DIM,
     closest_points_segment_obb,
+    obstacle_feature_dim,
+    reference_ppo_observation_dim,
     reference_ppo_reward,
+    composition_saturation_penalty,
     residual_action_penalty,
     compose_base_residual_action,
     residual_handoff_authority,
@@ -216,6 +219,100 @@ class ReferenceS0Tests(unittest.TestCase):
         np.testing.assert_array_equal(
             controller.previous_velocity, previous_velocity
         )
+
+    def test_butterworth_quintic_execution_reduces_command_jerk(self):
+        common = dict(
+            joint_velocity_limits=np.full(6, np.deg2rad(10.0)),
+            joint_acceleration_limits=np.full(6, np.deg2rad(20.0)),
+            position_gain=4.0,
+            position_tolerance=5.0e-4,
+        )
+        q0 = np.zeros(6, dtype=np.float64)
+        goal = np.full(6, 0.05, dtype=np.float64)
+
+        def rollout(smoothed: bool):
+            controller = BoundedJointMotionController(
+                **common,
+                trajectory_smoothing_enabled=smoothed,
+                butterworth_cutoff_hz=0.5,
+                quintic_blend_duration_s=0.4,
+            )
+            q = q0.copy()
+            controller.begin_policy_step(q, goal, 0.4)
+            jerks = []
+            velocities = []
+            for _ in range(50):
+                command = controller.command(q, goal, 1.0 / 125.0)
+                q += command.velocity.astype(np.float64) / 125.0
+                jerks.append(float(np.max(np.abs(command.jerk))))
+                velocities.append(float(command.velocity[0]))
+            return q, np.asarray(velocities), max(jerks)
+
+        plain_q, plain_velocity, plain_jerk = rollout(False)
+        smooth_q, smooth_velocity, smooth_jerk = rollout(True)
+        self.assertGreater(plain_q[0], smooth_q[0])
+        self.assertLess(smooth_velocity[0], plain_velocity[0])
+        self.assertGreater(smooth_velocity[-1], smooth_velocity[0])
+        self.assertLess(smooth_jerk, 0.1 * plain_jerk)
+
+    def test_smoothed_prediction_preserves_all_controller_history(self):
+        controller = BoundedJointMotionController(
+            joint_velocity_limits=np.full(6, np.deg2rad(10.0)),
+            joint_acceleration_limits=np.full(6, np.deg2rad(20.0)),
+            position_gain=4.0,
+            position_tolerance=5.0e-4,
+            trajectory_smoothing_enabled=True,
+            butterworth_cutoff_hz=0.5,
+            quintic_blend_duration_s=0.4,
+        )
+        controller.begin_policy_step(np.zeros(6), np.full(6, 0.05), 0.4)
+        controller.command(np.zeros(6), np.full(6, 0.05), 1.0 / 125.0)
+        before = controller._state_snapshot()
+        predicted = controller.predict_reachable_position(
+            np.zeros(6), np.full(6, 0.05), 1.0 / 125.0, 50
+        )
+        after = controller._state_snapshot()
+        self.assertTrue(np.all(predicted > 0.0))
+        for lhs, rhs in zip(before[:6], after[:6]):
+            np.testing.assert_array_equal(lhs, rhs)
+        self.assertEqual(before[6:], after[6:])
+
+    def test_horizontal_tool_s0_config_is_consolidated(self):
+        config = load_config(
+            ROOT / "configs/experiments/"
+            "paper_s0_cb31_10deg_horizon120_delta3_horizontal_tool_smooth5m.yaml"
+        )
+        thesis = config["thesis"]
+        controller = thesis["joint_motion_controller"]
+        smoothing = controller["trajectory_smoothing"]
+
+        self.assertEqual(thesis["stage"], "s0")
+        self.assertTrue(thesis["simple_reaching_mode"])
+        self.assertFalse(thesis["blocking_obstacle_mode"])
+        self.assertEqual(thesis["horizon"], 120)
+        self.assertAlmostEqual(thesis["control_dt"], 0.4)
+        self.assertAlmostEqual(thesis["joint_delta_limit_rad"], np.deg2rad(3.0))
+        np.testing.assert_allclose(
+            thesis["fixed_orientation_goal"]["euler_rad"],
+            np.deg2rad([-180.0, 0.0, 90.0]),
+        )
+        self.assertTrue(controller["enabled"])
+        self.assertEqual(controller["real_control_frequency_hz"], 125.0)
+        np.testing.assert_allclose(
+            controller["joint_velocity_limits_rad_s"],
+            np.full(6, np.deg2rad(10.0)),
+        )
+        np.testing.assert_allclose(
+            controller["joint_acceleration_limits_rad_s2"],
+            np.full(6, np.deg2rad(20.0)),
+        )
+        self.assertTrue(smoothing["enabled"])
+        self.assertAlmostEqual(smoothing["butterworth_cutoff_hz"], 0.5)
+        self.assertAlmostEqual(smoothing["quintic_blend_duration_s"], 0.4)
+        self.assertEqual(config["train"]["num_envs"], 16)
+        self.assertEqual(config["train"]["rollout_length"], 256)
+        self.assertEqual(config["train"]["total_steps"], 5_000_000)
+        self.assertAlmostEqual(config["ppo"]["action_std_init"], 0.06)
 
     def test_base_clearance_prediction_uses_reachable_cb31_position(self):
         config = load_config(
@@ -610,6 +707,55 @@ class ReferenceS0Tests(unittest.TestCase):
             atol=0,
         )
 
+    def test_route_geometry_checkpoint_can_return_to_compact_observation(self):
+        route_config = deepcopy(self.config)
+        route_config["thesis"]["stage"] = "s1"
+        route_config["thesis"]["observation"]["obstacle_set"][
+            "feature_mode"
+        ] = "route_geometry"
+        route_dim = obstacle_feature_dim("route_geometry")
+        route_obs_dim = reference_ppo_observation_dim(
+            DEFAULT_MAX_OBSTACLES, route_dim
+        )
+        source = ThesisPPOAgent(route_obs_dim, 6, route_config)
+
+        compact_config = deepcopy(self.config)
+        compact_config["thesis"]["stage"] = "s1"
+        compact_config["thesis"]["observation"]["obstacle_set"][
+            "feature_mode"
+        ] = "clearance_direction"
+        restored = ThesisPPOAgent(REFERENCE_PPO_OBSERVATION_DIM, 6, compact_config)
+        restored.initialize_from_stage_checkpoint(
+            deepcopy(source.state_dict()), action_std=0.0135
+        )
+
+        source_actor_weight = source.actor_obstacle_encoder.state_dict()[
+            "phi.0.weight"
+        ]
+        restored_actor_weight = restored.actor_obstacle_encoder.state_dict()[
+            "phi.0.weight"
+        ]
+        torch.testing.assert_close(
+            restored_actor_weight,
+            source_actor_weight[:, :OBSTACLE_FEATURE_DIM],
+            rtol=0,
+            atol=0,
+        )
+        source_value_weight = source.value_obstacle_encoder.state_dict()[
+            "phi.0.weight"
+        ]
+        restored_value_weight = restored.value_obstacle_encoder.state_dict()[
+            "phi.0.weight"
+        ]
+        torch.testing.assert_close(
+            restored_value_weight,
+            source_value_weight[:, :OBSTACLE_FEATURE_DIM],
+            rtol=0,
+            atol=0,
+        )
+        self.assertEqual(restored.obs_dim, REFERENCE_PPO_OBSERVATION_DIM)
+        self.assertEqual(restored.obstacle_feature_dim, OBSTACLE_FEATURE_DIM)
+
     def test_s0_base_override_preserves_avoidance_modules(self):
         s0_config = deepcopy(self.config)
         s0_config["thesis"]["stage"] = "s0"
@@ -794,6 +940,17 @@ class ReferenceS0Tests(unittest.TestCase):
         self.assertAlmostEqual(fields["reference_self_collision_penalty"], 10.0)
         self.assertAlmostEqual(reward, expected_goal - expected_proximity - 30.0)
 
+    def test_reference_clearance_gate_charges_only_base_worsening_links(self):
+        reward, fields = reference_ppo_reward(
+            reference_error=0.2,
+            obstacle_clearances=(0.0, 0.0, 0.0),
+            obstacle_clearance_gates=(0.0, 0.5, 1.0),
+        )
+        expected_goal = -0.001 * 0.2**2 - np.log(0.2**2 + 1.0e-4)
+        self.assertAlmostEqual(fields["c_proximity_ungated"], 3.0)
+        self.assertAlmostEqual(fields["c_proximity"], 1.5)
+        self.assertAlmostEqual(reward, expected_goal - 1.5)
+
     def test_obstacle_first_contact_has_one_time_entry_cost(self):
         parameters = {
             "reference_obstacle_threshold": 0.08,
@@ -857,6 +1014,20 @@ class ReferenceS0Tests(unittest.TestCase):
         self.assertAlmostEqual(middle_cost, 0.625)
         self.assertAlmostEqual(near_safe_weight, 1.0)
         self.assertAlmostEqual(near_safe_cost, 2.5)
+
+    def test_composition_penalty_ignores_base_envelope_and_penalizes_overflow(self):
+        inside = np.full(6, 0.05, dtype=np.float32)
+        outside = np.asarray([0.10, 0.05, 0.0, 0.0, 0.0, 0.0])
+        inside_cost, inside_overflow = composition_saturation_penalty(
+            inside, 0.05, penalty_weight=2.0
+        )
+        outside_cost, outside_overflow = composition_saturation_penalty(
+            outside, 0.05, penalty_weight=2.0
+        )
+        self.assertAlmostEqual(inside_cost, 0.0)
+        self.assertAlmostEqual(inside_overflow, 0.0)
+        self.assertAlmostEqual(outside_overflow, 1.0 / 6.0)
+        self.assertAlmostEqual(outside_cost, 1.0 / 3.0)
 
     def test_residual_handoff_requires_both_near_goal_and_safe_clearance(self):
         self.assertEqual(residual_handoff_authority(0.025, 0.10), 0.0)

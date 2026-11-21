@@ -1,0 +1,822 @@
+                IEEE TRANSACTIONS ON INDUSTRIAL ELECTRONICS, VOL. 73, NO. 4, APRIL 2026                                                               5849
+
+
+
+
+                   Real-Time Safe and Smooth Visual
+                   Servoing for Robot Manipulators via
+                        Reinforcement Learning
+     Jianliang Mao , Member, IEEE, Jun Hu , Xin Zhou , Member, IEEE, Chuanlin Zhang , Senior
+           Member, IEEE, Jun Yang , Fellow, IEEE, and Hesheng Wang , Senior Member, IEEE
+
+
+   Abstract—Real-time collision avoidance is a critical chal-                                            I. INTRODUCTION
+lenge in visual servoing control for safe robot manipu-
+lation. This article presents a model-free framework that
+integrates reinforcement learning (RL) with real-time colli-
+sion detection (RCD), enabling secure and smooth visual
+                                                                              I   N recent years, as a crucial aid to industrial automation,
+                                                                                  robot manipulators have been increasingly deployed in var-
+                                                                              ious scenarios, including industrial assembly [1], logistics sort-
+servoing in dynamic environments. The reward function                         ing [2], and welding operations [3]. In structured environments,
+in the RL framework is carefully designed to simultane-
+ously minimize tracking errors, promote motion smooth-                        offline motion planning typically meets practical requirements.
+ness, and enforce collision avoidance. Beyond policy opti-                    However, with the increasing applications of robots in un-
+mization through RL, a two-step real-time trajectory blend-                   structured situations, dynamic and complex scenes may lead
+ing (RTB) scheme, consisting of a Butterworth filter (BF)                     to higher requirements for vision-based control methods [4].
+and polynomial interpolation, is developed to further refine                  Visual servoing control is an effective approach to enhance
+the generated trajectories and ensure smooth joint velocity
+profiles. Furthermore, the soft actor-critic (SAC) algorithm                  the flexibility of robots in adapting to dynamically changing
+is employed for policy learning, and the performance is                       environments. Over the past decade, it has found widespread
+compared with two widely used methods, namely proximal                        application in various fields, including inertially stabilized plat-
+policy optimization (PPO) and twin delayed deep determin-                     forms [5], autonomous vehicles [6], [7], and robot manipulators
+istic policy gradient (TD3). Experimental results on a 6-                     [8], [9]. The core idea behind these applications is to leverage
+degree-of-freedom (6-DoF) robot manipulator demonstrate
+the effectiveness of the proposed approach in achieving                       visual information for autonomous robot movement control.
+safe and smooth visual servoing in real time.                                    Toward robot manipulation, many efforts have been dedi-
+                                                                              cated for high-performance control of visual servoing applica-
+   Index Terms—Collision avoidance, motion planning, re-
+inforcement learning (RL), visual servoing.
+                                                                              tions. For instance, a fuzzy control method is developed in [10]
+                                                                              to realize the adaptive parameter adjustment for optimal perfor-
+                                                                              mance. In [11], the authors devote to propose a sliding mode
+                                                                              controller (SMC) to increase the accuracy of visual servoing
+                                                                              for systems with the presence of model uncertainties. More-
+   Received 3 May 2025; revised 13 September 2025 and 6 November
+2025; accepted 9 November 2025. Date of publication 11 December               over, the model predictive control (MPC) strategy is presented
+2025; date of current version 11 March 2026. This work was supported          in [12], [13] for the constrained motion space. However, the
+in part by the National Natural Science Foundation of China under Grant       aforementioned methods are inherently dependent on the pre-
+62203292 and Grant 62173221; and in part by the Ministry of Education
+Chunhui Plan Cooperative Research Projects under Grant 202200897.             cise mathematical modeling of the robotic system, classifying
+(Corresponding author: Xin Zhou.)                                             them as model-based control approaches. In scenarios where
+   Jianliang Mao and Xin Zhou are with the College of Automation              environmental uncertainties are unpredictable or unobservable,
+Engineering, Shanghai University of Electric Power, Shanghai 200090,
+China (e-mail: jl_mao@shiep.edu.cn; xinzhou@shiep.edu.cn).                    these methods may experience significant performance degra-
+   Jun Hu and Chuanlin Zhang are with the College of Com-                     dation. This limitation highlights the potential advantages of
+puter Science and Technology, Shanghai University of Electric                 model-free approaches, which do not rely on explicit system
+Power, Shanghai 200090, China (e-mail: Jun_Hu@mail.shiep.edu.cn;
+clzhang@shiep.edu.cn).                                                        models.
+   Jun Yang is with the Department of Aeronautical and Automotive                As a way of self-optimization, reinforcement learning (RL)
+Engineering, Loughborough University, LE11 3TU Loughborough, U.K.             is regarded as a promising method for robot manipulation ow-
+(e-mail: j.yang3@lboro.ac.uk).
+   Hesheng Wang is with the School of Automation and Intelligent Sens-        ing to its ability to learn skills autonomously, especially in
+ing, Key Laboratory of System Control and Information Processing of           unstructured environments [14], [15]. By virtue of the intel-
+Ministry of Education, Shanghai Jiao Tong University, Shanghai 200240,        ligent decision-making capabilities of RL, the Cartesian mo-
+China (e-mail: wanghesheng@sjtu.edu.cn).
+   This article has supplementary downloadable material available at          tion planning with vision-based grasping strategy is proposed
+https://doi.org/10.1109/TIE.2025.3634401, provided by the authors.            in [16], [17]. Considering a variety of difficult industrial in-
+   Digital Object Identifier 10.1109/TIE.2025.3634401                         sertion tasks with visual inputs and different natural reward
+
+1557-9948 © 2025 IEEE. All rights reserved, including rights for text and data mining, and training of artificial intelligence and similar technologies.
+   Personal use is permitted, but republication/redistribution requires IEEE permission. See https://www.ieee.org/publications/rights/index.html
+                                                                 for more information.
+
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on October 30,2026 at 07:29:47 UTC from IEEE Xplore. Restrictions apply.
+5850                                                                     IEEE TRANSACTIONS ON INDUSTRIAL ELECTRONICS, VOL. 73, NO. 4, APRIL 2026
+
+
+
+specifications, an end-to-end approach based on deep RL is                        1) A generic model-free framework is proposed for safe and
+studied in [18]. In addition, the techniques by using demonstra-                     smooth visual servoing control, enabling simultaneous
+tions and self-imitation learning to enhance training efficiency,                    target tracking and real-time collision avoidance in dy-
+have been introduced into deep RL to improve the control per-                        namic environments without relying on prior models of
+formance [19]. Note that these existing RL methods primarily                         the robot or obstacles.
+focus on addressing grasping problems in unstructured environ-                    2) To improve motion smoothness, the proposed approach
+ments. However, such non-real-time approaches are inadequate                         integrates maximum-entropy RL with a reward-driven
+for effectively managing the tracking of dynamic targets in                          RTB mechanism that penalizes abrupt velocity variations
+visual servoing tasks. For the visual tracking applications, [20],                   and refines policy outputs, thereby ensuring smooth joint
+[21] introduce the convolutional-network based deep learning                         velocity profiles for physical manipulators.
+for control policy training in the absence of obstacles. However,                 3) For efficient policy training and validation, a digital-twin
+when there are unknown obstacles in manipulation tasks, the                          simulation environment integrating the RCD and RTB
+integration of safety mechanisms into RL is imperative. Such                         modules is constructed, effectively bridging the sim-to-
+an approach ensures not only safe tracking but also precise posi-                    real gap and facilitating a seamless transition to real-world
+tioning, enabling robust performance in complex and uncertain                        robotic systems. Experimental results are demonstrated in
+environments.                                                                        the verification video at https://youtu.be/15G-pYg2ohs.
+   In order to guarantee safety manipulations, real-time colli-                   The remainder of the article is organized as follows. Sec-
+sion detection (RCD) and avoidance should be realized in a                     tion II presents the preliminaries and problem formulation.
+visual servoing task. One promising approach is to mount sensi-                Section III details the design procedure of the proposed RL-
+tive components (e.g., electronic skins presented in [22]) on the              based visual servoing controller. The experimental results are
+robot body to achieve sensitive perception. However, the cost                  discussed in Section IV. Finally, Section V provides the con-
+is relatively high with the high-performance sensing require-                  clusion.
+ments. Another category establishes a collision observer by
+collecting information from robot joint encoders and actuators                         II. PRELIMINARIES AND PROBLEM FORMULATION
+to realize real-time observations of external collision forces,                  In this section, a brief review of maximum entropy RL is
+in which the collision detection is based on the occurrence of                 provided, which serves as one of the key techniques in the
+collisions [23]. For the initial exploration stage of RL, a large              proposed framework. Subsequently, the safe visual servoing
+number of collisions will inevitably cause certain damage to the               control problem is formulated within the RL setting.
+robot. The third approach for collision detection is to describe
+each link of the robot as a convex object and calculate the
+                                                                               A. Preliminaries
+distance between each pair of objects in the modeling envi-
+ronment [24]. This method has been released as open source                       1) Maximum Entropy RL: Different from the standard RL
+in the famous flexible collision library (FCL). However, the                   where the policy is to maximize a long-term reward, maximum
+standard collision detection method in FCL is computation-                     entropy RL aims to maximize the expected return and the policy
+ally time-consuming. To further enhance detection efficiency,                  entropy at the same time [26], where the optimal policy π ∗ is
+[25] introduces a recursive Gilbert–Johnson–Keerthi (RGJK)                     defined as
+algorithm that employs a geometric approach to calculate the                                  T
+distance between rigid bodies in the environment and detect                      π ∗ =argmax      γ t E(st ,at )∼ρπ [r(st , at ) + αH(π(·|st ))] (1)
+                                                                                              π
+potential collisions.                                                                             t=0
+   Building upon the aforementioned observations, a model-                                t
+                                                                               where γ represents the discount factor, st and at are the
+free RL framework aimed at real-time collision avoidance in                    continuous state and action at time-step t, respectively, ρπ is
+visual servoing control tasks is proposed. The key contribution                the state–action distribution induced by the policy π, T is the
+of this work lies in the integration of a general RL approach with             maximum time steps, r(st , at ) is the immediate reward, H(·)
+RCD and real-time trajectory blending (RTB) to enable safe                     is the entropy term, and α is a temperature parameter used for
+operation in dynamic environments. Specifically, the proposed                  entropy adjustment.
+design procedure consists of three main steps, as illustrated in                  Following the policy π, the state–action value function Qπsoft
+Fig. 1. First, a real-world experimental setup is established for                                              π
+                                                                               and the state–value function Vsoft    are defined as
+motion trajectory collection and validation. Second, a digital                                           ∞
+twin environment incorporating RCD is developed to facilitate                     Qπsoft (s, a) =  E          γ t r (st , at )               (1)
+RL training. Third, an RL policy, augmented with RTB by using                                       st ,at ∼ρπ
+                                                                                                                  t=0
+obstacle locations as part of the observation space, is trained to                                       ∞
+                                                                                                                                                       
+operate safely within dynamic settings. To optimize the learned                                     +α           γ t H (π (· | st )) | s0 = s, a0 = a       (2)
+policy, a reward function is carefully crafted to simultaneously                                         t=1
+minimize tracking errors, ensure motion smoothness, and pro-                                                     
+                                                                                                                  ∞        
+mote collision avoidance. Compared to existing approaches,
+                                                                                        π
+                                                                                      Vsoft (s) =       E               γ t r (st , at )
+                                                                                                    st ,at ∼ρπ
+the primary distinguishing features of the proposed method are                                                    t=0
+                                                                                                                               
+summarized as follows.                                                                              + αH (π (· | st )) | s0 = s                             (3)
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on October 30,2026 at 07:29:47 UTC from IEEE Xplore. Restrictions apply.
+MAO et al.: REAL-TIME SAFE AND SMOOTH VISUAL SERVOING FOR ROBOT MANIPULATORS                                                                          5851
+
+
+
+
+Fig. 1. An illustration of the proposed design procedure. In step 1, a real-world robot manipulator is constructed for motion trajectories collection
+and experimental verification. In step 2, building a digital twin environment for RL training with RCD. In step 3, training the RL policy with RTB by
+utilizing the location of obstacles as an observed state.
+
+
+
+where s0 and a0 represent the initial state and initial action,                    III. RL-BASED VISUAL SERVOING CONTROL DESIGN
+respectively.
+                                                                                 In this section, to realize safe visual servoing control of robot
+   To capture multiple modes of near-optimal policies, the max-
+                                                                              manipulators, a model-free RL framework is introduced that
+imum entropy RL uses a unique energy-based policy (EBP)
+                                                                              integrates RCD and trajectory blending, enabling the tracking
+                   π (at | st ) ∝ exp (−E (st , at ))                  (4)    of dynamic targets. An overview of the proposed framework is
+                                                                              shown in Fig. 2, and the detailed design procedure is presented
+where E(·) is an energy function [27]. In practice, since the                 as follows.
+tractable policies are preferred in the training process, the
+Gaussian distribution is usually developed to interact with the               A. Real-Time Collision Detection
+environment. Subsequently, it is common to use the Kullback–                     To realize flexible collision avoidance, including self-
+Leibler (KL) divergence to narrow the distance between EBP                    collisions and collisions with obstacles, the RTB is imple-
+and the Gaussian distribution with an optimal policy.                         mented by the following two steps.
+                                                                                 1) Environment Modeling: To describe the spatial location
+                                                                              of robot components conveniently, a graphical data structure
+B. Problem Formulation
+                                                                              based on a spatial grid is constructed. Each component in the
+   For visual servoing control of robot manipulators, safe target             robot workspace is assigned a coordinate system to represent its
+tracking or positioning is an indispensable task. In this article,            spatial pose, and link relationships are defined through trans-
+we aim to realize real-time safe visual servoing control of                   formation matrices relative to a given reference frame. Com-
+robot manipulators in 3-D space. Concretely, given the current                bined with the forward kinematics of the robot, any pose can
+observation st (e.g., the robot and environment states) at time t,            thus be calculated and modeled. The unified robot description
+the objective is to determine a proper joint-space command at                 format (URDF) is adopted to model both the manipulator and
+such that the current end-effector pose pt accurately tracks the              its installation environment, as shown in Fig. 1, where each
+desired pose gt . Note that after executing the action command                component is represented using the standard triangle language
+at , the robot will transition to a new state st+1 with the proba-            (STL). This modeling approach is robot-agnostic, requiring
+bility p(st+1 |st , at ). This control problem in essence amounts             only the manipulator’s kinematic model from CAD or URDF
+to a Markov decision process (MDP) problem, which can be                      files.
+naturally solved using RL. For the observation st , the RL policy                In terms of obstacle handling, randomized obstacles with full
+samples an action at from a stochastic policy π: at ∼ πθ (·|st ),             state information are generated during training, which is a com-
+where the optimal policy is obtained by maximizing                            mon practice in RL to facilitate efficient policy learning. The
+                                                                              randomization includes variations in position and size, thereby
+                               
+                               T
+                                                                              enhancing the generalization capability of the learned policy.
+              πθ∗ = argmax            γ t E [rt + αH(πθ )]             (5)
+                         πθ                                                   In real-world experiments, obstacle states must be obtained
+                                t=0
+                                                                              through perception using an Intel RealSense camera, where
+where rt is a composite indicator at time-step t to be designed.              obstacles are approximated by rectangular bounding boxes to
+   To effectively implement this model-free control framework                 simplify detection and ensure reliable localization. For complex
+in real-time, it is essential to incorporate strategies that ensure           obstacles, voxel-based reconstruction [28] can be combined
+safety and achieve smooth motion in dynamic environments,                     with convex decomposition, and the resulting convex parts are
+which serves as the motivation for this work.                                 then processed by the RCD module.
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on October 30,2026 at 07:29:47 UTC from IEEE Xplore. Restrictions apply.
+5852                                                                       IEEE TRANSACTIONS ON INDUSTRIAL ELECTRONICS, VOL. 73, NO. 4, APRIL 2026
+
+
+
+
+                                                                                                                                            r
+Fig. 2. An overview of the proposed RL-based visual servoing control architecture. Xgt represent the target pose, Xrt and Ẋt denote the end-
+effector pose and velocity, respectively, qrt and q̇rt denote the joint position and velocity, respectively, q̇π                            rtb
+                                                                                                               t is the policy output and q̇t   is the reference
+joint velocity generated by the RTB process, u denotes the control signal, da     t is the prefetched safe distance generated by the RTB module, and dt
+                                                                                                                                                               c
+is the actual safe distance.
+
+
+   2) Distance Calculation: In what follows, the closest distance                Algorithm 1: Real-Time RGJK Collision Detection.
+between one component and the others is calculated by itera-                      1: Input: Robot joint angles θ1 , θ2 , . . . , θ6 , and the position
+tion. After the modeling in the previous steps, each link of the                     of obstacles P7 , . . . , PN
+robot and obstacles can be described as the convex object. For                    2: Output: Shortest distance dct
+any two objects, the point sets P1 and P2 can be defined to                       3: P1 , P2 , . . . , PN are updated positions
+represent them. Define the Minkowski difference between P1                        4: for i = 1 to N do
+and P2                                                                            5:    for j = i + 1 to N do
+                                                                                  6:      Compute the distance dij = RGJK (Pi , Pj )
+           P1  P2 = {p1 − p2 : ∀p1 ∈ P1 , ∀p2 ∈ P2 }.                    (6)
+                                                                                  7:      if dij ≤ dct then
+  Note that if the result of (6) contains the origin O of coor-                   8:          dct = dij
+dinates, it means that the two objects have overlapped, and a                     9:      end if
+collision has occurred. Otherwise, the shortest distance between                 10:    end for
+                                                                                 11: end for
+P1 and P2 is denoted by
+
+              dct = min{c − O : ∀c ∈ {P1  P2 }}                        (7)
+
+where c represents a point in the Minkowski difference set.
+                                                                                 B. Reinforcement Learning
+   To calculate dct , the RGJK algorithm developed in [25] is
+employed, as shown in Algorithm 1. The initial value of dct is                      In this section, the soft actor-critic (SAC) method [26] based
+set as a threshold that depends on the specific application. The                 on the maximum entropy RL is used to search for the optimal
+RGJK algorithm extends the Gilbert–Johnson–Keerthi (GJK)                         policy. The choice of SAC over other RL algorithms is moti-
+method by using a geometric approach to compute the distance                     vated by the requirements of real-time visual servoing, where
+between rigid bodies in the environment and detect potential                     efficient policy learning, stable adaptation to dynamic targets,
+collisions. Compared to the traditional FCL that is computa-                     and safety-aware control are critical. Compared with proxi-
+tionally time-consuming, the RGJK algorithm is more efficient                    mal policy optimization (PPO), SAC offers substantially higher
+and generic. This is due to it requires only the robot’s URDF and                sample efficiency and more reliable long-term performance,
+the object meshes with their respective transformations. Further                 which is particularly important for real-time adaptation under
+details can be found in [25].                                                    constrained training resources. In contrast to the twin delayed
+   Remark 1: It should be noted that RCD requires obstacles to                   deep deterministic policy gradient (TD3), SAC benefits from
+remain observable. When the field of view is limited or tem-                     entropy regularization and automatic temperature adjustment,
+porary occlusion occurs, robustness can be improved through                      providing more stable value estimation and greater robustness
+short-horizon trajectory prediction for slowly moving obstacles.                 to hyperparameter variations. Together, these advantages make
+Although not addressed in this work, future extensions may                       SAC well suited for safety-aware real-time visual servoing
+incorporate temporal models such as long short-term memory                       tasks. Design details, including the learning model, state space,
+(LSTM) or transformer-based predictors [29] and uncertainty-                     action space, and reward function, are introduced step by step.
+aware mapping methods [30], where deep neural networks es-                          1) Learning Model: Generally, SAC learns an actor policy
+timate occupancy beyond the current sensor range and exploit                     πθ and a critic Qw . To update the actor, a Gaussian policy
+uncertainty to maintain conservative safety under partial ob-                    distribution is adopted to interact with the environment. The
+servability.                                                                     policy parameters are optimized by minimizing the objective
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on October 30,2026 at 07:29:47 UTC from IEEE Xplore. Restrictions apply.
+MAO et al.: REAL-TIME SAFE AND SMOOTH VISUAL SERVOING FOR ROBOT MANIPULATORS                                                                          5853
+
+
+
+function as
+                                                                       
+    Jπ (θ) =        E             α log πθ (at | st ) − Qw (st , at )        (8)
+               st ∼D,at ∼πθ
+
+where Jπ denotes the policy objective that balances the maxi-
+mization of the expected return with an entropy-regularization
+term to encourage exploration, and D is the replay buffer.
+   To reduce the variance of gradient estimation, the reparam-
+eterization trick is applied to express the stochastic action as
+                                          
+   aθ (st , ) = tanh μθ (st ) + σθ (st )  ,  ∼ N (0, I) (9)
+
+where μθ (s) and σθ (s) are outputs of the policy network, and                     Fig. 3. Variations of the reward function as the robot approaches the
+   denotes the element-wise product. The policy distribution is                    target.
+modeled as a Gaussian with diagonal covariance σθ2 (s)I, which
+is not full-rank but is a standard and effective design choice
+in SAC. This ensures sufficient stochasticity for exploration                         3) Action Space: The action space at consists of a set of joint
+while preserving numerical stability and training efficiency. It                   velocities, expressed by q̇πt . Note that singularity problems can
+is also important to note that the log-probability log πθ (a|s)                    be avoided by selecting actions in joint space as the control
+incorporates the Jacobian correction term introduced by the                        inputs. For more reliable training, the range of the action value
+tanh transformation. Accordingly, the reparameterized objec-                       is set within [–1, 1] rad/s, and the maximum change of each
+tive becomes                                                                       control cycle is set to 0.1 rad/s. On the other hand, in order to
+                                                                                 obtain a smoother motion, a real-time velocity blending (VB)
+ Jπ (θ)=      E     α log πθ (aθ (st , )|st )−Qw (st , aθ (st , )) .             controller is designed, which will be introduced in the following
+          st ∼D,∼N
+                                                                                   section.
+                                                                            (10)
+                                                                                      4) Reward Design: The reward function rt that considers
+  While optimizing the policy, SAC also trains the critic Qw                       tracking errors, motion smoothness as well as collision avoid-
+by minimizing the soft Bellman residual as                                         ance is defined as
+
+                             1                                                                           rt = rtg + rta + rtc .                     (13)
+  JQ (w) =          E           Qw (st , at ) − r (st , at )
+           (st ,at ,st+1 )∼D 2                                                       In (13), the term rtg depends on the tracking error
+                                                        2
+  + γ (Qω̄ (st+1 , at+1 ) − α log (πθ (at+1 | st+1 )))
+                                                                                                                           g
+                                                             (11)                                       cg1 (dgt − Cg )c2 , if dgt ≤ Cg
+                                                                                               rtg =                       g                          (14)
+                                                                                                        −cg3 (dgt − Cg )c4 , if dgt > Cg
+where Qw̄ denotes the target soft Q-function with delayed
+parameters.                                                                        where Cg is the threshold, and cgi , i = 1, . . . , 4 are positive
+   Finally, the temperature parameter α is tuned to match a                        weight coefficients.
+target entropy H̄ by minimizing                                                      The term rta measures the smoothness of actions
+                                                                                                                       ca1 dat
+      J(α) =       E       − α log πθ (at |st ) + H̄ . (12)                                             rta = −                     ca2             (15)
+               st ∼D,at ∼πθ                                                                                         max(dgt , 1)
+This update increases α whenever the policy entropy is below                       where caj , j = 1, 2 are positive weight coefficients.
+the target, ensuring a proper balance between exploration and                        The term rtc is a penalty for the occurrence of collisions
+exploitation throughout training.
+                                                                                                           −rcollision ,       if dct ≤ Cc
+   2) State Space: The state space consists of the states of the                                   rtc =                                              (16)
+robot manipulator, tracked target and obstacles, of which the                                              0,                  otherwise
+full observation is defined as st = [ort , ogt , oct ]. The first compo-           which means that if the safety distance dct is less than the
+                    r
+nent ort = [qr
+              t , q̇t ] is a concatenation of the joint position qt
+                                                                        r
+                                                                                   threshold Cc , the policy will get a large penalty rcollision , such
+                          r                                  g      g ˙g
+and the joint velocity q̇t . The second component ot = [dt , dt ]                  that rtc can almost mask the other two reward terms in the
+where dgt = Xgt − Xrt 2 is the difference between the target                     presence of collisions.
+                                                            g      r
+pose Xgt and the end-effector pose Xrt , d˙gt = Ẋt − Ẋt 2 is                      Fig. 3 illustrates how the reward function evolves as the robot
+                                                         g
+the difference between the target velocity Ẋt and the end-                        approaches the target. Notably, by reasonably adjusting the
+                     r
+effector velocity Ẋt . The third component oct = [dat , dct ] where               parameters cgi and caj , the robot achieves enhanced exploratory
+dat = q̇rtb
+         t−1 − q̇t−1  is the difference between the policy out-
+                 π     2
+                                                                                   ability when the end-effector is distant from the target, and
+put q̇t−1 and the reference joint velocity q̇rtb
+      π
+                                                      t−1 from the last            improved tracking performance with greater robustness when
+time step. The observations are normalized by subtracting the                      the end-effector is close to the target.
+mean and dividing by the standard deviation using the statistics                      It is worth noting that the hyperparameters in the reward
+aggregated over the course of the entire training.                                 function are typically determined through extensive training
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on October 30,2026 at 07:29:47 UTC from IEEE Xplore. Restrictions apply.
+5854                                                                     IEEE TRANSACTIONS ON INDUSTRIAL ELECTRONICS, VOL. 73, NO. 4, APRIL 2026
+
+
+
+
+Algorithm 2: SAC-Based RL Training.
+ 1: Input: environmental state st
+ 2: Output: action at
+ 3: Initialize online Q network, target Q network, and policy
+    network with weights ω, ω̄, θ;
+ 4: Build target motion trajectory dataset D;
+ 5: Initialize replay buffer R;
+ 6: Check collision information in real-time;
+ 7: for each iteration do
+ 8:    Sample a random target trajectory Di form dataset D;
+ 9:    Initialize robot to a collision-free pose randomly;
+10:    Sample initial state s0 = [or0 , og0 , oc0 ], which is related to
+       Di ;
+11:    for each environment step do                                            Fig. 4. An illustration of the RTB scheme.
+12:       at = Policy(st );
+13:       st+1 = Env.step(at , st );
+14:       rt = Reward(st , at );                                               time step t2 , the transition of the joint velocity q̇rtb can be
+                                                                                                                                     ι
+15:       Add(st , at , rt , st+1 ) into R;                                    computed by
+16:       if collision or success then
+17:          break;
+                                                                                              ι = q̇t1 + α(s)(q̇t1 − q̇t1 ), ι ∈ [t1 , t2 ]
+                                                                                            q̇rtb   r           bw     r
+                                                                                                                                                      (18)
+18:       end if
+19:    end for
+20: end for
+                                                                               where α(s) is the blending function and s = (ι − t1 )/(t2 − t1 )
+21: for each gradient step do
+                                                                               is the normalized time parameter. As a boundary condition,
+22:    Update online Q network weights:                                        α(s) is defined as α(s) = 6s5 − 15s4 + 10s3 in our designed
+       ω ← ω − λQ ∇    ˆ ω JQ (wi );                                           approach. Therefore, the velocity trajectory direction is cor-
+23:    Update policy weights: θ ← θ − λπ ∇          ˆ θ Jπ (θ);                rected in real time by considering the latest way points of the
+24:    Adjust temperature: α ← α − λ∇α J(α); ˆ                                 RL model at each time-step, as shown in Fig. 4.
+25:    Update target Q network weights:                                           Remark 2: Although many trajectory smoothing methods
+       ω̄ ← τ ω + (1 − τ )ω̄;                                                  have been proposed, the aim of this work is not to introduce a
+26: end for
+                                                                               new technique but to integrate trajectory blending into an RL-
+                                                                               based framework for real-time visual servoing, with smoothness
+                                                                               and real-time performance as the main considerations. A BF is
+and systematic trial-and-error to achieve optimal values. The                  adopted to suppress jitters in the RL-generated joint velocities,
+detailed tuning process is presented in the experimental sec-                  ensuring the feasibility of subsequent velocity interpolation,
+tion. The detailed realization of RL training is summarized in                 while other filters can be selected in practice depending on the
+Algorithm 2.                                                                   environment. In addition, the RL reward function (13) includes
+                                                                               a smoothness term (15) that penalizes abrupt velocity varia-
+                                                                               tions, enabling the agent to learn smoother control strategies.
+C. Real-Time Trajectory Blending                                               By combining reward-driven smoothness with execution-level
+    To avoid the jitter behavior of action values generated by RL,             refinement through a lightweight two-step scheme of Butter-
+a RTB strategy is proposed to modify the direct output of the                  worth filtering and polynomial interpolation, the proposed RTB
+policy. Specifically, the RTB is made up of two aspects.                       achieves both computational efficiency and reliable trajectory
+    1) Low-Pass Butterworth Filter: A low-pass butterworth filter              profiles suitable for real-robot deployment.
+(BF) is firstly adopted to smooth the action value and improve                    Remark 3: It should be highlighted that this work focuses
+the robustness of the RL policy. The detailed expression of the                on real-time visual servoing in environments with randomly
+filter is                                                                      placed static obstacles, as reflected in the experimental design.
+                                                                             Under these conditions, the RGJK-based RCD, combined with
+                    q̇πt + q̇πt−1 − 1 − 2/(ωc Ts ) q̇bw
+                                                     t−1
+           q̇bw
+             t  =                                             (17)             the learned policy and the RTB, ensures safe and smooth oper-
+                                 1 + 2/(ωc Ts )                                ation. However, for dynamic obstacles, more reliable avoidance
+where ωc is the cut-off frequency, Ts is the sampling period,                  requires the integration of predictive capabilities in addition to
+q̇πt is the policy output, and q̇bw
+                                 t is the action after the low-pass            perception. As part of our ongoing research, we are investi-
+filter.                                                                        gating short-horizon trajectory prediction with temporal mod-
+    2) Velocity Blending: Second, a VB scheme is developed                     els (e.g., LSTM) and proactive safety enforcement using con-
+to generate smooth joint velocity trajectories. Suppose that at                trol barrier functions (CBFs) to enhance robustness in rapidly
+the time step t1 , the joint velocity is denoted as q̇rt1 and the              changing environments. Preliminary results in this direction can
+RL policy gives the action denoted as q̇bw    t1 . Within the next             be referred to in our recent work [31].
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on October 30,2026 at 07:29:47 UTC from IEEE Xplore. Restrictions apply.
+MAO et al.: REAL-TIME SAFE AND SMOOTH VISUAL SERVOING FOR ROBOT MANIPULATORS                                                                          5855
+
+
+
+                 IV. EXPERIMENTAL EVALUATION                                        The output layer differs between the networks: the policy
+                                                                                    network outputs an action vector of dimension 6, while
+   In this section, a series of experiments in both simulated and
+                                                                                    the Q-network outputs a scalar representing the estimated
+real robotic systems is carried out to demonstrate the efficacy
+                                                                                    state-action value.
+of the proposed approach.1
+                                                                                    During training, the influence of hyperparameter settings
+                                                                                    on policy performance is systematically examined. In the
+A. Environmental Setup                                                              early stages, reasonable parameter ranges are identified
+   For the training environment, all simulations are conducted in                   through preliminary experiments and analysis of reward
+the PyBullet simulator, which provides a safe and high-fidelity                     convergence trends. These insights are then used to itera-
+environment that closely replicates the physical system to train                    tively refine the hyperparameters to achieve stable conver-
+the optimal policy. The Bullet physics engine is applied to the                     gence and improved performance. Although some trial-
+simulations, where a 6-degree-of-freedom (6-DoF) Universal                          and-error adjustments are required initially, the process
+Robot 5 (UR5) is modeled for visual servoing tasks. A Python                        becomes increasingly systematic as the impact of key
+interface is employed between the RL algorithm and the agent                        parameters is better understood, thereby streamlining fine-
+environment. The policy is trained on a computer with an Intel                      tuning and reducing redundancy. The final parameter set-
+i7-10750H CPU and an Nvidia RTX 4050 GPU.                                           tings are summarized in Table I.
+   For the real-world validation, the UR5 manipulator is op-                     3) Training Process: As outlined in Algorithm 2, the train-
+erated in velocity-control mode through the official UR con-                        ing process begins with a series of initialization steps,
+troller interface. Two Intel RealSense D435i RGB-D cameras                          including the setup of RCD. Convergence is evaluated
+are employed, with one fixed overlooking the robot workspace                        by monitoring the stabilization of episodic rewards across
+for obstacle detection and another designated for dynamic target                    training episodes. Key hyperparameters, such as the learn-
+recognition and tracking. The vision system operates at an                          ing rate, batch size, discount factor, and exploration pa-
+average update rate of 60 Hz. The control loop is implemented                       rameters. The control framework operates at multiple fre-
+externally on an industrial PC with an Nvidia RTX 4050 GPU,                         quencies: the control policy runs at 30 Hz, while the
+where the control policy is computed and transmitted to the                         proposed RTB module functions as an intermediate layer
+robot in real time via Ethernet. To evaluate the effectiveness                      at 100 Hz to provide interpolated data to the PD controller.
+of the trained policy, two representative tasks are performed: a                    Each episode comprises a maximum of 3000-time steps,
+reaching task and a dynamic target tracking task. In the reaching                   with the training process spanning 5000 episodes. During
+task, the target position is defined as a desired pose, whereas                     training, a replay buffer collects interaction data from the
+in the dynamic tracking task, it is obtained through visual                         robot’s environment, facilitating simultaneous updates to
+detection of the designated object. Obstacles are automatically                     the neural networks. The entire training process is com-
+detected from the environment using the visual system, with                         pleted in approximately 8 h.
+their geometric information extracted through image processing                   4) Sim-to-Real Transfer: During the transition of the model
+and used by the RCD module to compute minimum distances                             from a simulated environment to the real world, a series
+for collision avoidance.                                                            of system configurations is required. The depth camera
+                                                                                    captures data at a frame rate of 60 Hz and transmits the
+B. Training Setup                                                                   information in real time via the USB protocol. The UR5
+                                                                                    operates at a control frequency of 100 Hz. The host ma-
+  1) Obtaining State Information: To begin with, during the                         chine synchronously collects data from both the camera
+     training process, the position information of the target                       and the robotic arm at 30 Hz, feeds the information into
+     points and obstacles, as well as the joint information of                      the model for inference, and outputs the corresponding
+     the robot manipulator, is obtained through the application                     control policy at the same frequency. Since the APIs
+     programming interface (API) provided by the Pybullet                           invoked by the host and the neural network inference
+     simulator. In the real environment, position information                       operate at significantly higher speeds than the data acqui-
+     is acquired through an RGB-D camera, while joint infor-                        sition and control frequencies, and given that processing
+     mation of the robotic system is obtained in real-time via                      performance can be further improved with more powerful
+     the API provided by the UR5 robot. Subsequently, the                           computational hardware, the overall system latency can be
+     obtained position information of the target points and joint                   considered negligible.
+     information from the simulation state are utilized as the
+     state space for training.
+  2) Parameter Selection: For the network architecture, both                  C. Safe Reaching Task
+     the actor and critic networks are implemented as mul-                       1) Task Description: The reaching task is a fundamental
+     tilayer perceptrons (MLPs) with four layers. The input                         component in robot manipulation that requires the end-
+     layer processes a state vector of dimension 30. Two hidden                     effector to arrive at a target pose. In this case, we train
+     layers follow, with dimensions of 256 and 64, respectively.                    the UR5 for set-point tracking with obstacle avoidance.
+   1
+     Please refer to the supplementary material for a video demonstration           Collision avoidance includes self-collisions and collisions
+illustrating the evaluation details.                                                with obstacles in the environment. The UR5 follows the
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on October 30,2026 at 07:29:47 UTC from IEEE Xplore. Restrictions apply.
+5856                                                                       IEEE TRANSACTIONS ON INDUSTRIAL ELECTRONICS, VOL. 73, NO. 4, APRIL 2026
+
+
+
+                                      TABLE I
+                             PARAMETERS OF SAC TRAINING
+
+         Parameter             Definition                     Value
+               Θ               Policy network size     30 × 256 × 64× 6
+               Ω               Q Network size          30 × 256 × 64× 1
+               γ               Discount factor                 0.95
+              M                Minibatch size                  256
+               λ               Learning rate                  3e−4
+               R               Size of replay buffer          10e5
+              Cg               Threshold of the r g              3
+              Cc               Threshold of the r c              2
+       c1 , c2 , cg3 , cg4
+        g    g
+                               Weight of the r g          4, 2, 0.3, 1.5
+            ca
+             1 , c2
+                    a          Weight of the r a            110, 0.15
+            rcollision         Penalty for collision           400
+              ωc               Cut-off frequency                30
+
+
+     policy in taking actions to reach the goal pose, and the
+     positions of the goal and obstacles are sampled from the                   Fig. 5. Average rewards during the training process with different strate-
+     dataset. The obstacle side length dimension is set to the                  gies: (a) SAC_Ours, PPO_Ours, and TD3_Ours with the combination of
+                                                                                BF and VB; (b) different SAC strategies with or without BF and VB; (c)
+     range [0.1, 0.3] m and the spatial location of the obstacle                different PPO strategies with or without BF and VB; and (d) different TD3
+     is constrained from [0.1, 0.1, 0.15] m to [0.1, 0.2, 0.15]               strategies with or without BF and VB.
+     m. The testing procedure can be divided into the following
+     steps. Firstly, the position of the obstacle is randomly
+     initialized within the constraint space. Secondly, the robot                                          TABLE II
+                                                                                          COMPARISON OF SRS UNDER SAFE REACHING TASK
+     manipulator is initialized with respect to the left side of the
+     obstacle. Thirdly, a collision-free point is sampled from                     Policy   SR (%)         Policy   SR (%)           Policy   SR (%)
+     the right side of the obstacle as the target position.                        SAC_Ours 77.29          PPO_Ours 81.79            TD3_Ours 75.63
+                                                                                   SAC_BF    75.04         PPO_BF    71.45           TD3_BF    75.57
+  2) Training Results: To further evaluate the effectiveness                       SAC_VB    76.75         PPO_VB    75.23           TD3_VB    74.62
+     of the proposed method, PPO and TD3 algorithms are                            SAC       75.36         PPO       71.43           TD3       48.32
+     employed for comparative analysis. We implement four                         Note: Bold entries represent the best indicator.
+     different strategies by combining the BF and VB modules.
+     As shown in Fig. 5, the efficiency of the algorithms does                        decreases consistently over time for all methods. More-
+     not decrease regardless of whether BF or VB is added,                            over, the proposed SAC-based strategy achieves faster
+     and across all four combinations, the reward functions                           convergence and reaches the target point in the shortest
+     converge to nearly the same level. It is worth noting                            time, demonstrating its superior effectiveness compared
+     that PPO often exhibits faster initial convergence due to                        to PPO and TD3.
+     its on-policy updates, whereas SAC, benefiting from its                       Furthermore, safe reaching experiments with multiple ob-
+     off-policy design with a replay buffer, achieves higher                    stacles are conducted to evaluate the generalization capability
+     overall sample efficiency and more reliable long-term                      of the framework. As shown in Fig. 8, both SAC and PPO
+     performance. This distinction highlights the suitability                   successfully achieve collision-free reach, with SAC generating
+     of SAC for real-time visual servoing tasks where both                      smoother trajectories, while TD3 exhibits sensitivity to obstacle
+     efficiency and stability are essential. Furthermore, Table II              configurations. After changing the obstacle settings, TD3 can
+     illustrates the success rates (SRs) of various algorithms                  also complete the task, indicating a relatively weak generaliza-
+     under different combinations over 1000 rounds of testing.                  tion performance. The results in Fig. 9 are consistent with those
+     As depicted, when the algorithms are used individually,                    in Fig. 7, further confirming that the proposed method remains
+     the SRs of training are relatively low. However, upon                      effective in multiobstacle scenarios.
+     incorporating the BF and VB modules, the SRs of all three                     To further evaluate motion smoothness, Fig. 10 compares the
+     algorithms show improvement.                                               joint velocity profiles of different strategies. The velocities of
+  3) Real-World Tracking Results: As shown in Fig. 6, all three                 wrist joints 1, 2, and 3 remain close to zero during motion since
+     methods can successfully avoid the obstacle and reach                      the end-effector pose scarcely changes. As illustrated, the appli-
+     the target pose. In comparison, the proposed SAC-based                     cation of the BF module results in noticeably smoother velocity
+     control framework demonstrates the optimal path length                     profiles. With the additional incorporation of the VB module,
+     when crossing the obstacle. Meanwhile, it can be observed                  smoothness is further improved and jitter is almost eliminated.
+     from Fig. 7 shows the real-time tracking errors of the end-                The same framework can also be applied to traditional PPO and
+     effector under the safe reaching task using three different                TD3 algorithms.
+     strategies. The results are reported as mean values with                      Finally, the computational overhead introduced by the RTB
+     shaded areas representing the standard deviation of 30                     module is evaluated. On our experimental platform, the control
+     repeated trials, which more clearly illustrate the variability             policy runs at 30 Hz with an average inference time of about
+     of the results. It can be observed that the tracking error                 5 ms per cycle, while the RTB module adds only about 0.1 ms
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on October 30,2026 at 07:29:47 UTC from IEEE Xplore. Restrictions apply.
+MAO et al.: REAL-TIME SAFE AND SMOOTH VISUAL SERVOING FOR ROBOT MANIPULATORS                                                                         5857
+
+
+
+
+Fig. 6. Frame-by-frame plots under the safe reaching task with one
+obstacle using three different strategies: (a) SAC_Ours with the com-
+bination of BF and VB; (b) PPO_Ours with the combination of BF and
+VB; and (c) TD3_Ours with the combination of BF and VB.
+
+
+
+
+                                                                             Fig. 8. Frame-by-frame plots under the safe reaching task with multiple
+                                                                             obstacles using three different strategies: (a) SAC_Ours with the combi-
+                                                                             nation of BF and VB; (b) PPO_Ours with the combination of BF and VB;
+                                                                             and (c) TD3_Ours with the combination of BF and VB.
+
+
+
+
+Fig. 7. Real-time tracking errors of the end-effector under the safe
+reaching task with one obstacle using three different strategies.
+
+
+
+per cycle. This additional cost is negligible within the control
+loop and does not impose any extra computational burden.
+Moreover, the average task completion time is assessed across
+five randomly obstacle scenarios, as shown in Fig. 11. The pro-
+posed approach achieves an average of 5.0 s compared to 4.2 s
+                                                                             Fig. 9. Real-time tracking errors of the end-effector under the safe
+with plain SAC, where the slight increase is attributed to the               reaching task with multiple obstacles using three different strategies.
+smoother motions generated by the RTB scheme. Importantly,
+these results confirm that the proposed framework maintains
+both efficiency and reliability.
+                                                                                   applied in each round via sampling from the dataset. The
+                                                                                   objective is to use RL to train a velocity control action,
+D. Safe Dynamic Target Tracking Task
+                                                                                   and then control the UR5 in a continuous state-action
+  1) Task Description: We further extend the scenario to                           space to achieve precise tracking of dynamic targets while
+     dynamic target tracking. The workspace is depicted in                         avoiding collisions.
+     Fig. 12. The tracked target is abstracted as a cube. Ad-                   2) Training Results: Different from the reaching task, dy-
+     ditionally, another collision scenario is introduced to                       namic target tracking is more complex because it involves
+     demonstrate the effectiveness of the proposed method in                       continuously adjusting the position and velocity of the
+     avoiding collisions with dynamic targets. The initial pose                    target over time. While SAC may be less computation-
+     of the UR5 is set to a randomly selected collision-free                       ally efficient due to entropy regularization, it consistently
+     position. Different motion trajectories and target sizes are                  outperforms PPO and TD3, which face challenges such
+
+      Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on October 30,2026 at 07:29:47 UTC from IEEE Xplore. Restrictions apply.
+5858                                                                     IEEE TRANSACTIONS ON INDUSTRIAL ELECTRONICS, VOL. 73, NO. 4, APRIL 2026
+
+
+
+
+Fig. 10. Comparative analysis of robot joint velocity profiles with different strategies: (a)–(c) depict the joint velocity profiles using three different
+combinations of SAC; (d)–(f) depict the joint velocity profiles using three different combinations of PPO; and (g)–(i) depict the joint velocity profiles
+using three different combinations of TD3.
+
+
+
+
+Fig. 11. Average task completion time for four different combinations.
+
+      as local optima, poor generalization, and hyperparame-
+      ter sensitivity in dynamic environments [32]. Indeed, the
+      entropy maximization in SAC helps balance exploration
+      and exploitation, preventing premature convergence and
+      improving generalization. As shown in Table III, our SAC
+      approach achieves the highest SR over 1000 rounds of
+      testing, making it particularly effective for dynamic com-
+      plex tasks like target tracking in visual servoing.                      Fig. 12. Frame-by-frame plots under the 1-D dynamic target tracking
+   3) Real-World Tracking Results: Fig. 12 illustrates the track-              task using our proposed approach.
+      ing process of the robot manipulator during the forward
+                                                                                                         TABLE III
+      and reverse movement of a dynamic target. At the initial                   COMPARISON OF SRS UNDER SAFE DYNAMIC TARGET TRACKING TASK
+      moment, the end-effector is more than 15 cm away from
+      the target, which moves continuously at a speed of 0.1 m/s.                  Policy   SR (%)        Policy   SR (%)         Policy   SR (%)
+      The results demonstrate that the robot accomplishes the                      SAC_Ours 78.63         PPO_Ours 72.36          TD3_Ours 74.70
+                                                                                   SAC_BF    76.58        PPO_BF    70.98         TD3_BF    71.75
+      tracking task using the proposed SAC-based approach.                         SAC_VB    75.43        PPO_VB    70.54         TD3_VB    74.36
+      Fig. 13 shows the tracking error during the process. The                     SAC       76.43        PPO       71.43         TD3       45.36
+      error initially decreases, then rises, and subsequently de-
+      creases again. This behavior is mainly due to the obstacle
+      placed along the tracking path, which forces the end-                    another robot manipulator. As shown in Figs. 14 and 15, the
+      effector to increase the error to avoid collision.                       robot successfully follows the target trajectory, confirming that
+   In addition to the 1-D tracking experiments, 2-D dynamic                    the proposed framework can effectively handle dynamic targets.
+target tracking tasks with variable speed are also performed. For              It is also observed that when the target moves at relatively
+reproducibility, the target motion is physically generated using               high speed in the 2D workspace, tracking failures may occur
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on October 30,2026 at 07:29:47 UTC from IEEE Xplore. Restrictions apply.
+MAO et al.: REAL-TIME SAFE AND SMOOTH VISUAL SERVOING FOR ROBOT MANIPULATORS                                                                           5859
+
+
+
+                                                                                Nevertheless, potential limitations remain in scenarios in-
+                                                                             volving visual occlusion or sim-to-real transfer within complex
+                                                                             environments. Future work may address these challenges by
+                                                                             incorporating multimodal sensing, predictive mechanisms, and
+                                                                             adaptive safety-aware control to further enhance generalization
+                                                                             in dynamic and challenging tasks.
+
+
+
+Fig. 13. Real-time tracking errors of the end-effector under the 1-D
+dynamic target tracking task using our proposed approach.
+                                                                                                           REFERENCES
+                                                                              [1] J. Su, L. Wang, C. Liu, and H. Qiao, “Robotic inserting a moving object
+                                                                                  using visual-based control with time-delay compensator,” IEEE Trans.
+                                                                                  Ind. Informat., vol. 20, no. 2, pp. 1842–1852, Feb. 2024.
+                                                                              [2] Y. Wang, Y. Liang, D. Chen, Y. Liu, and M. Wang, “A goods sorting
+                                                                                  robot system for e-commerce logistics warehouse based on robotic
+                                                                                  arm technology,” in Proc. IEEE Int. Conf. Real-Time Comput. Robot.
+                                                                                  (RCAR), 2020, pp. 310–314.
+                                                                              [3] P. Zhou, R. Peng, M. Xu, V. Wu, and D. Navarro-Alarcon, “Path
+                                                                                  planning with automatic seam extraction over point cloud models for
+                                                                                  robotic arc welding,” IEEE Robot. Autom. Lett., vol. 6, no. 3, pp. 5002–
+                                                                                  5009, Jul. 2021.
+                                                                              [4] K. Li, H. Zhang, and H. Wang, “Nonlinear observer-based visual
+                                                                                  servoing and vibration control of flexible robotic manipulators with a
+                                                                                  fixed camera,” IEEE Trans. Cybern., vol. 54, no. 7, pp. 4100–4110, Jul.
+Fig. 14. Frame-by-frame plots under the 2-D dynamic target tracking               2024.
+task using the proposed approach.                                             [5] Y. Chen et al., “Image-based visual servoing of unmanned aerial
+                                                                                  manipulators for tracking and grasping a moving target,” IEEE Trans.
+                                                                                  Ind. Informat., vol. 19, no. 8, pp. 8889–8899, Aug. 2023.
+                                                                              [6] P. Serra, R. Cunha, T. Hamel, D. Cabecinhas, and C. Silvestre, “Landing
+                                                                                  of a quadrotor on a moving target using dynamic image-based visual
+                                                                                  servo control,” IEEE Trans. Robot., vol. 32, no. 6, pp. 1524–1525, Dec.
+                                                                                  2016.
+                                                                              [7] J. Lin, Y. Wang, Z. Miao, S. Fan, and H. Wang, “Robust observer-based
+                                                                                  visual servo control for quadrotors tracking unknown moving targets,”
+                                                                                  IEEE/ASME Trans. Mechatronics, vol. 28, no. 3, pp. 1268–1279, Jun.
+                                                                                  2023.
+                                                                              [8] J. Yang, X. Liu, J. Sun, and S. Li, “Sampled-data robust visual servoing
+                                                                                  control for moving target tracking of an inertially stabilized platform
+                                                                                  with a measurement delay,” Automatica, vol. 137, 2022, Art. No.
+                                                                                  110105.
+Fig. 15. Real-time tracking errors of the end-effector under the 2-D          [9] H. Shi, G. Sun, Y. Wang, and K.-S. Hwang, “Adaptive image-based
+dynamic target tracking task using our proposed approach.                         visual servoing with temporary loss of the visual signal,” IEEE Trans.
+                                                                                  Ind. Informat., vol. 15, no. 4, pp. 1956–1965, Aug. 2018.
+due to limited computational bandwidth, which highlights an                  [10] I. Siradjuddin, L. Behera, T. M. McGinnity, and S. Coleman, “Image-
+                                                                                  based visual servoing of a 7-DoF robot manipulator using an adaptive
+important direction for further optimization in future work.                      distributed fuzzy pd controller,” IEEE/ASME Trans. Mechatronics, vol.
+   Furthermore, dynamic target tracking experiments are also                      19, no. 2, pp. 512–523, Mar. 2013.
+conducted using PPO and TD3. Both methods tend to fail                       [11] H. M. Becerra, G. López-Nicolás, and C. Sagüés, “A sliding-mode-
+                                                                                  control law for mobile robots based on epipolar visual servoing from
+frequently in practice, and the few successful cases exhibit per-                 three views,” IEEE Trans. Robot., vol. 27, no. 1, pp. 175–183, Feb.
+formance patterns similar to those observed in the reaching task.                 2011.
+Therefore, specific plots for these methods are not included                 [12] A. Hajiloo, M. Keshmiri, W.-F. Xie, and T.-T. Wang, “Robust online
+                                                                                  model predictive control for a constrained image-based visual servoing,”
+here.                                                                             IEEE Trans. Ind. Electron., vol. 63, no. 4, pp. 2242–2250, Dec. 2015.
+                                                                             [13] T. Zhu, J. Mao, L. Han, C. Zhang, and J. Yang, “Real-time dynamic
+                                                                                  obstacle avoidance for robot manipulators based on cascaded nonlinear
+                          V. CONCLUSION                                           MPC with artificial potential field,” IEEE Trans. Ind. Electron., vol. 71,
+                                                                                  no. 7, pp. 7424–7434, Aug. 2023.
+   This article has presented a model-free framework for safe                [14] W. Zhao, J. P. Queralta, and T. Westerlund, “Sim-to-real transfer in deep
+and smooth visual servoing control of robot manipulators by                       reinforcement learning for robotics: a survey,” in Proc. IEEE Symp. Ser.
+integrating collision detection and trajectory blending schemes                   Comput. Intell. (SSCI), pp. 737–744, 2020.
+                                                                             [15] H. Liu, F. Ying, R. Jiang, Y. Shan, and B. Shen, “Obstacle-avoidable
+with RL. Unlike prior works, enhanced safety has been achieved                    robotic motion planning framework based on deep reinforcement learn-
+by embedding collision avoidance directly into the reward de-                     ing,” IEEE/ASME Trans. Mechatronics, vol. 29, no. 6, pp. 4377–4388,
+sign of the learning process. In addition, a trajectory blending                  Dec. 2024.
+                                                                             [16] D. Kalashnikov et al., “Scalable deep reinforcement learning for vision-
+strategy that combines a BF with polynomial interpolation has                     based robotic manipulation,” in Proc. 2nd Int. Conf. Robot Learn., 2018,
+been developed to mitigate abrupt variations in joint velocities                  pp. 651–673.
+and ensure smooth motion execution. Experimental evaluations                 [17] T. Zhang, K. Zhang, J. Lin, W.-Y. G. Louie, and H. Huang, “Sim2real
+                                                                                  learning of obstacle avoidance for robotic manipulators in uncertain
+have demonstrated that the proposed method enables efficient                      environments,” IEEE Robot. Autom. Lett., vol. 7, no. 1, pp. 65–72, Sep.
+visual servoing with collision avoidance.                                         2021.
+
+
+      Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on October 30,2026 at 07:29:47 UTC from IEEE Xplore. Restrictions apply.
+5860                                                                         IEEE TRANSACTIONS ON INDUSTRIAL ELECTRONICS, VOL. 73, NO. 4, APRIL 2026
+
+
+
+[18] G. Schoettler et al., “Deep reinforcement learning for industrial insertion                            Xin Zhou (Member, IEEE) received the B.E.
+     tasks with visual inputs and natural rewards,” in Proc. IEEE/RSJ Int.                                  degree in electrical engineering and automa-
+     Conf. Intell. Robots Syst., 2020, pp. 5548–5555.                                                       tion from Xi’an Jiaotong-Liverpool University,
+[19] S. Luo, H. Kasaei, and L. Schomaker, “Self-imitation learning by                                       Suzhou, China, in 2015, the M.S. degree in
+     planning,” in Proc. IEEE Int. Conf. Robot. Autom., 2021, pp. 4823–                                     digital systems and communication engineering
+     4829.                                                                                                  from Australian National University, Canberra,
+[20] A. Saxena, H. Pandya, G. Kumar, A. Gaud, and K. M. Krishna,                                            Australia, in 2017, and the Ph.D. degree in con-
+     “Exploring convolutional networks for end-to-end visual servoing,” in                                  trol science and engineering from East China
+     Proc. IEEE Int. Conf. Robot. Autom., 2017, pp. 3817–3823.                                              University of Science and Technology, Shang-
+[21] J. Guo, H.-T. Nguyen, C. Liu, and C. C. Cheah, “Convolutional neural                                   hai, China, in 2022.
+     network-based robot control for an eye-in-hand camera,” IEEE Trans.                                       Since August 2022, she has been with the
+     Syst., Man, Cybern.: Syst., vol. 53, no. 8, pp. 4764–4775, Aug. 2023.         College of Automation Engineering, Shanghai University of Electric
+[22] N. Yogeswaran et al., “New materials and advances in making electronic        Power, Shanghai, China. Her research interests include multiobjective
+     skin for interactive robots,” Adv. Robot., vol. 29, no. 21, pp. 1359–1373,    intelligent optimization, path planning, trajectory planning, and their
+     2015.                                                                         applications to high-dimensional manipulators.
+[23] L. Han, J. Mao, P. Cao, Y. Gan, and S. Li, “Toward sensorless
+     interaction force estimation for industrial robots using high-order finite-
+     time observers,” IEEE Trans. Ind. Electron., vol. 69, no. 7, pp. 7275–                                Chuanlin Zhang (Senior Member, IEEE) re-
+     7284, Jul. 2021.                                                                                      ceived the B.S. degree in mathematics and the
+[24] J. Pan, S. Chitta, and D. Manocha, “FCL: A general purpose library                                    Ph.D. degree in control theory and control engi-
+     for collision and proximity queries,” in Proc. IEEE Int. Conf. Robot.                                 neering from the School of Automation, South-
+     Autom., 2012, pp. 3859–3866.                                                                          east University, Nanjing, China, in 2008 and
+[25] A. Coulombe and H.-C. Lin, “High precision real time collision detec-                                 2014, respectively. From 2011 to 2012, he was
+     tion,” 2021, arXiv:200712045v2.                                                                       a Visiting Ph.D. Student with the Department of
+[26] T. Haarnoja, A. Zhou, P. Abbeel, and S. Levine, “Soft actor-critic: Off-                              Electrical and Computer Engineering, University
+     policy maximum entropy deep reinforcement learning with a stochastic                                  of Texas, San Antonio, TX, USA. From 2016 to
+     actor,” in Proc. 35th Int. Conf. Mach. Learn., 2018, pp. 1861–1870.                                   2017, he was a Visiting Scholar with the Energy
+[27] T. Haarnoja, H. Tang, P. Abbeel, and S. Levine, “Reinforcement learning                               Research Institute, Nanyang Technological Uni-
+     with deep energy-based policies,” in Proc. Int. Conf. Mach. Learn.,           versity, Singapore.
+     2017, pp. 1352–1361.                                                            Since 2014, he has been with the College of Automation Engineering,
+[28] C. Lv, W. Lin, and B. Zhao, “Voxel structure-based mesh reconstruction        Shanghai University of Electric Power, Shanghai, China, where he is
+     from a 3D point cloud,” IEEE Trans. Multimedia, vol. 24, pp. 1815–            currently a Professor.
+     1829, Apr. 2021.                                                                His research interests include nonlinear system control theory and
+[29] F. Giuliari, I. Hasan, M. Cristani, and F. Galasso, “Transformer networks     applications for power systems.
+     for trajectory forecasting,” in Proc. 25th Int. Conf. Pattern Recognit.
+     (ICPR), IEEE, 2021, pp. 10335–10342.                                                                 Jun Yang (Fellow, IEEE) received the B.Sc.
+[30] K. Katyal, K. Popek, C. Paxton, P. Burlina, and G. D. Hager,                                         degree in automation from the Department
+     “Uncertainty-aware occupancy map prediction using generative net-                                    of Automatic Control, Northeastern University,
+     works for robot navigation,” in Proc. Int. Conf. Robot. Autom. (ICRA),                               Shenyang, China, in 2006, and the Ph.D. degree
+     IEEE, 2019, pp. 5453–5459.                                                                           in control theory and control engineering from
+[31] Y. Zhao, J. Mao, and C. Zhang, “Safe reinforcement learning-based                                    the School of Automation, Southeast University,
+     dynamic obstacle avoidance for robotic manipulators,” in Proc. 10th                                  Nanjing, China, in 2011.
+     Int. Conf. Automat., Control Robot. Eng. (CACRE), IEEE, 2025,                                           Since 2020, he has been with the Department
+     pp. 5453–5459.                                                                                       of Aeronautical and Automotive Engineering,
+[32] J. W. Mock and S. S. Muknahallipatna, “A comparison of PPO,                                          Loughborough University, Loughborough, U.K.,
+     TD3 and SAC reinforcement algorithms for quadruped walking gait                                      as a Senior Lecturer. His research interests in-
+     generation,” J. Intell. Learn. Syst. Appl., vol. 15, no. 1, pp. 36–56,        clude disturbance observer, motion control, visual servoing, nonlinear
+     2023.                                                                         control, and autonomous systems.
+                                                                                      Dr. Yang was the recipient of the EPSRC New Investigator Award.
+                         Jianliang Mao (Member, IEEE) received the                 He serves as an Associate Editor or Technical Editor for IEEE
+                         B.Sc. degree in automation, the M.Sc. degree              TRANSACTIONS ON INDUSTRIAL ELECTRONICS, IEEE/ASME TRANSACTIONS
+                         in control engineering, and the Ph.D. degree              ON MECHATRONICS, and IEEE Open Journal of the Industrial Electronics
+                         in control theory and control engineering from            Society.
+                         the School of Automation, Southeast University,
+                         Nanjing, China, in 2011, 2014, and 2018, re-                                       Hesheng Wang (Senior Member, IEEE) recei-
+                         spectively.                                                                        ved the B.E. degree in electrical engineering
+                            From 2018 to 2021, he worked with the Re-                                       from Harbin Institute of Technology, Harbin,
+                         search and Development Institute, Estun Au-                                        China, in 2002, and the M.Phil. and Ph.D. de-
+                         tomation Company, Ltd, Nanjing, China. Since                                       grees in automation and computer-aided engi-
+                         2021, he has been with the College of Automa-                                      neering from The Chinese University of Hong
+tion Engineering, Shanghai University of Electric Power, Shanghai,                                          Kong, Hong Kong, China, in 2004 and 2007,
+China. His research interests include model predictive control, sliding                                     respectively.
+mode control, vision-based interactive control, and their applications to                                      He is currently a Distinguished Professor with
+electric drives and robot manipulators.                                                                     the School of Automation and Intelligent Sens-
+                                                                                                            ing, Shanghai Jiao Tong University, Shanghai,
+                          Jun Hu received the B.Sc. degree in mechanical           China. His research interests include visual servoing, service robots,
+                          engineering from Taihu University of Wuxi, Wuxi,         computer vision, and autonomous driving.
+                          China, in 2022, and is currently working toward            Dr. Wang is an Associate Editor of Robotic Intelligence and Au-
+                          the M.E. degree in computer technology with              tomation, and the International Journal of Humanoid Robotics, and a
+                          Shanghai University of Electric Power, Shang-            Senior Editor for the IEEE/ASME TRANSACTIONS ON MECHATRONICS, an
+                          hai, China.                                              Editor-in-chief of Robot Learning. From 2015 to 2019, was an Associate
+                            His research interests include motion plan-            Editor for IEEE TRANSACTIONS ON ROBOTICS and IEEE TRANSACTIONS ON
+                          ning, reinforcement learning, and visual servo-          AUTOMATION SCIENCE AND ENGINEERING, from 2021 to 2023. He was the
+                          ing.                                                     General Chair of IEEE/RSJ IROS 2025, IEEE ROBIO 2022, and IEEE
+                                                                                   RCAR 2016.
+
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on October 30,2026 at 07:29:47 UTC from IEEE Xplore. Restrictions apply.
+

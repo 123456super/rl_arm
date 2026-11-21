@@ -98,6 +98,7 @@ def validate_config(config: dict[str, Any]) -> None:
         ("thesis", "static_obstacle_count_probabilities"),
         ("thesis", "hybrid_static_obstacle_count"),
         ("thesis", "static_obstacle_layout_probabilities"),
+        ("thesis", "physical_obstacle_mixture"),
         ("thesis", "path_offset_min_m"), ("thesis", "path_offset_max_m"),
         ("thesis", "obstacle_surface_clearance_min_m"),
         ("thesis", "structured_offset_min_m"),
@@ -133,7 +134,54 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("device selection weights cannot both be zero")
 
     thesis = config["thesis"]
+    physical_mixture = thesis["physical_obstacle_mixture"]
+    required_physical_fields = {
+        "challenging_episode_probability", "grounded_probability",
+        "extra_path_probability", "max_path_obstacles",
+        "suspended_bottom_min_m", "obstacle_top_max_m",
+        "path_clearance_max_m",
+    }
+    missing_physical_fields = required_physical_fields - set(physical_mixture)
+    if missing_physical_fields:
+        raise KeyError(
+            "missing thesis.physical_obstacle_mixture fields: "
+            f"{sorted(missing_physical_fields)}"
+        )
+    for field in (
+        "challenging_episode_probability", "grounded_probability",
+        "extra_path_probability",
+    ):
+        probability = float(physical_mixture[field])
+        if not np.isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise ValueError(
+                f"thesis.physical_obstacle_mixture.{field} must be in [0, 1]"
+            )
+    max_path_obstacles = int(physical_mixture["max_path_obstacles"])
+    if max_path_obstacles < 1:
+        raise ValueError(
+            "thesis.physical_obstacle_mixture.max_path_obstacles must be positive"
+        )
+    suspended_bottom = _positive(
+        physical_mixture["suspended_bottom_min_m"],
+        "thesis.physical_obstacle_mixture.suspended_bottom_min_m",
+    )
+    obstacle_top = _positive(
+        physical_mixture["obstacle_top_max_m"],
+        "thesis.physical_obstacle_mixture.obstacle_top_max_m",
+    )
+    if obstacle_top <= suspended_bottom:
+        raise ValueError("physical obstacle top must exceed suspended bottom")
+    _positive(
+        physical_mixture["path_clearance_max_m"],
+        "thesis.physical_obstacle_mixture.path_clearance_max_m",
+        allow_zero=True,
+    )
     reward = thesis["reward"]
+    _positive(
+        reward.get("reference_tcp_path_length_weight", 0.0),
+        "thesis.reward.reference_tcp_path_length_weight",
+        allow_zero=True,
+    )
     entry_collision_penalty = _positive(
         reward["reference_obstacle_collision_entry_penalty"],
         "thesis.reward.reference_obstacle_collision_entry_penalty",
@@ -233,6 +281,33 @@ def validate_config(config: dict[str, Any]) -> None:
         "position_gain_s_inv", "position_tolerance_rad",
     ):
         _positive(motion[field], f"joint_motion_controller.{field}")
+    smoothing = motion.get("trajectory_smoothing")
+    if not isinstance(smoothing, dict):
+        raise KeyError(
+            "joint_motion_controller.trajectory_smoothing must be configured"
+        )
+    required_smoothing_fields = {
+        "enabled", "butterworth_cutoff_hz", "quintic_blend_duration_s",
+    }
+    missing_smoothing_fields = required_smoothing_fields - set(smoothing)
+    if missing_smoothing_fields:
+        raise KeyError(
+            "missing joint_motion_controller.trajectory_smoothing fields: "
+            f"{sorted(missing_smoothing_fields)}"
+        )
+    cutoff_hz = _positive(
+        smoothing["butterworth_cutoff_hz"],
+        "joint_motion_controller.trajectory_smoothing.butterworth_cutoff_hz",
+    )
+    _positive(
+        smoothing["quintic_blend_duration_s"],
+        "joint_motion_controller.trajectory_smoothing.quintic_blend_duration_s",
+    )
+    policy_frequency_hz = 1.0 / control_dt
+    if cutoff_hz >= 0.5 * policy_frequency_hz:
+        raise ValueError(
+            "Butterworth cutoff must be below the policy-rate Nyquist frequency"
+        )
     if bounded_motion_enabled:
         maximum_executable_delta = float(np.min(joint_velocity_limits)) * control_dt
         if float(thesis["joint_delta_limit_rad"]) > maximum_executable_delta + 1.0e-9:
@@ -279,6 +354,18 @@ def validate_config(config: dict[str, Any]) -> None:
     if int(thesis["scene_sample_max_attempts"]) < 1:
         raise ValueError("thesis.scene_sample_max_attempts must be positive")
     max_obstacles = int(thesis["observation"]["obstacle_set"]["max_obstacles"])
+    obstacle_set = thesis["observation"]["obstacle_set"]
+    feature_mode = str(obstacle_set.get("feature_mode", "clearance_direction"))
+    if feature_mode not in {"clearance_direction", "route_geometry"}:
+        raise ValueError(
+            "thesis.observation.obstacle_set.feature_mode must be "
+            "clearance_direction or route_geometry"
+        )
+    for field in ("route_size_scale_m", "route_position_scale_m"):
+        _positive(
+            obstacle_set.get(field, 0.25 if field == "route_size_scale_m" else 0.75),
+            f"thesis.observation.obstacle_set.{field}",
+        )
     hybrid_static_count = int(thesis["hybrid_static_obstacle_count"])
     if hybrid_static_count < 1 or hybrid_static_count + 1 > max_obstacles:
         raise ValueError(

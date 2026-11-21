@@ -1,0 +1,852 @@
+2186                                                         IEEE TRANSACTIONS ON INDUSTRIAL INFORMATICS, VOL. 22, NO. 3, MARCH 2026
+
+
+
+
+         Rapid Generalization of Motion Planning for
+             Robot Manipulator Among Locally
+                 Changed Environments
+                             Xiangjian Li , Xinjie Xiao , Huashan Liu , Senior Member, IEEE,
+                                           and Bo Shen , Senior Member, IEEE
+
+
+   Abstract—As is known, the problem of making a trained                        it has been verified that obtaining a sufficient amount of accurate
+deep reinforcement learning (DRL) model to adapt to a                           pretraining data or valuable human experience and knowledge
+new environment different from where it trains remains                          for robots can speed up the training [5], [6], but such process is
+open. In this article, DRL-based techniques are investi-
+gated and deployed for the robotic motion planning task
+                                                                                time-consuming and expensive, and motion planning tasks with
+in locally changed environments. First, a dynamic-entropy                       multiobjective optimization exacerbate this situation. In addi-
+actor-critic is proposed to automatically adjust the coeffi-                    tion, even small localized changes in the environment are likely
+cient of the entropy cluster to enable the agent to efficiently                 to invalidate the results of previously trained motion planning
+learn the potentially optimal policy. Second, a tutoring-                       policy. Although retraining or replanning can tackle such issues,
+guiding mechanism is established to heuristically explore                       they are inefficient and require extra pretraining data to accel-
+and sufficiently exploit valuable experience. Third, a mech-                    erate the training. In various tasks, the robot (agent) equipped
+anism consisting of progressive planner and inverse kine-
+matics mapper is designed to cope with localized changes                        with DRL is expected to adapt to different environments and
+in the environment, which enables the robot manipulator to                      obtain the maximum episode return. Although the exploration
+rapidly adapt to the newly changed environment. Finally, ex-                    capability of DRL under the maximum entropy framework can
+perimental results have verified the superior performance                       be improved to be competent in different environments by
+of the proposed approaches.                                                     adjusting the entropy of the policy, it is expensive to manually
+   Index Terms —Deep reinforcement learning (DRL), envi-                        pick off the most feasible entropy through extensive trials.
+ronment, localized change, motion planning, robot manipu-                           Since the exploration of DRL is guided by the reward, the
+lator.                                                                          exploitation of the experience in terms of augmentation and
+                                                                                sampling of experience and the corresponding reward mecha-
+                            I. INTRODUCTION                                     nism can heavily affect the policy learning [7], [8], especially
+A. Motivation                                                                   in situations where the environment changes after the training
+                                                                                has been completed, the problem on how to correct the trained
+       EEP reinforcement learning (DRL) has been employed
+D      broadly in many fields [1], [2], as one of the most essential
+fields, motion planning of robots based on DRL appeals to
+                                                                                results so as to rapidly adapt to the new environment remains
+                                                                                open.
+
+increasing researches [3], [4].                                                 B. Related Works
+   In complicated environments, it is challenging to plan moving
+trajectory for robot with redundant degrees of freedom (DoFs) to                   Under the maximum entropy framework, both the reward and
+adapt to different tasks with satisfactory performance. Moreover,               the entropy of the policy are taken into account in the episode
+                                                                                return, which can facilitate the exploration [9]. Moreover, for
+                                                                                different tasks, proper entropies can boost the efficiency of
+   Received 23 October 2025; revised 17 November 2025; accepted                 the policy learning [10]. Nonetheless, manually adjusting the
+21 November 2025. Date of publication 24 December 2025; date of
+current version 5 March 2026. This work was supported in part by the            entropy is imprecise and inefficient, and the potential optima are
+National Natural Science Foundation of China under Grant 62373095               likely to be neglected. Although additional structure or functions
+and Grant 62273088, in part by the Shanghai Oriental Talent Program             can be imposed into the updates to facilitate DRL in learning
+(Outstanding Project), in part by the Discipline Innovation Cultivation
+Program under Grant XKCX202304, and in part by the Fundamental
+                                                                                the optimal policy [11], [12], a fixed entropy fails to strongly
+Research Funds for the Central Universities under Grant 2232022G-09.            incentivize the agent on its exploratory actions [13]. The entropy
+Paper no. TII-25-7494. (Corresponding author: Huashan Liu.)                     is expected to be dynamically adjusted according to the policy
+   The authors are with the School of Information and Intelli-                  learning, since different entropies have different effects for the
+gent Science, Donghua University, Shanghai 201620, China, and
+also with the Engineering Research Center of Digitized Textile                  agent to explore the environment. Moreover, excessive useless
+and Apparel Technology, Ministry of Education, Donghua Univer-                  exploratory behaviors should be constrained to drive the agent
+sity, Shanghai 201620, China (e-mail: xjli@mail.dhu.edu.cn; xin-                to learn the potentially optimal policy and accomplish the task.
+jie.xiao@mail.dhu.edu.cn; hsliu@dhu.edu.cn; bo.shen@dhu.edu.cn).
+                                                                                   In the policy learning, although high-quality curricula or
+   This article has supplementary downloadable material available at
+https://doi.org/10.1109/TII.2025.3637078, provided by the authors.              demonstrations can assist the agent to converge rapidly [14],
+   Digital Object Identifier 10.1109/TII.2025.3637078                           [15], it is difficult to get plenty of precise experience that can
+
+1941-0050 © 2025 IEEE. All rights reserved, including rights for text and data mining, and training of artificial intelligence and similar technologies.
+   Personal use is permitted, but republication/redistribution requires IEEE permission. See https://www.ieee.org/publications/rights/index.html
+                                                                 for more information.
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:12:06 UTC from IEEE Xplore. Restrictions apply.
+LI et al.: RAPID GENERALIZATION OF MOTION PLANNING FOR ROBOT MANIPULATOR                                                                             2187
+
+
+
+act as demonstrations. The problem of methods for obtaining                        generate heuristic experience for shortening paths based
+heuristic experience and the balance between exploration and                       on explored experience in the early stage of the training.
+exploitation remains open. Moreover, due to the randomness in                      The guiding in the TG can adjust the reward distribution
+the sampling update, high-quality experience in the policy learn-                  according to the previous valuable experience to prevent
+ing might be neglected, which results in the agent for repeated                    the potentially optimal policy from being neglected and
+explorations and updates, or even being stranded in suboptimal                     drive the agent to approach the optimal policy.
+policies. Since DRL is reward-guided, the reward distribution                   3) A rapid refitting program consisting of a progressive
+can significantly impact the direction of the policy learning. In                  planner (PP) and an inverse kinematics mapper (IKM)
+addition, the reward distributions in different environments are                   is proposed, to cope with the localized changes in the
+difficult to design manually, and a static reward may result in the                environment without retraining DRL. The PP is based
+previous valuable experience being neglected in the stochastic
+                                                                                   on Voronoi diagram and Dijkstra planner, and is used to
+sampling updates. Due to this, the agent can be encouraged to
+                                                                                   seek for alternative paths to adapt to the locally changed
+learn the optimal policy by projecting the valuable experience
+                                                                                   environments. The IKM with a mixed normal distribu-
+into the reward distribution.
+    As known, it is difficult for a trained policy in a given scenario             tion algorithm is used to map the path in the Cartesian
+to adapt to a different scenario, even if the scenario has localized               space to the trajectory in the joint space of the robot
+changes. Transfer learning is always recalled at this point, to                    while ensuring that the inverse kinematics (IK) solution
+be used to solve the problem of policy inapplicability due to                      is energy-optimal.
+differences between scenarios [16], [17]. However, the situation               The rest of this article is organized as follows. Section II
+is not that simple in fact and the intricacies of knowledge transfer        describes the fundamentals of the proposed algorithm DEAC.
+are notably amplified in fields of DRL [18], [19]. In particular,           In Section III, the details of TG for the efficient policy learning
+it seems too costly when transfer learning is used, to generalize           is elaborated. In Section IV, a rapid refitting program consisting
+situations applicable when there are small changes in the envi-             of PP and IKM for locally changed environments is formulated.
+ronment. Thus, it is necessary to find a more targeted and simpler          Experimental results are given in Section V. Finally, Section VI
+approach than transfer learning . Approaches based on artificial            concludes this article.
+neural networks (ANNs) are kinds of imitation or fitting means
+in continuous spatiotemporal space of the robot [20], [21], [22].                    II. DYNAMIC-ENTROPY ACTOR-CRITIC (DEAC)
+These kinds of methods of ANNs generally based on traditional                  The process of DRL-based motion planning of a robot can
+kinematics formulas or pretrained model, which makes them                   be described as a Markov decision process, and it can be repre-
+restricted by the geometry of robots and expensive pretraining              sented as a tuple M = (S, A, F, T, r, τ ), where S is the state
+data. In addition, for localized changes in the environment,                space and A is the action space, both of them are assumed
+retraining and replanning result in a serious waste of resources            to be continuous. F (st+1 |st , a) is the transition probability
+and the benefits may be undesirable, therefore, a rapid and simple          of the environment. t ∈ {1, 2, . . . , T} denotes the number of
+method to mend the previous trajectory that can satisfy multiple            the transition times and T is the total number of that. In an
+optimization objectives is worth investigating.                             interaction between the agent and the environment, the state
+                                                                            st ∈ S will be transited to st+1 ∈ S when the agent takes action
+C. Contributions and Organization of this Article                           at ∈ A according to the policy π. r is the reward that will emit
+                                                                            a single-step reward rt when the agent takes an action at the tth
+   In response to the aforementioned discussions, we aim to                 interaction. τ ∈ (0, 1) is a discount that determines the priority
+provide general motion planning for robot manipulator, from                 of short-term rewards.
+the perspective of enhancing DRL for the policy learning and                   Under the maximum entropy framework, the primary formu-
+coping with the adaptation of trained results in a newly changed            las of DRL can be expressed as
+environment. The main contributions are summarized as fol-                                            
+                                                                                                        1
+lows.                                                                           Jη = Eat ,st ,st+1 ∼U     [Q(at , st ) − rt+1
+    1) A dynamic-entropy actor-critic (DEAC) with sharpness-                                            2
+       aware minimization (SAM) is proposed to assist the agent                                                                         2
+       in adapting to different environments and to boost the                            −τ     min Qi (at+1 , st+1 ) + αSλ (st+1 )                 (1)
+                                                                                                i=1,2
+       efficiency of the policy learning. The entropy cluster is
+                                                                                                                                
+       automatically adjusted by analyzing the policy learning
+       in the explored region, as it can be reflected by the                     Jφ = Est ,at ∼U − min Qi (st , at ) − αSλ (st )                     (2)
+                                                                                                        i=1,2
+       temporal difference (TD) error, to encourage the agent to            where Jη and Jφ are principles for updating the critic and the
+       make explorations. Moreover, the TD error threshold is               actor networks, respectively. η and φ are the entire parameters
+       automatically adjusted to protect the agent from learning            of the corresponding networks. U is the memory for storing
+       suboptimal policies due to the overweighted entropy in               experience during the interactions. Q denotes the output of
+       the episode return.                                                  the target critic network. α is the temperature parameter. Sλ (·)
+    2) A tutoring-guiding (TG) mechanism is proposed to ac-                 denotes a monotonically increasing entropy belonging to the
+       celerate the convergence of the policy learning and assist           entropy cluster S(·) with coefficient λ.
+       the agent to sufficiently exploit the previous valuable                 Since SAM [23] can seek the point of maximum loss around
+       experience. The tutoring in the TG is built into DRL to              the current parameters of the ANNs, it is used in the updates
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:12:06 UTC from IEEE Xplore. Restrictions apply.
+2188                                                                     IEEE TRANSACTIONS ON INDUSTRIAL INFORMATICS, VOL. 22, NO. 3, MARCH 2026
+
+
+
+of DRL to enhance stability of the ANNs. As illustrated by                       Algorithm 1: DEAC.
+Tsallis actor-critic with clipped automatic entropy adjustment
+(TAC-CA) [10], desirable entropies do much favor to enhance
+the DRL performance in diverse tasks. However, attempting
+entropies individually is time-consuming and expensive. More-
+over, exploring the environment and exploiting the experience
+have much randomness, which are challenges for manually
+selecting the desirable entropy.
+   To deal with the aforementioned dilemma, a DEAC is pro-
+posed in this article to assist the agent in automatically adjusting
+the coefficient of the entropy cluster in the training, the principle
+for adjusting the coefficient is defined as
+         λ ← λ + Cλ [1 − tanh(υ/Hυ )] , λ ∈ [λmin , λmax ]               (3)
+where υ = 21 [Q(at , st ) − rt + 1 − τ ( min Qi (at+1 , st+1 ) +
+                                                 i=1,2
+αS(st+1 ))]2 is the TD error. Hυ is the TD error threshold and λ
+will be adjusted when υ < Hυ . λmin and λmax are the minimum
+and maximum values for λ, respectively. Cλ is a constant.
+   As defined in (1), the critic networks update to reduce the TD
+error, which enables DRL to obtain the maximum episode return
+so as to learn the optimal policy. As the TD error reduces, DRL
+can be considered to gradually learn the policy in the explored
+region. In such situation, λ can be increased for enhancing the
+agent’s exploratory behaviors for seeking the potentially optimal
+policy in extra region.                                                         will dominate the episode return and misguide the agent to
+   Furthermore, under the maximum entropy framework, the                        concentrate on learning to increase the entropy, which will cause
+episode return is extended as the sum of the reward and the                     the task to fail. In the meantime, a small entropy is difficult to
+                                                                               encourage the agent to make more exploratory behaviors to seek
+entropy, which can be described as T     t=1 Est ,at ∼U [r(st , at ) +
+αSλ (st )], and the policy learning is guided by the reward and                 the optimal policy. Thus, it is crucial to dynamically regulate the
+the entropy. Importantly, even though the entropy can facilitate                growth of entropy.
+the agent’s exploratory behaviors, the aim of the agent is to                      Remark 2: With increasing λ, the agent’s exploratory be-
+accomplish the task; thus; in an episode return, the reward should              haviors are enhanced and the entropy becomes larger. To avoid
+play a more dominant role than the entropy for the vast majority                the policy learning being misguided, the TD error threshold is
+of training time.                                                               automatically adjusted to force the agent to obtain the maximum
+   The restriction should be imposed such that the increase in                  episode reward and accomplish the task. Moreover, since the
+the entropy is controllable, and it is defined as                               region explored by the agent is enlarged, a stricter constraint
+                                                                                in terms of a smaller TD error threshold can facilitate the
+                                          υ      υ
+ Hυ ← Hυ − CHυ [1 − tanh(υ/Hυ )] , Hυ ∈ [Hmin , Hmax ]                          sufficiency of the policy learning.
+                                                    (4)
+                                 υ          υ
+where CHυ is a constant, and Hmin    and Hmax    are the minimum                                         III. TG MECHANISM
+and maximum values of Hυ , respectively.                                           Heuristic is efficient in enhancing policy learning, thus the
+   In the training, as shown in (3), the entropy coefficient λ is               way in which heuristic experience is generated and utilized
+adjusted according to the TD error. When the TD error is smaller                is particularly important. Moreover, when the agent learns a
+than the TD error threshold Hυ , the policy in the explored region              superior policy to the previous ones, the commonly used static
+is considered to be well learned by the agent, in which case λ                  reward distribution may result in the agent not being able to take
+will be increased to encourage the agent to explore extra region.               sufficient advantage of the newly gained policy.
+As expressed by (4), a gradually tightened Hυ can constrain the                    To cope with these issues, a TG mechanism is proposed in
+proportion of the entropy in the episode return, and motivate                   this article to simplify the explored transitions and adjust the
+the agent to sufficiently explore the potential optimal policy by               reward distribution, so as to motivate sufficient utilization of
+using the enhanced exploratory behaviors. Moreover, the agent                   previous experience, and finally, boost the efficiency of the
+will be activated again for exploration until the current Hυ is                 policy learning.
+satisfied. Importantly, according to (3) and (4), the principles
+for automatically adjusting the entropy ensure the balance of
+exploration and exploitation in the policy learning of DEAC.                    A. Tutoring
+The proposed DEAC is presented in Algorithm 1.                                     In the tutoring, as shown in Fig. 1, a long-term memory
+   Remark 1: The reward obtained by the agent at a given                        is used to store long-term experience in the training, and a
+moment depends on the learned policy, while different entropies                 tutoring memory is used to store the heuristic experience. In
+have different effects on the episode return and the direction                  training, when the robot discovers feasible trajectories that can
+of the policy learning. In detail, an excessively large entropy                 connect the initial state to the target state without collision, these
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:12:06 UTC from IEEE Xplore. Restrictions apply.
+LI et al.: RAPID GENERALIZATION OF MOTION PLANNING FOR ROBOT MANIPULATOR                                                                             2189
+
+
+
+
+                                                                                     (a)                      (b)                      (c)
+
+                                                                            Fig. 2. Diagram of the trajectory simplification. In (a), when n = 1, the
+                                                                            simplified path is identical to the original one. In (b), when n = 2, the
+                                                                            trajectory is attempted to be simplified by skipping s2 . In (c), when n =
+                                                                            T − 1, the trajectory is attempted to connect the starting state s1 directly
+                                                                            to the ending state sT , and all other nodes are skipped.
+
+
+
+                                                                            |at,t+n | ≤ |amax |, which can bridge states st and st+n . This
+                                                                            approach not only satisfies the joint angle constraints for the
+                                                                            robot at each step, but also meets the settings for the range of
+                                                                            actions in DRL. Such experience data can be effectively utilized
+                                                                            as heuristic experience data for the policy learning.
+                                                                               In Fig. 2, specific cases with different values of n are shown.
+                                                                            During trajectory simplification, when n = 1, as depicted in
+                                                                            Fig. 2(a), state s1 is only attempted to be directly connected to the
+                                                                            next state s2 . This results in the simplified trajectory remaining
+                                                                            unchanged. In Fig. 2(b), state s1 is attempted to be directly
+                                                                            connected to state s3 , with an interval of one state between them.
+                                                                            In this case, if an action |a1,3 | = |θ 3 − θ 1 | exists, then state s2
+                                                                            will be skipped to simplify the trajectory. Furthermore, in the
+                                                                            extreme case where n = N = T − 1, as shown in Fig. 2(c), state
+Fig. 1. Schematic diagram of the proposed TG. The proposed TG
+mechanism is divided into the two components of Tutoring and                s1 is attempted to be directly connected to state sT . However,
+Guiding. In Tutoring, expert data are stored in the tutoring memory,        in this case, the robot could collide with obstacles and no action
+while explored data are stored in the long-term memory. During updates,     |a1,T | = |θ T − θ 1 | ≤ |amax | exists. Hence, the range of n is
+data in the minibatch will be sampled from these two memories adjusted      set to start from 2, and N should not be set excessively large to
+by ρg . As ρg decreases, the proportion of data from the long-term
+memory gradually increases. If ρg = 0 and a successful trajectory is        satisfy |at,t+n | ≤ |amax |.
+found, Guiding will be activated. According to the explored valuable           As shown in Fig. 1, the experience in the minibatch is sampled
+trajectories, the reward is continuously adjusted through Guiding, pro-     from the tutoring memory and the long-term memory, and the
+moting the agent to leverage previous valuable experience.
+                                                                            sampling ratio is automatically adjusted as
+
+trajectories are regarded as successful trajectories. In addition,                               ρg + τ, Gρ0 ≤ g ≤ Gρmax /2
+                                                                                       ρg =                                                          (6)
+the cache is used to store the successful trajectory experience                                  ρmax − τ, Gρmax /2 < g < Gρmax
+temporarily for the tutoring memory.
+   In the early stage of the training, the tutoring will be activated       where g, Gρ0 , Gρmax ∈ {1, 2, . . . , G} and G is the maximum
+when the cache is fully filled with the experience of successful            number of episode. ρg is the sampling ratio of experience from
+trajectories. In this stage, the state transitions of the trajectory        the tutoring memory in each episode, while the sampling ratio for
+are inefficient since the learned policy is poor. To tackle this            the experience sampled from the long-term memory is (1 − ρg ).
+issue, in the tutoring, the transitions are progressively simplified        τ is a constant. Gρ0 is the number of episode when the tutoring
+by the principle described as                                               is activated. ρmax is the maximum sampling ratio and Gρmax is
+              at,t+n                                                        the maximum number of episodes to use the tutoring.
+       st+n ←− st , ∃at,t+n ∈ A, |at,t+n | ≤ |amax |                 (5)
+                                                                               In early stage of the training, when the agent learns a trajectory
+where n ∈ {2, . . . , N}, and N is the maximum attempting inter-            to reach the objective, the state transitions in this trajectory
+val, (t + N) ≤ T. amax is the maximum value of the action that              will be simplified through (5) as the heuristic experience that is
+can be taken by the agent.                                                  stored in the tutoring memory. In this stage, heuristic experience
+   In (5), during trajectory simplification, the robot attempts to          is dominant in the minibatch and it can motivate the agent to
+reach the (t + n)th state directly from the tth state. It is a loop,        explore potentially shorter trajectories. In the later stage of the
+where n varies from 2 to N. Moreover, within this loop, when                training, the agent has learned the capability of simplifying
+the robot cannot reach the (t + n)th state from the tth state, the          trajectories from the heuristic experience. To allow the agent
+loop will be terminated. The connection from the tth state to               to exploit the capability and explore independently, as defined
+the (t + n − 1)th state will be created and the corresponding               in (6), the ratio of the heuristic experience sampled from the
+experience data will be saved. The next loop begins at the                  tutoring memory gradually decreases, which makes the agent
+(t + n − 1)th state. Furthermore, when the robot attempts to                gradually disengage from the effect of the heuristic experience.
+reach the (t + n)th state directly from the tth state, each joint           Correspondingly, the ratio of the experience sampled from the
+angle at,t+n should be less than the maximum angle amax , i.e.,             long-term memory gradually increases. Thereout, the policy
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:12:06 UTC from IEEE Xplore. Restrictions apply.
+2190                                                                     IEEE TRANSACTIONS ON INDUSTRIAL INFORMATICS, VOL. 22, NO. 3, MARCH 2026
+
+
+
+learned in the later stage of the training will be ensured to be                obstacles, and dobs
+                                                                                                  max is the maximum value of the distance under
+unbiased.                                                                       consideration. L and E are the path length and the energy
+   Remark 3: Heuristic experience is typically biased, thus the                 consumption of the current valuable trajectory, respectively,
+tutoring memory is only used to store the heuristic experience in               and Lmax and Emax are the corresponding maximum values of
+the early stage of the training, as defined in (6), in the updates, the         them. dangt  = minθ t − θ val  denotes the minimum distance
+sampling ratio of the heuristic experience is gradually reduced                 between the tth angle set θ t and the angle set θ val in the
+to 0, which ensures that the policy learning is shifted from biased             valuable trajectory. C obs , C col , and C ﬂag are sign functions,
+to unbiased.                                                                    i.e., C obs > 0 if dobs
+                                                                                                    t   < dobs
+                                                                                                            max , otherwise C
+                                                                                                                               obs
+                                                                                                                                   = 0; C col < 0 if
+                                                                                                                col         ﬂag
+                                                                                collision occurs, otherwise C = 0; C            > 0 if the valuable
+B. Guiding                                                                      trajectory exists, otherwise C ﬂag = 0.
+   Since the policy learning is reward-guided and the experience                   As defined as (10) and (11), the main reward f (t) is negatively
+sampling for updates is stochastic, potential valuable experience               correlated with the errors of the position and orientation between
+could be neglected during the training. To alleviate this issue,                the robot end at the tth transition and that of the objective,
+as shown in Fig. 1, when the agent obtains a feasible trajectory,               which can motivate the robot to approach the objective. In
+which is considered as the valuable trajectory, it will be suffi-               addition, in (12), when the robot explores a feasible trajectory,
+ciently exploited in the subsequent exploration by adjusting the                the trajectory will be retained and considered as the valuable
+reward distribution.                                                            trajectory for adjusting the reward distribution, as shown in
+   The valuable trajectory can be discretized as a set of nodes;                Fig. 1, the closer the subsequently explored node wt is to the
+for each node, the information it contains can be described as                  valuable trajectory, the lager its reward is. Through guiding by
+                                                                                the adjusted reward, the valuable trajectory can be inherited and
+                       wm = {pm , om , θ m }                  (7)               shared in subsequent exploration, which mitigates the impact
+where m ∈ {1, 2, . . . , M} is the number of the node in the                    of poor exploration and makes the policy learning efficient and
+valuable trajectory and M is the maximum number, and pm =                       robust.
+{xm , ym , zm } and om = {αm , βm , γm } denote the position and                                              ζ =L+E                                   (13)
+the orientation of the node wm , respectively. xm , ym , and zm
+are the coordinates in the Cartesian space, and αm , βm , and γm                where ζ represents the disadvantage of the valuable trajectory,
+are Euler angles. θ m is the set of the joint angles.                           where both path length and energy consumption are considered
+   In the training, the path length L and the energy consumption                with equal weight. The sum of their values is regarded as the
+E of the trajectory are calculated as                                           disadvantage of the valuable trajectory. During later training,
+                           M−1
+                                                                                valuable trajectories are continuously updated according to (13).
+                                                                                When the disadvantage ζ of the current valuable trajectory is
+                    L=            pm+1 − pm 2                            (8)
+                                                                                larger than that of the newly explored one, the current valuable
+                           m=1
+                                                                                trajectory will be updated by the newly discovered one. This
+                           M−1
+                                                                                ensures that policy learning remains aligned with the most recent
+                    E=           ω    |θ m+1 − θ m |1                  (9)    valuable trajectory. Details about TG are given in Algorithm 2.
+                           m=1                                                     Remark 4: Note that the valuable experience will not be
+where ω is the vector of weights for the joints in terms of inertia             retained after the tutoring (when ρg = 0). The subsequent tra-
+with its elements are assigned according to the principle that the              jectories explored by the agent will be unbiased, since the
+greater the moment of inertia of a specific joint, the bigger the               additional reward g(t) adjusts the reward distribution according
+value of corresponding element of ω.                                            to the trajectory found independently by the agent, which allows
+    The TG reward is designed to adjust the reward distribution,                the agent to seek the trajectory that is both length and energy
+which can be defined
+                      as                                                      optimal. Importantly, the valuable trajectory will be updated,
+                        f (t)                                                   which maintains that the valuable trajectory being shared is
+     r(t) = f (t) 1 +          g(t)                             (10)
+                       |f (t)|                                                  up-to-date. Moreover, the reward distribution can be updated
+                                                                              along with the policy updating, which mitigates the impact of
+                   pos      ori T      obs       dobs
+                                                  t
+    f (t) = − A[et ∪ et ] − C                1 − obs + C col                    inappropriate rewards on the policy learning.
+                                                 dmax
+                                                                (11)                             IV. RAPID REFITTING PROGRAM
+                                      
+             1                      L                                              As is known, for DRL, even localized changes occur in the
+     g(t) = C ﬂag clip 1 −
+             2                    Lmax                                          environment, it is generally necessary to retrain or replan. This
+                                                                             greatly diminishes the generalization of the learned policy. To
+                             E
+             + clip 1 −               exp (−dang
+                                               t )              (12)            cope with such issue, a rapid refitting program is proposed, it
+                           Emax                                                 contains a PP and an IKM, where the PP is based on Voronoi
+where f (t) is the main reward, and g(t) is the additional re-                  diagram [24], [25] and Dijkstra planner [26], and the IKM is a
+ward used to adjust the reward distribution. A is a constant                    mixed normal distribution-based energy-optimal IK solver with
+matrix. epos
+           t   = |pt − pobj | and eorit = |ot − o
+                                                    obj
+                                                        | denote the            an ANN.
+position and orientation errors, respectively. pt and ot are the                   As presented by (7), the information of each node in a
+tth position and orientation of the robot end, respectively. pobj               trajectory contains positions, orientations, and angles. The
+and oobj are the objective position and orientation, respectively.              path in the Cartesian space is described as the position set
+dobs
+  t   is the minimum distance between the robot plant and the                   P = {p1 , p2 , . . . , pM }, where pm ∈ P is the position at the
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:12:06 UTC from IEEE Xplore. Restrictions apply.
+LI et al.: RAPID GENERALIZATION OF MOTION PLANNING FOR ROBOT MANIPULATOR                                                                             2191
+
+
+
+
+ Algorithm 2: TG mechanism.
+
+
+
+
+                                                                                          (a)                   (b)                   (c)
+
+                                                                            Fig. 3. Schematic diagram of the proposed PP. (a) Voronoi diagram
+                                                                            is used to generate candidate nodes surrounding the obstacles. Nodes
+                                                                            pm and pm+n on the previous path are defined as the starting and
+                                                                            ending nodes, respectively, and are connected by a straight line labeled
+                                                                            Lb . (b) po and po are the candidate nodes closest to pm and pm+n ,
+                                                                            respectively, and are defined as the temporary starting and ending
+                                                                            nodes. The Dijkstra planner is utilized to plan a path from po and po
+                                                                            based on these candidate nodes, and this path is labeled P o . (c) P o
+                                                                            will be iteratively optimized according to (5) for shorter paths.
+
+
+                                                                               The main principles of PP can be depicted in Fig. 3, and the
+                                                                            steps in detail are elaborated as follows.
+                                                                               Step 1: Assuming P is the previous path, and there are local
+                                                                            changes occur in the environment resulting in some invalid
+                                                                            position nodes with sequence number from m + 1 to m + n − 1.
+                                                                            pm and pm+n belonging to P are considered as the starting node
+                                                                            and the ending one, respectively. Connect them by a straight line
+                                                                            as a basic path Lb as shown in Fig. 3(a).
+                                                                               Step 2: Voronoi diagram is used to obtain candidate nodes
+                                                                            surrounding the obstacle. On the two sides of the obstacle, where
+                                                                            Lb penetrates into and out of the obstacle, as shown in Fig. 3(b),
+                                                                            select two nodes po and po that have the smallest distance from
+                                                                            pm and pm+n , as the temporary starting and ending nodes,
+                                                                            respectively, where o ∈ {1, 2, . . . , O}.
+                                                                               Step 3: In Fig. 3(b), the Dijkstra planner is used to plan the
+                                                                            segment path P o from po to po based on the candidate nodes
+                                                                            that can bypass the obstacle.
+                                                                               Step 4: Connect P o with pm and pm+n at two sides for an
+mth node. The orientation set can be expressed as Υ =                       entire path Lo to replace Lb . The total number of the nodes of Lo
+{υ 1 , υ 2 , . . . , υ M }, where υ m ∈ Υ and υ m ∈ R3×3 is the orien-      is Δ, pm = Lo,1 , and pm+n = Lo,Δ . From Lo,1 , try to directly
+tation of the robot end at the mth node. The joint angle set is Θ =         connect the node afterward with an interval δ (δ ∈ {2, . . . , Δ −
+{θ 1 , θ 2 , . . . , θ M }, where θ m ∈ Θ is the joint angles at the mth    2}) until δ = Δ − 2 or failure. If failed, restart from Lo,δ−1 ,
+node. If the nodes from pm+1 to pm+n−1 (n ∈ {2, . . . , M − m})             and keep trying to connect afterward notes. This step will be
+are invalid due to localized changes in the environment, PP and             looped until Lo becomes unchanging, and as shown in Fig. 3(c),
+IKM will be activated.                                                      L∗o = Lo is the final path.
+                                                                               Step 5: Loop Steps 2–4 until all obstacles are bypassed.
+                                                                               The proposed PP only explores the regions surrounding the
+A. PP for Path Refitting                                                    obstacles rather than the entire region, which allows it to save a
+   This article aims to rapidly obtain a feasible path for locally          considerable cost in exploring. Moreover, candidate nodes gen-
+changed environments in a simple way. The Dijkstra planner is               erated by the Voronoi diagram diminish the bias of randomness
+a typical and low-complexity path planner widely used [27]. It              and significantly boost the efficiency of the path planning.
+needs sufficient candidate nodes that are obtained by randomly
+sampling or griding to obtain a high-quality path. However, it              B. IKM for IK Solving
+is cumbersome and time-consuming for the Dijkstra planner to
+                                                                               After L∗o is obtained by the PP, the nodes in Cartesian space
+explore the entire region, which inevitably generates needless
+                                                                            need to be mapped into the joint space. IKM, containing an
+explorations and leads to slow convergence.
+                                                                            ANN-based IK mapper and a mixed normal distribution-based
+   Voronoi diagram features high-computational efficiency and
+                                                                            algorithm, is proposed.
+is often used to assist traditional path planners in providing
+                                                                               The pose transformation matrix for the mth node on the path
+appropriately candidate nodes surrounding the obstacles [24],
+                                                                            can be expressed as
+[25]. Dijkstra is employed to search for feasible paths based on
+these candidate nodes, and the iterative optimization process (as                                               υm     pm
+illustrated in Step 4 below) is designed to progressively reduce                                     Tm =                 .                          (14)
+                                                                                                                 0      1
+path length.
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:12:06 UTC from IEEE Xplore. Restrictions apply.
+2192                                                                     IEEE TRANSACTIONS ON INDUSTRIAL INFORMATICS, VOL. 22, NO. 3, MARCH 2026
+
+
+
+
+                                                                                 Algorithm 3: IKM.
+
+
+
+
+Fig. 4. Schematic diagram of the proposed IKM. The number of ele-
+ments in the mean set x and energy consumption E is maintained at
+K. The κ is randomly selected and compared against the threshold .
+If κ ≤ , xK+1 follows the mixed normal distribution; otherwise, xK+1
+follows the uniform distribution. The corresponding EK+1 is obtained,
+and its elements are sorted in ascending order. Simultaneously, the
+elements in x are sorted according to the corresponding elements in E.
+At the end of the trial, E1 represents the minimum energy consumption.
+
+
+  The forward kinematics can be defined as
+                      f (θ m ) ∼
+                               = T m.                                  (15)
+  Thus, the IK can be described as
+                             θ m = f −1 (T m ).                        (16)
+   The ANN-based IK mapper is used to approximate f −1 with
+the loss function defined as
+                                                      2
+                   4      4
+      Lf =                     T̂ m (i, j) − T m (i, j)    (17)
+                       i=1     j=1
+
+where T̂ m = f (θ m ) is the estimated pose matrix provided by
+the mapper. T̂ m (i, j) denotes the element of row i and column
+j in T̂ m , and T m (i, j) also has the same representation in T m .
+   The proposed IKM can be expressed as shown in Fig. 4 and
+Algorithm 3, where a positive correlation relationship is created
+between the epoch number g and . In the early stage of the
+iterations, is small, it is promised that xK+1 is more likely to fol-
+low the uniform distribution and the mapper prefers exploratory
+behaviors. Accordingly, in the late stage of the iterations, the
+output of the mapper is likely to be close enough to the optimal
+solution, then excessive exploration will be unnecessary because                   From a systemic perspective, as shown in Fig. 5, the proposed
+it will diminish the efficiency of seeking the energy-optimal                   DEAC is an actor-critic structure of the off-policy model-free
+solution. Consequently, it is preferred that xK+1 follows the                   DRL algorithm. The entropy is adjusted according to the TD
+mixed normal distribution N to enhance exploitation of the                      error, with a smaller TD error indicating more adequate explo-
+previous iteration results. In addition, in each epoch, E will                  ration. When v is less than Hv , the entropy is adjusted to en-
+be sorted, and in this way, the energy-optimal IK solution can                  courage exploration, while Hv is reduced to impose a constraint
+be maintained and updated.                                                      on the return to ensure that the reward and the target are primary
+   Remark 5: When localized changes occur, the environment                      in the return. In the early training, successful trajectories are
+could be simplified or complicated, in both cases PP and IKM                    collected in the TG mechanism. Tutoring is used to generate
+will be activated. The proposed PP can rapidly find alternative                 heuristic trajectories based on these successful trajectories to
+paths, and the energy-optimal IK can be efficiently mapped                      facilitate exploration of potentially valuable trajectories, and
+by the proposed IKM. In a nutshell, without retraining DRL,                     Guiding is used to adjust the reward distribution so as to reduce
+using the proposed rapid refitting program composed of PP and                   the forgetting of those valuable trajectories. Moreover, in case
+IKM can assist the agent to rapidly adapt to newly changed                      localized changes occur in the environment, the proposed rapid
+environment, which significantly enhances the generalization                    refitting program will be activated to handle the effect of this
+performance of the learned policy.                                              change on the planning and update the whole trajectory. In the
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:12:06 UTC from IEEE Xplore. Restrictions apply.
+LI et al.: RAPID GENERALIZATION OF MOTION PLANNING FOR ROBOT MANIPULATOR                                                                             2193
+
+
+
+
+                                                                            Fig. 6. Comparisons of DRL algorithms in the OpenAI MuJoCo stan-
+                                                                            dard robotics tasks. The capability of each algorithm to obtain episode
+                                                                            reward is compared, and the curves are smoothed with convolution.
+
+                                                                                                      TABLE I
+                                                                             EPISODE REWARD COMPARISON OF DIFFERENT DRL ALGORITHMS IN THE
+                                                                                       OPENAI MUJOCO STANDARD ROBOTICS TASKS
+
+
+
+
+                                                                               OpenAI Gym MuJoCo is a standardized platform for robotic
+Fig. 5. Schematic diagram of the proposed motion planning frame-            tasks, some benchmarks [Ant, HalfCheetah (HalChe in short)],
+work. DEAC features efficient policy learning by adjusting entropy. TG      Hopper, Pusher, Humanoid, and HumanoidStandup (HumSta
+is used to assist DEAC in exploring and exploiting potential valuable
+experience by generating heuristic trajectory data and adjusting the re-    in short, and the episode reward is scaled by 0.01)] in it are
+ward distribution. The rapid refitting program incorporating PP and IKM     selected as the experimental scenarios to verify the generality
+is used to cope with changes occurring in the environment and provide       and efficiency of DEAC. For each benchmark, every DRL
+the robot with alternative trajectories that does not require retraining.
+                                                                            algorithm (SAC, TAC-CA, and DEAC) runs 1000 episodes and
+                                                                            each episode has 1000 steps. As shown in Fig. 6 and Table I,
+rapid refitting program, PP, which is a combination of Voronoi              the proposed DEAC performs superior to the other algorithms in
+diagram and Dijkstra planner, generates paths in Cartesian space,           terms of the episode reward. In detail, the trial of each algorithm
+then IKM is used to map these paths to trajectories with optimal            in each scenario is split into the early (episode from 1 to 500) and
+energy consumption in the joint space. The proposed methods                 the later (episode from 501 to 1000) stages. In the early stage, for
+can be integrated into a rapid generalization framework for robot           each scenario, the rates of the episode reward earned by DEAC
+motion planning to cope with locally changed environments.                  to those earned by SAC are 100.89% , 125.01% , 126.87% ,
+                                                                            99.01% , 100.92% , and 116.97% , respectively, and the rates of
+                                                                            the episode reward earned by DEAC to those earned by TAC-CA
+                   V. EXPERIMENTAL RESULTS                                  are 100.2% , 110.23% , 107.7% , 102.55% , 100.28% , and
+   In this article, six OpenAI MuJoCo robotic benchmarks are                113.12% , respectively. As shown in Fig. 6(a), (b), and (d), the
+selected and six customized robotic scenarios are established               exploratory ability of DEAC can be enhanced by (3), which
+to verify the proposed methods, and the experimental results                enables the agent to obtain more significantly increasing episode
+are presented and discussed. All the algorithms involved are                reward than that obtained by the other algorithms. Moreover, in
+developed and implemented on the Ubuntu 18.04 LTS operating                 the later stage, for each scenario, the rates of the episode reward
+system, and run on a laptop platform equipped with an Intel                 earned by DEAC to those earned by SAC are 155.38% , 128.56%
+Core i7-8750H CPU (at 2.20 GHz), 8-GB DDR4 RAM, and an                      , 147.16% , 100.08% , 100.88% , and 115.79% , respectively,
+NVIDIA GeForce GTX 1050Ti with 4-GB GDDR5 VRAM.                             and the rates of the episode reward earned by DEAC to those
+                                                                            earned by TAC-CA are 118.89% , 112.97% , 117.7% , 100.77%
+                                                                            , 100.34% , and 107.11% , respectively. To constrain excessively
+A. Verification of the Proposed DEAC Algorithm                              exploratory behaviors, as shown in Fig. 6(c) and (f), the TD error
+   The proposed DEAC is compared with two recent DRL                        threshold is shrunk according to (4) to make the reward dominant
+algorithms (soft actor-critic (SAC) [9] and TAC-CA [10]) in                 in the episode return, thus the agent is motivated to obtain the
+the standard robotics tasks of OpenAI MuJoCo to certify the                 maximum episode reward and accomplish the task, as well as
+superiority.                                                                the learned policy can be maintained and sufficiently exploited.
+
+     Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:12:06 UTC from IEEE Xplore. Restrictions apply.
+2194                                                                     IEEE TRANSACTIONS ON INDUSTRIAL INFORMATICS, VOL. 22, NO. 3, MARCH 2026
+
+
+
+                              TABLE II
+               MAIN HYPERPARAMETERS IN THE EXPERIMENTS
+
+
+
+
+                                                                                                 (a)                 (b)                  (c)
+
+
+
+
+                                                                                                 (d)                 (e)                  (f)
+
+
+
+
+                                                                                                 (g)                 (h)                  (i)
+
+                                                                                Fig. 8. Performance comparisons in terms of episode reward, path
+                                                                                length, and energy consumption in different Scenarios: (a)–(c) for Sce-
+                                                                                nario 1, (d)–(f) for Scenario 2, and (g)–(i) for Scenario 3. The curves are
+                                                                                smoothed with convolution.
+
+
+                   (a)                (b)               (c)                                                  TABLE III
+                                                                                              PLANNING RESULTS IN DIFFERENT SCENARIOS
+Fig. 7. Scenarios in simulation and the real-world platforms. The
+robotic task is to pick up the block from the starting place, and then,
+put it in the designated place. No collision with obstacles is allowed
+throughout. (a) Scenario 1. (b) Scenario 2. (c) Scenario 3.
+
+
+The main hyperparameters of DEAC in these experiments are
+given in Table II.
+
+B. Verification of the Proposed TG Mechanism
+   The proposed DEAC and TG for motion planning are ex-
+perimentally verified on a 7-DoF redundant robot manipulator
+KUKA LBR 7 R800 iiwa, in different work scenarios, as shown
+in Fig. 7. The state and action are defined as
+               s = {θ, epos , eori }, θ = {θ1 , θ2 , . . . , θD }      (18)     previous valuable experience from being neglected by adjusting
+                                                                                the reward distribution. In the meantime, as described in (12),
+              a = Δθ = {Δθ1 , Δθ2 , . . . , ΔθD }                      (19)     the guiding motivates the agent to explore trajectories that are
+where θ denotes the set of the joint angles of the robot and Δθ                 more energy-saving, as illustrated in Fig. 8(c), (f), and (i) that
+is the increments for the joint angles. D is the number of the                  the proposed DEAC-TG produces the energy-optimal trajectory
+joints. An attenuated noise is added to a in the experiments.                   among all the methods.
+   TG is integrated into DEAC as DEAC-TG, and the proposed                         The best policy of each method is selected for the test-
+DEAC and DEAC-TG are compared with two state-of-the-art                         ing, where there are 1000 episodes and each episode has
+methods (DRL with base controllers (DRLwB) [28] and back-                       300 steps. The comparative results are presented in Table III,
+stepping experience replay (BER) [29]). For fairness, the DRL                   where Lmin represents the minimum path length defined by
+in all the methods is replaced with DEAC. Every method runs                     Lmin = min{L1 , L2 , . . . , LG } and elements in it are calculated
+2000 episodes, 300 steps in each episode, for each scenario.                    by (8), the Emin denotes the minimum energy consumption
+   As shown in Fig. 8, the proposed DEAC-TG performs the                        defined by Emin = min{E1 , E2 , . . . , EG } and elements in it
+best in episode reward as shown in Fig. 8(a), (d) and (g),                      are calculated by (9) and ξ is the success rate defined by
+                                                                                       
+due to the superiority of DEAC in balancing exploration and                     ξ = G1 G  g=1 μg × 100% as the percentage of successful times
+exploitation in the episode return, which enables the agent to                  of reaching the objective in total episodes where μg = 1 if the
+efficiently exploit the enhanced exploratory ability to obtain                  agent reaches the objective, otherwise μg = 0.
+the maximum episode reward. Moreover, benefiting from the                          The DRLwB in [28] uses expert policies to assist the agent
+TG mechanism, the tutoring can generate heuristic trajectory by                 in the policy learning, where the learning efficiency is heav-
+using explored experience to reduce the path length, as shown in                ily dependent on the quality of the expert policies, and the
+Fig. 8(b), (e), and (h); the proposed DEAC-TG performs superior                 policy learned is likely to be biased. The BER in [29] aims
+to the other methods. In addition, after a feasible policy has                  to accelerate convergence in the early training through using
+been learned, the guiding of TG will be used to prevent the                     bidirectional transitions, the back-stepping transition function
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:12:06 UTC from IEEE Xplore. Restrictions apply.
+LI et al.: RAPID GENERALIZATION OF MOTION PLANNING FOR ROBOT MANIPULATOR                                                                              2195
+
+
+
+                             TABLE IV
+              MAIN HYPERPARAMETERS IN THE EXPERIMENTS
+
+
+
+
+                                                                                                  (a)               (b)               (c)
+
+                                                                                 Fig. 10. Scenarios in simulation and the real-word platforms. Sce-
+                                                                                 nario 4 is locally changed from Scenario 1, Scenario 5 is locally changed
+                (a)            (b)            (c)           (d)                  from Scenario 2, and Scenario 6 is locally changed from Scenario 3.
+                                                                                 In each scenario, the robotic task is to pick up the block from the
+                                                                                 starting place, and then, put them in the designated place. No collision
+                                                                                 with obstacles is allowed throughout. (a) Scenario 4. (b) Scenario 5.
+                (e)            (f)            (g)           (h)
+                                                                                 (c) Scenario 6.
+
+                                                                                                            TABLE VI
+                                                                                       COMPARISONS OF DIFFERENT IK SOLVERS IN SCENARIOS 1–6
+                (i)            (j)            (k)           (l)
+
+Fig. 9. Performance of the proposed DEAC-TG: (a) in simulation
+and (b)–(d) in real-word platform for Scenario 1; (e) in simulation and
+(f)–(h) in real-word platform for Scenario 2; (i) in simulation and (j)–(l) in
+real-word platform for Scenario 3.
+
+                            TABLE V
+       COMPARISONS OF DIFFERENT PLANNERS IN SCENARIOS 1–6
+
+
+
+
+                                                                                 on the exploration process, but its path optimization relies on
+                                                                                 randomly sampled nodes, requiring a large number of iterations
+                                                                                 to approximate the theoretical shortest path. HIA is an integrated
+                                                                                 approach that can generate high-quality paths under specific
+                                                                                 conditions. Nonetheless, potential parameter conflicts among its
+                                                                                 submodules pose a challenge to its generalization. PP can find
+                                                                                 shorter path lengths than the other two planners in Scenarios 1–6,
+is computationally expensive or even unsolvable. In contrast,                    as the progressive mechanism can remove unnecessary nodes to
+the proposed DEAC-TG can exploit the explored experience to                      reduce path length. Furthermore, since Voronoi diagrams can
+generate heuristic data without extra data or expert policies, and               supply feasible candidate nodes for Dijkstra, PP also achieves
+the previous valuable experience can be shared in subsequent                     higher success rates.
+explorations. Moreover, the tutoring can be inherited by the guid-                   As shown in Fig. 10, localized changes occur in Scenario 1
+ing, which allows the path length and the energy consumption                     to form Scenario 4, in Scenario 2 to form Scenario 5, and in
+to be optimized simultaneously in the policy learning according                  Scenario 3 to form Scenario 6.
+to (10)–(12), as shown in Table III; the proposed DEAC-TG has                        As shown in Table VI, the proposed IKM is compared with the
+the superiority to obtain a shorter path, less energy consumption,               state-of-the-art IK solvers (a hybrid method based on pose errors,
+and a higher success rate. The main hyperparameters of DEAC                      Cartesian movement primitives, a modified neural network and
+are the same as that in the Table II, and the main hyperparameters               an image-guided navigation (PCmI) in [32] and the combina-
+of TG in these experiments are given in Table IV.                                tion of a task-priority framework and an optimization-based
+   As presented in Fig. 9, the proposed motion planning ap-                      approach (TFOA) in [33]) in these six scenarios, and all methods
+proach DEAC-TG is experimentally verified in Scenario 1,                         are based on identical paths provided by DEAC-TG. PCmI
+Scenario 2, and Scenario 3 in the real-word platforms.                           can rapidly acquire expert skills through imitation learning,
+                                                                                 but it could be constrained by the experience of the expert
+                                                                                 and unable to autonomously explore IK with lower energy
+C. Verification of the Proposed PP and IKM                                       consumption. Although TFOA has a fast response, it requires
+   The proposed PP is compared with current typical path                         disabling optimization tasks to adjust the nullspace, making it
+planners (hybrid improved algorithm (HIA) in [30] and mul-                       difficult to ensure low energy consumption while tracking tra-
+tiinformed trees (MIT∗) in [31]) for path planning tasks in                      jectories. In the proposed IKM, the mapper has strong nonlinear
+Scenarios 1–6. As shown in Table V, MIT∗ employs an adaptive                     fitting capability, enabling IKM to be theoretically applied to
+sampler that dynamically adjusts the sampling strategy based                     arbitrary manipulator and improve success rates. Furthermore,
+
+      Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:12:06 UTC from IEEE Xplore. Restrictions apply.
+2196                                                                     IEEE TRANSACTIONS ON INDUSTRIAL INFORMATICS, VOL. 22, NO. 3, MARCH 2026
+
+
+
+                                                                                                            TABLE VIII
+                                                                                            RUNTIME COMPARISONS IN DIFFERENT SCENARIOS
+
+
+
+
+                    (a)                 (b)                 (c)
+
+
+
+
+                    (d)                 (e)                 (f)
+                                                                                                             TABLE IX
+                                                                                              MAIN HYPERPARAMETERS IN THE EXPERIMENTS
+
+
+
+                    (g)                 (h)                 (i)
+
+Fig. 11. Performance comparisons in terms of episode reward, path
+length, and energy consumption in different Scenarios: (a)–(c) for Sce-
+nario 4, (d)–(f) for Scenario 5, and (g)–(i) for Scenario 6. The curves are
+smoothed with convolution. DEAC-M inherits the policy of DEAC-TG in
+each episode without retraining.
+
+                               TABLE VII
+            PLANNING RESULTS IN LOCALLY CHANGED SCENARIOS
+
+                                                                                              (a)             (b)              (c)             (d)
+
+
+
+
+                                                                                              (e)             (f)              (g)             (h)
+
+
+
+
+                                                                                              (i)             (j)              (k)             (l)
+
+                                                                                Fig. 12. Performance of the proposed DEAC-M: (a) in simulation and
+                                                                                (b)–(d) in real-word platform for Scenario 4; (e) in simulation and (f)–
+                                                                                (h) in real-word platform for Scenario 5; and (i) in simulation and (j)–(l) in
+the mixed normal distribution-based energy optimization algo-                   real-word platform for Scenario 6.
+rithm enables IKM to perform superior in minimizing energy
+consumption.                                                                    terms of energy consumption in the comparison with the other
+   Integrate the proposed PP and IKM mechanisms into the                        methods. In addition, the proposed DEAC-M and DEAC-TG
+DEAC-TG to establish a general framework, named as DEAC-                        have maintained a high level of success rates since PP has the
+M, and compare it with the state-of-the-art motion planning                     ability of the systematic exploration and IKM features strong
+methods DRLwB in [28] and BER in [29]. Considering that the                     nonlinear fitting.
+proposed DEAC-M does not need to retrain the DRL in locally                        As shown in Table VIII, since DRLwB has expert policies,
+change environments, the corresponding policy in each episode                   DEAC is equipped with SAM, and DEAC-TG is assisted by
+to be applied in Scenarios 4–6 will inherit the DEAC-TG’s policy                both SAM and TG mechanism, they consume more training
+learned in Scenarios 1–3, respectively.                                         time compared to BER. However, when local changes occur in
+   As shown in Fig. 11 and Table VII, the proposed DEAC-TG                      the environment, only DEAC-M does not require retraining, as
+performs better than DRLwB and BER in Scenarios 4–6. In                         its PP and IKM can rapidly generate alternative trajectories to
+terms of the episode reward, as shown in Fig. 11(a), (d), and (g),              enhance the efficiency of the agent in accomplishing tasks.
+the proposed DEAC-M does not have an advantage over the                            The main hyperparameters of PP and IKM in these experi-
+proposed DEAC-TG, since PP and IKM aims to refit the trajec-                    ments are given in Table IX. As shown in Fig. 12, the proposed
+tory and the episode reward is not taken into account. As shown                 motion planning framework DEAC-M is experimentally verified
+in Fig. 11(b), (e), and (h) and Table VII, DEAC-M performs                      on the real-world platforms.
+shorter paths than DEAC-TG, which is attributed to the Voronoi
+diagram and Dijkstra planner-based PP that can minimize the                                                VI. CONCLUSION
+path length while bypassing the obstacles. Moreover, since IKM                     This article discussed the problem of motion planning in
+is capable of seeking energy-optimal IK solutions, as shown in                  the environments with localized changes. We showed that
+Fig. 11(c), (f), and (i) and Table VII, DEAC-M has the edge in                  the proposed DEAC can automatically adjust the coefficient
+
+       Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:12:06 UTC from IEEE Xplore. Restrictions apply.
+LI et al.: RAPID GENERALIZATION OF MOTION PLANNING FOR ROBOT MANIPULATOR                                                                                       2197
+
+
+
+of the entropy cluster to boost the efficiency of the policy                       [10] X. Li, H. Liu, and M. Dong, “A general framework of motion plan-
+learning. A TG mechanism was proposed to generate heuristic                             ning for redundant robot manipulator based on deep reinforcement
+                                                                                        learning,” IEEE Trans Ind. Inform., vol. 18, no. 8, pp. 5253–5263,
+experience without extra data or expert policies and adjust                             Aug. 2022.
+the reward distribution for the later updates according to the                     [11] X. Hai, L. Tan, Q. Feng, H. Duan, and C. Wen, “Replanning-oriented
+previous valuable experience. Moreover, TG can be used in an                            framework for efficient real-time decision-making in multi-systems,” IEEE
+arbitrary DRL algorithm to enhance its performance in motion                            Trans. Ind. Inform., vol. 21, no. 7, pp. 5127–5137, Jul. 2025.
+                                                                                   [12] W. Liang, Y. Liu, J. Wang, and Z.-X. Yang, “Trajectory progress-based
+planning tasks. Furthermore, to cope with localized changes                             prioritizing and intrinsic reward mechanism for robust training of robotic
+in the environment, PP and IKM were designed for locally                                manipulations,” IEEE Trans. Autom. Sci. Eng., vol. 22, pp. 9829–9842,
+refitting the trajectory with the length-optimal path and the                           2025, doi: 10.1109/TASE.2024.3513354.
+                                                                                   [13] T. Haarnoja et al., “Learning to walk via deep reinforcement learning,”
+energy-optimal IK solution. The proposed techniques can be                              Robot., Sci. Syst., pp. 1–10, 2019.
+combined as a framework called DEAC-M that generalizes                             [14] Z. He, P. Chen, H. Shi, J. Li, and K.-S. Hwang, “Robotic locomotion skill
+motion planning in the environments with localized changes                              learning using unsupervised reinforcement learning with controllable la-
+for different robots and/or different tasks using DRL.                                  tent space partition,” IEEE Trans. Ind. Inform., vol. 21, no. 1, pp. 902–911,
+                                                                                        Jan. 2025.
+   The proposed motion planning scheme was experimentally                          [15] Y. Zang et al., “Robotic disassembly skill acquisition based on rein-
+verified on a 7-DoF serial robot manipulator. The experimental                          forcement learning with external knowledge injection,” IEEE Trans. Ind.
+results showed that, as an important part of the proposed general                       Inform., vol. 21, no. 6, pp. 4576–4585, Jun. 2025.
+                                                                                   [16] J. Chen, Y. Wu, and H. Qiao, “Memory, attention, and muscle synergies
+framework DEAC-M, the proposed DEAC can motivate the
+                                                                                        based reinforcement and transfer learning for musculoskeletal robots under
+agent to efficiently obtain high episode reward by balancing ex-                        imperfect observation,” IEEE/ASME Trans. Mechatron., vol. 30, no. 3,
+ploration and exploitation. Besides, the proposed TG mechanism                          pp. 1853–1864, Jun. 2025.
+can facilitate the agent to seek the trajectory that is both length                [17] L. Jin, Y. Men, R. Song, F. Li, Y. Li, and X. Tian, “Robot skill generaliza-
+                                                                                        tion: Feature-selected adaptation transfer for peg-in-hole assembly,” IEEE
+and energy optimal by sufficiently utilizing the previous valu-                         Trans. Ind. Electron., vol. 71, no. 3, pp. 2748–2757, Mar. 2024.
+able experience. In addition, the proposed PP and IKM can be                       [18] Y. Men, L. Jin, T. Cui, Y. Bai, F. Li, and R. Song, “Policy fusion transfer:
+activated when the localized changes occur in the environment,                          The knowledge transfer for different robot peg-in-hole insertion assem-
+which is a shortcut without retraining DRL to refit the trajectory                      blies,” IEEE Trans. Instrum. Meas., vol. 72, 2023, Art. no. 3528510.
+                                                                                   [19] Z. Zhu, K. Lin, A. K. Jain, and J. Zhou, “Transfer learning in deep
+while having similar edges with the retrained one in terms of                           reinforcement learning: A survey,” IEEE Trans. Pattern Anal. Mach. Intell.,
+path length, energy consumption and success rate. One more                              vol. 45, no. 11, pp. 13344–13362, Nov. 2023.
+thing, the proposed methods can be generalized to robots with                      [20] Y. Xu et al., “Multi-attention spatio-temporal fusion graph neural network
+                                                                                        for chemical process fault diagnosis,” IEEE Trans. Instrum. Meas., vol. 74,
+arbitrary geometries. Furthermore, to meet the diverse demands                          2025, Art. no. 3530113.
+of future robot applications, the future work will be extended to                  [21] Y. Liu, R. Ni, and A. H. Qureshi, “Physics-informed neural mapping and
+collaborative tasks involving multitype robots, especially the                          motion planning in unknown environments,” IEEE Trans. Robot., vol. 41,
+human–robot collaboration scenarios. Embodied intelligence                              pp. 2200–2212, 2025.
+                                                                                   [22] M. A. Manzour, C. M. Elias, E. I. Morgan, and O. M. Shehata, “De-
+will also be introduced to enable robots to perceive physical en-                       velopment of a modular ROS-enabled pedestrian intention prediction
+vironments and understand human intentions in real time during                          architecture for maneuvering control,” IEEE Trans. Intell. Transp. Syst.,
+interaction, making human–robot collaboration more natural.                             vol. 26, no. 1, pp. 798–809, Jan. 2025.
+                                                                                   [23] P. Foret et al., “Sharpness-aware minimization for efficiently improving
+                                                                                        generalization,” in Proc. Int. Conf. Learn. Representations, 2021, pp. 1–19.
+                              REFERENCES                                           [24] Z. Wu, Y. Chen, J. Liang, B. He, and Y. Wang, “ST-FMT∗: A fast optimal
+                                                                                        global motion planning for mobile robot,” IEEE Trans. Ind. Electron.,
+ [1] Q. Zhou, Y. Niu, W. Xiang, and L. Zhao, “A novel reinforcement learning            vol. 69, no. 4, pp. 3854–3864, Apr. 2022.
+     algorithm based on broad learning system for fast communication antijam-      [25] J. Hu, Y. Hu, C. Lu, J. Gong, and H. Chen, “Integrated path planning
+     ming,” IEEE Trans. Ind. Inform., vol. 21, no. 3, pp. 2590–2599, Mar. 2025.         for unmanned differential steering vehicles in off-road environment with
+ [2] W. Zhang, Y. Zhang, N. Liu, K. Ren, and G. Peng, “Dimension-variable               terrains and obstacles,” IEEE Trans. Intell. Transp. Syst., vol. 23, no. 6,
+     mapless navigation with deep reinforcement learning,” IEEE/ASME Trans.             pp. 5562–5572, Jun. 2022.
+     Mechatron., to be published, doi: 10.1109/TMECH.2025.3541797.                 [26] E. W. Dijkstra, “A note on two problems in connexion with graphs,” Numer.
+ [3] H. Liu, X. Li, M. Dong, Y. Gu, and B. Shen, “Robotic motion planning               Math., vol. 1, no. 1, pp. 269–271, 1959.
+     based on deep reinforcement learning and artificial neural networks,” IEEE    [27] Z. Qiu, I. Jokić, S. Tang, R. Noldus, and P. Van Mieghem, “Inverse
+     Trans. Autom. Sci. Eng., vol. 22, pp. 8465–8479, 2025.                             all shortest path problem,” IEEE Trans. Netw. Sci. Eng., vol. 11, no. 3,
+ [4] H. Hua, Y. Wang, H. Zhong, and Y. Fang, “Deep reinforcement learning-              pp. 2703–2714, May/Jun. 2024.
+     based hierarchical motion planning strategy for multirotors,” IEEE Trans.     [28] G. Wang, M. Xin, W. Wu, Z. Liu, and H. Wang, “Learning of long-horizon
+     Ind. Inform., vol. 21, no. 6, pp. 4324–4333, Jun. 2025.                            sparse-reward robotic manipulator tasks with base controllers,” IEEE
+ [5] P. Chen et al., “An environmental-complexity-based navigation method               Trans. Neural Netw. Learn. Syst., vol. 35, no. 3, pp. 4072–4081, Mar. 2024.
+     based on hierarchical deep reinforcement learning,” in Proc. IEEE Int.        [29] X. Qi, D. Chen, Z. Li, and X. Tan, “Back-stepping experience replay with
+     Conf. Robot. Autom., 2024, pp. 5119–5125.                                          application to model-free reinforcement learning for a soft snake robot,”
+ [6] X. Liu, Z. Liu, G. Wang, Z. Liu, and P. Huang, “Efficient reinforcement            IEEE Robot. Autom. Lett., vol. 9, no. 9, pp. 7517–7524, Sep. 2024.
+     learning method for multi-phase robot manipulation skill acquisition via      [30] Y. Su, J. Xin, and C. Sun, “Dynamic path planning for mobile robots based
+     human knowledge, model-based, and model-free methods,” IEEE Trans.                 on improved RRT and DWA algorithms,” IEEE Trans. Ind. Inform., vol. 72,
+     Autom. Sci. Eng., vol. 22, pp. 6643–6652, 2025.                                    no. 10, pp. 10595–10604, Oct. 2025.
+ [7] X. Xing, Z. Zhou, Y. Li, B. Xiao, and Y. Xun, “Multi-UAV adaptive             [31] L. Zhang et al., “Estimated informed anytime search for sampling-based
+     cooperative formation trajectory planning based on an improved algorithm           planning via adaptive sampler,” IEEE Trans. Autom. Sci. Eng., vol. 22,
+     of deep reinforcement learning,” IEEE Trans. Veh. Technol., vol. 73, no. 9,        pp. 18580–18593, 2025.
+     pp. 12484–12499, Sep. 2024.                                                   [32] X. Jian et al., “Motion planning and control of active robot in orthopedic
+ [8] D. Liu, Y. Jiang, Y. Du, Z. Wang, and M. Cong, “Bi-phase episodic                  surgery by CAMP-based imitation learning and constrained optimization,”
+     memory-guided deep reinforcement learning for robot skills,” IEEE Robot.           IEEE Trans. Autom. Sci. Eng., vol. 22, pp. 12197–12212, 2025.
+     Autom. Lett., vol. 10, no. 9, pp. 8674–8681, Sep. 2025.                       [33] H. Gamper, L. Rodrigo Pérez, A. Mueller, A. D. Rosales, and M. Di
+ [9] T. Haarnoja et al., “Soft actor-critic: Off-policy maximum entropy deep            Castro, “An inverse kinematics algorithm with smooth task switching for
+     reinforcement learning with a stochastic actor,” in Proc. 35th Int. Conf.          redundant robots,” IEEE Robot. Autom. Lett., vol. 9, no. 5, pp. 4527–4534,
+     Mach. Learn., 2018, pp. 1861–1870.                                                 May 2024.
+
+
+      Authorized licensed use limited to: SHANGHAI UNIVERSITY. Downloaded on November 02,2026 at 09:12:06 UTC from IEEE Xplore. Restrictions apply.
+

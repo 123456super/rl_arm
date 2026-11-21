@@ -91,6 +91,11 @@ thesis:
     joint_acceleration_limits_rad_s2: [0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659]
     position_gain_s_inv: 4.0
     position_tolerance_rad: 0.0005
+    trajectory_smoothing:
+      # Disabled by default so archived experiments remain exactly reproducible.
+      enabled: false
+      butterworth_cutoff_hz: 0.5
+      quintic_blend_duration_s: 0.4
 
   self_collision:
     safe_distance_m: 0.005
@@ -105,6 +110,15 @@ thesis:
     reference_obstacle_clearance_weight: 1.0
     # Power 1.0 is the original linear clearance hinge.
     reference_obstacle_clearance_power: 1.0
+    # Absolute proximity alone made the Residual preserve conservative capsule
+    # contours even when Base was not moving toward them. During S1/S2 the
+    # trainer supplies Base-predicted clearance changes; the proximity cost
+    # starts at a 1 mm predicted decrease and reaches full strength at 10 mm.
+    reference_base_clearance_decrease_start_m: 0.001
+    reference_base_clearance_decrease_full_m: 0.010
+    # S1/S2 may opt in to discourage Base+Residual sums outside the Base
+    # increment envelope. This is a reward signal, not policy action clipping.
+    reference_composition_saturation_weight: 0.0
     # By default, the first and subsequent contact steps retain the archived
     # reference-PPO cost. Safety-focused S1 experiments may override only the
     # one-time entry cost without changing the continuation semantics.
@@ -113,6 +127,9 @@ thesis:
     reference_self_collision_penalty: 10.0
     reference_environment_collision_entry_penalty: 10.0
     reference_environment_collision_penalty: 10.0
+    # Optional executed TCP path cost (reward per metre). The established
+    # safety baseline keeps this disabled; route-efficiency experiments opt in.
+    reference_tcp_path_length_weight: 0.0
     reference_residual_penalty_weight: 0.0
     reference_residual_penalty_goal_start_m: 0.03
     reference_residual_penalty_goal_full_m: 0.02
@@ -125,12 +142,35 @@ thesis:
       max_obstacles: 8
       embedding_dim: 32
       output_dim: 32
+      feature_mode: clearance_direction
+      route_size_scale_m: 0.25
+      route_position_scale_m: 0.75
 
   static_obstacle_count_probabilities: {1: 1.0}
   # The first hybrid S2 curriculum step combines one moving obstacle with one
   # static obstacle. Later stages may raise this without changing the network.
   hybrid_static_obstacle_count: 1
   static_obstacle_layout_probabilities: {legacy_blocking: 1.0}
+  # Physical OBB layout sampler used by the obstacle-count curriculum. Support
+  # type is sampled independently per obstacle. In 80% of episodes at least
+  # one object affects the nominal path; no episode contains more than two
+  # path-relevant objects, keeping dense scenes feasible.
+  physical_obstacle_mixture:
+    challenging_episode_probability: 0.8
+    grounded_probability: 0.5
+    extra_path_probability: 0.25
+    max_path_obstacles: 2
+    suspended_bottom_min_m: 0.12
+    obstacle_top_max_m: 0.75
+    path_clearance_max_m: 0.03
+  # Optional trainer-side verification. Path-labelled scenes are replayed by
+  # the frozen Base and retained only when Base contacts the object or crosses
+  # this explicit external-clearance margin. Validation steps are not PPO
+  # samples and the accepted scene is recreated from the exact same seed.
+  path_scene_base_validation:
+    enabled: false
+    safety_margin_m: 0.01
+    max_attempts: 128
   path_offset_min_m: 0.03
   path_offset_max_m: 0.15
   obstacle_surface_clearance_min_m: 0.05

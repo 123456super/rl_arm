@@ -23,6 +23,7 @@ from rl_risk_sac.algorithms.thesis_ppo import PPONumericalError, ThesisPPOAgent
 from rl_risk_sac.envs.parallel_thesis_env import ParallelThesisEnvPool
 from rl_risk_sac.tasks.reference_reaching import (
     BASE_CLEARANCE_DELTA_FEATURE_DIM,
+    composition_saturation_penalty,
     residual_action_penalty,
 )
 from rl_risk_sac.utils.config import load_config
@@ -99,6 +100,14 @@ def episode_stats(info):
         "dynamic_obstacle_count": int(info.get("dynamic_obstacle_count", 0)),
         "static_obstacle_count": int(info.get("static_obstacle_count", 0)),
         "obstacle_layout": str(info.get("obstacle_layout", "none")),
+        "grounded_obstacle_count": int(info.get("grounded_obstacle_count", 0)),
+        "suspended_obstacle_count": int(info.get("suspended_obstacle_count", 0)),
+        "path_relevant_obstacle_count": int(
+            info.get("path_relevant_obstacle_count", 0)
+        ),
+        "primary_obstacle_route_shape": str(
+            info.get("primary_obstacle_route_shape", "none")
+        ),
         "obstacle_collision": False, "self_collision": False,
         "environment_collision": False, "joint_limit": False,
         "success": False,
@@ -109,9 +118,24 @@ def episode_stats(info):
         "dense_reward_sum": 0.0, "terminal_reward_sum": 0.0,
         "self_collision_penalty_sum": 0.0,
         "residual_penalty_sum": 0.0,
+        "composition_penalty_sum": 0.0,
+        "tcp_path_penalty_sum": 0.0,
+        "tcp_path_length_m": 0.0,
+        "joint_path_length_rad": 0.0,
+        "direct_tcp_distance_m": 0.0,
+        "tcp_path_efficiency_ratio": 0.0,
+        "route_lateral_min_m": 0.0,
+        "route_lateral_max_m": 0.0,
+        "route_vertical_deviation_min_m": 0.0,
+        "route_vertical_deviation_max_m": 0.0,
+        "selected_avoidance_route": "none",
         "joint_limit_violation_max_rad": 0.0,
         "joint_speed_peak_rad_s": 0.0,
         "joint_acceleration_peak_rad_s2": 0.0,
+        "joint_jerk_peak_rad_s3": 0.0,
+        "commanded_joint_jerk_peak_rad_s3": 0.0,
+        "joint_jerk_rms_rad_s3_square_sum": 0.0,
+        "commanded_joint_jerk_rms_rad_s3_square_sum": 0.0,
         "tcp_linear_speed_peak_m_s": 0.0,
         "tcp_angular_speed_peak_rad_s": 0.0,
         "joint_velocity_limiter_fraction_sum": 0.0,
@@ -149,6 +173,148 @@ def make_contract(stage: str, scene: str, config: dict) -> dict:
     }
 
 
+class BasePathSceneValidator:
+    """Reject nominally path-blocking scenes that do not challenge Base.
+
+    Scene construction remains inside the isolated PyBullet workers. For each
+    generated path-relevant scene, the trainer executes the frozen Base alone
+    until it either contacts the obstacle, crosses the configured external
+    clearance margin, reaches the target, or exhausts the horizon. Accepted
+    scenes are then reset with the exact same seed before PPO sees them.
+    Validation transitions never enter the rollout or the training step count.
+    """
+
+    def __init__(self, pool, agent, config: dict) -> None:
+        settings = config["thesis"].get("path_scene_base_validation", {})
+        self.enabled = bool(settings.get("enabled", False))
+        self.safety_margin_m = float(settings.get("safety_margin_m", 0.01))
+        self.max_attempts = int(settings.get("max_attempts", 128))
+        self.horizon = int(config["thesis"]["horizon"])
+        if not np.isfinite(self.safety_margin_m) or self.safety_margin_m < 0.0:
+            raise ValueError("Base scene-validation margin must be non-negative")
+        if self.max_attempts < 1:
+            raise ValueError("Base scene-validation max_attempts must be positive")
+        self.pool = pool
+        self.agent = agent
+        self.candidates = 0
+        self.accepted_collision = 0
+        self.accepted_clearance = 0
+        self.rejected = 0
+
+    def reset_many(self, requests: dict[int, dict]) -> dict:
+        if not self.enabled:
+            return self.pool.reset_many(requests)
+        pending = dict(requests)
+        attempts = {index: 0 for index in requests}
+        required_path: set[int] = set()
+        accepted: dict[int, tuple[np.ndarray, dict]] = {}
+        while pending:
+            candidate_seeds = {
+                index: int(np.random.randint(0, 2**31 - 1))
+                for index in pending
+            }
+            candidate_reset = self.pool.reset_many(
+                pending, seeds=candidate_seeds
+            )
+            active: dict[int, np.ndarray] = {}
+            path_seeds: dict[int, int] = {}
+            path_requests: dict[int, dict] = {}
+            layout_retries: set[int] = set()
+            for index, (observation, info) in candidate_reset.items():
+                if int(info.get("path_relevant_obstacle_count", 0)) <= 0:
+                    if index in required_path:
+                        attempts[index] += 1
+                        layout_retries.add(index)
+                    else:
+                        accepted[index] = (observation, info)
+                    continue
+                required_path.add(index)
+                self.candidates += 1
+                attempts[index] += 1
+                active[index] = observation
+                path_seeds[index] = candidate_seeds[index]
+                path_requests[index] = pending[index]
+
+            accepted_path: dict[int, str] = {}
+            if active:
+                self.pool.set_mesh_clearance_diagnostics(active, True)
+            for _ in range(self.horizon):
+                if not active:
+                    break
+                indices = tuple(active)
+                observations = np.stack(
+                    [active[index] for index in indices]
+                ).astype(np.float32)
+                actions = self.agent.predict_base_actions(observations)
+                results = self.pool.step_many({
+                    index: actions[offset]
+                    for offset, index in enumerate(indices)
+                })
+                for index, (
+                    next_observation, _reward, _cost,
+                    terminated, truncated, info,
+                ) in results.items():
+                    if bool(info.get("obstacle_collision", False)):
+                        accepted_path[index] = "collision"
+                        active.pop(index)
+                    elif float(
+                        info.get("external_mesh_d_min", np.inf)
+                    ) <= self.safety_margin_m:
+                        accepted_path[index] = "clearance"
+                        active.pop(index)
+                    elif bool(info.get("success", False)) or terminated or truncated:
+                        active.pop(index)
+                    else:
+                        active[index] = next_observation
+
+            if path_requests:
+                self.pool.set_mesh_clearance_diagnostics(
+                    path_requests, False
+                )
+
+            accepted_indices = tuple(accepted_path)
+            if accepted_indices:
+                exact_resets = self.pool.reset_many(
+                    {index: path_requests[index] for index in accepted_indices},
+                    seeds={index: path_seeds[index] for index in accepted_indices},
+                )
+                accepted.update(exact_resets)
+                self.accepted_collision += sum(
+                    reason == "collision" for reason in accepted_path.values()
+                )
+                self.accepted_clearance += sum(
+                    reason == "clearance" for reason in accepted_path.values()
+                )
+
+            rejected_indices = (
+                set(path_requests) - set(accepted_path)
+            ) | layout_retries
+            self.rejected += len(rejected_indices)
+            next_pending: dict[int, dict] = {}
+            for index in rejected_indices:
+                if attempts[index] >= self.max_attempts:
+                    raise RuntimeError(
+                        "failed to sample a Base-challenging path scene for "
+                        f"worker {index} after {attempts[index]} attempts; "
+                        f"margin={self.safety_margin_m:.6g} m"
+                    )
+                next_pending[index] = pending[index]
+            pending = next_pending
+        return accepted
+
+    def metrics(self) -> dict[str, int | float]:
+        return {
+            "base_validation_candidates": self.candidates,
+            "base_validation_accepted_collision": self.accepted_collision,
+            "base_validation_accepted_clearance": self.accepted_clearance,
+            "base_validation_rejected": self.rejected,
+            "base_validation_acceptance_rate": (
+                (self.accepted_collision + self.accepted_clearance)
+                / max(1, self.candidates)
+            ),
+        }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train thesis reaching with PPO")
     parser.add_argument("--config", default="configs/experiments/paper_full.yaml")
@@ -175,9 +341,9 @@ def main() -> None:
     parser.add_argument(
         "--base-actor-checkpoint",
         help=(
-            "After stage initialization, replace only the frozen Base Actor "
-            "with the Actor from this S0 checkpoint. Residual, encoders, "
-            "value function, exploration state, and optimizers are unchanged."
+            "Load only the frozen Base Actor from an S0 checkpoint. Without "
+            "--initialize-from-stage-checkpoint, Residual, obstacle encoders, "
+            "value function, exploration state, and optimizers start fresh."
         ),
     )
     parser.add_argument(
@@ -204,10 +370,6 @@ def main() -> None:
     if args.resume and args.initialize_from_stage_checkpoint:
         parser.error(
             "--resume and --initialize-from-stage-checkpoint are mutually exclusive"
-        )
-    if args.base_actor_checkpoint and not args.initialize_from_stage_checkpoint:
-        parser.error(
-            "--base-actor-checkpoint requires --initialize-from-stage-checkpoint"
         )
     if args.initial_action_std is not None and args.initial_action_std <= 0.0:
         parser.error("--initial-action-std must be positive")
@@ -343,11 +505,20 @@ def main() -> None:
             "timeout",
             "termination_reason",
             "d_min",
+            "external_d_min",
+            "external_mesh_d_min",
+            "c_proximity",
+            "c_proximity_ungated",
+            "clearance_gate_mean",
             "goal_error_norm",
             "obstacle_count",
             "obstacle_layout",
             "joint_speed_peak_rad_s",
             "joint_acceleration_peak_rad_s2",
+            "joint_jerk_peak_rad_s3",
+            "commanded_joint_jerk_peak_rad_s3",
+            "joint_jerk_rms_rad_s3",
+            "commanded_joint_jerk_rms_rad_s3",
             "tcp_linear_speed_peak_m_s",
             "tcp_angular_speed_peak_rad_s",
             "joint_velocity_limiter_fraction",
@@ -355,8 +526,17 @@ def main() -> None:
             "tcp_velocity_limiter_fraction",
             "joint_position_clip_fraction",
             "joint_position_clip_max_rad",
+            "reference_tcp_path_penalty",
+            "tcp_path_length_m",
+            "joint_path_length_rad",
+            "direct_tcp_distance_m",
+            "tcp_path_efficiency_ratio",
+            "route_lateral_min_m", "route_lateral_max_m",
+            "route_vertical_deviation_min_m",
+            "route_vertical_deviation_max_m", "selected_avoidance_route",
         ),
     )
+    scene_validator = BasePathSceneValidator(pool, agent, config)
     if resume_payload is not None and "random_state" in resume_payload:
         restore_random_state(resume_payload["random_state"], pool)
     elif resume_payload is not None:
@@ -375,7 +555,7 @@ def main() -> None:
     if resume_payload:
         recent.extend(resume_payload.get("recent_episodes", []))
     episodes_csv = (output / "episodes.csv").open("w", newline="", encoding="utf-8")
-    fields = ["episode", "step", "run_step", "scene", "obstacle_count", "dynamic_obstacle_count", "static_obstacle_count", "obstacle_layout", "return", "length", "success", "collision", "obstacle_collision", "self_collision", "environment_collision", "terminal_collision", "timeout", "joint_limit", "termination_reason", "best_position_m", "best_orientation_rad", "best_reference_error", "final_position_m", "final_orientation_rad", "final_reference_error", "max_hold", "action_abs_mean", "action_abs_max", "dense_reward_sum", "terminal_reward_sum", "self_collision_penalty_sum", "residual_penalty_sum", "joint_limit_violation_max_rad", "joint_speed_peak_rad_s", "joint_acceleration_peak_rad_s2", "tcp_linear_speed_peak_m_s", "tcp_angular_speed_peak_rad_s", "joint_velocity_limiter_fraction", "joint_acceleration_limiter_fraction", "tcp_velocity_limiter_fraction", "joint_position_clip_fraction", "joint_position_clip_max_rad"]
+    fields = ["episode", "step", "run_step", "scene", "obstacle_count", "dynamic_obstacle_count", "static_obstacle_count", "obstacle_layout", "grounded_obstacle_count", "suspended_obstacle_count", "path_relevant_obstacle_count", "primary_obstacle_route_shape", "selected_avoidance_route", "return", "length", "success", "collision", "obstacle_collision", "self_collision", "environment_collision", "terminal_collision", "timeout", "joint_limit", "termination_reason", "best_position_m", "best_orientation_rad", "best_reference_error", "final_position_m", "final_orientation_rad", "final_reference_error", "max_hold", "action_abs_mean", "action_abs_max", "dense_reward_sum", "terminal_reward_sum", "self_collision_penalty_sum", "residual_penalty_sum", "composition_penalty_sum", "tcp_path_penalty_sum", "tcp_path_length_m", "joint_path_length_rad", "direct_tcp_distance_m", "tcp_path_efficiency_ratio", "route_lateral_min_m", "route_lateral_max_m", "route_vertical_deviation_min_m", "route_vertical_deviation_max_m", "joint_limit_violation_max_rad", "joint_speed_peak_rad_s", "joint_acceleration_peak_rad_s2", "joint_jerk_peak_rad_s3", "commanded_joint_jerk_peak_rad_s3", "joint_jerk_rms_rad_s3", "commanded_joint_jerk_rms_rad_s3", "tcp_linear_speed_peak_m_s", "tcp_angular_speed_peak_rad_s", "joint_velocity_limiter_fraction", "joint_acceleration_limiter_fraction", "tcp_velocity_limiter_fraction", "joint_position_clip_fraction", "joint_position_clip_max_rad"]
     writer = csv.DictWriter(episodes_csv, fieldnames=fields)
     writer.writeheader()
     updates_file = (output / "updates.jsonl").open("w", encoding="utf-8")
@@ -407,7 +587,10 @@ def main() -> None:
     last_checkpoint_step = initial_global_step
 
     try:
-        reset = pool.reset_many({i: make_contract(args.stage, scenes[i], config) for i in range(args.num_envs)})
+        reset = scene_validator.reset_many({
+            i: make_contract(args.stage, scenes[i], config)
+            for i in range(args.num_envs)
+        })
         stats = {}
         for i, (value, info) in reset.items():
             obs[i] = value
@@ -415,7 +598,7 @@ def main() -> None:
         while completed_steps < args.steps:
             rollout_started = time.perf_counter()
             T = min(args.rollout_length, max(1, (args.steps - completed_steps + args.num_envs - 1) // args.num_envs))
-            rollout = {k: [] for k in ("obs", "actions", "std_scale", "logp", "values", "rewards", "residual_penalties", "residual_safety_context", "dones", "terminated", "next_obs")}
+            rollout = {k: [] for k in ("obs", "actions", "std_scale", "logp", "values", "rewards", "residual_penalties", "composition_penalties", "clearance_gate_means", "proximity_costs", "ungated_proximity_costs", "residual_safety_context", "dones", "terminated", "next_obs")}
             for _ in range(T):
                 episode_fraction = episodes / max(1.0, args.steps / float(config["thesis"]["horizon"]))
                 base_actions = agent.predict_base_actions(obs)
@@ -439,10 +622,28 @@ def main() -> None:
                     episode_fraction=episode_fraction,
                     residual_safety_context=residual_safety_context,
                 )
-                result = pool.step_many({i: actions[i] for i in range(args.num_envs)})
+                step_actions = {
+                    i: actions[i] for i in range(args.num_envs)
+                }
+                if getattr(
+                    pool, "supports_base_clearance_step_context", False
+                ):
+                    result = pool.step_many(
+                        step_actions,
+                        base_clearance_changes={
+                            i: residual_safety_context[i]
+                            for i in range(args.num_envs)
+                        },
+                    )
+                else:  # Minimal test doubles and archived pool adapters.
+                    result = pool.step_many(step_actions)
                 next_obs = np.empty_like(obs); raw_next_obs = np.empty_like(obs)
                 rewards = np.zeros(args.num_envs); dones = np.zeros(args.num_envs, dtype=np.float32)
                 residual_penalties = np.zeros(args.num_envs, dtype=np.float32)
+                composition_penalties = np.zeros(args.num_envs, dtype=np.float32)
+                clearance_gate_means = np.zeros(args.num_envs, dtype=np.float32)
+                proximity_costs = np.zeros(args.num_envs, dtype=np.float32)
+                ungated_proximity_costs = np.zeros(args.num_envs, dtype=np.float32)
                 terminated_flags = np.zeros(args.num_envs, dtype=np.float32)
                 reset_requests = {}
                 for i, (nobs, reward, _cost, terminated, truncated, info) in result.items():
@@ -472,7 +673,25 @@ def main() -> None:
                         ),
                     )
                     reward = float(reward) - residual_penalty
+                    composition_penalty, _ = composition_saturation_penalty(
+                        actions[i],
+                        float(config["thesis"]["joint_delta_limit_rad"]),
+                        penalty_weight=float(
+                            reward_config.get(
+                                "reference_composition_saturation_weight", 0.0
+                            )
+                        ),
+                    )
+                    reward -= composition_penalty
                     residual_penalties[i] = residual_penalty
+                    composition_penalties[i] = composition_penalty
+                    clearance_gate_means[i] = float(
+                        info.get("clearance_gate_mean", 0.0)
+                    )
+                    proximity_costs[i] = float(info.get("c_proximity", 0.0))
+                    ungated_proximity_costs[i] = float(
+                        info.get("c_proximity_ungated", 0.0)
+                    )
                     raw_next_obs[i] = nobs
                     next_obs[i] = nobs; rewards[i] = reward
                     terminated_flags[i] = float(terminated)
@@ -509,15 +728,40 @@ def main() -> None:
                     self_penalty = float(info.get("self_collision_step_penalty", 0.0))
                     stat["self_collision_penalty_sum"] += self_penalty
                     stat["residual_penalty_sum"] += residual_penalty
+                    stat["composition_penalty_sum"] += composition_penalty
+                    stat["tcp_path_penalty_sum"] += float(
+                        info.get("reference_tcp_path_penalty", 0.0)
+                    )
+                    for key in (
+                        "tcp_path_length_m", "joint_path_length_rad",
+                        "direct_tcp_distance_m", "tcp_path_efficiency_ratio",
+                        "route_lateral_min_m", "route_lateral_max_m",
+                        "route_vertical_deviation_min_m",
+                        "route_vertical_deviation_max_m",
+                    ):
+                        stat[key] = float(info.get(key, stat[key]))
+                    stat["selected_avoidance_route"] = str(
+                        info.get(
+                            "selected_avoidance_route",
+                            stat["selected_avoidance_route"],
+                        )
+                    )
                     stat["terminal_reward_sum" if dones[i] else "dense_reward_sum"] += reward - self_penalty
                     stat["joint_limit_violation_max_rad"] = max(stat["joint_limit_violation_max_rad"], info.get("joint_limit_violation_max_rad", 0.0))
                     for key in (
                         "joint_speed_peak_rad_s",
                         "joint_acceleration_peak_rad_s2",
+                        "joint_jerk_peak_rad_s3",
+                        "commanded_joint_jerk_peak_rad_s3",
                         "tcp_linear_speed_peak_m_s",
                         "tcp_angular_speed_peak_rad_s",
                     ):
                         stat[key] = max(stat[key], float(info.get(key, 0.0)))
+                    for key in (
+                        "joint_jerk_rms_rad_s3",
+                        "commanded_joint_jerk_rms_rad_s3",
+                    ):
+                        stat[f"{key}_square_sum"] += float(info.get(key, 0.0)) ** 2
                     for key in (
                         "joint_velocity_limiter_fraction",
                         "joint_acceleration_limiter_fraction",
@@ -532,6 +776,13 @@ def main() -> None:
                     if dones[i]:
                         episodes += 1
                         stat["action_abs_mean"] /= stat["length"]
+                        for key in (
+                            "joint_jerk_rms_rad_s3",
+                            "commanded_joint_jerk_rms_rad_s3",
+                        ):
+                            stat[key] = float(np.sqrt(
+                                stat.pop(f"{key}_square_sum") / stat["length"]
+                            ))
                         for key in (
                             "joint_velocity_limiter_fraction",
                             "joint_acceleration_limiter_fraction",
@@ -557,11 +808,11 @@ def main() -> None:
                         scenes[i] = stage_scene(args.stage, config)
                         reset_requests[i] = make_contract(args.stage, scenes[i], config)
                 if reset_requests:
-                    reset_results = pool.reset_many(reset_requests)
+                    reset_results = scene_validator.reset_many(reset_requests)
                     for i, (reset_observation, reset_info) in reset_results.items():
                         next_obs[i] = reset_observation
                         stats[i] = episode_stats(reset_info)
-                rollout["obs"].append(obs.copy()); rollout["actions"].append(policy_info["raw_actions"]); rollout["std_scale"].append(policy_info["std_scale"]); rollout["logp"].append(logp); rollout["values"].append(values); rollout["rewards"].append(rewards); rollout["residual_penalties"].append(residual_penalties); rollout["residual_safety_context"].append(residual_safety_context.copy()); rollout["dones"].append(dones); rollout["terminated"].append(terminated_flags); rollout["next_obs"].append(raw_next_obs.copy())
+                rollout["obs"].append(obs.copy()); rollout["actions"].append(policy_info["raw_actions"]); rollout["std_scale"].append(policy_info["std_scale"]); rollout["logp"].append(logp); rollout["values"].append(values); rollout["rewards"].append(rewards); rollout["residual_penalties"].append(residual_penalties); rollout["composition_penalties"].append(composition_penalties); rollout["clearance_gate_means"].append(clearance_gate_means); rollout["proximity_costs"].append(proximity_costs); rollout["ungated_proximity_costs"].append(ungated_proximity_costs); rollout["residual_safety_context"].append(residual_safety_context.copy()); rollout["dones"].append(dones); rollout["terminated"].append(terminated_flags); rollout["next_obs"].append(raw_next_obs.copy())
                 obs = next_obs; completed_steps += args.num_envs
                 if completed_steps >= args.steps: break
             rollout_seconds = time.perf_counter() - rollout_started
@@ -600,12 +851,13 @@ def main() -> None:
                       "obstacle_collision_rate_last100": mean("obstacle_collision"),
                       "self_collision_rate_last100": mean("self_collision"),
                       "environment_collision_rate_last100": mean("environment_collision"),
-                      "mean_length_last100": mean("length"), "mean_reward": float(rewards.mean()), "mean_residual_penalty": float(np.mean(rollout["residual_penalties"])), "gamma_mean": float(gammas.mean()), "action_abs_mean": float(np.mean(np.abs(batch["actions"]))), "action_abs_max": float(np.max(np.abs(batch["actions"]))), **metrics}
+                      "mean_length_last100": mean("length"), "mean_reward": float(rewards.mean()), "mean_residual_penalty": float(np.mean(rollout["residual_penalties"])), "mean_composition_penalty": float(np.mean(rollout["composition_penalties"])), "mean_clearance_gate": float(np.mean(rollout["clearance_gate_means"])), "mean_proximity_cost": float(np.mean(rollout["proximity_costs"])), "mean_ungated_proximity_cost": float(np.mean(rollout["ungated_proximity_costs"])), "gamma_mean": float(gammas.mean()), "action_abs_mean": float(np.mean(np.abs(batch["actions"]))), "action_abs_max": float(np.max(np.abs(batch["actions"]))), **metrics}
             record.update(
                 rollout_seconds=float(rollout_seconds),
                 update_seconds=float(update_seconds),
                 training_steps_per_second=float(len(batch["obs"]) / training_seconds),
             )
+            record.update(scene_validator.metrics())
             updates_file.write(json.dumps(record, allow_nan=False) + "\n"); updates_file.flush(); episodes_csv.flush()
             if metrics["actor_update_rejected"]:
                 rejection_directory = output / "diagnostics"
@@ -629,7 +881,7 @@ def main() -> None:
                     encoding="utf-8",
                 )
             if update % args.log_interval == 0:
-                print(f"step={record['step']}/{global_target_steps} run_step={completed_steps}/{args.steps} update={update} episodes={episodes} return100={record['mean_return_last100']} success100={record['success_rate_last100']} len100={record['mean_length_last100']} reward={record['mean_reward']:.3f} residual_penalty={record['mean_residual_penalty']:.4f} actor={metrics['actor_loss']:.4f} critic={metrics['critic_loss']:.4f} entropy={metrics['entropy']:.3f} std={metrics['action_std_mean']:.3f} std_ema={metrics['actor_std_ema']:.3f} residual_on={metrics['residual_enabled_fraction']:.3f} residual=({metrics['residual_action_abs_mean']:.4f},{metrics['residual_action_abs_max']:.4f}) action=({record['action_abs_mean']:.4f},{record['action_abs_max']:.4f}) kl={metrics['approx_kl']:.4f} kl_max={metrics['max_approx_kl']:.4f} kl_reject={int(metrics['actor_update_rejected'])} actor_steps={metrics['optimizer_steps']}/{metrics['actor_optimizer_attempts']} critic_steps={metrics['critic_optimizer_steps']} lr=({metrics['actor_lr']:.3g},{metrics['critic_lr']:.3g}) clip={metrics['clip_fraction']:.3f} adv_clip={metrics['advantage_clip_fraction']:.3f} grad=({metrics['actor_grad_norm']:.2f},{metrics['critic_grad_norm']:.2f}) time=({record['rollout_seconds']:.2f},{record['update_seconds']:.2f}) steps/s={record['training_steps_per_second']:.1f}", flush=True)
+                print(f"step={record['step']}/{global_target_steps} run_step={completed_steps}/{args.steps} update={update} episodes={episodes} return100={record['mean_return_last100']} success100={record['success_rate_last100']} len100={record['mean_length_last100']} reward={record['mean_reward']:.3f} residual_penalty={record['mean_residual_penalty']:.4f} composition_penalty={record['mean_composition_penalty']:.4f} clearance_gate={record['mean_clearance_gate']:.3f} proximity={record['mean_proximity_cost']:.3f}/{record['mean_ungated_proximity_cost']:.3f} actor={metrics['actor_loss']:.4f} critic={metrics['critic_loss']:.4f} entropy={metrics['entropy']:.3f} std={metrics['action_std_mean']:.3f} std_ema={metrics['actor_std_ema']:.3f} residual_on={metrics['residual_enabled_fraction']:.3f} residual=({metrics['residual_action_abs_mean']:.4f},{metrics['residual_action_abs_max']:.4f}) action=({record['action_abs_mean']:.4f},{record['action_abs_max']:.4f}) kl={metrics['approx_kl']:.4f} kl_max={metrics['max_approx_kl']:.4f} kl_reject={int(metrics['actor_update_rejected'])} actor_steps={metrics['optimizer_steps']}/{metrics['actor_optimizer_attempts']} critic_steps={metrics['critic_optimizer_steps']} lr=({metrics['actor_lr']:.3g},{metrics['critic_lr']:.3g}) clip={metrics['clip_fraction']:.3f} adv_clip={metrics['advantage_clip_fraction']:.3f} grad=({metrics['actor_grad_norm']:.2f},{metrics['critic_grad_norm']:.2f}) time=({record['rollout_seconds']:.2f},{record['update_seconds']:.2f}) steps/s={record['training_steps_per_second']:.1f}", flush=True)
             if metrics["kl_early_stopped"]:
                 if metrics["actor_rejection_reason"] == "target_kl":
                     rejection_detail = (

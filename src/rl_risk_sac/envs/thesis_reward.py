@@ -24,6 +24,7 @@ def compute_step_reward(
     self_collision: bool,
     environment_collision: bool,
     obstacle_clearances: Sequence[float],
+    obstacle_clearance_gates: Sequence[float] | None = None,
     parameters: Mapping[str, float],
     obstacle_risk: float,
     self_risk: float,
@@ -31,6 +32,7 @@ def compute_step_reward(
     self_distance: float,
     obstacle_safe_distance: float,
     self_safe_distance: float,
+    tcp_path_increment_m: float = 0.0,
     environment_first_contact: bool = False,
 ) -> StepReward:
     first_contact = bool(obstacle_collision and obstacle_first_contact)
@@ -56,6 +58,11 @@ def compute_step_reward(
         self_collision=self_collision,
         environment_collision=environment_collision,
         obstacle_clearances=tuple(float(value) for value in obstacle_clearances),
+        obstacle_clearance_gates=(
+            None
+            if obstacle_clearance_gates is None
+            else tuple(float(value) for value in obstacle_clearance_gates)
+        ),
         obstacle_threshold=parameters["reference_obstacle_threshold"],
         obstacle_clearance_weight=parameters["reference_obstacle_clearance_weight"],
         obstacle_clearance_power=parameters["reference_obstacle_clearance_power"],
@@ -63,6 +70,14 @@ def compute_step_reward(
         self_collision_penalty=parameters["reference_self_collision_penalty"],
         environment_collision_penalty=environment_collision_penalty,
     )
+    path_weight = float(parameters.get("reference_tcp_path_length_weight", 0.0))
+    path_increment = float(tcp_path_increment_m)
+    if path_weight < 0.0 or path_increment < 0.0:
+        raise ValueError("TCP path weight and increment must be non-negative")
+    path_cost = path_weight * path_increment
+    reward -= path_cost
+    fields["reference_tcp_path_penalty"] = float(path_cost)
+    fields["tcp_path_increment_m"] = path_increment
     any_collision = obstacle_collision or self_collision or environment_collision
     fields["reference_obstacle_collision_entry_penalty"] = float(
         obstacle_collision_penalty if first_contact else 0.0

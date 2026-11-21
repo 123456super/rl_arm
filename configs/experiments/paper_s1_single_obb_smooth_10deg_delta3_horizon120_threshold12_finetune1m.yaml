@@ -1,0 +1,11 @@
+# Single-variable fine-tuning experiment: continue the trained S1 policy while
+# increasing only the obstacle-clearance shaping range from 80 mm to 120 mm.
+includes:
+  - paper_s1_single_obb_smooth_10deg_delta3_horizon120_2m.yaml
+
+thesis:
+  reward:
+    reference_obstacle_threshold_m: 0.12
+
+train:
+  total_steps: 1000000

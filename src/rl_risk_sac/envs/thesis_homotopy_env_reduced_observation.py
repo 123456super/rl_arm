@@ -16,6 +16,7 @@ from rl_risk_sac.envs.thesis_dynamic_obstacles import DynamicObstacleMixin
 from rl_risk_sac.envs.thesis_static_obstacles import (
     ObstacleSamplingError,
     StaticObstacleMixin,
+    _sample_physical_layout_plan,
 )
 from rl_risk_sac.envs.thesis_reward import compute_step_reward
 from rl_risk_sac.prediction import LSTMObstaclePredictor, load_lstm_predictor
@@ -32,6 +33,7 @@ from rl_risk_sac.tasks.reference_reaching import (
     compute_thesis_geometry,
     pose_error,
     quaternion_to_matrix,
+    obstacle_feature_dim,
     reference_point_errors,
     reference_ppo_observation_dim,
 )
@@ -66,6 +68,10 @@ class ThesisHomotopyEnv(
         # to make all 240 Hz substeps visible in the PyBullet GUI.
         self._visualization_substep_delay_s = 0.0
         self._visualization_input_callback: Callable[[], None] | None = None
+        self._evaluation_counterfactual_variant: str | None = None
+        self._evaluation_forced_goal: tuple[
+            np.ndarray, np.ndarray, np.ndarray
+        ] | None = None
         self.config = config
         self.runtime = RuntimeConfig.from_mapping(config)
         thesis = config["thesis"]
@@ -153,6 +159,7 @@ class ThesisHomotopyEnv(
         self.controller_updates_per_policy_step = int(round(
             self.control_dt * self.real_control_frequency_hz
         ))
+        smoothing = motion["trajectory_smoothing"]
         self.motion_controller = (
             BoundedJointMotionController(
                 joint_velocity_limits=np.asarray(
@@ -163,6 +170,11 @@ class ThesisHomotopyEnv(
                 ),
                 position_gain=float(motion["position_gain_s_inv"]),
                 position_tolerance=float(motion["position_tolerance_rad"]),
+                trajectory_smoothing_enabled=bool(smoothing["enabled"]),
+                butterworth_cutoff_hz=float(smoothing["butterworth_cutoff_hz"]),
+                quintic_blend_duration_s=float(
+                    smoothing["quintic_blend_duration_s"]
+                ),
             )
             if self.bounded_joint_motion_enabled
             else None
@@ -312,6 +324,7 @@ class ThesisHomotopyEnv(
                 self.dynamic_predictor.horizon_times.copy()
             )
         self.blocking_obstacle_mode = bool(thesis["blocking_obstacle_mode"])
+        self.mesh_clearance_diagnostics_enabled = False
         self.d_safe = float(thesis["d_safe"])
         self_collision_config = thesis["self_collision"]
         self.d_self_safe = float(self_collision_config["safe_distance_m"])
@@ -363,12 +376,28 @@ class ThesisHomotopyEnv(
                     reward["reference_environment_collision_penalty"],
                 )
             ),
+            "reference_tcp_path_length_weight": float(
+                reward.get("reference_tcp_path_length_weight", 0.0)
+            ),
+            "reference_base_clearance_decrease_start": float(
+                reward.get("reference_base_clearance_decrease_start_m", 0.001)
+            ),
+            "reference_base_clearance_decrease_full": float(
+                reward.get("reference_base_clearance_decrease_full_m", 0.010)
+            ),
         }
         for name, value in self.reward_parameters.items():
             if not np.isfinite(value) or value < 0.0:
                 raise ValueError(f"{name} must be finite and non-negative")
         if self.reward_parameters["reference_obstacle_clearance_power"] <= 0.0:
             raise ValueError("reference_obstacle_clearance_power must be positive")
+        if not (
+            self.reward_parameters["reference_base_clearance_decrease_start"]
+            < self.reward_parameters["reference_base_clearance_decrease_full"]
+        ):
+            raise ValueError(
+                "Base clearance-decrease gate must satisfy start < full"
+            )
         self.goal_sample_max_attempts = int(thesis["goal_sample_max_attempts"])
         if self.goal_sample_max_attempts < 1:
             raise ValueError("goal_sample_max_attempts must be positive")
@@ -454,6 +483,25 @@ class ThesisHomotopyEnv(
         )
         obstacle_set_config = observation_config["obstacle_set"]
         self.max_obstacles = int(obstacle_set_config["max_obstacles"])
+        self.obstacle_feature_mode = str(
+            obstacle_set_config.get("feature_mode", "clearance_direction")
+        )
+        self.obstacle_feature_dim = obstacle_feature_dim(
+            self.obstacle_feature_mode
+        )
+        self.route_size_scale = float(
+            obstacle_set_config.get("route_size_scale_m", 0.25)
+        )
+        self.route_position_scale = float(
+            obstacle_set_config.get("route_position_scale_m", 0.75)
+        )
+        if (
+            not np.isfinite(self.route_size_scale)
+            or not np.isfinite(self.route_position_scale)
+            or self.route_size_scale <= 0.0
+            or self.route_position_scale <= 0.0
+        ):
+            raise ValueError("route feature scales must be finite and positive")
         if self.max_obstacles < 1:
             raise ValueError("observation.obstacle_set.max_obstacles must be positive")
         raw_count_probabilities = thesis["static_obstacle_count_probabilities"]
@@ -500,7 +548,8 @@ class ThesisHomotopyEnv(
             )
         allowed_layouts = {
             "legacy_blocking", "workspace_random", "path_offset", "mixed",
-            "structured",
+            "structured", "grounded_path", "grounded_random",
+            "suspended_path", "suspended_random", "physical_mixed",
         }
         raw_layout_probabilities = thesis["static_obstacle_layout_probabilities"]
         if not isinstance(raw_layout_probabilities, dict) or not raw_layout_probabilities:
@@ -538,6 +587,28 @@ class ThesisHomotopyEnv(
             ],
             dtype=np.float64,
         )
+        physical_mixture = thesis["physical_obstacle_mixture"]
+        self.physical_challenging_episode_probability = float(
+            physical_mixture["challenging_episode_probability"]
+        )
+        self.physical_grounded_probability = float(
+            physical_mixture["grounded_probability"]
+        )
+        self.physical_extra_path_probability = float(
+            physical_mixture["extra_path_probability"]
+        )
+        self.physical_max_path_obstacles = int(
+            physical_mixture["max_path_obstacles"]
+        )
+        self.physical_suspended_bottom_min = float(
+            physical_mixture["suspended_bottom_min_m"]
+        )
+        self.physical_obstacle_top_max = float(
+            physical_mixture["obstacle_top_max_m"]
+        )
+        self.physical_path_clearance_max = float(
+            physical_mixture["path_clearance_max_m"]
+        )
         self.path_offset_min = float(thesis["path_offset_min_m"])
         self.path_offset_max = float(thesis["path_offset_max_m"])
         self.obstacle_surface_clearance_min = float(
@@ -556,11 +627,14 @@ class ThesisHomotopyEnv(
         ):
             raise ValueError("invalid static obstacle layout distance settings")
         self.obstacle_layout = "none"
+        self.obstacle_layouts: tuple[str, ...] = ()
         # Reset selects one requested layout per episode. It remains fixed
         # while infeasible goals are rejected, so accepted episodes preserve
         # the configured layout mixture instead of biasing toward layouts
         # that are easier to sample.
         self._requested_obstacle_layout: str | None = None
+        self._requested_static_obstacle_count: int | None = None
+        self._requested_physical_layout_plan: tuple[str, ...] = ()
         if self.reference_point_offset_m <= 0.0:
             raise ValueError("observation.reference_point_offset_m must be positive")
         self._link_name_to_id: dict[str, int] = {}
@@ -574,7 +648,9 @@ class ThesisHomotopyEnv(
         # alive for the lifetime of the environment and reset only its state.
         self._initialize_world()
 
-        observation_dim = reference_ppo_observation_dim(self.max_obstacles)
+        observation_dim = reference_ppo_observation_dim(
+            self.max_obstacles, self.obstacle_feature_dim
+        )
         low = np.full(observation_dim, -np.inf, dtype=np.float32)
         high = np.full(observation_dim, np.inf, dtype=np.float32)
         self.observation_space = spaces.Box(
@@ -589,7 +665,14 @@ class ThesisHomotopyEnv(
         )
 
     def configure_episode(
-        self, scene: str, *, terminate_on_success: bool = True,
+        self,
+        scene: str,
+        *,
+        terminate_on_success: bool = True,
+        counterfactual_variant: str | None = None,
+        forced_goal_position: np.ndarray | None = None,
+        forced_goal_quaternion: np.ndarray | None = None,
+        forced_goal_joint_positions: np.ndarray | None = None,
     ) -> None:
         if scene not in {"none", "static", "dynamic", "hybrid"}:
             raise ValueError(
@@ -599,6 +682,36 @@ class ThesisHomotopyEnv(
             scene=scene,
             terminate_on_success=bool(terminate_on_success),
         )
+        variants = {"low_wide", "tall_narrow", "offset_left", "offset_right"}
+        if counterfactual_variant is not None:
+            if scene != "static":
+                raise ValueError("counterfactual obstacle evaluation requires static scene")
+            if counterfactual_variant not in variants:
+                raise ValueError(
+                    f"unknown counterfactual variant {counterfactual_variant!r}"
+                )
+        goal_values = (
+            forced_goal_position,
+            forced_goal_quaternion,
+            forced_goal_joint_positions,
+        )
+        if any(value is not None for value in goal_values) and not all(
+            value is not None for value in goal_values
+        ):
+            raise ValueError("forced counterfactual goal requires position, quaternion, and joints")
+        self._evaluation_counterfactual_variant = counterfactual_variant
+        self._evaluation_forced_goal = None
+        if forced_goal_position is not None:
+            position = np.asarray(forced_goal_position, dtype=np.float32)
+            quaternion = np.asarray(forced_goal_quaternion, dtype=np.float32)
+            joints = np.asarray(forced_goal_joint_positions, dtype=np.float32)
+            if position.shape != (3,) or quaternion.shape != (4,) or joints.shape != (6,):
+                raise ValueError("invalid forced counterfactual goal dimensions")
+            if not all(np.isfinite(value).all() for value in (position, quaternion, joints)):
+                raise ValueError("forced counterfactual goal must be finite")
+            self._evaluation_forced_goal = (
+                position.copy(), quaternion.copy(), joints.copy()
+            )
 
     def configure_human_playback(
         self,
@@ -623,6 +736,8 @@ class ThesisHomotopyEnv(
         total_obstacle_sampling_time = 0.0
         last_sampling_error: ObstacleSamplingError | None = None
         self._requested_obstacle_layout = None
+        self._requested_static_obstacle_count = None
+        self._requested_physical_layout_plan = ()
         if (
             self.contract.scene in {"static", "hybrid"}
             and self.blocking_obstacle_mode
@@ -631,9 +746,38 @@ class ThesisHomotopyEnv(
                 self.static_obstacle_layouts,
                 p=self.static_obstacle_layout_probabilities,
             ))
-        for scene_sample_attempt in range(1, self.scene_sample_max_attempts + 1):
+            if self._requested_obstacle_layout == "physical_mixed":
+                if self.contract.scene == "static":
+                    self._requested_static_obstacle_count = int(self.rng.choice(
+                        self.static_obstacle_counts,
+                        p=self.static_obstacle_count_probabilities,
+                    ))
+                else:
+                    self._requested_static_obstacle_count = (
+                        self.hybrid_static_obstacle_count
+                    )
+                self._requested_physical_layout_plan = (
+                    _sample_physical_layout_plan(
+                        self._requested_static_obstacle_count,
+                        challenging_probability=(
+                            self.physical_challenging_episode_probability
+                        ),
+                        grounded_probability=self.physical_grounded_probability,
+                        extra_path_probability=self.physical_extra_path_probability,
+                        max_path_obstacles=self.physical_max_path_obstacles,
+                        rng=self.rng,
+                    )
+                )
+        scene_attempt_limit = (
+            1 if self._evaluation_forced_goal is not None
+            else self.scene_sample_max_attempts
+        )
+        for scene_sample_attempt in range(1, scene_attempt_limit + 1):
             self._disable_obstacle()
             self._reset_fixed_initial_state()
+            self.episode_start_ee_position = np.asarray(
+                self.robot.end_effector_pose()[0], dtype=np.float32
+            )
             # A real controller starts a new episode from the measured, static
             # initial state.  Carrying the previous episode's final velocity
             # into the acceleration limiter would create a command that cannot
@@ -641,7 +785,23 @@ class ThesisHomotopyEnv(
             if self.motion_controller is not None:
                 _, initial_velocity = self.robot.joint_state()
                 self.motion_controller.reset(initial_velocity)
-            self._sample_fixed_orientation_goal_pose()
+            if self._evaluation_forced_goal is None:
+                self._sample_fixed_orientation_goal_pose()
+            else:
+                position, quaternion, joints = self._evaluation_forced_goal
+                self.goal_position = position.copy()
+                self.goal_quaternion = quaternion.copy()
+                self.goal_joint_positions = joints.copy()
+                self.goal_ik_validation = {
+                    "q_ik": joints.astype(np.float64),
+                    "reachable": True,
+                    "finite": True,
+                    "within_limits": True,
+                    "collision_free": True,
+                    "position_error_m": 0.0,
+                    "orientation_error_rad": 0.0,
+                }
+                self.goal_sample_attempts_last = 0
             try:
                 self._create_obstacle()
             except ObstacleSamplingError as error:
@@ -657,16 +817,29 @@ class ThesisHomotopyEnv(
             break
         else:
             self._requested_obstacle_layout = None
+            self._requested_static_obstacle_count = None
+            self._requested_physical_layout_plan = ()
             raise ObstacleSamplingError(
                 "failed to sample a feasible goal and obstacle scene after "
-                f"{self.scene_sample_max_attempts} goal attempts; "
+                f"{scene_attempt_limit} goal attempts; "
                 f"last error: {last_sampling_error}"
             ) from last_sampling_error
         self._requested_obstacle_layout = None
+        self._requested_static_obstacle_count = None
+        self._requested_physical_layout_plan = ()
         self.step_count = 0
         self.success_hold_count = 0
         self.obstacle_contact_seen = False
         self.environment_contact_seen = False
+        self.tcp_path_length_m = 0.0
+        self.joint_path_length_rad = 0.0
+        self.direct_tcp_distance_m = float(np.linalg.norm(
+            self.goal_position - self.episode_start_ee_position
+        ))
+        self.route_lateral_min_m = 0.0
+        self.route_lateral_max_m = 0.0
+        self.route_vertical_deviation_min_m = 0.0
+        self.route_vertical_deviation_max_m = 0.0
         observation, info, geometry, self_geometry, position_error, orientation_error = self._observe()
         self.previous_rho_position = float(np.linalg.norm(position_error))
         self.previous_rho_orientation = float(np.linalg.norm(orientation_error))
@@ -894,11 +1067,51 @@ class ThesisHomotopyEnv(
             raise RuntimeError("configured and URDF joint-position limits do not overlap")
         return lower, upper
 
-    def step(self, action: np.ndarray):
+    def step(
+        self,
+        action: np.ndarray,
+        *,
+        base_clearance_changes: np.ndarray | None = None,
+    ):
         action = np.asarray(action, dtype=np.float32)
         if action.shape != (6,) or not np.isfinite(action).all():
             raise ValueError("action must contain six finite joint-angle increments")
+        clearance_gates = None
+        if base_clearance_changes is not None:
+            changes = np.asarray(base_clearance_changes, dtype=np.float64)
+            if changes.shape != (BASE_CLEARANCE_DELTA_FEATURE_DIM,) or not np.isfinite(changes).all():
+                raise ValueError(
+                    "base_clearance_changes must contain five finite values"
+                )
+            gate_config = self.reward_parameters
+            decrease_start = gate_config[
+                "reference_base_clearance_decrease_start"
+            ]
+            decrease_full = gate_config[
+                "reference_base_clearance_decrease_full"
+            ]
+            # Context values use the shared 0.20 m observation scale. Convert
+            # the predicted decrease back to metres before applying the gate.
+            decrease_m = np.maximum(
+                -changes * OBSTACLE_CLEARANCE_SCALE_M, 0.0
+            )
+            phase = np.clip(
+                (decrease_m - decrease_start)
+                / max(decrease_full - decrease_start, 1.0e-12),
+                0.0,
+                1.0,
+            )
+            moving_link_gates = phase * phase * (3.0 - 2.0 * phase)
+            # The shoulder has no useful avoidance degree of freedom and has
+            # no corresponding Base-delta input. Never let its fixed absolute
+            # clearance create a perpetual proximity cost.
+            clearance_gates = np.concatenate((
+                np.zeros(1, dtype=np.float64), moving_link_gates,
+            ))
         q_before, qdot_before = self.robot.joint_state()
+        ee_position_before = np.asarray(
+            self.robot.end_effector_pose()[0], dtype=np.float32
+        )
         command_lower, command_upper = self.effective_joint_position_limits()
         lower, upper = command_lower, command_upper
         requested_target_positions = q_before + action
@@ -931,6 +1144,12 @@ class ThesisHomotopyEnv(
 
         peak_joint_speed = 0.0
         peak_joint_acceleration = 0.0
+        peak_joint_jerk = 0.0
+        peak_commanded_joint_jerk = 0.0
+        joint_jerk_square_sum = 0.0
+        joint_jerk_sample_count = 0
+        commanded_joint_jerk_square_sum = 0.0
+        commanded_joint_jerk_sample_count = 0
         peak_tcp_linear_speed = 0.0
         peak_tcp_angular_speed = 0.0
         velocity_limited_substeps = 0
@@ -938,7 +1157,14 @@ class ThesisHomotopyEnv(
         tcp_limited_substeps = 0
         controller_updates = 0
         last_measured_velocity = qdot_before.astype(np.float64)
+        last_measured_acceleration = np.zeros(6, dtype=np.float64)
         last_commanded_velocity = np.zeros(6, dtype=np.float32)
+        if self.bounded_joint_motion_enabled:
+            if self.motion_controller is None:
+                raise RuntimeError("bounded joint controller was not initialized")
+            self.motion_controller.begin_policy_step(
+                q_before, target_positions, self.control_dt
+            )
         if not self.bounded_joint_motion_enabled:
             # Exact execution route used by the archived S0/S1 reference-PPO
             # experiments: a joint-position target persists for all physics
@@ -972,6 +1198,16 @@ class ThesisHomotopyEnv(
                         self.real_control_dt,
                     )
                     last_commanded_velocity = motion_command.velocity
+                    peak_commanded_joint_jerk = max(
+                        peak_commanded_joint_jerk,
+                        float(np.max(np.abs(motion_command.jerk))),
+                    )
+                    commanded_joint_jerk_square_sum += float(
+                        np.sum(np.square(motion_command.jerk, dtype=np.float64))
+                    )
+                    commanded_joint_jerk_sample_count += int(
+                        motion_command.jerk.size
+                    )
                     controller_updates += 1
                     velocity_limited_substeps += int(
                         motion_command.joint_velocity_limited
@@ -1004,7 +1240,11 @@ class ThesisHomotopyEnv(
             measured_acceleration = (
                 measured_velocity.astype(np.float64) - last_measured_velocity
             ) / self.physics_dt
+            measured_jerk = (
+                measured_acceleration - last_measured_acceleration
+            ) / self.physics_dt
             last_measured_velocity = measured_velocity.astype(np.float64)
+            last_measured_acceleration = measured_acceleration
             _, _, tcp_linear_velocity, tcp_angular_velocity = (
                 self.robot.end_effector_kinematics()
             )
@@ -1015,6 +1255,11 @@ class ThesisHomotopyEnv(
                 peak_joint_acceleration,
                 float(np.max(np.abs(measured_acceleration))),
             )
+            peak_joint_jerk = max(
+                peak_joint_jerk, float(np.max(np.abs(measured_jerk)))
+            )
+            joint_jerk_square_sum += float(np.sum(np.square(measured_jerk)))
+            joint_jerk_sample_count += int(measured_jerk.size)
             peak_tcp_linear_speed = max(
                 peak_tcp_linear_speed, float(np.linalg.norm(tcp_linear_velocity))
             )
@@ -1112,6 +1357,38 @@ class ThesisHomotopyEnv(
         timeout = bool(self.step_count >= self.horizon and not terminated)
         truncated = bool(timeout)
         q_after, qdot_after = self.robot.joint_state()
+        ee_position_after = np.asarray(info["ee_position"], dtype=np.float32)
+        tcp_path_increment_m = float(np.linalg.norm(
+            ee_position_after - ee_position_before
+        ))
+        joint_path_increment_rad = float(np.linalg.norm(q_after - q_before))
+        self.tcp_path_length_m += tcp_path_increment_m
+        self.joint_path_length_rad += joint_path_increment_rad
+        tcp_path_efficiency_ratio = self.tcp_path_length_m / max(
+            self.direct_tcp_distance_m, 1.0e-6
+        )
+        route_lateral_m, route_vertical_deviation_m = (
+            self._tcp_route_deviation(ee_position_after)
+        )
+        self.route_lateral_min_m = min(
+            self.route_lateral_min_m, route_lateral_m
+        )
+        self.route_lateral_max_m = max(
+            self.route_lateral_max_m, route_lateral_m
+        )
+        self.route_vertical_deviation_min_m = min(
+            self.route_vertical_deviation_min_m, route_vertical_deviation_m
+        )
+        self.route_vertical_deviation_max_m = max(
+            self.route_vertical_deviation_max_m, route_vertical_deviation_m
+        )
+        route_candidates = {
+            "left": self.route_lateral_max_m,
+            "right": -self.route_lateral_min_m,
+            "over": self.route_vertical_deviation_max_m,
+            "under": -self.route_vertical_deviation_min_m,
+        }
+        selected_route = max(route_candidates, key=route_candidates.get)
         # Average across joints before the bounded reward mapping. Summing six
         # normalized squared changes made the smoothness term saturate on
         # nearly every transition.
@@ -1154,6 +1431,11 @@ class ThesisHomotopyEnv(
                 () if endpoint_geometry is None
                 else tuple(float(value) for value in endpoint_geometry.distances)
             ),
+            obstacle_clearance_gates=(
+                None
+                if endpoint_geometry is None or clearance_gates is None
+                else tuple(float(value) for value in clearance_gates)
+            ),
             parameters=self.reward_parameters,
             obstacle_risk=max_risk,
             self_risk=self_max_risk,
@@ -1161,6 +1443,7 @@ class ThesisHomotopyEnv(
             self_distance=self_min_distance,
             obstacle_safe_distance=self.d_safe,
             self_safe_distance=self.d_self_safe,
+            tcp_path_increment_m=tcp_path_increment_m,
         )
         reward = reward_result.reward
         reward_fields = reward_result.fields
@@ -1195,6 +1478,15 @@ class ThesisHomotopyEnv(
                 "joint_velocity": qdot_after.copy(),
                 "joint_speed_peak_rad_s": peak_joint_speed,
                 "joint_acceleration_peak_rad_s2": peak_joint_acceleration,
+                "joint_jerk_peak_rad_s3": peak_joint_jerk,
+                "commanded_joint_jerk_peak_rad_s3": peak_commanded_joint_jerk,
+                "joint_jerk_rms_rad_s3": float(np.sqrt(
+                    joint_jerk_square_sum / max(1, joint_jerk_sample_count)
+                )),
+                "commanded_joint_jerk_rms_rad_s3": float(np.sqrt(
+                    commanded_joint_jerk_square_sum
+                    / max(1, commanded_joint_jerk_sample_count)
+                )),
                 "tcp_linear_speed_peak_m_s": peak_tcp_linear_speed,
                 "tcp_angular_speed_peak_rad_s": peak_tcp_angular_speed,
                 "controller_updates": controller_updates,
@@ -1258,6 +1550,21 @@ class ThesisHomotopyEnv(
                 "qdot_measured": qdot_after.copy(),
                 "smooth_velocity": smooth_velocity,
                 "velocity_magnitude": velocity_magnitude,
+                "tcp_path_increment_m": tcp_path_increment_m,
+                "tcp_path_length_m": self.tcp_path_length_m,
+                "joint_path_increment_rad": joint_path_increment_rad,
+                "joint_path_length_rad": self.joint_path_length_rad,
+                "direct_tcp_distance_m": self.direct_tcp_distance_m,
+                "tcp_path_efficiency_ratio": tcp_path_efficiency_ratio,
+                "route_lateral_min_m": self.route_lateral_min_m,
+                "route_lateral_max_m": self.route_lateral_max_m,
+                "route_vertical_deviation_min_m": (
+                    self.route_vertical_deviation_min_m
+                ),
+                "route_vertical_deviation_max_m": (
+                    self.route_vertical_deviation_max_m
+                ),
+                "selected_avoidance_route": selected_route,
                 "rho_position": self.previous_rho_position,
                 "next_rho_position": next_rho_position,
                 "rho_orientation": self.previous_rho_orientation,
@@ -1303,26 +1610,57 @@ class ThesisHomotopyEnv(
             offset_m=self.reference_point_offset_m,
         )
         point_distances = np.linalg.norm(point_errors, axis=1).astype(np.float32)
-        obstacle_geometries = self._safety_geometries()
+        external_geometries = self._obstacle_geometries()
+        external_geometry = self._aggregate_obstacle_geometries(
+            external_geometries
+        )
+        plane_geometry = self._plane_geometry()
+        obstacle_geometries = list(external_geometries)
+        if plane_geometry is not None:
+            obstacle_geometries.append(plane_geometry)
         geometry = self._aggregate_obstacle_geometries(obstacle_geometries)
         self_geometry = self._self_geometry()
         obstacle_features = None
+        route_sizes_m: list[np.ndarray] = []
+        route_positions_m: list[np.ndarray] = []
         if obstacle_geometries:
             if any(item.distances.shape != (6,) for item in obstacle_geometries):
                 raise RuntimeError(
                     "obstacle encoding requires six ordered UR5 capsule clearances"
                 )
-            obstacle_features = np.stack(
-                [
-                    np.concatenate(
-                        [
-                            item.distances / OBSTACLE_CLEARANCE_SCALE_M,
-                            item.nearest_direction,
-                        ]
-                    )
-                    for item in obstacle_geometries
+            rows = []
+            for obstacle_index, item in enumerate(external_geometries):
+                row = [
+                    item.distances / OBSTACLE_CLEARANCE_SCALE_M,
+                    item.nearest_direction,
                 ]
-            ).astype(np.float32)
+                if self.obstacle_feature_mode == "route_geometry":
+                    position, half_extents, quaternion = (
+                        self._policy_obstacle_obb(obstacle_index)
+                    )
+                    projected_size, path_position = self._route_geometry_features(
+                        position, half_extents, quaternion
+                    )
+                    row.extend((projected_size, path_position))
+                    route_sizes_m.append(
+                        projected_size * self.route_size_scale
+                    )
+                    route_positions_m.append(
+                        path_position * self.route_position_scale
+                    )
+                rows.append(np.concatenate(row))
+            if plane_geometry is not None:
+                plane_row = [
+                    plane_geometry.distances / OBSTACLE_CLEARANCE_SCALE_M,
+                    plane_geometry.nearest_direction,
+                ]
+                if self.obstacle_feature_mode == "route_geometry":
+                    # The infinite mounting plane has no finite OBB centre or
+                    # route-dependent extent. Its clearance/direction fields
+                    # already identify its safety role without inventing a box.
+                    plane_row.extend((np.zeros(3), np.zeros(3)))
+                rows.append(np.concatenate(plane_row))
+            obstacle_features = np.stack(rows).astype(np.float32)
         observation = build_reference_observation(
             q=q,
             ee_position=ee_position,
@@ -1335,6 +1673,7 @@ class ThesisHomotopyEnv(
             reference_point_offset_m=self.reference_point_offset_m,
             obstacle_features=obstacle_features,
             max_obstacles=self.max_obstacles,
+            obstacle_feature_dim=self.obstacle_feature_dim,
         )
         info = {
             "goal_sampling_mode": (
@@ -1356,7 +1695,37 @@ class ThesisHomotopyEnv(
             "orientation_error_vector": orientation_error.copy(),
             "reference_point_errors": point_errors.copy(),
             "reference_point_distances": point_distances.copy(),
+            "external_d_min": (
+                0.80
+                if external_geometry is None
+                else float(external_geometry.distance_min)
+            ),
+            "external_mesh_d_min": (
+                self._external_mesh_clearance()
+                if self.mesh_clearance_diagnostics_enabled
+                else (
+                    0.80
+                    if external_geometry is None
+                    else float(external_geometry.distance_min)
+                )
+            ),
         }
+        if route_sizes_m:
+            primary_size = route_sizes_m[0]
+            primary_position = route_positions_m[0]
+            lateral_half_width = float(primary_size[1])
+            vertical_half_height = float(primary_size[2])
+            if vertical_half_height < 0.8 * lateral_half_width:
+                route_shape = "low_wide"
+            elif lateral_half_width < 0.8 * vertical_half_height:
+                route_shape = "tall_narrow"
+            else:
+                route_shape = "balanced"
+            info.update({
+                "primary_obstacle_route_shape": route_shape,
+                "primary_obstacle_route_half_extents_m": primary_size.copy(),
+                "primary_obstacle_route_position_m": primary_position.copy(),
+            })
         if np.any(self.obstacle_dynamic_mask):
             predicted_positions = []
             envelope_centers = []
@@ -1390,6 +1759,88 @@ class ThesisHomotopyEnv(
                 ),
             })
         return observation, info, geometry, self_geometry, position_error, orientation_error
+
+    def _policy_obstacle_obb(
+        self, obstacle_index: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return the same current/predicted OBB represented by the encoder."""
+        position = self.obstacle_positions[obstacle_index]
+        half_extents = self.obstacle_half_extents_all[obstacle_index]
+        if (
+            self.obstacle_dynamic_mask[obstacle_index]
+            and self.dynamic_prediction_enabled
+        ):
+            position, half_extents, _ = self._predicted_obstacle_envelope(
+                obstacle_index
+            )
+        return (
+            np.asarray(position, dtype=np.float32),
+            np.asarray(half_extents, dtype=np.float32),
+            np.asarray(self.obstacle_quaternions[obstacle_index], dtype=np.float32),
+        )
+
+    def _route_geometry_features(
+        self,
+        position: np.ndarray,
+        half_extents: np.ndarray,
+        quaternion: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Project an OBB into a stable start-to-goal route frame.
+
+        The three size values are the OBB half-widths along the nominal path,
+        across it, and vertically.  The three location values are the centre's
+        coordinates in that same frame.  Unlike local OBB extents, these
+        features remain meaningful when a horizontal box is yawed.
+        """
+        start = np.asarray(self.episode_start_ee_position, dtype=np.float64)
+        goal = np.asarray(self.goal_position, dtype=np.float64)
+        horizontal = goal[:2] - start[:2]
+        norm = float(np.linalg.norm(horizontal))
+        if norm <= 1.0e-8:
+            along = np.asarray([1.0, 0.0, 0.0], dtype=np.float64)
+        else:
+            along = np.asarray(
+                [horizontal[0] / norm, horizontal[1] / norm, 0.0],
+                dtype=np.float64,
+            )
+        lateral = np.asarray([-along[1], along[0], 0.0], dtype=np.float64)
+        vertical = np.asarray([0.0, 0.0, 1.0], dtype=np.float64)
+        frame = np.stack((along, lateral, vertical), axis=0)
+        rotation = quaternion_to_matrix(quaternion)
+        projected_half_extents = (
+            np.abs(frame @ rotation) @ np.asarray(half_extents, dtype=np.float64)
+        )
+        relative_position = frame @ (
+            np.asarray(position, dtype=np.float64) - start
+        )
+        return (
+            (projected_half_extents / self.route_size_scale).astype(np.float32),
+            (relative_position / self.route_position_scale).astype(np.float32),
+        )
+
+    def _tcp_route_deviation(
+        self, ee_position: np.ndarray,
+    ) -> tuple[float, float]:
+        """Return lateral and vertical deviation from the straight TCP route."""
+        start = np.asarray(self.episode_start_ee_position, dtype=np.float64)
+        goal = np.asarray(self.goal_position, dtype=np.float64)
+        current = np.asarray(ee_position, dtype=np.float64)
+        horizontal = goal[:2] - start[:2]
+        horizontal_length = float(np.linalg.norm(horizontal))
+        if horizontal_length <= 1.0e-8:
+            along = np.asarray([1.0, 0.0], dtype=np.float64)
+            progress = 0.0
+        else:
+            along = horizontal / horizontal_length
+            progress = float(np.clip(
+                np.dot(current[:2] - start[:2], along) / horizontal_length,
+                0.0,
+                1.0,
+            ))
+        lateral_axis = np.asarray([-along[1], along[0]], dtype=np.float64)
+        lateral = float(np.dot(current[:2] - start[:2], lateral_axis))
+        direct_height = float(start[2] + progress * (goal[2] - start[2]))
+        return lateral, float(current[2] - direct_height)
 
     def pose_crossing_diagnostics(self) -> dict[str, object]:
         """Return expensive kinematic diagnostics for the current state.
@@ -1796,6 +2247,35 @@ class ThesisHomotopyEnv(
             "environment_collision": bool(environment_collision),
         }
 
+    def _external_mesh_clearance(self, query_distance: float = 0.20) -> float:
+        """Return exact Bullet mesh clearance to external obstacle bodies.
+
+        Capsule distances remain the policy's shape-independent OBB feature.
+        This independent metric is used to verify whether a generated path
+        scene genuinely challenges the frozen Base rather than merely
+        intersecting a conservative capsule approximation.
+        """
+        distance_limit = float(query_distance)
+        if not np.isfinite(distance_limit) or distance_limit <= 0.0:
+            raise ValueError("mesh-clearance query distance must be positive")
+        minimum = distance_limit
+        for obstacle_body_id in self._obstacle_body_ids:
+            points = p.getClosestPoints(
+                bodyA=self.robot_id,
+                bodyB=obstacle_body_id,
+                distance=distance_limit,
+                physicsClientId=self.client_id,
+            )
+            for point in points:
+                if int(point[3]) not in self._collision_link_ids:
+                    continue
+                minimum = min(minimum, float(point[8]))
+        return float(minimum)
+
+    def set_mesh_clearance_diagnostics(self, enabled: bool) -> None:
+        """Enable exact mesh clearance only during Base scene validation."""
+        self.mesh_clearance_diagnostics_enabled = bool(enabled)
+
     def _set_joint_state(self, q: np.ndarray, qdot: np.ndarray | None = None) -> None:
         velocity = np.zeros(6, dtype=np.float64) if qdot is None else np.asarray(qdot, dtype=np.float64)
         for joint_id, position, speed in zip(self.robot.joint_ids, q, velocity):
@@ -1823,6 +2303,22 @@ class ThesisHomotopyEnv(
                 - np.count_nonzero(self.obstacle_dynamic_mask)
             ),
             "obstacle_layout": self.obstacle_layout,
+            "obstacle_layouts": self.obstacle_layouts,
+            "grounded_obstacle_count": int(sum(
+                layout.startswith("grounded_")
+                for layout in self.obstacle_layouts
+            )),
+            "suspended_obstacle_count": int(sum(
+                layout.startswith("suspended_")
+                for layout in self.obstacle_layouts
+            )),
+            "path_relevant_obstacle_count": int(sum(
+                layout.endswith("_path")
+                for layout in self.obstacle_layouts
+            )),
+            "obstacle_positions": self.obstacle_positions.copy(),
+            "obstacle_half_extents": self.obstacle_half_extents_all.copy(),
+            "obstacle_quaternions": self.obstacle_quaternions.copy(),
             "obstacle_sampling_proposals": self.obstacle_sampling_proposals,
             "obstacle_sampling_time_s": self.obstacle_sampling_time_s,
             "scene_sampling_attempts": self.scene_sampling_attempts,

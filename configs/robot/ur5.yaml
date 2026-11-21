@@ -38,8 +38,13 @@ robot:
     # upper_arm nearly zero-length in this URDF.
     - {name: upper_arm, parent_link_name: upper_arm_link, child_link_name: forearm_link, radius: 0.07, parent_offset: [0.0, 0.0, 0.13585], child_offset: [0.0, 0.0, 0.13585], allow_degenerate: false}
     - {name: forearm, parent_link_name: forearm_link, child_link_name: wrist_1_link, radius: 0.06, parent_offset: [0.0, 0.0, 0.0165], child_offset: [0.0, 0.0, -0.09265], allow_degenerate: false}
-    - {name: wrist_1, parent_link_name: wrist_1_link, child_link_name: wrist_2_link, radius: 0.06, parent_offset: [0.0, 0.0, 0.0], child_offset: [0.0, 0.0, 0.0], allow_degenerate: false}
-    - {name: wrist_2, parent_link_name: wrist_2_link, child_link_name: wrist_3_link, radius: 0.06, parent_offset: [0.0, 0.0, 0.0], child_offset: [0.0, 0.0, 0.0], allow_degenerate: false}
+    # wrist1/2 collision meshes are compact joint housings centred at their
+    # respective link frames; they do not fill the line segment to the next
+    # revolute-joint frame.  The previous long capsules created a large false
+    # occupied volume.  Offline STL calibration gives minimum enclosing radii
+    # 0.06511/0.06564 m, so 0.067 m retains 1.4--1.9 mm geometric margin.
+    - {name: wrist_1, parent_link_name: wrist_1_link, child_link_name: wrist_1_link, radius: 0.067, parent_offset: [0.0, 0.0, 0.0], child_offset: [0.0, 0.0, 0.0], allow_degenerate: true}
+    - {name: wrist_2, parent_link_name: wrist_2_link, child_link_name: wrist_2_link, radius: 0.067, parent_offset: [0.0, 0.0, 0.0], child_offset: [0.0, 0.0, 0.0], allow_degenerate: true}
     # wrist_3_link、flange 和 tool0 的原点重合；这里有意使用零长度胶囊
     # （即球）覆盖紧凑的末端腕部。0.055 m 大于碰撞 STL 顶点最大半径
     # 约 0.0511 m，并保留少量网格裕量。

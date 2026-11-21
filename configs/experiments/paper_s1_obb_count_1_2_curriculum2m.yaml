@@ -1,0 +1,36 @@
+# S1-B obstacle-count curriculum initialized from the accepted smoothed
+# single-OBB policy.  Keep its 10 deg/s CB3.1 controller, 3-degree joint
+# increment, 120-step horizon, compact9 obstacle contract, reward, and
+# Butterworth/quintic execution smoothing unchanged.  Only the static
+# obstacle-count/layout distribution and fine-tuning schedule change here.
+includes:
+  - paper_s1_single_obb_smooth_10deg_delta3_horizon120_2m.yaml
+
+thesis:
+  static_obstacle_count_probabilities: {1: 0.5, 2: 0.5}
+  static_obstacle_layout_probabilities:
+    legacy_blocking: 0.0
+    workspace_random: 0.0
+    grounded_path: 0.0
+    grounded_random: 0.0
+    suspended_path: 0.0
+    suspended_random: 0.0
+    physical_mixed: 1.0
+
+train:
+  total_steps: 2000000
+  num_envs: 16
+  rollout_length: 256
+  # Reset exploration below the learned single-obstacle std (about
+  # 0.018--0.023 rad), but retain enough variation to discover two-obstacle
+  # detours without destabilizing the transferred policy.
+  stage_transfer_action_std: 0.0135
+
+ppo:
+  # Stage transfer resets both optimizers.  Use a smaller Actor rate than the
+  # fresh single-obstacle run so the accepted policy is refined, not erased.
+  actor_lr: 2.0e-05
+  critic_lr: 8.0e-05
+  actor_lr_final: 1.0e-05
+  critic_lr_final: 3.0e-05
+  actor_lr_min: 1.0e-05

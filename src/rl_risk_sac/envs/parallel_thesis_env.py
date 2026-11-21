@@ -65,9 +65,25 @@ def _worker(
                 env.configure_episode(**contract)
                 observation, info = env.reset(seed=reset_seed)
                 connection.send((observation, info))
+            elif command == "try_reset":
+                contract, reset_seed = payload
+                try:
+                    env.configure_episode(**contract)
+                    observation, info = env.reset(seed=reset_seed)
+                    connection.send((True, observation, info, ""))
+                except Exception as error:
+                    connection.send((False, None, None, repr(error)))
             elif command == "step":
                 profile_started = time.perf_counter() if os.environ.get("THESIS_PROFILE") == "1" else None
-                result = env.step(payload)
+                if isinstance(payload, dict):
+                    result = env.step(
+                        payload["action"],
+                        base_clearance_changes=payload.get(
+                            "base_clearance_changes"
+                        ),
+                    )
+                else:
+                    result = env.step(payload)
                 if profile_started is not None:
                     observation, reward, cost, terminated, truncated, info = result
                     info = dict(info)
@@ -88,6 +104,9 @@ def _worker(
                 connection.send(env.base_clearance_changes(payload))
             elif command == "residual_safety_context":
                 connection.send(env.residual_safety_context(payload))
+            elif command == "set_mesh_clearance_diagnostics":
+                env.set_mesh_clearance_diagnostics(bool(payload))
+                connection.send(None)
             elif command == "set_rng":
                 env.rng.bit_generator.state = payload
                 connection.send(None)
@@ -103,6 +122,8 @@ def _worker(
 
 class ParallelThesisEnvPool:
     """Process-isolated PyBullet environments controlled by one learner process."""
+
+    supports_base_clearance_step_context = True
 
     def __init__(
         self,
@@ -169,10 +190,27 @@ class ParallelThesisEnvPool:
             self.connections[index].send(("reset", (contract, reset_seed)))
         return {index: self.connections[index].recv() for index in requests}
 
+    def try_reset_many(
+        self, requests: dict[int, dict[str, Any]],
+        *, seeds: dict[int, int] | None = None,
+    ) -> dict[int, tuple[bool, np.ndarray | None, dict[str, Any] | None, str]]:
+        """Reset evaluation workers without killing them on an infeasible scene."""
+        if seeds is not None and set(seeds) != set(requests):
+            raise ValueError("reset seeds must match reset request workers")
+        for index, contract in requests.items():
+            reset_seed = None if seeds is None else int(seeds[index])
+            self.connections[index].send(("try_reset", (contract, reset_seed)))
+        return {index: self.connections[index].recv() for index in requests}
+
     def step_many(
-        self, actions: dict[int, np.ndarray],
+        self,
+        actions: dict[int, np.ndarray],
+        *,
+        base_clearance_changes: dict[int, np.ndarray] | None = None,
     ) -> dict[int, tuple[np.ndarray, float, float, bool, bool, dict[str, Any]]]:
-        self.send_steps(actions)
+        self.send_steps(
+            actions, base_clearance_changes=base_clearance_changes
+        )
         return self.recv_steps()
 
     def pose_crossing_diagnostics_many(
@@ -218,7 +256,28 @@ class ParallelThesisEnvPool:
             ))
         return {index: self.connections[index].recv() for index in actions}
 
-    def send_steps(self, actions: dict[int, np.ndarray]) -> None:
+    def set_mesh_clearance_diagnostics(
+        self, indices: Collection[int], enabled: bool
+    ) -> None:
+        """Toggle exact obstacle-mesh clearance for selected workers."""
+        selected = tuple(dict.fromkeys(int(index) for index in indices))
+        if self._pending_step_indices is not None:
+            raise RuntimeError(
+                "cannot change mesh diagnostics while a step is pending"
+            )
+        for index in selected:
+            self.connections[index].send((
+                "set_mesh_clearance_diagnostics", bool(enabled)
+            ))
+        for index in selected:
+            self.connections[index].recv()
+
+    def send_steps(
+        self,
+        actions: dict[int, np.ndarray],
+        *,
+        base_clearance_changes: dict[int, np.ndarray] | None = None,
+    ) -> None:
         """Start one simulation step on every selected worker without waiting."""
         if self._pending_step_indices is not None:
             raise RuntimeError("parallel environment step is already in flight")
@@ -229,8 +288,24 @@ class ParallelThesisEnvPool:
             index < 0 or index >= len(self.connections) for index in indices
         ):
             raise IndexError("parallel environment action index is out of range")
+        if (
+            base_clearance_changes is not None
+            and set(base_clearance_changes) != set(actions)
+        ):
+            raise ValueError(
+                "Base clearance-change workers must match action workers"
+            )
         for index, action in actions.items():
-            self.connections[index].send(("step", np.asarray(action, dtype=np.float32)))
+            action_array = np.asarray(action, dtype=np.float32)
+            payload: Any = action_array
+            if base_clearance_changes is not None:
+                payload = {
+                    "action": action_array,
+                    "base_clearance_changes": np.asarray(
+                        base_clearance_changes[index], dtype=np.float32
+                    ),
+                }
+            self.connections[index].send(("step", payload))
         self._pending_step_indices = indices
 
     def recv_steps(

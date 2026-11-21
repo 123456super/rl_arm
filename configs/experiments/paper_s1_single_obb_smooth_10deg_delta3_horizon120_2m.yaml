@@ -1,0 +1,95 @@
+# Complete S1 single-obstacle experiment matched to the smoothed 10 deg/s,
+# 3-degree-increment S0 control contract. One cuboid is represented by the
+# compact OBB clearance-direction feature used by later obstacle-count stages.
+# Full side lengths are sampled independently in [0.10, 0.30] m; configured
+# values below are half extents.
+includes:
+  - paper_full.yaml
+
+thesis:
+  stage: s1
+  simple_reaching_mode: false
+  blocking_obstacle_mode: true
+  control_dt: 0.4
+  obstacle_geometry_check_interval_substeps: 96
+  horizon: 120
+  joint_delta_limit_rad: 0.05235987755982989  # 3 degrees
+  qdot_observation_scale: 0.17453292519943295  # 10 deg/s
+  scene_sample_max_attempts: 64
+
+  fixed_orientation_goal:
+    enabled: true
+    # Match the frozen horizontal-tool S0 Base exactly:
+    # [roll, pitch, yaw] = [-180, 0, 90] degrees.
+    euler_rad: [-3.141592653589793, 0.0, 1.5707963267948966]
+    # [60, -90, 90, -90, -90, -120] degrees.
+    initial_joint_positions_rad:
+      [1.0471975511965976, -1.5707963267948966, 1.5707963267948966, -1.5707963267948966, -1.5707963267948966, -2.0943951023931953]
+
+  joint_motion_controller:
+    enabled: true
+    robot_generation: ur5_cb3_1
+    real_control_frequency_hz: 125.0
+    joint_velocity_limits_rad_s:
+      [0.17453292519943295, 0.17453292519943295, 0.17453292519943295, 0.17453292519943295, 0.17453292519943295, 0.17453292519943295]
+    joint_acceleration_limits_rad_s2:
+      [0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659, 0.3490658503988659]
+    position_gain_s_inv: 4.0
+    position_tolerance_rad: 0.0005
+    trajectory_smoothing:
+      enabled: true
+      butterworth_cutoff_hz: 0.5
+      quintic_blend_duration_s: 0.4
+
+  obstacle_half_extents_min_m: [0.05, 0.05, 0.05]
+  obstacle_half_extents_max_m: [0.15, 0.15, 0.15]
+  static_obstacle_count_probabilities: {1: 1.0}
+  static_obstacle_layout_probabilities:
+    # Included mappings merge by key, so explicitly disable inherited layouts.
+    legacy_blocking: 0.0
+    workspace_random: 0.0
+    grounded_path: 0.40
+    grounded_random: 0.10
+    suspended_path: 0.40
+    suspended_random: 0.10
+
+  observation:
+    obstacle_set:
+      max_obstacles: 8
+      embedding_dim: 32
+      output_dim: 32
+      # Six ordered link clearances plus nearest-point direction; do not expose
+      # route labels or explicit shape parameters to the policy.
+      feature_mode: clearance_direction
+
+  obstacle_surface_clearance_min_m: 0.10
+
+  path_scene_base_validation:
+    enabled: true
+    safety_margin_m: 0.01
+    max_attempts: 128
+
+  reward:
+    reference_obstacle_collision_entry_penalty: 100.0
+    reference_obstacle_collision_penalty: 20.0
+    reference_self_collision_penalty: 10.0
+    reference_environment_collision_entry_penalty: 100.0
+    reference_environment_collision_penalty: 20.0
+    reference_residual_penalty_weight: 0.0
+    reference_composition_saturation_weight: 2.0
+
+train:
+  total_steps: 2000000
+  num_envs: 16
+  rollout_length: 256
+  # Same exploration/action-scale ratio as the previous 4-degree S1 setup.
+  stage_transfer_action_std: 0.017142857142857144
+  cpu_ids: [0, 6, 12, 18, 1, 7, 13, 19, 2, 8, 14, 20, 3, 9, 15, 21]
+
+ppo:
+  actor_lr: 3.0e-05
+  critic_lr: 1.0e-04
+  actor_lr_final: 1.0e-05
+  critic_lr_final: 3.0e-05
+  actor_lr_min: 1.0e-05
+  action_std_init: 0.017142857142857144

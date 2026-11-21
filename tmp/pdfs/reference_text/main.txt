@@ -1,0 +1,1042 @@
+                                                      Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+                                                                     Contents lists available at ScienceDirect
+
+
+                                           Engineering Applications of Artificial Intelligence
+                                                         journal homepage: www.elsevier.com/locate/engappai
+
+
+Research paper
+
+Fast trajectory planner with a reinforcement learning-based controller for
+robotic manipulators
+Yongliang Wang , Hamidreza Kasaei ∗
+Department of Artificial Intelligence, Bernoulli Institute, Faculty of Science and Engineering, University of Groningen, Nijenborgh 9, Groningen, 9747 AG, The
+Netherlands
+
+
+
+ARTICLE                INFO                                ABSTRACT
+
+Keywords:                                                  Generating obstacle-free trajectories for robotic manipulators in unstructured and cluttered environments
+Reinforcement learning                                     remains a significant challenge. Existing motion planning methods often require additional computational
+Artificial Intelligence Enabled Robotics                   effort to generate the final trajectory by solving kinematic or dynamic equations. This paper highlights the
+Motion planning
+                                                           strong potential of model-free reinforcement learning methods over model-based approaches for obstacle-free
+Artificial Intelligence Based Methods
+                                                           trajectory planning in joint space. We propose a fast trajectory planning system for manipulators that combines
+Collision avoidance
+                                                           vision-based path planning in task space with reinforcement learning-based obstacle avoidance in joint space.
+                                                           We divide the framework into two key components. The first introduces an innovative vision-based trajectory
+                                                           planner in task space, leveraging the large-scale fast segment anything (FSA) model in conjunction with
+                                                           basis spline (B-spline)-optimized kinodynamic path searching. The second component enhances the proximal
+                                                           policy optimization (PPO) algorithm by integrating action ensembles (AE) and policy feedback (PF), which
+                                                           greatly improve precision and stability in goal-reaching and obstacle avoidance within joint space. These
+                                                           proximal policy optimization (PPO) enhancements increase the algorithm’s adaptability across diverse robotic
+                                                           tasks, ensuring consistent execution of commands from the first component by the manipulator, while also
+                                                           enhancing both obstacle avoidance efficiency and reaching accuracy. The experimental results demonstrated
+                                                           the effectiveness of proximal policy optimization (PPO) enhancements, as well as simulation-to-simulation
+                                                           (Sim-to-Sim) and simulation-to-reality (Sim-to-Real) transfer, in improving model robustness and planner
+                                                           efficiency in complex scenarios. These enhancements allowed the robot to perform obstacle avoidance and
+                                                           real-time trajectory planning in obstructed environments. https://sites.google.com/view/ftp4rm/home
+
+
+
+1. Introduction                                                                                  a graph of the environment to find the most efficient or shortest
+                                                                                                 path from start to goal (Merikh Nejadasl et al., 2024). Despite their
+    Robotic manipulators are widely used in industrial production lines                          efficiency, these algorithms struggle with computational complexity,
+and service robots to assist humans. This integration underscores the                            memory usage, and adapting to dynamic environments. In contrast,
+need for safe and efficient motion planning to achieve precise manip-                            sampling-based methods such as the Probabilistic Roadmap (PRM)
+ulations in complex environments (Kirner and Ott, 2024; Nishio et al.,                           (Rösmann et al., 2015, 2017) and the Rapidly-exploring Random Trees
+2023). The motion planning process consists of four key stages: (Wang                            (RRT) are capable of navigating collision-free paths in both static and
+et al., 2024): (1) Task Planning , which involves designing a set of high-                       dynamic environments (Kuffner and LaValle, 2000; Ji et al., 2023; Sac-
+level goals, for example, ‘‘Move the box in front of you to the opposite
+                                                                                                 cuti et al., 2023). Nevertheless, the inherent randomness of the search
+side of the table.’’; (2) Path Planning , the generation of a feasible path
+                                                                                                 process in these methods might not always yield the optimal solution,
+from a start to a goal; (3) Trajectory Planning , the creation of a time
+                                                                                                 with their effectiveness heavily reliant on the sampling strategy. These
+schedule for following the path, given constraints such as position,
+                                                                                                 approaches often face challenges in constrained environments, and
+velocity, and acceleration; and (4) Trajectory Tracking , executing the
+                                                                                                 their execution time cannot be guaranteed.
+trajectory accurately based on a control system.
+    The majority of research has been concentrated on path plan-                                     Operating in the task space, i.e., the Cartesian space of the end-
+ning. Graph search and sampling-based methods are two primary                                    effector for manipulators, simplifies motion planning significantly.
+approaches. Graph-based algorithms such as A∗ and Dijkstra create                                However, these trajectories only account for obstacle avoidance in
+
+
+  ∗ Corresponding author.
+     E-mail address: hamidreza.kasaei@rug.nl (H. Kasaei).
+
+https://doi.org/10.1016/j.engappai.2025.112341
+Received 23 October 2024; Received in revised form 20 August 2025; Accepted 13 September 2025
+Available online 23 September 2025
+0952-1976/© 2025 The Authors. Published by Elsevier Ltd. This is an open access article under the CC BY license (http://creativecommons.org/licenses/by/4.0/).
+Y. Wang and H. Kasaei                                                                                 Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+
+
+Fig. 1. System Overview: The Kinect sensor captures visual data to create an FSA-enhanced 3-dimensional (3D) map of the environment. This map is used with
+B-spline optimization to generate waypoints for kinodynamic path searching. These waypoints, along with the manipulator’s state, inform the RL-based controller
+that adjusts the positions of the 6 joints of the manipulator.
+
+
+the task space. For manipulators, consideration of joint space is also                 In this paper, a comprehensive framework is presented to generate
+essential. Research on trajectory generation for autonomous vehicles               safe and efficient trajectories for manipulators operating in dynamic
+and aerial drones has developed efficient methods that quickly pro-                environments. An overview of the proposed trajectory planner is shown
+duce high-quality trajectories in cluttered environments. Transferring             in Fig. 1. The framework employs a specially designed fast trajectory
+high-quality trajectory generation from aerial drones to manipulators              planner in task space, alongside a novel model-free reinforcement
+requires a controller for avoiding obstacles in joint space (Zhou et al.,          learning (RL) model, to effectively address reaching tasks while navi-
+2019b, 2020, 2021; Wang et al., 2024). A task-space waypoint can be                gating around obstacles. Firstly, the fast trajectory planner incorporates
+converted to an obstacle-free robot’s configuration in joint-space using           perception, kinodynamic path searching, and B-spline-based trajectory
+reinforcement learning (RL) (Chen and Rojas, 2024; Li et al., 2021;                optimization, ensuring safe and dynamically feasible motion planning
+Zhang et al., 2021). Such approaches have been effectively applied to              for manipulators. Secondly, we propose a novel model-free RL algo-
+robot manipulators for joint-level control in both simulations and real-           rithm to solve reaching tasks while avoiding obstacles for a 6-degree-of-
+world scenarios. Most RL-based research typically limits robot motion              freedom (DoF) manipulator in complex environments. This algorithm is
+to a small portion of the workspace, despite achieving high rewards                highly adaptable to various types of manipulators and offers superior
+and task success rates. However, applying these results to real-world              performance compared to existing baseline RL methods. Unlike other
+environments is challenging due to the larger workspace sizes.                     approaches, our framework can easily adapt to new scenarios due to the
+    Although various motion planners exist for manipulators, there                 use of large-scale models, eliminating the need for constructing detailed
+                                                                                   kinematic or dynamic models. Finally, comprehensive simulations and
+remains a lack of a fast, systematic trajectory planning framework
+                                                                                   real-robot evaluations were conducted to validate the effectiveness of
+tailored specifically for robotic arms. Current planners rarely leverage
+                                                                                   the proposed planner. In summary, the key contributions of this paper
+learning-based approaches to directly map target space configurations
+                                                                                   are as follows:
+to joint space, and often lack the flexibility to be easily integrated and
+deployed across different manipulator platforms. Furthermore, while                   • For the trajectory planner operating in the Cartesian space of
+RL offers great potential for adaptive control, existing methods are                    the end-effector, we develop a systematic approach. This ap-
+not fully tailored for high-precision reaching tasks in manipulation. In                proach integrates perception, kinodynamic path searching, and B-
+particular, policy-gradient-based algorithms such as PPO have shown                     spline-based trajectory optimization, ensuring safety and dynamic
+promising results in robot control, but still suffer from instability,                  feasibility for manipulators.
+high action variance, and limited adaptability in dynamic or cluttered                • For obstacle avoidance in joint space during reaching tasks for
+environments. These challenges are especially pronounced in tasks                       manipulators, we propose a novel model-free RL algorithm to
+requiring precise positioning, rapid re-planning, or coordinated motion                 address reaching tasks while avoiding obstacles for a 6-DoF ma-
+under partial observability. Therefore, the central problem addressed                   nipulator in complex environments, which is easily adaptable
+in this paper is twofold: (i) How can we design a fast and efficient                    to various manipulators and offers improved performance over
+trajectory planning and tracking framework specifically tailored for                    existing baseline RL algorithms.
+manipulators? (ii) How can we leverage learning-based methods to                      • For experiments, we conduct comprehensive simulations and real-
+enable efficient mapping from task space to joint space and adapt rein-                 world assessments to evaluate our proposed planner. Addition-
+forcement learning algorithms to better suit robotic tasks, particularly                ally, we will make the source code of our implementation avail-
+high-precision reaching?                                                                able.
+
+                                                                               2
+Y. Wang and H. Kasaei                                                                               Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+    The remainder of this paper is organized as follows. Section 2 re-           2.2. RL-based control for manipulators
+views related work on motion planning for manipulators and RL-based
+control methods. Section 3 presents our proposed framework, including                 Several research efforts have used reinforcement learning to control
+the perception-aware trajectory planner and the modules developed                a robot manipulator at the joint level, (Ze et al., 2024) introduced
+to enhance PPO’s performance in trajectory tracking. Section 4 details           Temporal Difference Models, goal-conditioned value functions train-
+the experimental setup and provides comprehensive evaluations across             able via model-free learning for model-based control. Still, this method
+multiple manipulation benchmarks, along with ablation studies and                is limited to reaching tasks. To navigate towards goals while avoiding
+comparative analyses. Section 5 discusses how the proposed approach              obstacles, (Kumar et al., 2021) introduced an adaptable joint-level
+addresses the previously identified challenges and limitations. Finally,         controller through PPO. However, training with PPO is time-consuming
+Section 6 concludes the paper and outlines promising directions for              in such tasks. Moreover, (Wang et al., 2021) enhanced PPO for training
+future research.                                                                 tasks, including reaching and obstacle avoidance, making it adapt-
+                                                                                 able to trajectory-tracking tasks. While sufficient for space robots,
+2. Related work                                                                  the workspace for industrial robots falls short, indicating a need for
+                                                                                 algorithmic refinement. For obstacle avoidance in larger workspaces,
+2.1. Motion planning for manipulators                                            we introduce an improved PPO that allows a 6-DoF manipulator to
+                                                                                 reach targets without collisions. This method supports low-level control
+    Motion planning for manipulators, aiming to guide the end-effector           within the trajectory planning framework.
+along a predefined path, involves navigating safety, efficiency, and spa-             Compared to reviewed manipulator motion planners, our frame-
+tial constraints. This requires balancing obstacle avoidance, adherence          work divides the problem into two subproblems: trajectory planning
+to joint limits, and real-time execution within a limited workspace.             in task space and obstacle avoidance for the manipulator’s links us-
+    RRTConnect (Kuffner and LaValle, 2000), originally designed for              ing an RL-based joint space controller. Furthermore, we address ob-
+planning movements for a human arm modeled as a ‘‘7-DoF kinematic                stacle avoidance via our proposed RL-based joint space controller,
+chain’’, enhances aggressiveness in the search process. E-RRT∗ (Ji et al.,
+                                                                                 which maps task space to joint space. The waypoints generated by the
+2023), designed for hyper-redundant manipulators, uses ellipsoids for
+                                                                                 trajectory planner ensure a safe and efficient trajectory in task space.
+node linking, enhancing path planning in constrained areas. However,
+its specialization limits its real-time response and broader applicabil-
+                                                                                 3. Method
+ity, with future work aimed at improving efficiency and adaptability.
+PROTAMP-RRT (Saccuti et al., 2023) introduces a unified RRT func-
+                                                                                     We aim to enhance the capability of manipulators for safe and
+tioning in both geometric and symbolic spaces. However, its main loop,
+                                                                                 efficient motion planning in environments with both static and dynamic
+comprising task and motion planning phases, exhibits limited efficiency
+                                                                                 obstacles. The primary contribution is the development of an inte-
+in manipulator obstacle avoidance. A novel bidirectional RRT∗ method
+                                                                                 grated vision-based trajectory planner coupled with an enhanced RL
+improves obstacle avoidance in joint space for redundant manipulators,
+                                                                                 joint space controller, enabling manipulators to achieve goal-oriented
+bypassing inverse kinematics (Dai et al., 2023) but only tested in static.
+                                                                                 motion with obstacle avoidance. In this section, we briefly discuss
+    Probabilistic Roadmaps (PRM) sample valid configurations and link
+                                                                                 vision-based trajectory planning in Section 3.1. We then discuss in
+them via dynamics-compliant trajectories to build graphs for path
+                                                                                 detail the construction of an improved PPO and its role in enhancing
+planning. Rösmann et al. (2015, 2017) initially generated a PRM or
+                                                                                 the performance of the reaching task with obstacle avoidance for ma-
+Voronoi diagram, followed by establishing a homology equivalence
+                                                                                 nipulators in Section 3.2. Finally, in Section 3.3, we discuss combining
+relation via complex analysis, applicable only in 2D. For 3D homology
+                                                                                 these elements to develop a fast trajectory planner.
+classes, (Bhattacharya et al., 2012) utilized electromagnetism theory,
+proposing a 3D homology equivalence but requiring impractical ‘‘genus
+1" obstacle decomposition as noted in Jaillet and Siméon (2008), due to          3.1. Perception-aware trajectory planning for manipulators
+the difficulty of deforming 3D homotopic paths into each other. Jaillet
+and Siméon (2008) adopted a visibility deformation roadmap for a                     Single-view point clouds often suffer from incompleteness. To at-
+broader range of paths, but this approach, aimed at offline planning,            tain 3D point cloud completion, while the use of multiple sensors
+proves too time-consuming for online applications.                               yields a detailed composite, it significantly increases both cost and
+    Recent advancements in deep reinforcement learning (DRL) have                system complexity. To streamline this process, we leverage SOTA object
+propelled motion planning for manipulators. Li et al. (2021) devel-              detection to facilitate the generation of complete point clouds. The
+oped a DRL-integrated motion planning framework for optimal path                 Segment Anything Model (SAM) revolutionizes object segmentation but
+and energy solutions in kinematics, validated in both simulated and              faces deployment challenges in real-time applications due to its high
+real world, but limited to static environments. Zhang et al. (2021)              computational needs. Zhao et al. (2023) introduced an alternative to
+enhanced sim-to-real adaptation and scene generalization for manip-              the Segment Anything Model, 50 times faster and suitable for robotic
+ulator obstacle avoidance, Concentrating exclusively on the task space           perception, leveraging FSA to aid in the creation of voxel grid maps for
+while ignoring potential obstacle navigation around the manipulator              environments. In detail, consider a daily life scene with various bottles
+links. Aljalbout et al. (2021) tackles vision-based obstacle avoidance           and boxes on a table. A Kinect sensor captures images, converting them
+for manipulators, demonstrating efficient learning of stable strategies          into a height map. FSA could detect masks for objects from the height
+with high success rates. However, their approach lacks reactivity in             map of the scene. To eliminate the noisy background, we filter all masks
+dynamic environments due to perception limitations. Unlike its ex-               based on their 𝑧 position to isolate objects above the table, effectively
+tensive use in aerial drones and vehicles, training for manipulators’            removing the background and shadows. These filtered masks and table
+obstacle avoidance is confined to simulations, limited to 2D or discrete         information help reconstruct the occluded sections of the point cloud
+actions. Therefore, it is advantageous to integrate DRL with conven-             of the scene. An overview of this process is shown in Fig. 2.
+tional path planners for waypoint-based path optimization. To address                After estimating the full point cloud of the scene, we utilize them
+the aforementioned challenges, we propose creating waypoints akin to             for real-time trajectory planning in complex 3D environments. Drawing
+aerial drone trajectory generators and tracking trajectories utilizing RL        inspiration from SOTA drone path planning methods (Zhou et al.,
+methods, facilitating generalization and enabling obstacle avoidance             2019b, 2020, 2021), we aim to meet the requirements of real-time per-
+for manipulators. Furthermore, the current state-of-the-art (SOTA) vi-           formance. Our approach includes kinodynamic path planning combined
+sion algorithm, FSA, is deployed to enhance the adaptability of the              with B-spline-based trajectory optimization to create a trajectory that is
+trajectory planner in complex environments.                                      both safe and efficient. Additionally, the manipulator frequently needs
+
+                                                                             3
+Y. Wang and H. Kasaei                                                                                        Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+
+
+Fig. 2. Illustration of perception-aware Trajectory Planning: Using the FSA, object masks are merged with point clouds to create a Voxel Grid Map, providing
+a detailed basis for improved navigation and planning decisions.
+
+
+
+
+Fig. 3. Trajectory Planning Process: This example illustrates trajectory planning in a dynamic environment, where the yellow trajectory signifies initial planning.
+The start and target points are marked by a red and a blue ball, respectively. Upon encountering an unforeseen obstacle, represented by a green cylinder, the
+system triggers a replanning mechanism. Initially, the path does not circumvent the obstacle due to outdated map data. However, once the obstacle is detected,
+the system generates a new trajectory to navigate around it. This revised path, highlighted in red with waypoints, serves as input for the RL-based controller,
+ensuring adaptive and efficient navigation.
+
+
+to replan its trajectory due to unknown environments. This replanning                3.2.1. State and action representations
+occurs under two conditions: firstly, when the current path intersects                   Many researchers often use task space representations for state and
+with newly detected obstacles, ensuring immediate access to a safe                   action in robotic manipulator tasks, which can inadequately address
+trajectory; and secondly, at regular time intervals, which allows for                link-obstacle collisions. In our method, state representation includes po-
+continuous updates to the trajectory based on the latest environmental               sitions of the 6 joints, the pose of the end-effector, the pose of the target
+map. Fig. 3 illustrates an example of navigating a manipulator from                  point, the pose error between the target and end-effector, and distances
+a starting point to a goal while avoiding both static and dynamic                    between obstacles and manipulator links (excluding the base link),
+obstacles.                                                                           resulting in a 25-dimensional state vector 𝒔 ∈ R25 . For action selection,
+                                                                                     desired joint velocities 𝒒̇ 𝑑 are determined and subsequently integrated
+3.2. RL-based joint space controller for obstacle avoidance                          to calculate the desired joint angles 𝒒 𝑑 . These angles serve as inputs
+                                                                                     to a proportional–derivative (PD) controller, which then generates the
+    Our goal is to develop a neural network-based controller for precise             necessary torques for controlling the robot. The state is represented
+trajectory tracking, which, through extensive training, can map task                 as:
+and joint spaces without calculating inverse kinematics or dynamics.
+                                                                                     𝒔𝑡 =< 𝒒 𝑡 , 𝒑𝑒 , 𝒑𝑡 , 𝒆𝒓𝒓𝒐𝒓, 𝒅 𝑜𝑏𝑠 >                                                   (1)
+This learned controller demonstrates a significant advantage in navigat-
+ing obstacles and executing maneuvers by directly mapping the current                where 𝒒 𝑡 = (𝑞𝑡1 , … , 𝑞𝑡6 ) denotes the positions of the 6 joints, 𝒑𝑒 =
+state 𝑠𝑡 to an action 𝑎𝑡 through a policy 𝜋𝜃 . This policy, optimized                (𝑝𝑒𝑥 , 𝑝𝑒𝑦 , 𝑝𝑒𝑧 , 𝑜𝑒 ) and 𝒑𝑡 = (𝑝𝑡𝑥 , 𝑝𝑡𝑦 , 𝑝𝑡𝑧 , 𝑜𝑡 ) represent the poses of the end-
+to maximize rewards, signifies a shift from traditional control strate-              effector and target, respectively. These poses can be defined using
+gies. In our framework, forward kinematics (FK) acts as the interface                either Euler angles or quaternions, resulting in a length of either 6 or 7;
+between joint-space control and Cartesian task objectives, supporting                in this paper, quaternions are utilized. The 𝒆𝒓𝒓𝒐𝒓 vector quantifies the
+state representation by computing the current end-effector pose for the              discrepancy between the end-effector and target, incorporating the sum
+observation vector, reward shaping by evaluating pose error relative to              of distance errors from three points delineated along orthogonal axes
+the target, and task evaluation by verifying at test time whether the                and orientation error, as expounded in Molchanov et al. (2019), Zhou
+final pose satisfies the required tolerance (detailed in Appendix A).                et al. (2019a). 𝒅 𝑜𝑏𝑠 signifies the minimal distance between obstacles and
+
+                                                                                 4
+Y. Wang and H. Kasaei                                                                                        Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+the manipulator’s links. This distance calculation is reformulated as a               of local optima stagnation. To effectively balance exploration and
+geometric problem to ascertain the nearest point in space to various                  convergence, we vary sample sizes across distributions (Wang et al.,
+links (detailed in Appendix A). The action space is represented by a                  2021), demonstrating the process in Fig. 4 with a one-dimensional toy
+vector, 𝒂𝑡 =< 𝒒̇ 𝑑 >, where 𝒒̇ 𝑑 = (𝑞̇ 𝑑1 … 𝑞̇ 𝑑6 ) denotes the velocity of the       example. These enhancements are integrated into our refined action
+6 joints.                                                                             ensembles method as specified in the formula below:
+
+                                                                                      𝒂𝑡,𝑗 ∼ 𝑁(𝜇𝜃 (𝑠𝑡 ), 𝛿𝜃 ),    𝒂𝑡 = 𝑚𝑒𝑎𝑛(𝒂𝑡,𝑗 )                                          (9)
+3.2.2. Strategy for learning                                                                                              𝑗
+    In this paper, we adopt PPO (Schulman et al., 2017), an advanced                  where 𝒂𝑡,𝑗 represents 𝑗th action at time t, with 𝑗 varying from 1 up
+reinforcement learning method praised for its balance between stabil-                 to but not including 𝑖. 𝑒𝑛 and 𝑒𝑎 represent the counts of the current
+ity and efficiency, especially in complex robotic tasks with obstacle                 and total episodes, respectively. The number of samples, denoted as
+avoidance. PPO uses a policy gradient approach, enhancing training                    𝑖, varies based on the chosen distribution. We adjust sample sizes for
+stability through a clipped surrogate objective function that limits                  different distributions and detail their implementation within the PPO
+policy changes, thus optimizing rewards efficiently:                                  framework below.
+𝑳𝑪𝑳𝑰𝑷 (𝜃 𝜋 ) = Ė 𝑡 [𝑚𝑖𝑛(𝑟𝑡 (𝜃 𝜋 )𝐴̂ 𝑡 ,
+                                                                           (2)            • AE with Linear (AEL): Linear improvement for sample selection,
+                    𝑐𝑙𝑖𝑝(𝑟𝑡 (𝜃 𝜋 ), 1 − 𝜖, 1 + 𝜖)𝐴̂ 𝑡 )]
+                                                                                            defined as follows:
+𝐴̂ 𝑡 = 𝛿𝑡 + (𝛾𝜆)𝛿𝑡+1 + ⋯ + ⋯ + (𝛾𝜆)𝑇 −𝑡+1 𝛿𝑇 −1                            (3)                       𝑒
+                                                                                            𝑖=1+𝛼 𝑛                                                  (10)
+                                                                                                     𝑒𝑎
+𝛿𝑡 = 𝑟𝑡 + 𝛾𝑉 (𝑠𝑡+1 ) − 𝑉 (𝑠𝑡 )                                             (4)              𝛼 acts as a hyperparameter that significantly influences the con-
+                                                                                            vergence rate.
+𝑉 (𝑠) = E𝑠,𝑎∼𝜋 [𝐺(𝑠)|𝑠]                                                    (5)            • AE with Poisson Distribution (AEP): Poisson distribution for sam-
+                                                                                            ple selection, defined as follows:
+         ∑
+         ∞                                                                                                                        𝑒
+𝐺(𝑠) =          𝛾 𝑖−𝑡 𝑟(𝑠𝑖 )                                               (6)              𝑖 ∼ 𝑐𝑙𝑖𝑝(𝑃 𝑜𝑖𝑠𝑠𝑜𝑛(𝛽), 1, 𝛽), 𝛽 = 1 + 𝛼 𝑛                     (11)
+                                                                                                                                  𝑒𝑎
+          𝑖=𝑡
+                                                                                            𝛽 denotes the parameter of the Poisson distribution.
+where 𝜃 𝜋 indicates the policy network’s parameters, with 𝑟𝑡 (𝜃 𝜋 ) as
+                                                                                          • AE with Beta Distribution (AEB): Beta distribution for sample
+the probability ratio. The Generalized Advantage Estimator (GAE), 𝐴̂ 𝑡 ,
+                                                                                            selection, defined as follows:
+calculates the policy gradient. Rewards at time 𝑡 are noted as 𝑟𝑡 , with
+a clipping parameter 𝜖 = 0.2 and discount factor 𝛾 = 0.99. 𝑉 (𝑠)                             𝑖 ∼ 𝑐𝑙𝑖𝑝(𝐵𝑒𝑡𝑎(𝑎, 𝑏), 1, 𝑎)                                                    (12)
+represents the expected return from state 𝑠, and 𝐺 the discounted
+rewards. 𝑉𝑡𝑎𝑟𝑔𝑒𝑡 (𝑠) serves as the target value for the value loss func-                          𝑒                   𝑒
+                                                                                             𝑎=1+𝛼 𝑛             𝑏=1+𝛽 𝑛                                                   (13)
+tion, streamlining optimization. The value loss function is expressed as                          𝑒𝑎                  𝑒𝑎
+follows:                                                                                    where 𝑎 and 𝑏 represent the parameters of the Beta distribution. 𝛼
+𝑳𝑉 (𝜃 𝑉 ) = E𝑠,𝑎∼𝜋 [(𝑉 (𝑠) − 𝑉𝑡𝑎𝑟𝑔𝑒𝑡 (𝑠))2 ]                               (7)              and 𝛽 are the hyperparameters influencing the convergence rate.
+                                                                                          • AE with Exponential Distribution (AEE): Exponential distribution
+    Facing challenges like time-consuming training and suboptimal re-                       for sample selection, defined as follows:
+sults with PPO in complex robotic tasks, we introduce two enhance-                                                              𝑒
+ments to improve its performance.                                                           𝑖 ∼ 𝑐𝑙𝑖𝑝(𝐸𝑥𝑝(𝜆), 1, 𝜆), 𝜆 = 1∕(1 + 𝛼 𝑛 )                      (14)
+                                                                                                                                𝑒𝑎
+Action ensembles. The established principle that ensembles enhance                          𝜆 is the parameter of the Exponential distribution.
+stability, reduce variance, and improve uncertainty estimation is well                    • AE with Weibull Distribution (AEW): Weibull distribution for
+recognized. In RL, they are especially valuable in offline settings,                        sample selection, defined as follows:
+where robust uncertainty modeling is essential for safe, effective policy
+learning. Ghasemipour et al. (2022), An et al. (2021), Lee et al. (2022)                     𝑖 ∼ 𝑐𝑙𝑖𝑝(𝑊 𝑒𝑖𝑏𝑢𝑙𝑙(𝑘, 𝜆), 1, 𝜆)                                                (15)
+As a method grounded in policy gradients, PPO strives to approximate
+                                                                                                  𝑒                   𝑒
+the optimal policy through its objective function. Furthermore, Gaus-                        𝑘=1+𝛼 𝑛             𝜆=1+𝛽 𝑛                                                   (16)
+                                                                                                  𝑒𝑎                  𝑒𝑎
+sian distributions are favored for modeling optimal policies within the
+domain of robotics tasks, as they accurately capture the intricacies                         where 𝑘 and 𝜆 represent the parameters of the Weibull distribu-
+of real-world dynamics. For the manipulator reaching task, actions                           tion. 𝛼 and 𝛽 are the hyper-parameters influencing the conver-
+are modeled as 𝜋𝜃 (𝑎𝑡 |𝑠𝑡 ) ∼  (𝜇𝜃 (𝑠𝑡 ), 𝜎𝜃2 ), where 𝜎𝜃2 represents the                   gence rate.
+uncertainty and variability of actions. By utilizing KL divergence in
+                                                                                          Following experimentation, AEW is selected as the augmentation
+the PPO framework to quantify the disparity between the optimal and
+                                                                                      method for enhancing PPO in our task. Details regarding the parameter
+current policies, the ensuing objective function is derived (Schulman
+                                                                                      selection are included in Appendix A.
+et al., 2017):
+         (                        )                                                   Policy feedback. Within the PPO framework featuring an Actor–Critic
+min 𝐷KL 𝜋 ∗ (⋅|𝑠𝑡 ) ∥ 𝜋𝜃 (𝑎𝑡 |𝑠𝑡 )                                     (8)
+ 𝜃                                                                                    (AC) architecture, the critic network refines the actor’s policy by esti-
+    To optimize the objective function, the ideal 𝜃 ∗ should adhere to                mating the value function. Nonetheless, the policy’s indirect influence
+the conditions 𝜇 ∗ (𝑠𝑡 ) = 𝜇𝜃 (𝑠𝑡 ) and 𝛴 ∗ = 𝛴𝜃 . Typically, the optimal             on value function updates may heighten instability in DRL algorithms,
+action 𝑎∗𝑡 at any given time 𝑡 is deterministic with minimal uncertainty.             highlighting the challenge of maintaining equilibrium between actor
+Therefore, the reduction of policy uncertainty, denoted as 𝛴𝜃 , alongside             and critic adaptations for stable learning. The stability of PPO is en-
+the attainment of the optimal 𝜇 ∗ (𝑠𝑡 ), holds paramount importance. The              hanced by directly incorporating the policy into the updates of the
+mitigation of uncertainty frequently entails the aggregation of multiple              value function (Gu et al., 2021). This approach enables the critic
+action values, predicated on the principle that averaging samples drawn               to rapidly adapt to shifts in policy. Furthermore, (Gan et al., 2024)
+from a Gaussian distribution effectively diminishes policy uncertainty                introduced Reflective Policy Optimization (RPO), which incorporates
+by smoothing the distribution of action outputs. Nevertheless, this                   both past and future policy states into the critic to promote more
+approach could potentially inhibit early exploration and pose the risk                stable learning dynamics. Such enhancement is facilitated through the
+
+                                                                                  5
+Y. Wang and H. Kasaei                                                                                     Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+
+
+Fig. 4. The policy approximation towards the optimal policy in a 1-dimensional example unfolds in three stages from left to right: early exploration, middle
+exploration, and later convergence. 𝜋 ∗ (⋅|𝑠𝑡 ), 𝜋𝜃 (⋅|𝑠𝑡 ), and 𝜋̃𝜃 (⋅|𝑠𝑡 ) represent the optimal, current, and adjustable policies, respectively.
+
+
+
+
+            Fig. 5. The Framework of the PPO with Enhancements: The action ensembles (shown in red block) and the policy feedback (red line).
+
+
+implementation of an adaptive clipped discount factor, which allows              3.2.4. Improved PPO
+for a more dynamic adjustment in response to policy changes, thereby                According to previous advancements, the loss functions of AC net-
+promoting a more robust and stable learning environment within the               works can be represented as follows:
+framework.
+                                                                                 𝑳(𝜃 𝜋 ) = Ė 𝑡 [𝑚𝑖𝑛(𝑟𝑡 (𝜃 𝜋 )𝐴𝑡 ,
+𝛾(𝑠, 𝑎; 𝜂) = 𝑐𝑙𝑖𝑝(𝜋(𝑠, 𝑎), 𝜂, 1) 𝜂 ∈ (0.6, 0.99)                      (17)                                                                                              (20)
+                                                                                           𝑐𝑙𝑖𝑝(𝑟𝑡 (𝜃 𝜋 ), 1 − 𝜖, 1 + 𝜖)𝐴𝑡 )]
+in which 𝜋(𝑠, 𝑎) represents the policy and the adaptive 𝛾 can join in
+                                                                                 𝑳(𝜃 𝑉 ) = Ė 𝑡 [(𝑅𝜋𝑡 − 𝑉𝑡 )2 ]                                                         (21)
+the update of critic network. Both the AC neural network consists of 3
+layers, where each layer consists of 256 neurons. The first 2 layers use             Fig. 5 shows the overall architecture of the improved PPO, and Algo-
+the 𝑡𝑎𝑛ℎ activation function. The only distinction between actor and             rithm 1 represents the pseudocode of the improved PPO. By combining
+critic networks is that the critic network generates only a single scalar        all the proposed strategies together, the entire process for the robot to
+value, while the actor produces a vector of 6 values. For both networks,         avoid obstacles while reaching the goal is summarized in Algorithm 2
+we utilize the Adam optimizer. Fig. 5 shows the overall architecture of          and Fig. 6.
+the improved PPO.
+                                                                                 3.3. Fast trajectory planner
+3.2.3. Reward function
+   The following functions outline the approach utilized for calculating
+                                                                                     To achieve efficient motion planning for manipulators, we combine
+the reward:
+                                                                                 the perception-aware trajectory planning described in Section 3.1 with
+                                       ∑
+                                       𝑛
+                                                                                 the RL-based joint space controller from Section 3.2, creating a fast and
+𝑹(𝑠, 𝑎) = −[𝜔1 𝑒2 + ln (𝑒2 + 𝜏) + 𝜔2         𝜓𝑖 ]                     (18)
+                                       𝑖=1
+                                                                                 adaptive trajectory planner capable of handling complex environments
+                                                                                 with both static and dynamic obstacles. The key innovation of this fast
+𝜓𝑖 = 𝑚𝑎𝑥(0, 1 − ‖𝑑𝑖 ‖∕𝑑𝑚𝑎𝑥 )                                     (19)
+                                                                                 trajectory planner is its ability to replan on-the-fly. As the manipulator
+            ∑
+where 𝑒 = 𝒆𝒓𝒓𝒐𝒓 quantifies the pose discrepancy between the target               navigates through its environment, the system continuously monitors
+and the end-effector. The use of the ln(⋅) aims to minimize error 𝑒              for new obstacles. If an obstacle is detected, the planner immediately
+while maximizing the reward; 𝜓𝑖 denotes penalties for collisions. The            triggers a replanning mechanism. The perception-aware module up-
+coefficients 𝜔1 , 𝜔2 , and 𝜏, along with 𝑑𝑚𝑎𝑥 which defines the error            dates the voxel grid, and a new safe trajectory is generated using the
+threshold between the end-effector and target pose, are determined               B-spline optimization technique. This updated path is then fed into
+through trial and error to be 𝜔1 = 10−3 , 𝜔2 = 0.1, 𝑑𝑚𝑎𝑥 = 0.08, and             the RL-based controller, which ensures smooth and efficient navigation
+𝜏 = 10−4 .                                                                       around the obstacle.
+
+                                                                             6
+Y. Wang and H. Kasaei                                                                                      Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+
+
+Fig. 6. Learning Strategy Deployment Overview: The agent is first trained in Pybullet to learn the task-to-joint space mapping of the UR5e manipulator.
+This trained policy is then adapted from one simulation to another (Sim-to-Sim) in Gazebo and applied directly to real-world robot scenarios without further
+fine-tuning.
+
+
+Algorithm 1 Improved PPO Pseudocode                                                     planning, and reinforcement learning-based control to enable safe,
+                                                                                        adaptive, and efficient motion planning for manipulators in complex
+  Orthogonally initialize the actor and critic networks
+                                                                                        environments. This allows manipulators to achieve goal-oriented tasks
+  Initialize optimizer as Adam with learning rates
+                                                                                        while autonomously avoiding both static and dynamic obstacles, as
+  Set 𝜆, 𝑎𝑚𝑎𝑥 = 3.14, clip parameter: 𝜖
+                                                                                        demonstrated in Fig. 7.
+  Set AEW parameter: 𝛼 = 7, 𝛽 = 20
+  Set Policy Feedback parameter: 𝜂 ∈ [0.6, 0.99]                                        4. Experiments
+  for iteration = 1 to max_steps do
+     Get 𝑠𝑡 from the environment                                                            In this section, we evaluated our methods in both simulations
+     Sample 𝑎𝑡 from the baseline policy 𝜋𝑏𝜃 (𝑎𝑡 |𝑠𝑡 )                                   and the real world. Our experiments demonstrated that: (1) The im-
+     Use 𝒂𝒕 ∼ 𝐴𝐸𝑊 (𝜇𝜃 (𝑠𝑡 ), 𝛿𝜃 ) to publish 𝒂𝒕                                         proved PPO surpassed other baselines in performance and robust-
+     Execute 𝑎𝑡 , get < 𝑠𝑡 , 𝑎𝑡 , 𝜋𝜃 , 𝑟𝑡 , 𝑠𝑡+1 > and store them into buffer 𝐷         ness across different simulation platforms. (2) The RL-based controller
+     Calculate clipped discount factor 𝛾(𝑠, 𝑎; 𝜂) by Eq. (17)                           achieved precise and stable joint-level control of a robot manipula-
+                                   ∑
+                                   𝑇       ∏𝑛                                           tor. (3) The fast trajectory planner embedded within the proposed
+     Compute reward: 𝑅𝜋𝑡 = 𝑟𝑖 𝛾(𝑠, 𝑎; 𝜂)
+                                𝑖=𝑡   𝑗=𝑡                                               controller facilitated real-time trajectory planning for the manipulator.
+    Compute advantage function: 𝐴𝜋𝑡 = 𝑟𝑡 + 𝛾𝑉𝑡+1
+                                              𝜋 −𝑉𝜋
+                                                   𝑡
+    Use Eq. (20) to accumulate gradients with respect to 𝜃𝜋                             4.1. Experimental setups
+    Use Eq. (21) to accumulate gradients with respect to 𝜃𝑉
+  end for                                                                                  We conducted experiments on the following tasks:
+
+                                                                                            • Reaching with Obstacle Avoidance: The enhanced PPO was
+Algorithm 2 Manipulator Control via Improved PPO                                              trained in Pybullet to expedite training, with the model tested in
+                                                                                              Gazebo to validate the robustness.
+  for number of epochs do
+                                                                                            • Motion Planning in Static Obstructed Environments: The ma-
+    Set i_epoch as random seed                                                                nipulator navigated from start to goal, avoiding obstacles in
+    Orthogonally initialize the actor and critic networks                                     varied environments.
+    Set 𝜆, maximum action, learning rates, and clip parameter 𝜖                             • Motion Planning in Moving Obstacles Environments: The ma-
+    for number of episodes do                                                                 nipulator avoided moving obstacles from start to goal in dynamic
+       Set a target position 𝑝𝑡 randomly                                                      environments.
+       while True do                                                                        • Reaching the Moving Target with Obstacle Avoidance: The
+         Get 𝑠𝑡 from the environment                                                          manipulator achieved obstacle avoidance while reaching a mov-
+         Choose the action using 𝒂𝒕 ∼  (𝜇𝜃 (𝑠𝑡 ), 𝛿𝜃 )                                       ing target.
+         Clip 𝒂𝒕 to ensure safety for the environment                                       • Generalization Across Various Manipulators: The enhanced
+         Execute 𝑎𝑡 , get < 𝑠𝑡 , 𝑎𝑡 , 𝜋𝜃 , 𝑟𝑡 , 𝑠𝑡+1 > and store them into buffer             PPO algorithm was evaluated on manipulators with different DoF
+         𝐷                                                                                    to validate its generalization capability for the reaching task.
+       end while
+    end for                                                                                Our experiments utilized a 6-DoF UR5e manipulator, conducted
+    for every time step 𝑡 do                                                            on a PC equipped with Ubuntu 20.04, an Intel Xeon i7 processor at
+       for 𝑘 epochs do                                                                  3.20 GHz, and an NVIDIA RTX 2080 Ti card.
+         Select a minibatch 𝑏𝑘 in 𝐷
+                                                                                        4.2. Strategy evaluation in reaching tasks
+         Utilize Algorithm 1 to update networks
+       end for
+                                                                                            The experimental workspace was shaped as a sphere with an 85 cm
+    end for
+                                                                                        radius, excluding a 30 cm radius cylinder at the base of the ma-
+  end for
+                                                                                        nipulator. During training, targets were randomly placed within the
+                                                                                        workspace, with three 5 cm-diameter spherical obstacles located near
+                                                                                        the target or the manipulator’s links, serving as areas to avoid (detailed
+   Moreover, to enhance overall system efficiency, the planner in-                      in Appendix A). To assess the efficiency of the proposed RL method,
+tegrates a kinodynamic path-searching algorithm, which takes into                       we investigated the impact of each algorithm component, compared
+                                                                                        strategy performance with baselines, and tested strategy robustness.
+account the manipulator’s dynamic and kinematic constraints. This
+                                                                                        All experiments involved running 1.5 × 104 episodes, each limited to
+ensures that the trajectories not only avoid obstacles but also respect                 100-time steps, totaling 1.5 million steps. To minimize serendipity, we
+the physical limits of the manipulator. In summary, the fast trajec-                    consistently ran the algorithms five times with unique random seeds
+tory planner seamlessly integrates real-time perception, dynamic path                   for all experiments.
+
+                                                                                    7
+Y. Wang and H. Kasaei                                                                                 Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+
+
+Fig. 7. Fast Trajectory Planner: This diagram illustrates the workflow of the fast trajectory planner, which combines real-time perception, B-spline-based
+trajectory optimization, and RL-based control. The system dynamically replans trajectories in response to changes, ensuring safe and efficient navigation during
+reactive tasks.
+
+
+
+
+Fig. 8. Summary of Ablation Experiments: (a) Accumulated reward comparison for PPO with various AE methods across 5 random seeds; (b) PPO with PF
+method compared using 5 random seeds; (c) PPO performance with dual enhancements over 5 seeds. Variance is depicted by shaded areas.
+
+
+4.2.1. Ablation experiments                                                        4.2.2. Comparison experiments
+   In this round of experiments, we systematically modify various                      To underscore the benefits of our methodology, we conducted com-
+components of our model to assess their impacts on performance.                    parative analyses with five SOTA baselines: PPO (Schulman et al.,
+                                                                                   2017), A2C (Mnih et al., 2016), DDPG (Lillicrap et al., 2015), SAC
+Action ensembles. Our evaluation of AE’s impact on convergence is                  (Haarnoja et al., 2018), and TD3 (Dankwa and Zheng, 2019), ensuring
+presented in Fig. 8(a), which illustrates the convergence rates and                uniformity in neural network architectures, parameters, state–action
+optimal rewards for various AE methods across different distributions.             representations, and reward functions across all benchmarks. Fig. 9
+Fig. 8(a) demonstrates that PPO, when augmented with AE, achieves                  highlights the superiority of our approach via enhanced performance
+higher rewards, indicating enhanced accuracy in the reaching task with             metrics. Notably, the learning curve in (a) showcases our method’s
+obstacle avoidance. The AEL variant secures the highest reward across              distinct advantage, while (b) reveals its significantly higher average
+                                                                                   success rate, consistently surpassing 90% even with strict thresholds
+all tested distributions. Additionally, the Weibull distribution exhibits
+                                                                                   below 10 mm, confirming its precision and efficiency in trajectory
+rapid improvement in the initial phase of the convergence process, even
+                                                                                   tracking. Additionally, the training time comparison in (c) illustrates
+though its total accumulated rewards may not be the highest. Further-
+                                                                                   our method’s accelerated convergence rate due to the integrated en-
+more, this suggests that AE enhancements are effective for robotic tasks.          hancements, demonstrating that AE and PF not only expedite policy
+To identify the optimal approach for various applications, conducting              improvement but also achieve higher rewards more rapidly. Our ap-
+experiments tailored to each specific task is essential. Varying parame-           proach demonstrates efficiency by reaching fast convergence within 1.5
+ters across different distributions can influence outcomes. To explore             million timesteps, outperforming other methods in similar hardware
+this, we conducted extensive ablation studies (detailed in Appendix                and task conditions due to its time efficiency.
+A) that examined how changes in distribution parameters affect the
+mean value intervals. These studies indicate that the AEW method’s                 4.2.3. Generalization experiments
+performance is largely stable despite these variations.                                We assessed the robustness of our RL model in the Gazebo simu-
+                                                                                   lation environment as shown in Fig. 10, where it consistently demon-
+Policy feedback. Fig. 8(b) demonstrates that incorporating PF into PPO             strated reliable task performance, as highlighted in the accompanying
+results in higher rewards compared to the original PPO. From Fig.                  video. Furthermore, to evaluate the efficiency of our proposed model
+8(c), it is evident that combining AE and PF enhancements significantly            across manipulators with varying DoF, we performed experiments on
+improves reward outcomes for tasks involving obstacle avoidance.                   several robotic platforms, as shown in Fig. 11. The results indicate that
+Specifically, the PPO_PF_AEW variant achieves the highest accumulated              our method performs comparably well on manipulators such as the
+rewards, as described in Section 3.2. The AE component addresses the               Baxter, Franka Emika Panda, Kuka LBR4+, and ABB Yumi, confirming
+                                                                                   its ability to generalize effectively across a wide range of robotic
+challenges of inhibited early exploration and the risk of local optima
+                                                                                   systems. Details are available in supplementary videos.
+stagnation found in the original PPO, effectively balancing exploration
+and convergence. The PF component, implemented through an adaptive                 4.3. Implementation evaluation in motion planning tasks
+clipped discount factor, allows for dynamic adjustment in response
+to policy changes, fostering a more robust and stable learning envi-               4.3.1. Comparison experiments
+ronment within the framework. These results validate our theoretical                  We evaluated our framework against five prevalent planners (John-
+approach.                                                                          son et al., 2023) (RRT, TRRT, RRT*, PRM*, BIT*) using the Open
+
+                                                                               8
+Y. Wang and H. Kasaei                                                                                   Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+
+
+Fig. 9. Summary of Comparison Experiments: (a) Comparison result of accumulated reward utilizing 5 random seeds for our method and other baselines; (b)
+Comparison of success rate on reaching task with obstacles; (c) Comparison result of training time for different methods.
+
+
+
+
+Fig. 10. Trajectory Planning in Gazebo: The top image depicts the path planning process, where gray blocks represent detected obstacles and the red line
+traces the end-effector’s path. The blue sphere marks the target, while the red sphere indicates the manipulator’s current position. The green cube highlights the
+target location.
+
+
+
+
+Fig. 11. Robotic platforms used for evaluating the generalization of the proposed method. The experiments demonstrate our method’s ability to perform effectively
+across a variety of robotic systems.
+
+
+
+
+Fig. 12. Planner Comparison: Results from a single run for each planner across five tasks: Task 1 in an obstacle-free area; Task 2 with two additional obstacles;
+Task 3 in a cluttered scene; Task 4 featuring a moving obstacle near the goal; and Task 5 involving changing the goal as the end-effector nears it.
+
+
+Motion Planning Library (OMPL) (Sucan et al., 2012), as depicted in                     Fig. 12 shows task comparisons. In static environments (tasks 1–3),
+Fig. 12. The evaluation encompassed five tasks, considering the robot’s             our planner consistently achieves the shortest end-effector paths from
+head and body as obstacles: Task 1 in an obstacle-free area; Task 2 with            start to goal. Details on manipulator states at each waypoint are avail-
+two additional obstacles; Task 3 in a cluttered space; Task 4 featuring a           able in supplementary videos. The planner maintains gradual end-
+moving obstacle near the goal; Task 5 involves changing the goal as the             effector orientation changes, beneficial for tasks involving grasping
+end-effector nears it. We assessed planning performance with metrics:
+                                                                                    and human-like motions. In dynamic environments where traditional
+Length, Time, and Success Rate, and calculated the average values for
+                                                                                    planners falter, our planner still efficiently plans trajectories in real-
+each task and planner based on 100 trials. It is important to note that in
+tasks 1–3, all planners can successfully plan. However, as the difficulty           time. Table 1 reveals our method’s superiority in finding the quickest,
+increases, tasks 4 and 5 involve dynamic environments where obstacles               shortest trajectories in static environments compared to others. It ef-
+move or targets change suddenly. In such cases, other planners struggle             ficiently integrates 3D environmental data, such as point clouds, to
+to adapt within the OMPL library, whereas our planner is still able to              outline sampling areas and adapts to dynamic scenarios with moving
+complete these tasks.                                                               obstacles or targets.
+
+                                                                                9
+Y. Wang and H. Kasaei                                                                                  Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+Table 1
+Result comparisons of the motion planning experiments using different planners.
+          Length (m)                                      Time (s)                                            Success rate (%)
+          RRT     TRRT   RRT*     PRM*    BIT*    Ours    RRT        TRRT   RRT*     PRM*    BIT*    Ours     RRT        TRRT      RRT*       PRM*      BIT*      Ours
+ Task1    2.04    2.03   1.88     1.88    1.99    1.52    0.19       0.24   5.04     5.05    2.92    0.002    100%       100%      100%       100%      100%      100%
+ Task2    2.20    2.13   2.02     2.13    2.11    1.57    0.27       0.43   5.06     5.08    4.19    0.004    99%        96%       99%        98%       100%      100%
+ Task3    2.33    2.22   2.12     2.06    1.96    1.69    0.79       1.04   5.06     5.07    5.08    0.012    99%        98%       98%        99%       100%      100%
+ Task4    7       7      7        7       7       1.72    7          7      7        7       7       0.022    7          7         7          7         7         100%
+ Task5    7       7      7        7       7       1.76    7          7      7        7       7       0.013    7          7         7          7         7         100%
+
+
+
+4.3.2. Motion planning in real world                                                5. Discussion
+    We integrated the proposed method into our robot for motion
+planning. Fig. 13 showcases its navigation capabilities in complex                      Designing a specialized trajectory planner for manipulators capable
+environments. The top row (left) illustrates a task with no obstacles,              of executing complex real-world tasks remains a significant challenge.
+where our method moves directly from A to B in the shortest possible                In this section, we analyze how the proposed framework addresses
+distance. The middle image shows a task where obstacles increase in                 these challenges and discuss our findings. Firstly, our perception-aware,
+real-time as the manipulator moves, but our planner ensures a safe                  B-spline-optimized kinodynamic planner provides time-parameterized
+path. The right image demonstrates a reactive task where the planner                trajectories that respect kinematic and dynamic constraints while en-
+quickly responds to a person approaching the manipulator, highlighting              abling on-the-fly replanning. Empirically, Section 4 shows competitive
+its real-time planning capability. The bottom row depicts a scenario                path length and planning time in static scenes, and successful execution
+                                                                                    in dynamic scenes where classical sampling planners struggle. The
+where an obstacle suddenly appears, and as the end-effector nears the
+                                                                                    waypoint interface further standardizes the handoff from task space to
+goal, the goal changes. Despite these challenges, our planner plans
+                                                                                    the joint-space controller, easing deployment across different arms. Sec-
+successfully. Each experiment was conducted over five times, and the
+                                                                                    ondly, the proposed RL controller directly maps task-space waypoints
+planner consistently executed successfully, given stable perception.
+                                                                                    to safe joint commands without requiring explicit inverse kinematics,
+Further details are provided in an accompanying video.
+                                                                                    which is advantageous near kinematic singularities or in clutter. In
+                                                                                    aggregate, the controller sustains accurate reaching while maintaining
+4.4. Failure cases                                                                  link safety, as evidenced by high success rates under tight thresh-
+                                                                                    olds. Finally, the AE component smooths action sampling and reduces
+                                                                                    variance, accelerating convergence without suppressing exploration.
+  In our real-robot experiments, we observed several distinct failure               The PF mechanism introduces confidence-aware critic updates that
+modes, which can be categorized into three primary types:                           better align actor and value learning. Ablations show consistent gains
+    Perception Failures due to Self-Occlusion: During dynamic tasks,                from each module; in combination, AE+PF achieves higher cumulative
+the manipulator itself sometimes occludes key parts of the scene. This              reward, faster training, and more stable performance in dynamic or
+issue arises because our Kinect sensor is mounted at a fixed head                   partially observable conditions.
+position, leading to partial or total blockage of the scene when the                    In summary, the proposed planner–controller stack provides a fast,
+arm moves. This occlusion can degrade the quality of the environment                manipulator-specific trajectory generation pipeline coupled with a re-
+map and affect motion planning. Possible solutions include integrating              inforcement learning controller tailored for precise, collision-aware
+multi-view or external camera setups (e.g., shoulder- or wrist-mounted              reaching. By stabilizing PPO through the integration of AE and PF, the
+RGB-D sensors) to reduce blind spots; implementing occlusion-aware                  framework achieves improved efficiency, robustness, and adaptability
+perception pipelines that exclude the manipulator from segmentation                 for real-time manipulation tasks.
+or maintain a dynamic visibility map; and using partial map updates
+or temporal smoothing to retain information about occluded areas.                   6. Conclusions
+    Reactive Planning Limitations with Moving Obstacles: A second
+category of failure occurs when the end-effector’s current pose becomes                 This paper presents a fast trajectory planning system for a 6-DoF
+too close to a moving obstacle before the system has time to respond.               manipulator. The fast trajectory planner integrates vision-based trajec-
+This is particularly problematic when the obstacle’s behavior is delayed            tory planning in task space with a controller for joint-level obstacle
+or not predictable, resulting in invalid or unsafe trajectories. Potential          avoidance, based on reinforcement learning. For trajectory planning,
+solutions: Potential strategies include incorporating predictive models             we leverage FSA-augmented 3D mapping to enhance environmental
+                                                                                    perception and integrate kinodynamic path searching with B-spline-
+of obstacle motion to anticipate movements and re-plan in advance;
+                                                                                    based optimization, ensuring the generated trajectories are both ef-
+increasing the replanning frequency or employing hierarchical planners
+                                                                                    ficient and safe. In the case of trajectory tracking, we propose an
+capable of responding more quickly at different levels (e.g., reactive
+                                                                                    innovative RL-based controller that incorporates two significant ad-
+control for short-term avoidance); and including safety buffers around
+                                                                                    vancements within the PPO framework. First, we rigorously evaluate
+moving entities during path planning to ensure proactive clearance.
+                                                                                    the implementation of action ensembles across diverse distributions
+    Goal-Change Failures due to Spatial–Temporal Constraints: The                   through comprehensive ablation studies and comparative analysis. Sec-
+third failure type arises during the goal-changing task. When the ma-               ond, the integration of policy feedback improves reward acquisition
+nipulator is already near the original goal and a sudden change occurs,             and accelerates convergence, effectively shortening the training time.
+there is often insufficient time to re-plan a trajectory before execution               To validate the effectiveness of our method, we conduct exten-
+completes. This reflects the lag between perception, planning, and                  sive sets of simulations and real-world experiments. We compare our
+actuation. Potential solutions: Potential strategies include incorporating          method with five other planners, demonstrating that our method con-
+fast-switchable motion primitives that can adapt execution mid-flight,              sistently achieved the shortest trajectories at the fastest speeds in static
+maintaining low-latency planning pipelines or fallback reactive policies            environments. Additionally, our planner performs effectively in dy-
+for nearby goal shifts, and introducing uncertainty-aware planning                  namic and complex tasks, dynamically navigating through obstacles in
+methods that anticipate possible changes and prepare contingencies.                 various environments. In the future, we plan to explore learning-based
+
+                                                                               10
+Y. Wang and H. Kasaei                                                                                            Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+
+
+Fig. 13. Motion planning experiments in the real world: The top-row, from left to right, shows reaching from A (white plate) to B (green plate), obstacle addition
+during movement. The lower-row shows reacting to an approaching person, the moving obstacle and changing the goal pose during execution.
+
+
+replanning strategies to replace heuristic triggers, enabling more adap-                    Table A.2
+tive and efficient responses in dynamic environments. Incorporating                         UR5e DH parameters (radians).
+lightweight model-based components into our model-free framework                             𝑖              𝛼𝑖−1             𝑎𝑖−1 [m]          𝑑𝑖 [m]            𝜃𝑖 [rad]
+                                                                                                             𝜋
+may enhance data efficiency and improve the feasibility of generated                         1               2
+                                                                                                                             0                 0.1625            (−2𝜋, 2𝜋)
+motions. Furthermore, integrating our approach with high-level task                          2              0                −0.425            0                 (−2𝜋, 2𝜋)
+                                                                                             3              0                −0.3922           0                 (−2𝜋, 2𝜋)
+and motion planning (TAMP) frameworks could support more com-                                                𝜋
+                                                                                             4                               0                 0.1333            (−2𝜋, 2𝜋)
+plex, sequential behaviors such as grasp–place–regrasp in real-world                         5
+                                                                                                             2
+                                                                                                            − 𝜋2             0                 0.0997            (−2𝜋, 2𝜋)
+scenarios.                                                                                   6              0                0                 0.0996            (−2𝜋, 2𝜋)
+
+CRediT authorship contribution statement
+
+   Yongliang Wang: Writing – original draft, Software, Methodology,                     The FK defines the mapping from the robot’s joint configuration to
+Conceptualization. Hamidreza Kasaei: Writing – review & editing,                    the pose of its end-effector. In this work, the FK model of the UR5e ma-
+Supervision, Software.                                                              nipulator is formulated using the standard Denavit–Hartenberg (D–H)
+                                                                                    convention, with the parameters listed in Table A.2. These parameters
+                                                                                    specify the relative position and orientation between consecutive links
+Declaration of competing interest
+                                                                                    in the kinematic chain. The transformation from the (𝑖−1)-th link frame
+                                                                                    to the 𝑖th link frame is expressed as:
+    The authors declare that they have no known competing finan-
+cial interests or personal relationships that could have appeared to                𝑖−1
+                                                                                    𝑖 𝑇 = Trot 𝑧 (𝜃𝑖 ) Transl𝑧 (𝑑𝑖 ) Transl𝑥 (𝑎𝑖 ) Trot 𝑥 (𝛼𝑖 ),                              (A.1)
+influence the work reported in this paper.
+                                                                                    where Trot and Transl denote rotation and translation operations, re-
+                                                                                    spectively, around the indicated axes. The complete FK from the robot
+Acknowledgments
+                                                                                    base frame 𝑏 to the end-effector frame 𝑒 is obtained by chaining these
+                                                                                    transformations:
+   We thank the Center for Information Technology of the University
+of Groningen for their support and for providing access to the Hábrók                      ∏
+                                                                                           6
+                                                                                    𝑏            𝑖−1
+                                                                                    𝑒𝑇 =         𝑖 𝑇 (𝑎𝑖 , 𝛼𝑖 , 𝑑𝑖 , 𝜃𝑖 ),                                                    (A.2)
+high-performance computing cluster.                                                        𝑖=1
+
+                                                                                    where 𝜃𝑟 (𝑡) = [𝜃1 (𝑡), … , 𝜃6 (𝑡)] is the robot’s joint configuration vector.
+Appendix A. Appendix section
+                                                                                    The UR5e features 6 revolute joints, 𝐪 = (𝑞1 , 𝑞2 , 𝑞3 , 𝑞4 , 𝑞5 , 𝑞6 ). These
+                                                                                    parameters, combined with the D–H convention, allow the analytical
+    This appendix primarily elaborates on the details of the paper.
+                                                                                    computation of the end-effector pose. Formally, FK is expressed as:
+Initially, it delves into the kinematic model of the robot and com-
+putation of errors in state representation within the enhanced Prox-                𝐩 = 𝑓 (𝐪),                                                                                (A.3)
+imal Policy Optimization (PPO) algorithm. Subsequently, it explains
+                                                                                    where 𝑓 ∶ R𝑛 → R𝑚 maps the 𝑛 joint coordinates to an 𝑚-dimensional
+the methodology for calculating distances between links and obsta-
+                                                                                    task-space pose vector, typically comprising both Cartesian position and
+cles. It then presents the training workspace for a 6-degree-of-freedom
+                                                                                    orientation.
+(DoF) manipulator across all evaluated algorithms. Furthermore, results
+                                                                                        In our framework, FK serves as a critical interface between joint-
+from ablation studies on Action Ensembles with various distributions
+                                                                                    space control and Cartesian-space task objectives, fulfilling three pri-
+are displayed, illustrating the impact of different hyperparameters on
+                                                                                    mary roles:
+performance for each distribution.
+                                                                                         • State representation: Computing the current end-effector pose
+A.1. Kinematic model                                                                       for inclusion in the observation vector.
+                                                                                         • Reward shaping: Evaluating the pose error with respect to the
+    The experimental platform in this study is the Universal Robots                        target and incorporating it into the reward function.
+UR5e, an anthropomorphic manipulator widely used in industry. The                        • Task evaluation: Verifying during testing whether the final pose
+UR5e features 6 DoF, a maximum payload capacity of 5 kg, and a                             meets the target within a specified tolerance.
+reach of 850 mm, allowing accurate positioning of the end-effector in
+arbitrary poses within its workspace. In our framework, the RL policy               A.2. Pose error calculation
+is designed to output the desired joint positions for all 𝑛 joints directly,
+such that the action at time step 𝑡 is represented as 𝒂𝑡 = 𝒒 𝑡 ∈ R𝑛 . This              The state is represented as:
+design choice removes the need for intermediate inverse kinematics
+                                                                                    𝒔𝑡 =< 𝒒 𝑡 , 𝒑𝑒 , 𝒑𝑡 , 𝒆𝒓𝒓𝒐𝒓, 𝒅 𝑜𝑏𝑠 >                                                      (A.4)
+(IK) solvers or velocity-based differential control during deployment,
+streamlining the control pipeline. The corresponding end-effector pose,             The 𝒆𝒓𝒓𝒐𝒓 vector measures the difference between the end-effector and
+encompassing both position and orientation, is then obtained through                the target, integrating the sum of distance errors from three points de-
+the conventional forward kinematics (FK) formulation (Diaz et al.,                  fined along orthogonal axes and the orientation error. The computation
+2025).                                                                              proceeds as follows:
+
+                                                                               11
+Y. Wang and H. Kasaei                                                                                      Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+A.2.1. Generating tri-point representations for target and end-effector along        1. Calculate the dot product of 𝐪𝐮𝐚𝐭𝟏 and 𝐪𝐮𝐚𝐭𝟐.
+orthogonal axes
+    To describe the process mathematically for generating three points               dot_product = 𝐪𝐮𝐚𝐭𝟏 ⋅ 𝐪𝐮𝐚𝐭𝟐                                                      (A.15)
+on both the target and the end-effector. As depicted in Fig. A.14, the
+following steps are outlined:                                                        2. Ensure the dot product is within the range [−1, 1]to account for
+1. Convert quaternion to Euler angles. Convert the orientation of both               floating-point inaccuracies.
+the target and the end-effector from quaternions to Euler angles (roll
+                                                                                     dot_product = clip(dot_product, −1.0, 1.0)                                       (A.16)
+𝜙, pitch 𝜃, and yaw 𝜓):
+
+Quaternion → (𝜙, 𝜃, 𝜓)                                                 (A.5)
+                                                                                     3. Determine the angle difference.
+
+2. Calculate rotation matrices. Construct the following rotation matrices            angle_diff = 2 ⋅ arccos(dot_product)                                             (A.17)
+for roll, pitch, and yaw based on Euler angles:
+    Roll rotation matrix 𝑅𝜙 :
+                                                                                     4. Compute the shortest angular difference 𝛥𝜃 between two angles, 𝜃1 = 0
+     ⎡1        0             0 ⎤                                                     and 𝜃2 = angle_diff, while ensuring the result is within the range [0, 𝜋].
+𝑅𝜙 = ⎢ 0    cos(𝜙)       − sin(𝜙)⎥                                     (A.6)
+     ⎢                           ⎥                                                   𝛥𝜃 = min(|𝜃2 − 𝜃1 |, 2𝜋 − |𝜃2 − 𝜃1 |)                                            (A.18)
+     ⎣0     sin(𝜙)       cos(𝜙) ⎦
+    Pitch rotation matrix 𝑅𝜃 :
+                                                                                     𝛥𝜃 = |𝜃2 − 𝜃1 |                                                                  (A.19)
+     ⎡ cos(𝜃)      0      sin(𝜃) ⎤
+𝑅𝜃 = ⎢ 0           1         0 ⎥                                       (A.7)
+     ⎢                           ⎥
+     ⎣− sin(𝜃)     0      cos(𝜃)⎦                                                    If 𝛥𝜃 > 𝜋, then 𝛥𝜃 = 2𝜋 − 𝛥𝜃                                                     (A.20)
+
+    Yaw rotation matrix 𝑅𝜓 :                                                             Thus, the expression for calculating the shortest angular difference
+                                                                                     in radians between two quaternions is:
+     ⎡cos(𝜓)      − sin(𝜓)       0⎤
+𝑅𝜓 = ⎢ sin(𝜓)                                                                             {
+                  cos(𝜓)         0⎥                                    (A.8)                  |𝜃2 − 𝜃1 |      if |𝜃2 − 𝜃1 | ≤ 𝜋
+     ⎢                            ⎥                                                  𝛥𝜃 =                                                              (A.21)
+     ⎣ 0              0          1⎦                                                           2𝜋 − |𝜃2 − 𝜃1 | if |𝜃2 − 𝜃1 | > 𝜋
+3. Generate points. For each rotation (roll, pitch, and yaw), calculate              where 𝜃2 = 2 ⋅ arccos(dot_product) and 𝜃1 = 0.
+a point along the respective axis at a distance 𝑑 from the position 𝐩
+                                                                                        Ultimately, the error vector, 𝒆𝒓𝒓𝒐𝒓, is computed as 𝒆𝒓𝒓𝒐𝒓 = (𝐷𝜙 +
+(target or end-effector position):
+                                                                                     𝐷𝜃 + 𝐷𝜓 , 𝛥𝜃), encapsulating both the cumulative distance discrepancies
+𝐩𝜙 = 𝐩 + 𝑑 ⋅ 𝑅𝜙 [∶, 0]                                                 (A.9)         along the orthogonal axes and the angular difference.
+
+𝐩𝜃 = 𝐩 + 𝑑 ⋅ 𝑅𝜃 [∶, 1]                                                (A.10)
+                                                                                     A.3. Distances between links and obstacles
+
+𝐩𝜓 = 𝐩 + 𝑑 ⋅ 𝑅𝜓 [∶, 2]                                                (A.11)
+                                                                                         The 𝒅 𝑜𝑏𝑠 in state representation (Eq. (1)) is the shortest distance
+                                                                                     between obstacles and links in space. As depicted in Fig. A.14(b) and
+A.2.2. Computing distances between corresponding points                              (c), to calculate the distance between the obstacle and each link in joint
+   Then calculate the distance between the corresponding points:                     space, we transform it into a geometric problem to find the shortest
+1. Calculate distances. Compute the Euclidean distance between corre-                distance between any point in space and different links. We provide an
+sponding points generated for the target and the end-effector:                       example in Fig. A.14(b) to make it clearer. Let a 3D line be specified
+    Distance between points along roll axis 𝐷𝜙 , pitch axis 𝐷𝜃 , and yaw             by 2 points, 𝑝1 = (𝑥1 , 𝑦1 , 𝑧1 ) and 𝑝2 = (𝑥2 , 𝑦2 , 𝑧2 ), where ⋅ represents the
+axis 𝐷𝜓 :                                                                            dot product. Therefore, a vector along the line is given by the following
+                                                                                     equation:
+𝐷𝜙 = ‖𝐩𝜙,end_effector − 𝐩𝜙,target ‖                                   (A.12)
+                                                                                         ⎡𝑥1 + (𝑥2 − 𝑥1 )𝑡⎤
+                                                                                     𝒗 = ⎢ 𝑦1 + (𝑦2 − 𝑦1 )𝑡 ⎥                                                         (A.22)
+𝐷𝜃 = ‖𝐩𝜃,end_effector − 𝐩𝜃,target ‖                                   (A.13)             ⎢                  ⎥
+                                                                                         ⎣ 𝑧1 + (𝑧2 − 𝑧1 )𝑡 ⎦
+
+𝐷𝜓 = ‖𝐩𝜓,end_effector − 𝐩𝜓,target ‖                                   (A.14)            The squared distance between a point on the line with parameter 𝑡
+Here, 𝐩 represents the position vector, 𝑑 is the predefined distance from            and a point 𝑝0 = (𝑥0 , 𝑦0 , 𝑧0 ) is therefore:
+the position to the point, and 𝑅𝜙 [∶, 0], 𝑅𝜃 [∶, 1], 𝑅𝜓 [∶, 2] represent the         𝑑 2 = [(𝑥1 − 𝑥0 ) + (𝑥2 − 𝑥1 )𝑡]2
+column vectors of the rotation matrices corresponding to the roll, pitch,
+and yaw axes, respectively. The distances 𝐷𝜙 , 𝐷𝜃 , and 𝐷𝜓 quantify                      +[(𝑦1 − 𝑦0 ) + (𝑦2 − 𝑦1 )𝑡]2                                                 (A.23)
+the spatial discrepancy between the target and end-effector orientations                 +[(𝑧1 − 𝑧0 ) + (𝑧2 − 𝑧1 )𝑡]2
+and positions in three-dimensional space.
+                                                                                     Set 𝑑(𝑑 2 )∕𝑑𝑡 = 0 and solve for 𝑡 to obtain the shortest distance:
+A.2.3. Calculating the shortest angular difference between quaternions for                 (𝑥1 − 𝑥0 ) ⋅ (𝑥2 − 𝑥1 )
+target and end-effector                                                              𝒕=−                                                                              (A.24)
+                                                                                                 |𝑥2 − 𝑥1 |2
+    To steer the learning strategy towards achieving the target orien-
+tation, the angular difference between the target and the end-effector               The shortest distance can then be calculated by plugging Eq. (A.24)
+is incorporated. The formula for calculating the shortest angular dif-               back into Eq. (A.23). Thus, as shown on the right side of Fig. A.14(c),
+ference between two quaternions, 𝐪𝐮𝐚𝐭𝟏 and 𝐪𝐮𝐚𝐭𝟐, is mathematically                  we consider each link of the robot as the line and the obstacle as the
+delineated as follows:                                                               point. We then calculate the shortest distance between every obstacle
+                                                                                     and link.
+
+                                                                                12
+Y. Wang and H. Kasaei                                                                                      Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+
+
+Fig. A.14. (a) The difference calculation between the end-effector and the target, integrating the sum of distance errors from three points defined along orthogonal
+axes. (b) Distance between a point and a space line. (c) 𝒅 𝑜𝑏𝑠 is the obstacle (blue) to 5-link distance.
+
+
+
+
+Fig. A.15. Workspace and Summary of Ablation Studies with Varying 𝛼: The red line represents 𝛼 = 3, turquoise denotes 𝛼 = 5, and orange signifies 𝛼 = 7, across
+5 random seeds.
+
+A.4. Workspace                                                                             where 𝛽 represents the parameter of the Poisson distribution. As
+                                                                                           shown in Fig. A.15(c), we tested three different 𝛼.
+    As shown in Fig. A.15(a), the experimental workspace takes the                       • AE with Beta Distribution (AEB): Beta distribution for sample
+form of a sphere with a radius of 85 cm but excludes a 30 cm radius                        selection, defined specifically as follows:
+cylinder at the base of the robot. During training, targets are randomly
+                                                                                           𝑖 ∼ 𝑐𝑙𝑖𝑝(𝐵𝑒𝑡𝑎(𝑎, 𝑏), 1, 𝑎)                                                 (A.28)
+located within the workspace, and three 5 cm-diameter spherical obsta-
+cles are positioned either near the target or the manipulator’s links to                        𝑒                𝑒
+                                                                                           𝑎=1+𝛼 𝑛          𝑏=1+𝛽 𝑛                                                   (A.29)
+represent regions to avoid in joint space. Obstacle spheres are randomly                        𝑒𝑎               𝑒𝑎
+spawned within a quarter-spherical annulus, centered at the target,
+with the major and minor radii of 60 cm and 15 cm, respectively.                           𝒂𝑡,𝑗 ∼ 𝑁(𝜇𝜃 (𝑠𝑡 ), 𝛿𝜃 ),   𝒂𝑡 = 𝑚𝑒𝑎𝑛(𝒂𝑡,𝑗 )                                (A.30)
+                                                                                                                              𝑗
+
+                                                                                           where 𝑎 and 𝑏 represent the parameters of the Beta distribution. 𝛼
+A.5. Action ensembles ablation experiments                                                 and 𝛽 are the hyper-parameters influencing the convergence rate.
+                                                                                           As shown in Fig. A.15(d), we tested three different 𝛼.
+    • AE with Linear (AEL): Linear improvement for sample selection,                     • AE with Exponential Distribution (AEE): Exponential distribution
+      defined specifically as follows:                                                     for sample selection, defined specifically as follows:
+               𝑒                                                                                                               𝑒
+      𝑖 = 1 + 𝛼 𝑛 , 𝒂𝑡,𝑗 ∼ 𝑁(𝜇𝜃 (𝑠𝑡 ), 𝛿𝜃 ), 𝒂𝑡 = 𝑚𝑒𝑎𝑛(𝒂𝑡,𝑗 ) (A.25)                       𝑖 ∼ 𝑐𝑙𝑖𝑝(𝐸𝑥𝑝(𝜆), 1, 𝜆), 𝜆 = 1∕(1 + 𝛼 𝑛 )                   (A.31)
+               𝑒𝑎                                  𝑗                                                                           𝑒𝑎
+      where 𝛼 serves as the hyper-parameter influencing the rate of
+                                                                                           𝒂𝑡,𝑗 ∼ 𝑁(𝜇𝜃 (𝑠𝑡 ), 𝛿𝜃 ),   𝒂𝑡 = 𝑚𝑒𝑎𝑛(𝒂𝑡,𝑗 )                                (A.32)
+      convergence. with 𝑗 varying from 1 up to but not including 𝑖.                                                           𝑗
+      𝑒𝑛 and 𝑒𝑎 represent the counts of the current and total episodes,                    where 𝜆 represents the parameter of the Exponential distribution,
+      respectively. As shown in Fig. A.15(b), we tested three different                    𝛼 is the hyper-parameters influencing the convergence rate. As
+      𝛼.                                                                                   shown in Fig. A.15(e), we tested three different 𝛼.
+    • AE with Poisson Distribution (AEP): Poisson distribution for sam-                  • AE with Weibull Distribution (AEW): Weibull distribution for
+      ple selection, defined specifically as follows:                                      sample selection, defined specifically as follows:
+                                            𝑒
+      𝑖 ∼ 𝑐𝑙𝑖𝑝(𝑃 𝑜𝑖𝑠𝑠𝑜𝑛(𝛽), 1, 𝛽), 𝛽 = 1 + 𝛼 𝑛                   (A.26)                    𝑖 ∼ 𝑐𝑙𝑖𝑝(𝑊 𝑒𝑖𝑏𝑢𝑙𝑙(𝑘, 𝜆), 1, 𝜆)                                             (A.33)
+                                            𝑒𝑎
+                                                                                                𝑒                𝑒
+      𝒂𝑡,𝑗 ∼ 𝑁(𝜇𝜃 (𝑠𝑡 ), 𝛿𝜃 ),   𝒂𝑡 = 𝑚𝑒𝑎𝑛(𝒂𝑡,𝑗 )                       (A.27)             𝑘=1+𝛼 𝑛          𝜆=1+𝛽 𝑛                                                   (A.34)
+                                        𝑗                                                       𝑒𝑎               𝑒𝑎
+
+                                                                                 13
+Y. Wang and H. Kasaei                                                                                      Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+                                                                                        1. Adaptive Exploration Control: The tunable shape parameter 𝑘
+      𝒂𝑡,𝑗 ∼ 𝑁(𝜇𝜃 (𝑠𝑡 ), 𝛿𝜃 ),   𝒂𝑡 = 𝑚𝑒𝑎𝑛(𝒂𝑡,𝑗 )                    (A.35)                in the Weibull distribution enables AEW to modulate exploration
+                                        𝑗
+                                                                                           intensity over time. As mentioned above, 𝑘 < 1 encourages broad
+      where 𝑘 and 𝜆 represent the parameters of the Weibull distribu-
+                                                                                           exploration, while 𝑘 > 1 supports focused convergence. This
+      tion. 𝛼 and 𝛽 are the hyperparameters influencing the conver-
+                                                                                           flexibility allows AEW to adapt naturally to different phases of
+      gence rate. As shown in Fig. A.15(f), we tested three different
+                                                                                           training. Our learning curve in Fig. 8(a) and stability analysis in
+      𝛼.
+                                                                                           Fig. A.15(f) illustrate this adaptive behavior.
+                                                                                        2. Stability Across Hyperparameters: Compared to other distri-
+    As illustrated in Fig. A.15(b)–(f), the performance of AEW method
+                                                                                           butions like Beta or Poisson, AEW exhibits lower sensitivity to hy-
+appears largely consistent across different distribution parameter vari-
+                                                                                           perparameter variations, especially in 𝛼. As shown in Fig. A.15(f),
+ations.
+                                                                                           performance remains consistent across different 𝛼 values, mak-
+    Theoretical Comparison Across Distributions: To further under-
+                                                                                           ing AEW more robust and practical for real-world systems where
+stand why the Weibull-based AE performs best among the proposed
+                                                                                           hyperparameter tuning is often expensive or impractical.
+action ensemble variants, we provide a theoretical comparison based on
+                                                                                        3. Smooth Uncertainty Reduction: By using Weibull-guided sam-
+their distributional properties and alignment with key demands of rein-
+                                                                                           pling in the ensemble, AEW facilitates a gradual reduction of
+forcement learning, balancing exploration and exploitation, supporting
+                                                                                           policy uncertainty, avoiding abrupt changes in action selection.
+adaptive learning schedules, and ensuring stable convergence.
+                                                                                           This leads to smoother learning curves and helps prevent conver-
+                                                                                           gence to suboptimal local minima, a critical feature for robotic
+    • Linear (AEL): Offers deterministic weighting growth based on
+                                                                                           control tasks that require precision and stability.
+      estimated advantage. While simple and easy to tune, it lacks
+                                                                                        4. Empirical Advantage in Early and Mid Training Phases: As
+      stochasticity and diversity in action sampling. This can lead to
+                                                                                           demonstrated in our ablation study (Section 4, Fig. 8), AEW
+      overconfidence in early-stage suboptimal policies and poor explo-
+                                                                                           leads to faster learning in the early training phase and sustains
+      ration in complex or noisy environments.
+                                                                                           high performance throughout. This is particularly valuable in
+    • Poisson (AEP): Models discrete count-based sampling around a
+                                                                                           high-dimensional trajectory planning tasks where sample effi-
+      rate parameter 𝛽. However, the distribution’s support is non-
+                                                                                           ciency and early progress are essential.
+      negative integers with fixed mean–variance coupling Var(𝑋) =
+      E[𝑋], making it relatively rigid. Its symmetry and limited skew
+                                                                                    Appendix B. Supplementary data
+      control restrict nuanced adaptation of action weights during dif-
+      ferent learning phases.
+                                                                                        Supplementary material related to this article can be found online
+    • Beta (AEB): A flexible continuous distribution on [0, 1] controlled
+                                                                                    at https://doi.org/10.1016/j.engappai.2025.112341.
+      by shape parameters 𝑎 and 𝑏. It offers a range of modes (e.g., U-
+      shape, unimodal) depending on parameter values. However, it
+                                                                                    Data availability
+      lacks an explicit exponential tail, which can be useful for con-
+      trolling long-shot exploration, and requires careful parameter                    Data will be made available on request.
+      balancing to avoid biasing weight allocation prematurely.
+    • Exponential (AEE): A memoryless distribution defined by a sin-
+      gle rate parameter 𝜆, encouraging consistent exploration. While               References
+      beneficial early on, its fixed shape (constant right-skew) cannot
+      be adjusted to favor exploitation in later training stages, limiting          Aljalbout, E., Chen, J., Ritt, K., Ulmer, M., Haddadin, S., 2021. Learning vision-based
+                                                                                         reactive policies for obstacle avoidance. In: Conference on Robot Learning. PMLR,
+      convergence speed.
+                                                                                         pp. 2040–2054.
+    • Weibull (AEW): Extends the exponential by introducing a shape                 An, G., Moon, S., Kim, J.-H., Song, H.O., 2021. Uncertainty-based offline reinforcement
+      parameter 𝑘, enabling precise control over tail behavior and                       learning with diversified q-ensemble. Adv. Neural Inf. Process. Syst. 34, 7436–7447.
+      skewness:                                                                     Bhattacharya, S., Likhachev, M., Kumar, V., 2012. Topological constraints in
+                                                                                         search-based robot path planning. Auton. Robots 33, 273–290.
+                                                                                    Chen, W., Rojas, N., 2024. TraKDis: A transformer-based knowledge distillation ap-
+          – For 𝑘 < 1, AEW produces heavy right-skew, favoring small
+                                                                                         proach for visual reinforcement learning with application to cloth manipulation.
+            weights for most actions and large weights for a few, en-                    IEEE Robot. Autom. Lett.
+            hancing early-stage exploration.                                        Dai, J., Zhang, Y., Deng, H., 2023. Novel potential guided bidirectional rrt* with direct
+          – For 𝑘 > 1, the distribution becomes left-skewed, concentrat-                 connection strategy for path planning of redundant robot manipulators in joint
+            ing weights on high-advantage actions to promote exploita-                   space. IEEE Trans. Ind. Electron.
+                                                                                    Dankwa, S., Zheng, W., 2019. Twin-delayed ddpg: A deep reinforcement learning
+            tion and convergence.                                                        technique to model a continuous movement of an intelligent robot agent. In:
+          – At 𝑘 = 1, it recovers the exponential, naturally bridging both               Proceedings of the 3rd International Conference on Vision, Image and Signal
+            phases.                                                                      Processing. pp. 1–5.
+                                                                                    Diaz, M., Ferrer, M.A., Quintana, J.J., Wolniakowski, A., Trochimczuk, R., Miatliuk, K.,
+      This adaptability allows AEW to transition from exploration to ex-                 Castellano, G., Vessio, G., 2025. Neural network modelling of kinematic and
+                                                                                         dynamic features for signature verification. Pattern Recognit. Lett. 187, 130–136.
+      ploitation across training epochs smoothly. Additionally, Weibull’s           Gan, Y., Yan, R., Wu, Z., Xing, J., 2024. Reflective policy optimization. In: Proceedings
+      continuous support and tunable scale parameter 𝜆 allow better                      of the 41st International Conference on Machine Learning. pp. 14471–14490.
+      alignment with normalized advantage values. Its controlled tail               Ghasemipour, K., Gu, S.S., Nachum, O., 2022. Why so pessimistic? estimating uncer-
+      behavior also mitigates instability from assigning excessively high                tainties for offline rl through ensembles, and why their independence matters. Adv.
+                                                                                         Neural Inf. Process. Syst. 35, 18267–18281.
+      weights to outlier actions.
+                                                                                    Gu, Y., Cheng, Y., Chen, C.P., Wang, X., 2021. Proximal policy optimization with policy
+                                                                                         feedback. IEEE Trans. Syst. Man Cybern.: Syst.
+    Overall, AEW uniquely supports a dynamic action weighting scheme                Haarnoja, T., Zhou, A., Abbeel, P., Levine, S., 2018. Soft actor-critic: Off-policy maxi-
+that evolves with the agent’s confidence, offering temporal adaptivity,                  mum entropy deep reinforcement learning with a stochastic actor. In: International
+distributional expressiveness, and stability, key traits not jointly present             Conference on Machine Learning. PMLR, pp. 1861–1870.
+                                                                                    Jaillet, L., Siméon, T., 2008. Path deformation roadmaps: Compact graphs with useful
+in other tested distributions.
+                                                                                         cycles for motion planning. Int. J. Robot. Res. 27 (11–12), 1175–1188.
+    Based on our theoretical understanding and empirical findings, we               Ji, H., Xie, H., Wang, C., Yang, H., 2023. E-RRT*: Path planning for hyper-redundant
+attribute the superior performance of AEW to the following reasons:                      manipulators. IEEE Robot. Autom. Lett.
+
+
+                                                                               14
+Y. Wang and H. Kasaei                                                                                                   Engineering Applications of Arti cial Intelligence 162 (2025) 112341
+
+
+Johnson, J.J., Qureshi, A.H., Yip, M.C., 2023. Learning sampling dictionaries for                Rösmann, C., Hoffmann, F., Bertram, T., 2017. Integrated online trajectory planning
+     efficient and generalizable robot motion planning with transformers. IEEE Robot.                and optimization in distinctive topologies. Robot. Auton. Syst. 88, 142–153.
+     Autom. Lett.                                                                                Saccuti, A., Monica, R., Aleotti, J., 2023. PROTAMP-RRT: A probabilistic integrated task
+Kirner, A., Ott, C., 2024. Impact analysis for the planning of targeted non-slippage                 and motion planner based on RRT. IEEE Robot. Autom. Lett. 8 (12), 8398–8405.
+     impacts of robot manipulators. IEEE Robot. Autom. Lett.                                     Schulman, J., Wolski, F., Dhariwal, P., Radford, A., Klimov, O., 2017. Proximal policy
+Kuffner, J., LaValle, S., 2000. RRT-connect: An efficient approach to single-query                   optimization algorithms. arXiv preprint arXiv:1707.06347.
+     path planning. In: Proceedings 2000 ICRA. Millennium Conference. IEEE Inter-                Sucan, I.A., Moll, M., Kavraki, L.E., 2012. The open motion planning library. IEEE
+     national Conference on Robotics and Automation. Symposia Proceedings (Cat.                      Robot. Autom. Mag. 19 (4), 72–82.
+     No.00CH37065), vol. 2, pp. 995–1001. http://dx.doi.org/10.1109/ROBOT.2000.                  Wang, H., Li, H., Zhou, B., Gao, F., Shen, S., 2024. Impact-aware planning and control
+     844730.                                                                                         for aerial robots with suspended payloads. IEEE Trans. Robot.
+Kumar, V., Hoeller, D., Sundaralingam, B., Tremblay, J., Birchfield, S., 2021. Joint             Wang, S., Zheng, X., Cao, Y., Zhang, T., 2021. A multi-target trajectory planning of
+     space control via deep reinforcement learning. In: 2021 IEEE/RSJ International                  a 6-dof free-floating space robot via reinforcement learning. In: 2021 IEEE/RSJ
+     Conference on Intelligent Robots and Systems. IROS, IEEE, pp. 3619–3626.                        International Conference on Intelligent Robots and Systems. IROS, IEEE, pp.
+Lee, S., Seo, Y., Lee, K., Abbeel, P., Shin, J., 2022. Offline-to-online reinforcement               3724–3730.
+     learning via balanced replay and pessimistic q-ensemble. In: Conference on Robot            Ze, Y., Liu, Y., Shi, R., Qin, J., Yuan, Z., Wang, J., Xu, H., 2024. H-InDex: Visual rein-
+     Learning. PMLR, pp. 1702–1712.                                                                  forcement learning with hand-informed representations for dexterous manipulation.
+Li, X., Liu, H., Dong, M., 2021. A general framework of motion planning for redundant                Adv. Neural Inf. Process. Syst. 36.
+     robot manipulator based on deep reinforcement learning. IEEE Trans. Ind. Inform.            Zhang, T., Zhang, K., Lin, J., Louie, W.-Y.G., Huang, H., 2021. Sim2real learning of
+     18 (8), 5253–5263.                                                                              obstacle avoidance for robotic manipulators in uncertain environments. IEEE Robot.
+Lillicrap, T.P., Hunt, J.J., Pritzel, A., Heess, N., Erez, T., Tassa, Y., Silver, D.,                Autom. Lett. 7 (1), 65–72.
+     Wierstra, D., 2015. Continuous control with deep reinforcement learning. arXiv              Zhao, X., Ding, W., An, Y., Du, Y., Yu, T., Li, M., Tang, M., Wang, J., 2023. Fast
+     preprint arXiv:1509.02971.                                                                      segment anything. arXiv preprint arXiv:2306.12156.
+Merikh Nejadasl, A., Achaoui, J., El Makrini, I., Van De Perre, G., Verstraten, T.,              Zhou, Y., Barnes, C., Lu, J., Yang, J., Li, H., 2019a. On the continuity of rotation
+     Vanderborght, B., 2024. Ergonomically optimized path-planning for industrial                    representations in neural networks. In: Proceedings of the IEEE/CVF Conference
+     human–robot collaboration. Int. J. Robot. Res. 02783649241235670.                               on Computer Vision and Pattern Recognition. pp. 5745–5753.
+Mnih, V., Badia, A.P., Mirza, M., Graves, A., Lillicrap, T., Harley, T., Silver, D.,             Zhou, B., Gao, F., Pan, J., Shen, S., 2020. Robust real-time uav replanning using guided
+     Kavukcuoglu, K., 2016. Asynchronous methods for deep reinforcement learning.                    gradient-based optimization and topological paths. In: 2020 IEEE International
+     In: International Conference on Machine Learning. PMLR, pp. 1928–1937.                          Conference on Robotics and Automation. ICRA, IEEE, pp. 1208–1214.
+Molchanov, A., Chen, T., Hönig, W., Preiss, J.A., Ayanian, N., Sukhatme, G.S.,                   Zhou, B., Gao, F., Wang, L., Liu, C., Shen, S., 2019b. Robust and efficient quadrotor
+     2019. Sim-to-(multi)-real: Transfer of low-level robust control policies to multiple            trajectory generation for fast autonomous flight. IEEE Robot. Autom. Lett. 4 (4),
+     quadrotors. In: 2019 IEEE/RSJ International Conference on Intelligent Robots and                3529–3536.
+     Systems. IROS, IEEE, pp. 59–66.                                                             Zhou, B., Pan, J., Gao, F., Shen, S., 2021. Raptor: Robust and perception-aware
+Nishio, T., Zhao, M., Okada, K., Inaba, M., 2023. Design, control, and motion-planning               trajectory replanning for quadrotor fast flight. IEEE Trans. Robot. 37 (6),
+     for a root-perching rotor-distributed manipulator. IEEE Trans. Robot.                           1992–2009.
+Rösmann, C., Hoffmann, F., Bertram, T., 2015. Planning of multiple robot trajectories
+     in distinctive topologies. In: 2015 European Conference on Mobile Robots. ECMR,
+     IEEE, pp. 1–6.
+
+
+
+
+                                                                                            15
+

@@ -22,6 +22,7 @@ from rl_risk_sac.tasks.reference_reaching import (
     RESIDUAL_BASE_OBSERVATION_DIM,
     RESIDUAL_HANDOFF_GOAL_BASE_M,
     compose_base_residual_action,
+    obstacle_feature_dim,
     reference_ppo_observation_dim,
 )
 from rl_risk_sac.utils.device import resolve_device
@@ -136,7 +137,15 @@ class ThesisPPOAgent:
         observation_config = thesis["observation"]
         obstacle_config = observation_config["obstacle_set"]
         self.max_obstacles = int(obstacle_config["max_obstacles"])
-        expected_obs_dim = reference_ppo_observation_dim(self.max_obstacles)
+        self.obstacle_feature_mode = str(
+            obstacle_config.get("feature_mode", "clearance_direction")
+        )
+        self.obstacle_feature_dim = obstacle_feature_dim(
+            self.obstacle_feature_mode
+        )
+        expected_obs_dim = reference_ppo_observation_dim(
+            self.max_obstacles, self.obstacle_feature_dim
+        )
         if obs_dim != expected_obs_dim:
             raise ValueError(
                 f"reference PPO requires the {expected_obs_dim}-D masked "
@@ -153,6 +162,10 @@ class ThesisPPOAgent:
         )
         ppo = config["ppo"]
         self.policy_contract = (
+            "ppo_joint_delta_residual_route_geometry_set_qdot_"
+            "base_action_unified_clearance_delta5_compact_v17"
+            if self.obstacle_feature_mode == "route_geometry"
+            else
             "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
             "base_action_unified_clearance_delta5_compact_v16"
         )
@@ -254,13 +267,13 @@ class ThesisPPOAgent:
         if len(hidden) != 2:
             raise ValueError("reference PPO requires exactly two hidden layers")
         self.actor_obstacle_encoder = ObstacleSetEncoder(
-            OBSTACLE_FEATURE_DIM,
+            self.obstacle_feature_dim,
             self.max_obstacles,
             obstacle_embedding_dim,
             self.obstacle_encoding_dim,
         ).to(self.device)
         self.value_obstacle_encoder = ObstacleSetEncoder(
-            OBSTACLE_FEATURE_DIM,
+            self.obstacle_feature_dim,
             self.max_obstacles,
             obstacle_embedding_dim,
             self.obstacle_encoding_dim,
@@ -354,9 +367,9 @@ class ThesisPPOAgent:
         self, obs: torch.Tensor, encoder: ObstacleSetEncoder
     ) -> torch.Tensor:
         feature_start = REFERENCE_BASE_OBSERVATION_DIM
-        feature_end = feature_start + self.max_obstacles * OBSTACLE_FEATURE_DIM
+        feature_end = feature_start + self.max_obstacles * self.obstacle_feature_dim
         features = obs[..., feature_start:feature_end].reshape(
-            *obs.shape[:-1], self.max_obstacles, OBSTACLE_FEATURE_DIM
+            *obs.shape[:-1], self.max_obstacles, self.obstacle_feature_dim
         )
         mask = obs[..., feature_end:feature_end + self.max_obstacles]
         obstacle_encoding = encoder(features, mask)
@@ -384,9 +397,9 @@ class ThesisPPOAgent:
         self, obs: torch.Tensor, encoder: ObstacleSetEncoder
     ) -> torch.Tensor:
         feature_start = REFERENCE_BASE_OBSERVATION_DIM
-        feature_end = feature_start + self.max_obstacles * OBSTACLE_FEATURE_DIM
+        feature_end = feature_start + self.max_obstacles * self.obstacle_feature_dim
         features = obs[..., feature_start:feature_end].reshape(
-            *obs.shape[:-1], self.max_obstacles, OBSTACLE_FEATURE_DIM
+            *obs.shape[:-1], self.max_obstacles, self.obstacle_feature_dim
         )
         mask = obs[..., feature_end:feature_end + self.max_obstacles]
         obstacle_encoding = encoder(features, mask)
@@ -407,7 +420,7 @@ class ThesisPPOAgent:
         """Enable Residual only for external obstacles, not the fixed plane."""
         mask_start = (
             REFERENCE_BASE_OBSERVATION_DIM
-            + self.max_obstacles * OBSTACLE_FEATURE_DIM
+            + self.max_obstacles * self.obstacle_feature_dim
         )
         mask = obs[..., mask_start:mask_start + self.max_obstacles]
         active_count = (mask > 0.0).sum(dim=-1, keepdim=True)
@@ -1059,6 +1072,8 @@ class ThesisPPOAgent:
             "obs_dim": self.obs_dim,
             "reference_ppo": self.reference_ppo,
             "max_obstacles": self.max_obstacles,
+            "obstacle_feature_mode": self.obstacle_feature_mode,
+            "obstacle_feature_dim": self.obstacle_feature_dim,
             "obstacle_encoding_dim": self.obstacle_encoding_dim,
             "actor": self.actor.state_dict(),
             "residual_actor": self.residual_actor.state_dict(),
@@ -1164,6 +1179,92 @@ class ThesisPPOAgent:
                     f"cannot migrate pre-Base-action Residual parameter {key}"
                 )
         module.load_state_dict(migrated)
+
+    @staticmethod
+    def _migrate_obstacle_encoder_input(
+        module: ObstacleSetEncoder,
+        old_state: dict[str, torch.Tensor],
+    ) -> None:
+        """Append zero route-geometry columns to a learned 9-D encoder."""
+        migrated = module.state_dict()
+        for key, old_value in old_state.items():
+            if key == "phi.0.weight":
+                target = torch.zeros_like(migrated[key])
+                if (
+                    old_value.shape[0] != target.shape[0]
+                    or old_value.shape[1] != OBSTACLE_FEATURE_DIM
+                    or target.shape[1] <= old_value.shape[1]
+                ):
+                    raise ValueError("legacy obstacle encoder has an unexpected shape")
+                target[:, :old_value.shape[1]] = old_value.to(
+                    device=target.device, dtype=target.dtype
+                )
+                migrated[key] = target
+            elif key in migrated and migrated[key].shape == old_value.shape:
+                migrated[key] = old_value.to(
+                    device=migrated[key].device, dtype=migrated[key].dtype
+                )
+            else:
+                raise ValueError(f"cannot migrate obstacle encoder parameter {key}")
+        module.load_state_dict(migrated)
+
+    @staticmethod
+    def _truncate_route_geometry_encoder_input(
+        module: ObstacleSetEncoder,
+        old_state: dict[str, torch.Tensor],
+    ) -> None:
+        """Discard the six optional route-geometry columns from a 15-D encoder."""
+        migrated = module.state_dict()
+        route_feature_dim = obstacle_feature_dim("route_geometry")
+        for key, old_value in old_state.items():
+            if key == "phi.0.weight":
+                target = migrated[key]
+                if (
+                    old_value.shape[0] != target.shape[0]
+                    or old_value.shape[1] != route_feature_dim
+                    or target.shape[1] != OBSTACLE_FEATURE_DIM
+                ):
+                    raise ValueError(
+                        "route-geometry obstacle encoder has an unexpected shape"
+                    )
+                migrated[key] = old_value[:, : target.shape[1]].to(
+                    device=target.device, dtype=target.dtype
+                )
+            elif key in migrated and migrated[key].shape == old_value.shape:
+                migrated[key] = old_value.to(
+                    device=migrated[key].device, dtype=migrated[key].dtype
+                )
+            else:
+                raise ValueError(f"cannot truncate obstacle encoder parameter {key}")
+        module.load_state_dict(migrated)
+
+    def _load_pre_route_geometry_modules(self, state: dict[str, Any]) -> None:
+        """Load v16 while initially ignoring the six new layout features."""
+        self.actor.load_state_dict(state["actor"])
+        self.residual_actor.load_state_dict(state["residual_actor"])
+        self.value.load_state_dict(state["value"])
+        self._migrate_obstacle_encoder_input(
+            self.actor_obstacle_encoder, state["actor_obstacle_encoder"]
+        )
+        self._migrate_obstacle_encoder_input(
+            self.value_obstacle_encoder, state["value_obstacle_encoder"]
+        )
+        self.actor_log_std.data.copy_(state["actor_log_std"].to(self.device))
+
+    def _load_route_geometry_as_clearance_modules(
+        self, state: dict[str, Any]
+    ) -> None:
+        """Load v17 into v16 while retaining only the established 9-D input."""
+        self.actor.load_state_dict(state["actor"])
+        self.residual_actor.load_state_dict(state["residual_actor"])
+        self.value.load_state_dict(state["value"])
+        self._truncate_route_geometry_encoder_input(
+            self.actor_obstacle_encoder, state["actor_obstacle_encoder"]
+        )
+        self._truncate_route_geometry_encoder_input(
+            self.value_obstacle_encoder, state["value_obstacle_encoder"]
+        )
+        self.actor_log_std.data.copy_(state["actor_log_std"].to(self.device))
 
     def _load_pre_qdot_modules(self, state: dict[str, Any]) -> None:
         self._migrate_qdot_network(self.actor, state["actor"])
@@ -1379,6 +1480,32 @@ class ThesisPPOAgent:
             and state.get("max_obstacles") == self.max_obstacles
             and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
         )
+        pre_route_geometry_contract = (
+            self.obstacle_feature_mode == "route_geometry"
+            and state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
+            "base_action_unified_clearance_delta5_compact_v16"
+            and state.get("obs_dim")
+            == reference_ppo_observation_dim(
+                self.max_obstacles, OBSTACLE_FEATURE_DIM
+            )
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
+        route_geometry_to_clearance_contract = (
+            self.obstacle_feature_mode == "clearance_direction"
+            and state.get("policy_contract")
+            == "ppo_joint_delta_residual_route_geometry_set_qdot_"
+            "base_action_unified_clearance_delta5_compact_v17"
+            and state.get("obs_dim")
+            == reference_ppo_observation_dim(
+                self.max_obstacles, obstacle_feature_dim("route_geometry")
+            )
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim") == self.obstacle_encoding_dim
+        )
         pre_qdot_contract = (
             state.get("policy_contract")
             == "ppo_joint_delta_residual_obb_clearance_direction_set_v10"
@@ -1462,6 +1589,10 @@ class ThesisPPOAgent:
             self._load_pre_compact_modules(state)
         elif pre_unified_safety_contract:
             self._load_pre_unified_safety_modules(state)
+        elif pre_route_geometry_contract:
+            self._load_pre_route_geometry_modules(state)
+        elif route_geometry_to_clearance_contract:
+            self._load_route_geometry_as_clearance_modules(state)
         elif current_contract:
             self.actor.load_state_dict(state["actor"])
             self.residual_actor.load_state_dict(state["residual_actor"])
@@ -1526,6 +1657,20 @@ class ThesisPPOAgent:
         current_contract = (
             state.get("policy_contract") == self.policy_contract
             and state.get("obs_dim") == self.obs_dim
+            and state.get("reference_ppo") == self.reference_ppo
+            and state.get("max_obstacles") == self.max_obstacles
+            and state.get("obstacle_encoding_dim")
+            == self.obstacle_encoding_dim
+        )
+        pre_route_geometry_base_contract = (
+            self.obstacle_feature_mode == "route_geometry"
+            and state.get("policy_contract")
+            == "ppo_joint_delta_residual_obb_clearance_direction_set_qdot_"
+            "base_action_unified_clearance_delta5_compact_v16"
+            and state.get("obs_dim")
+            == reference_ppo_observation_dim(
+                self.max_obstacles, OBSTACLE_FEATURE_DIM
+            )
             and state.get("reference_ppo") == self.reference_ppo
             and state.get("max_obstacles") == self.max_obstacles
             and state.get("obstacle_encoding_dim")
@@ -1598,7 +1743,8 @@ class ThesisPPOAgent:
         elif pre_qdot_contract:
             self._migrate_qdot_network(self.actor, state["actor"])
         elif (
-            current_contract or pre_base_action_contract
+            current_contract or pre_route_geometry_base_contract
+            or pre_base_action_contract
             or pre_clearance_delta_contract or pre_plane_clearance_contract
             or pre_compact_contract or pre_unified_safety_contract
         ):

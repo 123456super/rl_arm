@@ -10,7 +10,10 @@ from rl_risk_sac.robots.ur5_capsules import CapsuleState
 REFERENCE_LEGACY_BASE_OBSERVATION_DIM = 28
 REFERENCE_BASE_OBSERVATION_DIM = 34
 RESIDUAL_BASE_OBSERVATION_DIM = 27
-OBSTACLE_FEATURE_DIM = 9
+LEGACY_OBSTACLE_FEATURE_DIM = 9
+ROUTE_GEOMETRY_OBSTACLE_FEATURE_DIM = 15
+# Backward-compatible public name used by archived checkpoints and tests.
+OBSTACLE_FEATURE_DIM = LEGACY_OBSTACLE_FEATURE_DIM
 DEFAULT_MAX_OBSTACLES = 8
 OBSTACLE_CLEARANCE_SCALE_M = 0.20
 BASE_CLEARANCE_DELTA_FEATURE_DIM = 5
@@ -29,13 +32,30 @@ RESIDUAL_HANDOFF_CLEARANCE_BASE_M = 0.100
 
 def reference_ppo_observation_dim(
     max_obstacles: int = DEFAULT_MAX_OBSTACLES,
+    obstacle_feature_dim: int = OBSTACLE_FEATURE_DIM,
 ) -> int:
     """Flat transport size for base state, padded obstacle set, and mask."""
     if max_obstacles < 1:
         raise ValueError("max_obstacles must be positive")
+    if obstacle_feature_dim < 1:
+        raise ValueError("obstacle_feature_dim must be positive")
     return REFERENCE_BASE_OBSERVATION_DIM + max_obstacles * (
-        OBSTACLE_FEATURE_DIM + 1
+        obstacle_feature_dim + 1
     )
+
+
+def obstacle_feature_dim(feature_mode: str) -> int:
+    """Return the per-obstacle width for a named observation contract."""
+    dimensions = {
+        "clearance_direction": LEGACY_OBSTACLE_FEATURE_DIM,
+        "route_geometry": ROUTE_GEOMETRY_OBSTACLE_FEATURE_DIM,
+    }
+    try:
+        return dimensions[str(feature_mode)]
+    except KeyError as error:
+        raise ValueError(
+            "obstacle feature_mode must be clearance_direction or route_geometry"
+        ) from error
 
 
 REFERENCE_PPO_OBSERVATION_DIM = reference_ppo_observation_dim()
@@ -141,10 +161,13 @@ def build_reference_observation(
     obstacle_features: np.ndarray | None = None,
     obstacle_mask: np.ndarray | None = None,
     max_obstacles: int = DEFAULT_MAX_OBSTACLES,
+    obstacle_feature_dim: int = OBSTACLE_FEATURE_DIM,
 ) -> np.ndarray:
     """Build base state plus a padded, masked obstacle-set transport tensor.
 
-    Each active obstacle row is ``[six capsule clearances, nearest direction]``.
+    The legacy active row is ``[six capsule clearances, nearest direction]``.
+    Route-aware experiments append three projected OBB half-sizes and three
+    obstacle-centre coordinates in the episode's nominal path frame.
     The direction is the unit vector from the closest robot-capsule centreline
     point towards the closest point on that obstacle's OBB.  OBB pose and size
     remain in the geometry layer and are not exposed to the policy.  Padding is
@@ -191,14 +214,14 @@ def build_reference_observation(
             f"({REFERENCE_BASE_OBSERVATION_DIM},), got {base_observation.shape}"
         )
     features = np.zeros(
-        (max_obstacles, OBSTACLE_FEATURE_DIM), dtype=np.float32
+        (max_obstacles, obstacle_feature_dim), dtype=np.float32
     )
     mask = np.zeros(max_obstacles, dtype=np.float32)
     if obstacle_features is not None:
         supplied = np.asarray(obstacle_features, dtype=np.float32)
-        if supplied.ndim != 2 or supplied.shape[1] != OBSTACLE_FEATURE_DIM:
+        if supplied.ndim != 2 or supplied.shape[1] != obstacle_feature_dim:
             raise ValueError(
-                f"obstacle_features must have shape (N, {OBSTACLE_FEATURE_DIM})"
+                f"obstacle_features must have shape (N, {obstacle_feature_dim})"
             )
         if supplied.shape[0] > max_obstacles:
             raise ValueError(
@@ -219,7 +242,9 @@ def build_reference_observation(
     observation = np.concatenate(
         [base_observation, features.reshape(-1), mask]
     ).astype(np.float32)
-    expected_dim = reference_ppo_observation_dim(max_obstacles)
+    expected_dim = reference_ppo_observation_dim(
+        max_obstacles, obstacle_feature_dim
+    )
     if observation.shape != (expected_dim,):
         raise RuntimeError(
             f"reference PPO observation must have shape ({expected_dim},), "
@@ -237,6 +262,7 @@ def reference_ppo_reward(
     self_collision: bool = False,
     environment_collision: bool = False,
     obstacle_clearances: tuple[float, ...] = (),
+    obstacle_clearance_gates: tuple[float, ...] | None = None,
     obstacle_threshold: float = 0.08,
     obstacle_clearance_weight: float = 1.0,
     obstacle_clearance_power: float = 1.0,
@@ -268,11 +294,29 @@ def reference_ppo_reward(
     # The archived 8M S1 policy used the original linear normalized clearance
     # deficit.  Keep the exponent configurable for explicit ablations, while
     # retaining 1.0 as the reference-PPO default.
-    proximity = sum(
+    if obstacle_clearance_gates is None:
+        clearance_gates = (1.0,) * len(obstacle_clearances)
+    else:
+        clearance_gates = tuple(float(value) for value in obstacle_clearance_gates)
+        if len(clearance_gates) != len(obstacle_clearances):
+            raise ValueError(
+                "obstacle clearance gates must match ordered link clearances"
+            )
+        if not all(
+            np.isfinite(value) and 0.0 <= value <= 1.0
+            for value in clearance_gates
+        ):
+            raise ValueError("obstacle clearance gates must be finite in [0, 1]")
+    raw_proximity = tuple(
         max(0.0, 1.0 - max(0.0, float(distance)) / threshold)
         ** obstacle_clearance_power
         for distance in obstacle_clearances
     )
+    proximity = sum(
+        gate * value
+        for gate, value in zip(clearance_gates, raw_proximity, strict=True)
+    )
+    ungated_proximity = float(sum(raw_proximity))
     goal_reward = -0.001 * errors**2 - float(np.log(errors**2 + 1.0e-4))
     clearance_cost = float(obstacle_clearance_weight) * proximity
     obstacle_collision_cost = float(obstacle_collision_penalty) * float(obstacle_collision)
@@ -285,6 +329,10 @@ def reference_ppo_reward(
     return float(reward), {
         "r_goal": float(goal_reward),
         "c_proximity": float(proximity),
+        "c_proximity_ungated": ungated_proximity,
+        "clearance_gate_mean": float(
+            np.mean(clearance_gates) if clearance_gates else 0.0
+        ),
         "reference_error": float(errors),
         "reference_obstacle_penalty": float(clearance_cost),
         "reference_safety_clearance_penalty": float(clearance_cost),
@@ -361,6 +409,33 @@ def residual_action_penalty(
     combined_weight = float(goal_weight * clearance_weight)
     penalty = float(penalty_weight * combined_weight * np.dot(action, action))
     return penalty, combined_weight
+
+
+def composition_saturation_penalty(
+    composed_action: np.ndarray,
+    action_limit: float,
+    *,
+    penalty_weight: float = 0.0,
+) -> tuple[float, float]:
+    """Penalize only policy increments outside the Base action envelope.
+
+    Directly adding an unrestricted Residual can exceed the Base envelope and
+    make the physical velocity/acceleration controller clip different joints
+    by different amounts. This supplies a smooth learning signal without
+    clipping the PPO action or invalidating its stored log probability.
+    """
+    action = np.asarray(composed_action, dtype=np.float64)
+    limit = float(action_limit)
+    weight = float(penalty_weight)
+    if action.shape[-1:] != (6,) or not np.isfinite(action).all():
+        raise ValueError("composed action must end with six finite values")
+    if not np.isfinite(limit) or limit <= 0.0:
+        raise ValueError("action limit must be finite and positive")
+    if not np.isfinite(weight) or weight < 0.0:
+        raise ValueError("composition penalty weight must be non-negative")
+    overflow = np.maximum(np.abs(action) - limit, 0.0) / limit
+    overflow_square_mean = float(np.mean(np.square(overflow)))
+    return weight * overflow_square_mean, overflow_square_mean
 
 
 def residual_handoff_authority(

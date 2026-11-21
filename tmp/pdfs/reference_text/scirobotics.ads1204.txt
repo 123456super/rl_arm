@@ -1,0 +1,928 @@
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+MOTION PLANNING AND CONTROL                                                                                                         Copyright © 2025 The
+                                                                                                                                    Authors, some rights
+RoboBallet: Planning for multirobot reaching with                                                                                   reserved; exclusive
+                                                                                                                                    licensee American
+graph neural networks and reinforcement learning                                                                                    Association for the
+                                                                                                                                    Advancement of
+                                                                                                                                    Science. No claim to
+Matthew Lai1,2*, Keegan Go3, Zhibin Li2, Torsten Kröger3, Stefan Schaal3,                                                           original U.S.
+Kelsey Allen1†, Jonathan Scholz1†                                                                                                   Government Works
+
+Modern robotic manufacturing requires collision-­free coordination of multiple robots to complete numerous
+tasks in shared, obstacle-­rich workspaces. Although individual tasks may be simple in isolation, automated joint
+task allocation, scheduling, and motion planning under spatiotemporal constraints remain computationally in-
+tractable for classical methods at real-­world scales. Existing multiarm systems deployed in industry rely on human
+intuition and experience to design feasible trajectories manually in a labor-­intensive process. To address this chal-
+lenge, we propose a reinforcement learning (RL) framework to achieve automated task and motion planning,
+tested in an obstacle-­rich environment with eight robots performing 40 reaching tasks in a shared workspace,
+where any robot can perform any task in any order. Our approach builds on a graph neural network (GNN) policy
+trained via RL on procedurally generated environments with diverse obstacle layouts, robot configurations, and
+task distributions. It uses a graph representation of scenes and a graph policy neural network trained through RL
+to generate trajectories of multiple robots, jointly solving the subproblems of task allocation, scheduling, and mo-
+
+
+
+
+                                                                                                                                                            Downloaded from https://www.science.org on November 02, 2026
+tion planning. Trained on large randomly generated task sets in simulation, our policy generalizes zero-­shot to
+unseen settings with varying robot placements, obstacle geometries, and task poses. We further demonstrate
+that the high-­speed capability of our solution enables its use in workcell layout optimization, improving solution
+times. The speed and scalability of our planner also open the door to capabilities such as fault-­tolerant planning
+and online perception-­based replanning, where rapid adaptation to dynamic task sets is required.
+
+
+
+INTRODUCTION                                                                     attempting to plan with all robotics at the same time. One potential
+In robotics applications such as welding (1), assembly (2), painting             solution is to plan for each robot sequentially; however, this formula-
+(3), construction (4), and object manipulation (5), robotic arms are             tion introduces its own challenges because other robots would have
+programmed to perform many tasks in a shared workspace. To re-                   to be treated as moving obstacles, which sampling-­based motion
+duce the overall execution time and increase throughput, more ro-                planners also struggle with, and would require techniques such as
+bots can be placed in the same cell to perform tasks concurrently.               converting paths of other robots into swept volumes, which then un-
+Such high-­density setups have the potential for reduced execution               duly limits the search space of the planner and might lead to subopti-
+time with minimal increases in cost and space compared with dupli-               mal solutions or planning failures.
+cating entire workcells.                                                             Similarly to the path planning problem, the task scheduling
+    However, coordinating multiple robots efficiently in confined                problem (to decide the order in which the tasks should be done) is
+spaces is both theoretically and technically difficult because the               also polynomial space (PSPACE) complete (9, 10), formalized as the
+planner must solve the task assignment, scheduling, and collision-­              traveling salesman problem (TSP). Although exact solutions to the
+free motion planning problems jointly, all of which have high com-               TSP are not computationally feasible for real-­world problem sizes,
+binatorial complexity, often in environments with complex obstacle               many approximate solutions exist with varying optimality/efficiency
+geometries. This work addresses this challenge in a setting where                trade-­offs. The main challenge in adapting these solutions to task
+multiple robots can perform all tasks in any order, which represents             scheduling in our context is that, instead of having a fixed cost to
+the most challenging scenario in terms of the size of the search space.          move between each pair of tasks, as is the case in the classically for-
+    Finding a collision-­free path in joint space that moves a robot end         mulated TSP, the joint-­space trajectories required to move from task
+effector to a pose target is the motion planning aspect of the problem           to task can be modified depending on the trajectories of other ro-
+and has been conventionally addressed using sampling-­based ap-                  bots, and each potential trajectory has a different cost. Furthermore,
+proaches such as rapidly exploring random trees (RRT) and its vari-              there is often more than one inverse kinematics (IK) solution per
+ants (6, 7). However, although these sampling-­based algorithms are              task, either because the task is not fully constrained or the robot has
+designed to tackle high-­dimensional configuration spaces and offer              more degrees of freedom (DoFs) than the task. In the case of seven-­
+probabilistic completeness, their runtime scales exponentially in the            DoF robot arms, each six-­DoF task pose has up to an infinite num-
+dimensionality of the configuration space and the complexity of the              ber of IK solutions. A good path planning algorithm must take the
+obstacles (8). In practice, these techniques are suitable only for rela-         entire sequence of tasks into account when selecting the best IK so-
+tively small configuration spaces [two or fewer robots (4)] when                 lutions to use to solve each task.
+                                                                                     The task allocation problem adds yet another layer of complexity.
+1
+                                                                                 Finding an allocation of tasks to robots that minimizes the total ex-
+ Google DeepMind, London, UK. 2University College London, London, UK. 3Intrin-   ecution time is conceptually similar to a multicontainer variant of
+sic, Mountain View, CA, USA.
+*Corresponding author. Email: matthewlai@​google.​com                            the classical knapsack problem (11), except that we do not know the
+†These authors contributed equally to this work.                                 marginal cost of allocating an additional task to a robot without
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)   3 September 2025                                                                                    1 of 13
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+solving the entire planning problem, nor are the costs independent
+of other tasks being solved by the robots. Therefore, algorithmic
+solutions to the knapsack problem are not practically helpful in
+this setting.
+    As a result of the high asymptotic complexity of each of the sub-
+problems, it has not been computationally feasible to combine existing
+algorithms with completeness guarantees to jointly solve high-­density
+multirobot planning on real-­world problem sizes because of their ex-
+ponential scaling in the number of robots, number of tasks, and com-
+plexity of obstacles (12). Instead, existing approaches focus on breaking
+the problem down into manageable subproblems, solving them one at
+a time, often iteratively, to generate solutions with realistic compute
+requirements (4). However, this approach sacrifices potential solution
+optimality for computational feasibility and still does not scale to envi-
+ronmental complexities of real-­world applications, given that the cur-
+rent state of the art reported scalability to only five robots and 10 tasks
+by iterating between a high-­level task planner and a low-­level motion
+planner, with some heuristics based on reachability and availability
+(13). By necessity, industry currently relies instead on manual trajec-       Movie 1. RoboBallet: Planning for multirobot reaching with GNNs and RL. We
+tory planning with complex schedules of interlocks to ensure collision-­      trained the model on environments with randomized robot placement, randomly
+
+
+
+
+                                                                                                                                                                      Downloaded from https://www.science.org on November 02, 2026
+free operation. These trajectories often take hundreds or thousands of        generated obstacles, and randomly generated tasks. These randomized environments
+                                                                              are generated per episode in training. Throughout the training process, the model
+hours to design by hand (1), and any change to the tasks or the envi-
+                                                                              interacts with about 1 million of these randomized environments. Each RGB (red,
+ronment requires time-­consuming manual replanning.                           green, blue) coordinate frame on the obstacles represents an end-­effector pose the
+    To tackle this challenge, we present RoboBallet, a learned                robots need to reach. For testing, the evaluation setup used a fixed robot placement,
+heuristics-­based approach for a task and motion planning on ran-             real-­world obstacles, and presampled tasks. Despite having never seen the evaluation
+domly generated environments, capable of planning multiarm reach-             robot placements, obstacles, or tasks during training, the model, trained on the ran-
+ing trajectories in environments different from those seen during             domized training environment, is able to transfer without any additional training to
+training, with arbitrary obstacle geometries, task poses, and robot           the evaluation cell and generates time-­efficient and collision-­free trajectories.
+placements. Task and motion planning is a large class of problems
+that require both high-­level discrete scheduling and low-­level con-         that the scene complexity still scales combinatorially and this leads
+tinuous planning to solve. In this work, we focus on the reaching sub-        to exponential scaling in the required size of the underlying deep
+class for simplicity. Specifically, we address problems where scalability     neural network representing the agent’s policy. The main contribu-
+and efficient task scheduling is the main challenge, with no implicit or      tion of this work is in the use of graphs to represent the state and the
+explicit task interdependencies and where each individual task is             use of graph neural networks (GNNs) for RL policy and state-­action
+simple to accomplish. For extensions to manipulation tasks or prob-           value estimation. GNNs use weight sharing to allow scaling of the
+lems with ordering/compatibility constraints, see the Limitations and         graph size without scaling the model complexity, similarly to how
+future work section.                                                          convolutional neural networks (CNNs) (14) have fixed kernel sizes
+    Our approach tackles the task allocation, scheduling, and motion          independent of image sizes, and inference time complexity is qua-
+planning problems jointly with no hand-­designed simplifications              dratic in the number of robots—refer to the Discussion section for
+common in existing approaches, such as presampling a fixed num-               more details. The state graphs are constructed such that graph nodes
+ber of IK solutions, preallocating tasks to robots on the basis of heu-       represent robots, obstacles, and tasks and graph edges connect each
+ristics, or planning subtrajectories for one robot at a time. Our key         task and each obstacle to each robot, and each robot to each other,
+insight is to adopt a deep reinforcement learning (deep RL) ap-               supporting coordination among the robots and allowing each node
+proach that trains an agent to control the arms at each time step.            to receive sufficient information about the environment to plan a
+This shifts expensive online computations to an offline phase, amor-          collision-­free path to tasks (Fig. 1).
+tizing and shifting the compute requirement from the planning                    With this formulation, RoboBallet directly and simultaneously
+phase to the training phase, benefiting applications that require             controls multiple (here up to eight) seven-­DoF robots, coordinates
+planning solutions on many similar setups or a setup with many                an up to 56-­dimensional configuration space, and handles up to 40
+variations. By training on configuration variations that we wish to           shared tasks, with completely unconstrained robot allocation and
+support, for example, robot positioning and morphology, task types,           task scheduling. The model decides at each 100-­ms time step the
+or obstacle types, RoboBallet can quickly generate plans for a wide           target joint velocities of all joints in all of the robots, and our envi-
+range of environments and novel configurations at test time without           ronment setup simply applies velocity and acceleration clamping,
+further training (Movie 1). After training, we can either simply ex-          stops robots from colliding, and integrates the resulting velocities to
+ecute these controllers in the real world, or, for safety, we can gener-      generate joint configuration waypoints.
+ate the solution trajectory by unrolling the policy step-­by-­step with          RoboBallet adopts an approach that prioritizes scalability and
+a forward kinematic simulator so it can be inspected and potentially          trades off theoretical guarantees to enable real-­world deployment on
+processed further.                                                            a much larger scale of problems (test with up to eight robots in dense
+    However, naive applications of deep RL to multiarm task and               environments) while demonstrating empirically high-­quality solu-
+motion planning would also fail to scale beyond trivial scenes, given         tions. RoboBallet opens up exciting possibilities for many industrial
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)   3 September 2025                                                                                             2 of 13
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+
+                                                     A Training                                                                  B Evaluation
+
+                                        Empty Workcell Environment                                                            Workcell Environment
+
+
+                                                                                                                Add Evaluation                       Obstacle CAD
+                Randomly Sample                     Randomize Robot                   Add Random                    Tasks                              Models
+                     Tasks                            Placements                       Obstacles
+
+             Initialize                                                                                                                          Decompose into
+                                                                                                                                                   Primitives
+                                                                    Weight Updates
+                              Joint Velocities                                                                Initialize
+
+                                                                                                                                  Joint Velocities
+                                                                                Train GNN Critics
+                 Simulator                       GNN Actor
+                                                                                 + Policy (TD3)
+                                                                                                                    Simulator                        GNN Actor
+                      States as Scene Graphs (see
+                                              see C)
+
+                                                                                         Sample                            States as Scene Graphs (see C)
+
+
+
+
+                                                                                                                                                                               Downloaded from https://www.science.org on November 02, 2026
+                                         Trajectories
+                                                                                                               Resample to Control                          Motion
+                                                                                 Replay Buffer                     Frequency                                Plans
+
+
+
+
+            C                                                                             D
+                     Task1                       Task2       …          TaskT
+
+
+
+
+                     Arm1                        Arm2        …          ArmA
+
+
+
+
+                  Obstacle1                   Obstacle2      …       ObstacleO
+
+
+
+
+Fig. 1. Training and evaluation pipeline. (A) Training pipeline. Each episode starts with an empty table, upon which we add random cuboid obstacles, randomize robot
+placements, and randomly sample end-­effector tasks. The GNN actor interacts with the kinematic simulator to try to complete the tasks. The trajectories are stored in a
+replay buffer and used to train a critic and policy function using TD3. (B) The evaluation pipeline, where externally defined tasks, together with obstacles, decomposed
+into collision primitives, are used to construct the simulated environment, with which the GNN interacts in the same way as in training. (C) Topographical view of the scene
+graph, containing robot, task, and obstacle nodes, with bidirectional edges between robots and unidirectional edges from each task and obstacle primitive to each robot.
+(D) Simplified training cell with a reduced number of obstacles and tasks. Each task is specified and visualized as a coordinate frame that the end effector of the robots
+must match, where the blue/z axis is in line with the radial axis of the end effector.
+
+
+applications, such as workcell layout optimization, fast replanning in                        and latency of manual task and motion planning in the multirobot
+case one robot fails, and handling run-­to-­run variations in work-                           manufacturing setting.
+piece pose using image-­based pose estimation to capture the work-
+piece pose for the planner, as well as environment changes using
+three-­dimensional (3D) environment reconstruction with cameras                               RESULTS
+or LIDAR (light detection and ranging) systems. RoboBallet is an                              To demonstrate the capability of RoboBallet, we trained the model
+enabling technology that opens the door to these important capa-                              over several days on randomly generated workcells of different sizes
+bilities that have thus far not been possible because of the high cost                        in simulation and validated the performance of trained models in a
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)      3 September 2025                                                                                                    3 of 13
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+simulated workcell with eight robot arms, a workpiece constructed
+out of aluminum struts, and 40 tasks (Movie 1). To demonstrate the
+feasibility of real-­world execution of our generated trajectories, we
+trained a model with four robot arms using exactly the same frame-
+work, and we validated the generated trajectories on a real workcell
+with minimal postprocessing. We observed that our models gener-
+ated high-­quality trajectories in seconds and can effectively use
+many robots to shorten execution time even on the largest settings
+tested (eight robots, 40 tasks, 30 obstacle primitives), on a single
+GPU (graphics processing unit), and in both a real and a simulated
+multiarm workcell.
+    To showcase one of the most important capabilities enabled by a
+fast automated planner, we used RoboBallet, combined with a black
+box optimizer, to perform workcell layout optimization (optimizing
+placement of robots given fixed sets of tasks and obstacles). We saw
+that this optimization setup improved task execution times by up to
+33% compared with nonoptimized robot placements in our test cell
+on our fixed test set of tasks.
+    The training environments had either four or eight Franka Panda
+                                                                              Movie 2. Four Franka Panda robots executing a plan generated by RoboBallet.
+seven-­DoF robots: four mounted on a table and an additional four
+
+
+
+
+                                                                                                                                                            Downloaded from https://www.science.org on November 02, 2026
+mounted on the ceiling mirroring the four on the table in the case of
+eight robots (Movie 1). At the beginning of each episode, we first            against, we needed to tackle the same four challenges that our mod-
+randomized the location of the robots along virtual 1.6-­m-­long rails        el needs to tackle simultaneously—task allocation, task scheduling,
+parallel to the side of the table, only rejecting configurations in col-      IK solution selection, and motion planning. Optimal task allocation
+lision at the start. Then, we sampled and placed 30 cuboid obstacles          is ensured by problem design (only one allocation is possible). Op-
+with randomly generated positions and orientations, only rejecting            timal task scheduling is done by exhaustively testing all possible task
+obstacles that would be in collision with the robots in their start           schedules. In the case of seven-­DoF robot arms, each six-­DoF task
+configurations. Next, we uniformly sampled tasks on the surfaces of           pose has up to an infinite number of IK solutions when poses are
+the obstacles with a small offset away from the surfaces, where each          within the feasible reachability workspace, and choosing good IK
+task is a position and an orientation that a robot end effector must          solutions in the context of each trajectory is also important in mini-
+reach. We then tried to generate IK solutions from each robot to the          mizing total trajectory cost. We present multiple minimum costs
+task pose and rejected the task if it did not have at least one collision-­   based on different numbers of IK solutions sampled (and exhaus-
+free IK solution from at least one robot. Information about the IK            tively tested) to compare against. Last, because a computationally
+solutions and reachability was not given to the model.                        feasible optimal motion planning algorithm for seven DoFs does
+    In the motion planning literature, the execution time (the dura-          not exist, we used RRT-­Connect (15) with shortcutting, which is a
+tions of trajectories) is the primary metric to be optimized for. How-        widely used motion planning algorithm known for generating low-­
+ever, because no published approach exists that can scale to our              cost trajectories in practice. We first planned for each robot sepa-
+problem sizes in the multiarm task and motion planning setting                rately and then, for each task set, took the cost of the longest
+with realistic execution time, we provide a comparison against a              single-­robot subtrajectory as the cost of the multirobot trajectory.
+baseline method for trajectory optimality in a simplified setup. This             In Fig. 2, we first showed that, with a random task schedule for
+is given in the “Optimality of generated trajectories” section below.         each robot, the trajectory costs were much higher than with optimal
+The rest of the Results section reports on the scalability and general-       task scheduling, demonstrating the importance of good task sched-
+izability of the algorithm on the full problem. For a qualitative eval-       uling even in this simplified setting. Then, we showed that, by in-
+uation, please refer to Movie 2 and movies S1 to S4 showing                   creasing the number of IK solutions sampled (and selecting the best
+generated trajectories.                                                       IK solution for each task in each trajectory), the trajectory costs also
+                                                                              decreased substantially, demonstrating the importance of choosing
+Optimality of generated trajectories                                          good IK solutions. Last, we showed that RoboBallet generated tra-
+In both real-­world applications and academic benchmarks, trajecto-           jectories with costs that are competitive with the baseline approach
+ries are most commonly evaluated by their time cost (duration). In            at eight IK samples per task. These results showed that, although an
+this section, we tested our approach on a set of smaller and simpli-          RL-­based approach cannot offer the probabilistic completeness that
+fied problems where we could generate near-­optimal trajectory so-            sampling-­based methods do, the costs of trajectories generated in
+lutions through exhaustive search and preassignments of tasks to              our problem settings are comparable to our baseline results in prac-
+robots. The preassignment is necessary because exhaustively testing           tice. The baseline also uses orders of magnitude more computation
+all possible allocations in addition to schedules is not computation-         and relies on several simplifying assumptions, unlike RoboBallet.
+ally feasible for all but the smallest problems.                                  There are two notable differences between the baseline and Ro-
+    Specifically, we generated 10 sets of 20 tasks, where each set con-       boBallet setups that need to be taken into account when interpreting
+tains five tasks for each of the four robots. We filtered the sampled         these results. First, the RRT-­Connect algorithm builds a tree from
+tasks to ensure that each can be reached by only one robot. To gener-         both the start and the finish poses, generating a valid path that puts
+ate solutions that are as close as possible to optimal to compare             the end effector at exactly the goal pose, whereas our approach uses
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)   3 September 2025                                                                                    4 of 13
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+a tolerance of 2.5 cm and 15°. In a real-­world application, our ap-                       whereas RoboBallet moves all robots at the same time. This means
+proach would integrate a linear driver to achieve final docking. This                      that the RRT-­Connect results here ignore potential collisions be-
+would be implemented as part of the environment, where the RL                              tween robots during task execution. If collisions did occur in prac-
+agent only receives a reward if the final docking is successful, ensur-                    tice when all robot trajectories are executed simultaneously, this
+ing that the agent chooses solution poses where the final docking is                       would require adjustment of task sequences to create a collision-­free
+feasible. This integration is excluded from the current study for                          multirobot trajectory.
+simplicity, and its inclusion would result in a marginal increase in
+trajectory costs for RoboBallet. Second, the RRT-­Connect results                          Training time scaling in the number of robots and tasks
+are generated with each robot in isolation (other robots removed),                         As discussed in the Introduction, classical approaches scale expo-
+                                                                                           nentially in the number of robots and number of tasks, and this pre-
+                                                                                           vents them from being applicable to large settings. In Fig. 3, we
+                                                                                           demonstrated that our approach scales much more favorably at
+                                                                                           training time. Quadrupling the number of tasks only required mar-
+                                                                                           ginally more training steps to converge, despite the 4× difference in
+                                                                                           the number of tasks and therefore in the difficulty of the scheduling
+                                                                                           problem. This does not correspond to equal amounts of computa-
+                                                                                           tion. The number of edges in our scene graph is linear in the number
+                                                                                           of tasks, and therefore, each training step takes up to four times more
+                                                                                           computation in the 40-­task case compared with the 10-­task case.
+                                                                                               The second important aspect of computational scalability per-
+
+
+
+
+                                                                                                                                                                                     Downloaded from https://www.science.org on November 02, 2026
+                                                                                           tains to the number of robots. Similarly to the scaling with number
+                                                                                           of tasks, we saw that the training curves converged at a similar num-
+                                                                                           ber of training steps. The theoretical asymptotic time complexity is
+Fig. 2. Comparison against RRT-­Connect plus exhaustive task scheduling
+baseline in a simplified setting. Each color represents one task set with 20 tasks
+                                                                                           Ο(Nrobots2) for Nrobots number of robots, given that the robot nodes
+(five per robot). All columns except “RoboBallet” use RRT-­Connect and shortcutting        are fully connected with each other for coordination. In practice,
+for motion planning. The “Random” column averages over all possible task sched-            quadratic scaling here is not a problem because there is an inherent
+ules. The “Opt [N] IK” columns use N IK solutions per task and the optimal task            limit in the density of placement of robots, beyond which there
+schedule and IK solution selection by exhaustive search.                                   would be no benefit in execution time given that it becomes more
+
+
+                       A                                                                          B
+
+
+
+
+                       C                                                                          D
+
+
+
+
+Fig. 3. Training curves for scalability and generalizability. (A) Training curves for 10 versus 40 tasks, four robots. (B) Training curves for four versus eight robots, 40 tasks.
+The number of training steps required to reach convergence does not scale exponentially. However, in terms of asymptotic time complexity, the amount of computation
+required is linear in the number of tasks and quadratic in the number of robots. (C) Results on randomly generated training cells versus hand-­designed evaluation cell over
+training, four robots. (D) Results with eight robots.
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)   3 September 2025                                                                                                            5 of 13
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+and more difficult for the robots to avoid one another. For very large
+workcells with more than a dozen robots, the robots would be posi-
+tioned such that they would not all have overlapping work volumes.
+If two robots do not have overlapping work volumes, then they do
+not need to coordinate with each other because they cannot com-
+plete the same tasks or collide with each other. Therefore, in the as-
+ymptotic case, assuming that we have a limiting density in placement
+of robots, and add more robots by expanding the workcell without
+connecting robots that do not have overlapping work volumes, the
+algorithm’s asymptotic time complexity falls back to Ο(Nrobots).
+    In practice, because of the performance characteristics of GPUs,
+the runtime differences are even smaller than suggested by the as-
+ymptotic complexity. In our case, each training step took 33 ms for
+the four-­robot–and–10-­task case, 52 ms for the four-­robot–and–40-­
+                                                                            Fig. 4. Task completion time scaling with the number of robots (optimized
+task case, and 80-­ms for the eight-­robot–and–40-­task case, with a
+                                                                            placements). Shortest trajectory execution times achieved with the 10 evaluation
+batch size of 128 state transitions per training step. Figure 3 shows
+                                                                            configurations using optimized placements of four to eight robots. Each color rep-
+the training curves with three different configurations—four robots         resents one evaluation configuration.
+with 10 versus 40 tasks and 40 tasks with eight robots.
+
+Inference time scaling                                                      flexibility at evaluation time. Movie 1 shows the evaluation setup,
+
+
+
+
+                                                                                                                                                                 Downloaded from https://www.science.org on November 02, 2026
+At inference time, even the largest setup with eight robots and 40          where the obstacle is a hand-­designed shape made out of aluminum
+tasks only took about 0.3 ms per planning step on an NVIDIA A100            struts, robot placements are fixed to the locations in our real test
+GPU, allowing for greater than 300× real-­time planning at 10-­Hz           workcell, and the tasks are randomly sampled on the faces of the
+time steps. On a single Intel Cascade Lake CPU core, each step takes        obstacle. We generated 10 sets of 40 tasks for evaluation, which were
+about 30 ms, which is still three times faster than real time with 10-­Hz   not used in training. Figure 3 (C and D) shows performance on
+time steps. The planning process consists of one inference and one          these evaluation configurations compared with that in the training
+collision check for the entire scene at each time step.                     environment over the training process. Our results show that the
+                                                                            model, trained on randomly generated environments, can general-
+Efficient use of multiple robots                                            ize very well to an unseen hand-­designed evaluation cell.
+Another important aspect of scalability is the reduction in task com-
+pletion time as the number of robots increases. The ability to control      Workcell layout optimization
+more robots is only meaningful if the controller is able to solve tasks     A fast task and motion planner enables use cases that are not cur-
+more quickly when given more robots to use. For this experiment,            rently possible with manual planning. One such use case is workcell
+we first randomly sampled 10 sets of robot placements, each with            layout optimization. In this experiment, we trained the model on
+four robots—two on either side of the table and two on either rail on       fully randomized environments as described above and used the
+the ceiling. For each set of placements, we sampled a set of 20 tasks       Google Vizier (16) black box optimizer with a modified Gaussian
+that can be solved using those four robots in those randomly sam-           process bandit algorithm (17) to find the best placement of robots to
+pled placements. These sets of tasks made up the evaluation configu-        achieve the shortest execution time on each of the 10 sets of fixed
+rations, each of which is a task set that is guaranteed to be solvable      evaluation tasks. Figure 5 shows the execution time improvements
+using four robots. Then, we performed experiments to find the               from the optimized placements compared with the common default
+shortest trajectory lengths we can generate for each evaluation con-        placements with one robot at each corner of the table, as well as the
+figuration using four, five, six, seven, and eight robots. For each         breakdown of time spent on each task by each robot, both with mo-
+number of robots and evaluation task set, we performed placement            tion plans generated using RoboBallet. We saw that there is univer-
+optimization (see the “Workcell layout optimization” section) to find       sal improvement in trajectory execution time over all evaluation
+the best placements for the given number of robots and set of tasks         configurations and that the improvement comes primarily from the
+and recorded the minimum trajectory length achieved. Figure 4               more even redistribution of tasks to robots and secondarily from
+shows the best execution time achieved using four to eight robots           reduced motion time to reach the task poses. In setups where the
+with optimized placements for each evaluation configuration. The            task completion time is long relative to the motion time, and there-
+plot shows strong execution time scaling from four to eight robots,         fore the even distribution of tasks is more crucial, the benefit of
+with the average execution time reducing from ~7.5 s using four             placement optimization would be even more pronounced. We chose
+robots to 4.5 s using eight robots (a reduction of 60%). This is ap-        to use a dwell time of 0.5 s (simulating task completion time) at each
+proximately optimal scaling, given that in the four-­robot case, with       task here to show the result on a more balanced setup where both
+uniform task distribution, each robot needed to perform five tasks,         motion time and task completion time contribute substantially to
+whereas in the eight-­robot case, four of the robots needed to per-         the total solution length.
+form two tasks and the other four needed to perform three tasks.
+
+Generalizability to hand-­designed environments                             DISCUSSION
+Our models were trained with randomized robot placements, ran-              Our results demonstrate that GNNs combined with RL enable effi-
+domized obstacles, and randomized tasks to enable maximum                   cient solutions to the joint problem of task allocation, scheduling,
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)   3 September 2025                                                                                        6 of 13
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+                                        A
+                                                                               Optimized                 Default
+
+
+
+
+                                         Task completion time (s)
+
+
+
+
+                                        B
+
+
+
+
+                                                                                                                                                                          Downloaded from https://www.science.org on November 02, 2026
+                                                                                  R3                                          R3             R4
+                                                                                                    R4
+                                                                                                                           R2
+                                                                                                                                          R1
+                                                                          R2
+                                                                                               R1
+
+
+
+
+                                                                                Default Workcell                        Optimized Workcell
+
+
+
+
+                                                                                    Time (s)                                   Time (s)
+
+                                        C
+
+
+
+                                                                                  R3                                                         R4
+                                                                                                    R4
+                                                                                                                                             R1
+                                                                                                                         R3
+                                                                          R2                                       R2
+                                                                                               R1
+
+
+
+                                                                                Default Workcell                        Optimized Workcell
+
+
+
+
+                                                                                    Time (s)                                   Time (s)
+
+Fig. 5. Layout optimization of the workcell. (A) Execution time comparison between optimized and default layouts on the 10 evaluation configurations (each with 10
+tasks). (B) Execution time breakdown of configuration #5, the configuration with the biggest improvements. Each bar represents the tasks done by a robot in the trajec-
+tory, and each block represents the motion time and dwell time (simulating time needed to perform work at the site, e.g., a spot welding task). Each task has a unique
+color so that the redistribution can be observed directly. (C) Same for configuration #8.
+
+
+
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)                         3 September 2025                                                                           7 of 13
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+and motion planning. Although the conventional sampling-­based              (e.g., along linear rails), the model can also be used, with layout op-
+approaches offer probabilistic completeness, a valuable property in         timization, to quickly determine the optimal new placements for the
+certain contexts, our approach is able to scale to much larger real-­       remaining robots.
+world problem sizes, delivering high-­quality solutions with minimal            In terms of real-­world execution of the generated trajectories, al-
+computation requirements, especially at evaluation time. This trade-­       though the models already respect joint velocity and acceleration
+off between theoretical completeness and scalability is critical for        constraints, it would be prudent to perform postprocessing on the
+practical applications in large-­scale, dynamic environments.               generated trajectory for smoothing and for compliance with more
+    The high scalability of our method comes from the fact that in          complex constraints such as jerk and torque. Movie 2 shows trajec-
+terms of model complexity of our learned functions, the network             tories generated by the model postprocessed by fifth-­order spline
+only has to learn the interactions between different types of nodes         interpolation to 1 kHz running on Franka Panda robots. In this case,
+(tasks to robots, obstacles to robots, and robots to robots) once. This     the network has also been trained to respect a 1.0-­cm collision mar-
+results in Ο(1) scaling in model complexity (model size) with re-           gin for additional safety.
+spect to the number of robots, number of tasks, and complexity of               High-­density robotic task and motion planning for reaching is a
+obstacles. This means that, theoretically, the amount of training data      problem that expert humans can manually solve at great time in-
+needed does not scale with the size of the environment, and we ob-          vestment and manpower costs, using human experience and intu-
+served that to be broadly true in our experiments. In terms of as-          ition to navigate the huge combinatorial search space. However, this
+ymptotic time complexity, computation is dominated by edge                  problem has proven to be very challenging for automated algorith-
+processing, which is proportional to the number of edges. We have           mic solutions. Machine learning provides methods to imitate hu-
+Nrobot × Nrobot robot-­to-­robot edges, Nrobot × Nrobot task-­to-­robot     man intuition that is hard to express as hand-­coded heuristics.
+edges, and Nrobot × Nobstacle robot-­to-­obstacle edges, for a total time   However, a naive machine learning–based solution would suffer the
+
+
+
+
+                                                                                                                                                       Downloaded from https://www.science.org on November 02, 2026
+complexity of Ο(Nrobot2 + NrobotNtask + NrobotNobstacle). This com-         same fate of combinatorially increasing cost if the model architec-
+plexity is linear in both number of tasks and number of obstacles           ture does not take into account the relational inductive biases that
+and quadratic in the number of robots, which is manageable be-              can be exploited to reduce the required learning efforts and improve
+cause of the inherent limit in how many robots can be usefully              generalization. Our combination of a structured state representa-
+placed in the same space.                                                   tion and a model learning approach that exploits the structure mir-
+    A fast and automated task and motion planner enables many use           rors how expert humans solve this problem using their intuitive
+cases that are previously not known to be practical because of the          understanding of the construction of the problem.
+speed of existing planners. As an example that we explored in this              The physical world is inherently structured, and one of the most
+work, we used the planner to design the layout of new robot work-           intuitive computational representations of those structures is as
+cells by running a black box optimizer on top of the planner to find        graphs. In our case, we chose to represent the scene as a graph made
+the best robot placement for each set of tasks. The cost of robots and      out of robot, task, and obstacle nodes, exploiting the fact that each
+floor space is one of the primary limiting factors in many manufac-         type of interaction (e.g., driving a robot to a task or avoiding an ob-
+turing setups, and our results show that we are able to substantially       stacle) only needs to be learned once, regardless of the complexity of
+reduce the execution time of each of our evaluation configurations          the scene. This gives us better data efficiency and fewer parameters
+by performing layout optimization. With our RL setup, the reward            to learn compared with naive network architectures that do not ex-
+function can easily be modified to incorporate different optimiza-          ploit these inductive biases. The fact that we can learn from every
+tion objectives with different levels of importance. As an example,         interaction of the same type (e.g., robot to task) to train one fixed-­
+for our demonstrations on real robots, we trained the model with an         size function turns the challenge of combinatorial complexity into
+additional reward term for returning to the start position at the end       an advantage and gives us the ability to efficiently train small and
+of the episode using the Euclidean (L2) norm in configuration space         high-­quality models that do not overfit to the training data.
+from the start configuration, only activated once all tasks are solved.
+We also used a weak penalty term based on squared joint space ac-           Limitations and future work
+celeration to discourage superfluous movements and unnecessarily            In practical applications, the key challenge we identified in task and
+extreme accelerations. Robotic applications often have unique re-           motion planning for dense robotics is to achieve scalability, and it
+quirements, and with an RL formulation, we only need to design a            is the main factor preventing existing solutions from being applica-
+cost function to reflect them, which is often much easier than de-          ble to real-­world applications. Our approach is demonstrated in a
+signing behaviors, making RL-­based systems more easily adaptable           general reaching setting and a formulation where any robot can
+to different requirements compared with both hand-­coded systems            complete any task in any order within a shared workspace. To
+and supervised learning–based systems learning from either an al-           specifically focus on the scalability challenge, the configuration in
+gorithmic planner or human demonstrations.                                  this paper represents the largest search space, allowing us to tackle
+    As another example use case, in situations where assembly line          the fundamental scalability issues before introducing additional
+halts due to robot failures are not acceptable, the only current strat-     constraints. In practical/industrial applications, there are often con-
+egy in the industry is to create fail-­safe motion plans with each robot    straints, such as intertask dependencies and heterogeneous robot
+removed, which is extremely costly in the manual labor required to          capabilities, that are not considered in this work. Our approach
+design these plans and not scalable to more than one robot failure          could be extended to handle these constraints, for example, by dis-
+per cell. With our approach, the trained model can either generate          abling edges between incompatible robots and tasks or adding edges
+the backup trajectories ahead of time, or as the failures happen, with      between tasks to signal dependencies. The resulting problem is the-
+minimal downtime. In case the remaining robots cannot continue              oretically simpler to solve than the fully unconstrained problem, but
+to cover all of the tasks, but at least some of the robots can be moved     this is to be demonstrated in future work. Similarly, on the motion
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)   3 September 2025                                                                               8 of 13
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+planning level, we chose the abstract setting where the tasks are           without postprocessing. Solving these issues, together with our fast
+fully constrained end-­effector poses, which makes motion planning          planner, would enable industrial capabilities that are not currently
+the most constrained and difficult. In many settings such as spot           available and would be a valuable extension to this work.
+welding or painting, the task poses are only semiconstrained, e.g.,             As an extension to our workcell layout optimization example,
+some rotational constraints of the end effector in spot welding are         using RoboBallet combined with a black box optimizer as the outer
+soft constraints. We believe that this can be accomplished by aug-          loop, a designer can use it to quickly find the optimal number,
+mentation of the reward function, and that is also left to be demon-        types, and positioning of robots in a workcell. For example, they
+strated in future work.                                                     may need to make a decision between using a six-­DoF robot
+    The favorable scaling properties demonstrated in this paper are         mounted on a linear rail versus a seven-­DoF robot or maybe a het-
+sufficient to enable many applications and industrial use cases, but if     erogeneous team of robots. Here, we present a simplified version
+scalability to even larger settings is required, it would be computation-   where only the placements are optimized. If the choice of robots is
+ally more efficient to apply some heuristics to prune graph connectiv-      also to be optimized, the model would be trained with robot mor-
+ity. For example, a preprocessing step can determine reachability           phology randomization at training time, in addition to the other
+between all robot and task pairs, and edges are only added where a          axes of randomization, so that the resulting model would be com-
+robot can reach a task. This takes Ο(NrobotNtask) time and would not        patible with multiple robot morphologies.
+increase the time complexity of the overall algorithm. Similarly, where         Last, bimanual manipulation is the most natural way for humans
+a robot’s work volume does not overlap with an obstacle, the robot can      to interact with the environment, and it enables capabilities that are
+never collide with the obstacle, and the pair would not need a con-         out of reach of single manipulators. One of the main challenges in
+necting edge. We did not implement these simple optimizations be-           multiarm manipulation is the combinatorial complexity in per-
+cause we wanted to explore the limit of machine learning and keep the       forming motion planning in such a high-­dimensional action space.
+
+
+
+
+                                                                                                                                                        Downloaded from https://www.science.org on November 02, 2026
+algorithm as simple and generally applicable as possible, but in a real-­   Our approach shows that this scalability can be achieved using a
+world application, it would be prudent to include them. A graph at-         structured network architecture, which can provide more insights
+tention mechanism (18) may also improve training in very large cells        and pave the way for developing future technologies in bimanual
+to automatically reduce the relevant pairs of entities the network has      and multimanual task settings, extending the nature of multiarm
+to consider.                                                                coordination from collision avoidance, which is the focus of our
+    For simplicity, we chose a minimal representation of obstacles—         work, to cooperative task completion in many other domains of ro-
+cuboids. Although this representation works well for our evaluation         bot manipulation.
+environments, it may not be suitable for environments where most                In this work, we present a method for multirobot task and mo-
+obstacles cannot be decomposed into a reasonable number of                  tion planning (demonstrated on but not fundamentally restricted to
+cuboid shapes. In that case, and especially if the robots must get very     reaching) that is able to perform automated planning on industrial-­
+close to the obstacles (e.g., for spot welding), it may be beneficial to    scale workcells, a task that is currently performed manually at great
+add more primitive types and pick the best primitive type for each          cost and great latency. We showed that a fast planner like ours not
+decomposed obstacle component. This approach would require an               only allows for acceleration of this process but also makes previ-
+adjustment in training to randomly place obstacles of all primitive         ously unknown capabilities such as workcell optimization and on-
+types. Another possibility is to support arbitrary polyhedrons by           line planning feasible.
+representing them as graphs themselves and using another GNN to
+summarize their properties into fixed-­length embeddings to be used
+in the main neural networks. The embedding and policy/value net-            MATERIALS AND METHODS
+works can be trained end-­to-­end to ensure that the embeddings cap-        Our goal is to train a neural network–based controller that, given
+ture useful information for motion planning.                                the states of all robots, tasks, and obstacle primitives, will generate a
+    To illustrate the core capabilities of our approach, we focus on        set of joint velocities for each robot such that, when followed over
+reaching tasks. However, the algorithm can be readily extended to           time, produces the most efficient trajectory to solve all of the tasks.
+more complex operations, such as pick-­and-­place tasks. One possi-         To that end, we designed an RL formulation, where the observations
+ble formulation is to factor pick-­and-­place tasks into separate pick-     are represented as graphs in which nodes represent robots, tasks,
+ing and placing task poses, adding and removing task dependencies           and obstacle primitives and edges represent the relationships be-
+and compatibility as required using edge features in the state graph,       tween them (e.g., relative pose). The trained policy network is a
+and have the simulator attach and detach objects from end effectors         GNN (19) that takes the observation graphs as input and produces
+where necessary. In this formulation, a separate controller or a grasp      commanded joint velocities for all robots at each time step. This in
+pose predictor is required to generate feasible pose targets for pick-      effect allows the agent to reason relationally and combinatorially
+ing up arbitrary objects, both at training time and at inference time.      while only taking in the raw state as inputs. The joint velocities are
+Extension to manipulation tasks presents further challenges, includ-        integrated to produce next robot configurations, except where the
+ing object collisions, robot-­environment constraints, and occlusion        commanded velocities would cause a collision, in which case the
+handling in multirobot coordination, requiring future work on both          joint velocities for the robot are zeroed. The agent is rewarded for
+algorithmic development and experimental validation.                        solving tasks and avoiding collisions. We used a slightly modified
+    Going beyond existing capabilities into potential future applica-       asynchronous version of the TD3 (20) RL algorithm to train the
+tions, although our method is more than fast enough at inference            policy network and two auxiliary discounted state-­action return
+time for online planning, online planning comes with other chal-            prediction Q networks, also known as critics. The overall training
+lenges such as perception and robot trajectory tracking accuracy            and evaluation setup is shown in Fig. 1.
+
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)   3 September 2025                                                                                9 of 13
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+RL setup                                                                         Obstacle representation
+Environment                                                                      Our goal was to train a generalized planner that can plan in environ-
+The environment is implemented using a kinematic simulator. Each                 ments it has not seen during training and support obstacles with
+action applied advances the simulation by 0.1 s, and each action                 arbitrary geometries. That requires breaking obstacles down to
+consists of desired joint velocities for all joints of all robots. We ap-        primitives, where each primitive can be added to the graph as a
+ply acceleration and velocity limiting on the basis of robot kinemat-            node. During training, we generated cuboid obstacles of random
+ic limits. A task is considered solved if the end effector of a robot            sizes, positions, and orientations to add to the graphs as obstacle
+moves to within a Euclidean distance of 2.5 cm and an angular dis-               nodes, filtered only to exclude collisions between them and the ro-
+tance of 15° of the task pose. Although this may seem coarse, there              bots in their initial poses.
+is a trade-­off between tolerance and learning speed, and in practice,               At evaluation time, with externally defined meshes as obstacles,
+2.5 cm is close enough to generate good plans that can be postpro-               the obstacle meshes are decomposed into approximate convex hulls,
+cessed to arbitrary precision. When a task is solved, the solving ro-            and the oriented bounding boxes of those convex hulls are used as
+bot is frozen for 0.5 s of dwell time to simulate performing some                obstacle nodes (see Fig. 6). The approximate convex decomposition
+work at the site and to encourage even task distribution between                 is performed using the V-­HACD library (21), whereas the oriented
+robot arms. If the joint velocities generated for any of the robots              bounding box search uses our implementation of the algorithm de-
+cause it to go into collision with itself, another robot, or the environ-        scribed in (22), which consists of a combination of genetic and
+ment, the joint velocities for the robot in question are zeroed, and             Nelder-­Mead (23) algorithms to efficiently find the best rotation
+thus the robot stands still for that time step. Therefore, the environ-          for minimum-­volume bounding boxes through unconstrained op-
+ment does not allow for collisions. This is a desirable property for             timization on the 3D rotation group SO(3). Because each cuboid
+transfer to real-­world setups, where collisions must be avoided at all          has four equivalent representations that can be created by exchang-
+
+
+
+
+                                                                                                                                                                  Downloaded from https://www.science.org on November 02, 2026
+costs. We use a collision penalty to discourage the policy from gen-             ing axes and making the corresponding change in pose, we ran-
+erating joint velocities that would cause collisions (see the “Reward”           domly selected between the representations at each time step as a
+section below for more details).                                                 simple augmentation.
+                                                                                 Task sampling
+Observation                                                                      At training time, the tasks (desired end-­effector poses) were sam-
+We represent environment states as graphs, with robots, tasks, and               pled uniformly in position from the surfaces of the obstacle
+obstacle primitives as nodes. The primary benefit of using this struc-           cuboids and in orientation randomly such that the desired orienta-
+tured representation rather than simply flattening the state informa-            tion corresponding to the end-­effector direction was maximally
+tion into a vector is that it provides a way to incorporate relational           22.5° from the normal direction of the face (that is, to complete the
+information between entities in a reusable way and allows the net-               task, the end effector pointed approximately into the obstacle). At
+work to reason about them relationally. For example, the model only              evaluation time, the tasks were generated in the same way on the
+has to learn to reason about relative pose between a robot and a task            externally defined obstacle geometry. We checked that each task
+once, and it automatically transfers via the graph to all combinations           pose had at least one collision-­free IK solution from one robot. For
+of robots and tasks. By contrast, conventional architectures would               efficiency, we were not verifying that there was a collision-­free path
+be forced to discover these relationships for every combination of               from the start position to the task pose, only that a collision-­free
+entities, leading to exponential compute and memory scaling as well              IK solution existed. Therefore, some of the tasks may not have had
+as poor data efficiency.                                                         a valid path solution. The IK solutions were not stored, and no in-
+   In GNNs, edges can be directional—we used bidirectional edges                 formation from this task-­filtering process was used in the train-
+between robot nodes to allow for collision avoidance and coordina-               ing process.
+tion, whereas unidirectional edges from the task nodes and obstacle              Node features
+nodes to robot nodes give the necessary information to robot nodes               The environment observations are in the form of graphs, where ro-
+for motion planning. The directionality of edges determines how                  bot and task nodes have different features, whereas obstacle nodes
+information flows during the graph inference step, and our choice                have no node features. The node features for different types of nodes
+was designed to propagate information to the robot nodes to allow                are then concatenated in a block-­diagonal fashion to create the com-
+reading out of the actions for each robot.                                       bined node features for the scene graph Gn.
+
+
+
+                A                                                B                                       C
+
+
+
+
+Fig. 6. Obstacle mesh decomposition pipeline. (A) Starting from the computer-­aided design (CAD) model of the obstacle. (B) Result of decomposition into convex
+polyhedrons using V-­HACD. (C) Oriented bounding boxes computed from the convex polyhedrons using (22).
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)   3 September 2025                                                                                        10 of 13
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+    For each robot, the robot node consists of the joint configuration          Hindsight experience replay
+for each of the seven DoFs of the robot, joint velocity for each DoF,           Given that the reward as specified above is sparse, it is unlikely that
+and dwell time remaining, which is nonzero if the robot has reached             an RL agent early on during the training process would be able to
+a task pose and is executing the task (we froze the robot in the task           find good rewards through random exploration. The conventional
+pose for 0.5 s of dwell time to simulate executing some task at the             solution to this problem is to engineer a shaped reward by giving
+site). Each task node consists of a single feature, task status, which          partial credit when the agent moves robots closer to completing
+records whether a task has been solved.                                         tasks. However, designing a good shaped reward that encourages
+Edge features                                                                   fast and reliable learning is not trivial and is also specific to the type
+Edge features encode relative information between each pair of                  of task being performed. Hindsight experience replay (HER), as
+nodes where an edge exists. Similarly to the node features, we have             proposed by Andrychowicz et al. (25), provides another solution to
+different edge features for each edge type, concatenated in a block-­           the sparse reward problem. With HER, instead of providing partial
+diagonal fashion to create the combined edge features for the scene             credits to aid learning when the agent is not yet reaching tasks, with
+graph Ge. In a graph net, edges are directional and represent direc-            each failed episode, we also generated a corresponding imaginary
+tion of information flow, and we used “sender” and “receiver” to de-            episode where we moved a randomly selected subset of tasks to ran-
+note the vertices of an edge relative to the direction of information           domly selected points of the robot trajectories within the episode,
+flow. All poses were encoded using a 3D translation and a 6D repre-             therefore providing positive training episodes that, in essence, show
+sentation of the rotation (24).                                                 the learner that it would have been a successful episode if the tasks
+    The robot → robot edges encode the sending robot base pose                  were actually along the robot trajectories the agent generated. This
+relative to the receiving robot tip pose. The task → robot edges                provides rich training signals with a healthy mix of successes and
+similarly encode the task end-­effector pose relative to the receiv-            failures for efficient learning. Refer to Andrychowicz et al. (25) for
+
+
+
+
+                                                                                                                                                             Downloaded from https://www.science.org on November 02, 2026
+ing robot tip pose. Last, the obstacle → robot edges have the fol-              more details on the general concept of HER. In our experiments, we
+lowing features: centroid translation of the obstacle primitive                 found that HER performs approximately as well as even a well-­
+relative to the receiving robot tip pose and rotation matrix of the             tuned shaped reward, so we relied entirely on HER for the experi-
+obstacle primitive relative to the receiving robot tip pose, with               ments above for simplicity.
+each basis vector scaled by the corresponding span of the primi-                Modified TD3
+tive in that direction.                                                         Twin-­delayed deep deterministic policy gradient (TD3) (20) is an
+Global features                                                                 RL algorithm based on the deterministic policy gradient algorithm
+The global features Gn of the graph consist of the following: episode           (26) in an actor-­critic framework, where two networks are trained
+time normalized to timeout, the episode time at which we termi-                 simultaneously—a policy network π(s) that predicts the best action
+nated the episode if the tasks had not been completed, and the cur-             to take from a state and a critic network Q(s,a) that predicts the
+rent score as defined in the “Reward” section.                                  discounted total future return (Q value) given a state and an action
+Reward                                                                          taken in that state. The policy network is trained to produce actions
+To calculate the reward for a step, we first calculated a score S(s) for        that result in a high Q value
+the state s, which is simply the fraction of tasks Ntotal that have al-
+ready been solved Ndone (Eq. 1)
+                                                                                                        π(s) ⇒ argmaxa Q(s, a)                        (5)
+                                                                                and the critic network is trained to predict the sum of the immediate
+                                              Ndone (s)                         reward from applying action a in state s and the discounted Q value
+                                  S(s) =                                 (1)
+                                              Ntotal (s)                        from the resulting state s′ with the best action in that state. Because
+The reward R consists of two components. The first component Rscore             we do not know the best action in state s′, we use the output of the
+is the difference in score between the new state (state s with action a         policy network π(s) as an approximation
+applied) and the previous state (Eq. 2)                                                            Q(s, a) ⇒ r(s, a) + λQ s� , π s�
+                                                                                                                          (     ( ))
+                                                                                                                                                    (6)
+                          Rscore (s, a) = S(s + a) − S(s)                (2)    where (s, a, r, s′) is a transition from applying action a to state s, ar-
+    The second component Rcollision is a penalty for actions that               riving at state s′ with reward r, and λ is the discount factor.
+would have put the robots in collision (if it was not stopped by the                Deterministic policy gradient algorithms are a newer class of RL
+environment). This is the number of robots that would be put in col-            algorithms where the policy network predicts an action directly as
+lision Nrobots_colliding, scaled by a coefficient Ccol (Eq. 3). That said, in   opposed to a distribution over actions that would be predicted by
+theory, we do not need to add an additional penalty for collisions              policy networks in earlier stochastic policy algorithms. They are
+because the increase in execution time, combined with the dis-                  more efficient to train but are prone to get stuck in local minima.
+counting, would encourage the agent not to command joint veloci-                TD3 is the current state of the art of a lineage of deterministic policy
+ties that would cause collisions, which are not optimal. However, in            gradient algorithms that each added some tweaks to stabilize train-
+practice, adding an explicit penalty for collisions is effective to both        ing. We refer the reader to Fujimoto et al. (20) for a thorough de-
+reduce collisions and improve solution execution time                           scription of the algorithm.
+                                                                                    In our implementation of TD3, we removed the delayed target
+                   Rcollision (s, a) = Ccol Nrobots_colliding (s, a)     (3)    network updates for simplicity because, similarly to what the au-
+The total reward is the sum of the two components (Eq. 4)                       thors reported, we found the stability contribution of the delayed
+                                                                                updates to be minimal, and the benefit is mainly a computational
+                     R(s, a) = Rscore (s, a) + Rcollision (s, a)         (4)    one. However, because our network architecture is much more
+
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)    3 September 2025                                                                                   11 of 13
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+complex, the target network updates do not constitute a notable part     network first concatenates the action (commanded joint velocities)
+of the compute requirement.                                              with the corresponding robot node features, and the new node fea-
+    We also decoupled critic and policy Polyak averaging (27) con-       tures are embedded into a higher-­dimensional embedding space
+stants so they can be tuned independently. On the actor side, we         using the node embedding function En to produce the node em-
+introduced exponential decay in exploration variance to encourage        bedding inputs to the core GNN Ln. The edge features and global
+strong exploration in the beginning and more accurate task solu-         features are also embedded into a higher-­dimensional embedding
+tions later on in the training process. Similarly, we introduced two     space using the learned edge embedding function Ee and global
+exponential decays—ληπ and ληQ for the policy and Q function learn-      embedding function Eg, into embeddings Le and Lg, respective-
+ing rates, respectively.                                                 ly (Eq. 11)
+
+Network architecture
+                                                                                                        (      ) ( ) ( )
+                                                                                       Ln , Le , Lg = En Gn ⊕ a , Ee Ge , Eg Gg            (11)
+The system consists of three learned functions—two Q value estima-
+tors and a policy function. All three functions use a GNN at their       Then, the resulting graph embedding made up of the feature embed-
+core, with the same architecture, but initialized and trained inde-      dings is passed through the core GNN for processing, and the out-
+pendently without weight sharing.                                        put Q value is predicted from the global features of the output graph
+GNN core                                                                 with a scalar prediction function PQ (Eq. 12)
+The core GNN takes as input graph G with nodes N with features                                          (               ) )
+matrix Gn, edges E with features matrix Ge, and graph-­global feature
+                                                                                                              (
+                                                                                           Q(s, a) = PQ Core Ln ,Le ,Lg g                  (12)
+vector Gg and produces an output graph G′ similarly with node,
+edge, and global features G′n, G′e , and G′g . The GNN contains three    Policy network
+
+
+
+
+                                                                                                                                                    Downloaded from https://www.science.org on November 02, 2026
+learned update functions—a node update function Un, an edge up-          The policy network uses a similar embedding process as the Q net-
+date function Ue, and a global update function Ug. In all of the fol-    works but without the action concatenation (Eq. 13)
+lowing equations, ⨁ denotes concatenation.                                                                ( ) ( ) ( )
+   The GNN first gathers, for each edge e ∈ E , the sending and re-                      Ln , Le , Lg = En Gn , Ee Ge , Eg Gg              (13)
+ceiving node features Gn[ns] and Gn[nr] (where ns is the sending
+node and nr is the receiving node), edge features Ge[ns → nr], and       After passing through the core GNN, the output actions are pre-
+global features Gg and concatenates them for input into the edge         dicted from the node features corresponding to the robot nodes Nrobots,
+update function Ue, which generates new edge features G′e for the        using another prediction function Pπ (Eq. 14)
+output graph (Eq. 7)                                                                         (      (         ) [ ])
+                                                                                    π(s) = Pπ Core Ln ,Le ,Lg n nr ∀ nr ∈ Nrobots         (14)
+  G�e = Ue Gn ns ⊕ Gn nr ⊕ Ge ns → nr ⊕ Gg ∀ e ns → nr ∈ E
+           ( [ ]        [ ]         [        ]      ) (          )
+
+                                                                   (7)       All of the learned functions (three embedding functions and
+   Then, for each node n ∈ N , all of the edge output features for       three update functions) have the same architecture. Each is a fully
+edges coming into the node are element-­wise aggregated by summa-        connected network where each layer consists of a matrix multiplica-
+tion to generate an aggregated view of information arriving into the     tion followed by a layer normalization operation (28) and Gaussian
+node. This is concatenated with the node input features and the          error linear unit (GELU) activation (29).
+global input features and passed as input into the node update func-         Both the value (PQ) and policy (Pπ) prediction networks are sim-
+tion Un, which generates node output features G′n (Eq. 8)                ilar in architecture to the main learned update functions but much
+                 (( ∑                  )                )                smaller in size. The experiments were conducted with JAX (30),
+        G�n = Un                G �
+                                    [e]  ⊕ G n [n] ⊕ Gg   ∀n ∈ N   (8)   with models built in the Jraph library (31) and the Flax library (32).
+                       e∈E(∗ →n) e
+                                                                         Refer to table S1 for the model shapes.
+   Last, the global update function Ug takes as input the aggregated
+node embeddings and edge embeddings, as well as the input global         Training
+features Gg, and generates new global embeddings G′g (Eq. 9)             During training, 64 actors were used to continuously and asynchro-
+                     (∑                                 )                nously generate training episodes for insertion into a first-­in–first-­
+                                                                         out replay buffer implemented using the Reverb library (33),
+                                      ∑
+            G�g = Ug         G� [n] ⊕       G� [e] ⊕ Gg          (9)
+                         n∈N n           e∈E e
+                                                                         updating their local copies of the policy network from the learner
+In the discussion below, we use Core(Gn,Ge,Gg) to denote the opera-      after each episode. The learner samples uniformly from the replay
+tions in Eqs. 7 to 9 above for brevity (Eq. 10)                          buffer. The replay buffer enforces a fixed sample-­to-­insert ratio by
+                                                                         blocking insertion or sampling as necessary. The learner uses a sin-
+                        G�n , G�e , G�g = Core Gn ,Ge ,Gg                gle NVIDIA A100 GPU, and each actor uses an Intel Ice Lake Xeon
+                                              (           )
+                                                                 (10)
+                                                                         CPU core. The training process takes 6 to 24 hours depending on
+For a more thorough introduction to GNNs, please refer to Battaglia      problem size to achieve a 95% task solution rate, and the quality of
+et al. (19).                                                             trajectories continues to improve (solving more tasks, reducing ex-
+Critic networks (Q value estimators)                                     ecution time, and reducing number of collisions) for an additional 2
+The two state-­value estimation networks Q have identical architec-      to 6 days. Please refer to table S1 for the main hyperparameters used
+ture but independent weight initialization. Given a state s with         in the experiments. These hyperparameters were tuned with the
+features encoded in graph tuple (Gn,Ge,Gg) and an action a, each Q       Google Vizier (16) black box optimizer.
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)   3 September 2025                                                                          12 of 13
+S c i e n c e R o b o t i c s | R e s e a r c h Ar t i c l e
+
+Supplementary Materials                                                                               20. S. Fujimoto, H. Hoof, D. Meger, “Addressing function approximation error in actor-­critic
+The PDF file includes:                                                                                    methods” in Proceedings of the 35th International Conference on Machine Learning (PMLR,
+Table S1                                                                                                  2018), pp. 1587–1596.
+                                                                                                      21. J. W. Ratcliff, K. Mamou, Voxelized hierarchical convex decomposition -­V-­HACD, version 4,
+Other Supplementary Material for this manuscript includes the following:                                  GitHub (2023); https://github.com/kmammou/v-­hacd.
+Movies S1 to S4                                                                                       22.	C.-­T. Chang, B. Gorissen, S. Melchior, Fast oriented bounding box optimization on the
+                                                                                                          rotation group SO(3, ℝ). ACM Trans. Graph. 30, 1–16 (2011).
+                                                                                                      23. D. M. Olsson, L. S. Nelson, The Nelder-­Mead simplex procedure for function minimization.
+REFERENCES AND NOTES                                                                                      Technometrics 17, 45–51 (1975).
+ 1. S. Pellegrinelli, N. Pedrocchi, L. M. Tosatti, A. Fischer, T. Tolio, Multi-­robot spot-­welding   24. Y. Zhou, C. Barnes, J. Lu, J. Yang, H. Li, “On the continuity of rotation representations in
+    cells for car-­body assembly: Design and motion planning. Robot. Comput. Integr. Manuf.               neural networks” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+    44, 97–116 (2017).                                                                                    Recognition (IEEE, 2019), pp. 5745–5753.
+ 2. Y. Yamada, S. Nagamatsu, Y. Sato, “Development of multi-­arm robots for automobile                25. M. Andrychowicz, F. Wolski, A. Ray, J. Schneider, R. Fong, P. Welinder, B. McGrew, J. Tobin,
+    assembly” in Proceedings of 1995 IEEE International Conference on Robotics and Automation             P. Abbeel, W. Zaremba, “Hindsight experience replay” in Advances in Neural Information
+    (IEEE, 1995), vol. 3, pp. 2224–2229.                                                                  Processing Systems (Curran Associates, 2017), pp. 5048–5058.
+ 3.	H. Chen, T. Fuhlbrigge, X. Li, “Automated industrial robot path planning for spray painting       26. D. Silver, G. Lever, N. Heess, T. Degris, D. Wierstra, M. Riedmiller, “Deterministic policy
+    process: A review” in 2008 IEEE International Conference on Automation Science and                    gradient algorithms” in Proceedings of the 31st International Conference on Machine
+    Engineering (IEEE, 2008), pp. 522–527.                                                                Learning (MLResearchPress, 2014), pp. 387–395.
+ 4. V. N. Hartmann, A. Orthey, D. Driess, O. S. Oguz, M. Toussaint, Long-­horizon multi-­robot        27.	B. T. Polyak, A new method of stochastic approximation type. Avtom. Telemek. 7, 98–107
+    rearrangement planning for construction assembly. IEEE Trans. Robot. 39, 239 (2022).                  (1990).
+ 5. Z. Xian, P. Lertkultanon, Q.-­C. Pham, Closed-­chain manipulation of large objects by             28. J. L. Ba, J. R. Kiros, G. E. Hinton, Layer normalization. arXiv:1607.06450 [stat.ML] (2016).
+    multi-­arm robotic systems. IEEE Robot. Autom. Lett. 2, 1832–1839 (2017).                         29. D. Hendrycks, K. Gimpel, Gaussian error linear units (GELUs). arXiv:1606.08415 [cs.LG]
+ 6. S. LaValle, Rapidly-­exploring random trees: A new tool for path planning (Tech. Rep.                 (2016).
+    98-­11, Iowa State University, 1998).                                                             30. J. Bradbury, R. Frostig, P. Hawkins, M. J. Johnson, C. Leary, D. Maclaurin, G. Necula, A. Paszke,
+
+
+
+
+                                                                                                                                                                                                              Downloaded from https://www.science.org on November 02, 2026
+ 7. S. M. LaValle, J. J. Kuffner, “Rapidly-­exploring random trees: Progress and prospects” in            J. VanderPlas, S. Wanderman-­Milne, Q. Zhang, JAX: Composable transformations of
+    Algorithmic and Computational Robotics (Taylor-­Francis, 2001), pp. 303–307.                          Python+NumPy programs, version 0.3.13, GitHub (2018); https://github.com/jax-­ml/jax.
+ 8. S. Karaman, E. Frazzoli, Sampling-­based algorithms for optimal motion planning.                  31. J. Godwin, T. Keck, P. Battaglia, V. Bapst, T. Kipf, Y. Li, K. Stachenfeld, P. Veličković,
+    Int. J. Robot. Res. 30, 846–894 (2011).                                                               A. Sanchez-­Gonzalez, Jraph: A library for graph neural networks in jax, version 0.0.1.dev,
+ 9. J. Canny, The Complexity of Robot Motion Planning (MIT Press, 1988).                                  GitHub (2020); http://github.com/google-­deepmind/jraph.
+10. W. Vega-­Brown, N. Roy, “Task and motion planning is pspace-­complete” in Proceedings of          32. J. Heek, A. Levskaya, A. Oliver, M. Ritter, B. Rondepierre, A. Steiner, M. van Zee, Flax:
+    the AAAI Conference on Artificial Intelligence (AAAI, 2020), vol. 34, pp. 10385–10392.                A neural network library and ecosystem for JAX, version 0.11.1, GitHub (2023);
+11. G. B. Mathews, On the partition of numbers. Proc. Lond. Math. Soc. s1-­28, 486–490 (1896).            http://github.com/google/flax.
+12.	H. Ha, J. Xu, S. Song, Learning a decentralized multi-­arm motion planner.                        33.	A. Cassirer, G. Barth-­Maron, E. Brevdo, S. Ramos, T. Boyd, T. Sottiaux, M. Kroiss, Reverb:
+    arXiv:2011.02608 [cs.RO] (2020).                                                                      A framework for experience replay. arXiv:2102.04736 [cs.LG] (2021).
+13.	T. Pan, A. M. Wells, R. Shome, L. E. Kavraki, “A general task and motion planning                 34.	E. Todorov, T. Erez, Y. Tassa, “Mujoco: A physics engine for model-­based control” in 2012
+    framework for multiple manipulators” 2021 IEEE/RSJ International Conference on Intelligent            IEEE/RSJ International Conference on Intelligent Robots and Systems (IEEE, 2012), pp.
+    Robots and Systems (IROS) (IEEE, 2021), pp. 3168–3174.                                                5026–5033.
+14. Y. LeCun, B. E. Boser, J. S. Denker, D. Henderson, R. E. Howard, W. E. Hubbard, L. D. Jackel,
+    “Handwritten digit recognition with a back-­propagation network” in Advances in Neural            Acknowledgments
+    Information Processing Systems (MIT Press, 1989), pp. 396–404.                                    Funding: This work was funded by Google DeepMind and Intrinsic. Author contributions:
+15. J. J. Kuffner, S. M. LaValle, “RRT-­connect: An efficient approach to single-­query path          M.L. and K.A. conceptualized, designed, and conducted the experiments. M.L., K.A., and
+    planning” in Proceedings 2000 ICRA. Millennium Conference. IEEE International Conference          J.S. developed the core algorithmic framework. M.L. and K.G. developed and implemented the
+    on Robotics and Automation. Symposia Proceedings (Cat. No. 00CH37065) (IEEE, 2000),               experimental infrastructure. M.L., K.A., K.G., J.S., and S.S. proposed improvements to the
+    vol. 2, pp. 995–1001.                                                                             system. M.L., K.A., S.S., and J.S. prepared and authored the paper. J.S., K.A., and Z.L. provided
+16. D. Golovin, B. Solnik, S. Moitra, G. Kochanski, J. Karro, D. Sculley, “Google Vizier: A service   research guidance and planning. K.A., J.S., S.S., and Z.L. edited and revised the paper.
+    for black-­box optimization” in KDD ’17: Proceedings of the 23rd ACM SIGKDD International         T.K. managed the project and provided organizational support and funding. Competing
+    Conference on Knowledge Discovery and Data Mining (Association for Computing                      interests: Google DeepMind has submitted US and WO patent applications for the techniques
+    Machinery, 2017), pp. 1487–1495.                                                                  described in this paper. All authors affiliated with Google DeepMind and Intrinsic own
+17. X. Song, Q. Zhang, C. Lee, E. Fertig, T.-­K. Huang, L. Belenki, G. Kochanski, S. Ariafar,         Alphabet shares as part of their employment. All authors declare that they have no other
+    S. Vasudevan, S. Perel, D. Golovin, The Vizier gaussian process bandit algorithm.                 competing interests. Data and materials availability: All data needed to support the
+    arXiv:2408.11527 [cs.LG] (2024).                                                                  conclusions of this manuscript are included in the main text or Supplementary Materials. The
+18. P. Veličković, G. Cucurull, A. Casanova, A. Romero, P. Liò, Y. Bengio, Graph attention            open sourced version of the system described in this paper, which is implemented with the
+    networks. stat 1050, 10 (2017).                                                                   MuJoCo physics simulator (34), is available at https://doi.org/10.5281/zenodo.16546403.
+19. P. W. Battaglia, J. B. Hamrick, V. Bapst, A. Sanchez-­Gonzalez, V. Zambaldi, M. Malinowski,
+    A. Tacchetti, D. Raposo, A. Santoro, R. Faulkner, C. Gulcehre, F. Song, A. Ballard, J. Gilmer,    Submitted 4 November 2024
+    G. Dahl, A. Vaswani, K. Allen, C. Nash, V. Langston, C. Dyer, N. Heess, D. Wierstra, P. Kohli,    Accepted 5 August 2025
+    M. Botvinick, O. Vinyals, Y. Li, R. Pascanu, Relational inductive biases, deep learning, and      Published 3 September 2025
+    graph networks. arXiv:1806.01261 [cs.LG] (2018).                                                  10.1126/scirobotics.ads1204
+
+
+
+
+Lai et al., Sci. Robot. 10, eads1204 (2025)       3 September 2025                                                                                                                              13 of 13
+    RoboBallet: Planning for multirobot reaching with graph neural networks and
+    reinforcement learning
+    Matthew Lai, Keegan Go, Zhibin Li, Torsten Kröger, Stefan Schaal, Kelsey Allen, and Jonathan Scholz
+
+
+
+    Sci. Robot. 10 (106), eads1204. DOI: 10.1126/scirobotics.ads1204
+
+
+
+
+    View the article online
+
+
+
+
+                                                                                                                                       Downloaded from https://www.science.org on November 02, 2026
+    https://www.science.org/doi/10.1126/scirobotics.ads1204
+    Permissions
+    https://www.science.org/help/reprints-and-permissions
+
+
+
+
+Use of this article is subject to the Terms of service
+
+Science Robotics (ISSN 2470-9476) is published by the American Association for the Advancement of Science. 1200 New York Avenue
+NW, Washington, DC 20005. The title Science Robotics is a registered trademark of AAAS.
+
+Copyright © 2025 The Authors, some rights reserved; exclusive licensee American Association for the Advancement of Science. No claim
+to original U.S. Government Works
+
